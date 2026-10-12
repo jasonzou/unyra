@@ -12,105 +12,31 @@ import raw from './sandboxRuntime.js?raw'
 
 /** 沙箱里可用的 api；顺序无所谓，Worker 会按点号拆成 api.<组>.<方法> */
 const API_NAMES = [
-  // 文档：全部按 path 寻址（path 省略 = 当前节点的教学文档）
-  'doc.read',
-  'doc.readRange',
-  'doc.find',
-  'doc.write',
-  'doc.replace',
-  'doc.append',
-  // 注解：在正文上划一条词条注解（挂在节点上，一个词一条；见 learn/agentOps 的 annotate）
-  'doc.annotate',
-  // 节点：列 / 看 / 建 / 改 / 删 / 移（一次编排可以同时操作多个节点）
+  // 节点：列 / 看 / 路径 / 建 / 改 / 注解 / 删 / 移（一次编排可以同时操作多个节点）
   'node.list',
   'node.read',
+  'node.paths',
   'node.create',
   'node.title',
   'node.rename',
   'node.update',
+  'node.annotate',
   'node.delete',
   // 迁移节点到另一个节点之下（改父线；见 graph/nodes 的 moveNode）
   'node.move',
-  // 目标大纲：结构化的计划（导语 + 一层子目标），页签里打开是交互页面（见 learn/outline）
-  'outline.read',
-  'outline.write',
-  // 描述：实际上是 node.update 的便捷写法，保留旧名免得模型改不过来
-  'description.read',
-  'description.update',
-  'exam.create',
-  'exam.read',
-  'exam.grade',
-  // 错题讲解：判分之后的第二步，落在同一次考试上
-  'exam.explain',
-  'exam.delete',
-  // 学习状态：自评 / 掌握度 / 错误记忆 / 检验记录（见 learn/learning）
-  'state.read',
-  'state.update',
-  'state.mistake',
-  'state.forget',
-  'state.check',
-  'tmp.set',
-  'tmp.get',
-  'tmp.has',
-  'tmp.del',
-  'tmp.list',
-  'tmp.clear',
-  // 资源库：本目标 static/ 下的文件（见 learn/static）
-  'res.list',
-  'res.info',
-  'res.read',
-  'res.create',
-  'res.update',
-  'res.delete',
-  'res.refs',
-  // 长期记忆：跨对话有效，但**不会**自动进上下文（见 learn/mind）
-  'mind.list',
-  'mind.read',
-  'mind.write',
-  'mind.delete',
-  'mind.clear',
-  // 目标级持久化函数：method.call 会把当前编排的 api 注入给那份持久化的源码（见 learn/methods）
-  'method.create',
+  // 目标级持久化函数：创建 / 列出 / 删除 / 执行
   'method.list',
-  'method.call',
+  'method.create',
   'method.delete',
-  // 超级文档：绑定节点的可交互 HTML（见 learn/superdocs）
-  'sdoc.list',
-  'sdoc.read',
-  'sdoc.write',
-  'sdoc.delete',
-  // 工作流登记表：管理（看/登记/删）+ 触发（invoke 只排队，本轮收口后宿主另起一轮，见 learn/workflows）
+  'method.call',
+  // 工作流触发与列表（登记管理统一收敛为 files.*）
   'wf.list',
-  'wf.create',
-  'wf.remove',
+  'wf.get',
   'wf.invoke',
   // 代码块伪编译：交付转译好的 JS（key 由代码块的菜单给，见 lib/codeArtifacts）
   'code.save',
   // 同上：判定「这段代码没有输出」，当场停止编译并标记那一块
   'code.silent',
-  // 学习者画像：**不在系统提示词里**，要用得自己 get（见 user/fields 与 learn/agentOps）
-  'userInfo.get',
-  'userInfo.update',
-  // 学习过程：有效阅读的事实、注意力评级、打卡、番茄钟（见 learn/reading 等）
-  // 打卡没有「直接成功」的口子：status 给资格与题源，settle 记结果且系统复核门槛；
-  // 番茄钟只有一个只读的 status——开始、停止、改时长都是用户按顶栏那颗按钮
-  'reading.get',
-  'reading.list',
-  'reading.day',
-  'attention.get',
-  'checkin.status',
-  'checkin.settle',
-  // 间隔复习：计划系统建，导师只读计划 / 落账 / 经用户同意后调整（见 learn/review）
-  'review.read',
-  'review.record',
-  'review.merge',
-  'review.extend',
-  'review.adjust',
-  // 工作区目录：节点目录下的真实系统子目录（docs/<目标>/<节点>/workspace/…），只收文本（见 learn/workspace）
-  'workspace.list',
-  'workspace.read',
-  'workspace.write',
-  'pomodoro.status',
   // 读网页：抓取在主进程、正文提取在渲染层、落盘在当前用户目录（见 learn/webDocs）
   'web.webFetch',
   'web.read',
@@ -162,6 +88,27 @@ const API_NAMES = [
   'ui.superdoc',
   // ui.dom 特殊：回调无法穿过 Worker 边界，Worker 侧特判成「建会话 + 逐个操作」
   'ui.dom',
+  // 基础系统文件操作：真实路径读写与管理 (files.*)
+  'files.read',
+  'files.write',
+  'files.edit',
+  'files.list',
+  'files.stat',
+  'files.mkdir',
+  'files.copy',
+  'files.move',
+  'files.delete',
+  // 基础系统进程任务：生命周期绑定与增量输出 (process.*)
+  'process.create',
+  'process.start',
+  'process.status',
+  'process.output',
+  'process.stop',
+  'process.list',
+  'process.get',
+  'process.delete',
+  // 自描述能力索引
+  'help',
 ]
 
 export const SANDBOX_API_NAMES = API_NAMES

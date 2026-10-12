@@ -546,3 +546,134 @@ export type WebFetchResult =
       truncated: boolean
     }
   | { ok: false; error: string }
+
+/* ---------- 基础文件系统与进程管理 (base.files.* / base.process.*) ---------- */
+
+export interface BaseFileEntry {
+  name: string
+  isDirectory: boolean
+  isFile: boolean
+  size: number
+  mtimeMs: number
+}
+
+export interface BaseFileStat {
+  exists: boolean
+  isDirectory: boolean
+  isFile: boolean
+  size: number
+  mtimeMs: number
+  ctimeMs: number
+}
+
+export type BaseFileReadResult =
+  | { ok: true; content: string; encoding: string; size: number; sizeBytes?: number; chars?: number; totalChars?: number }
+  | { ok: false; error: string }
+
+export type BaseFileWriteResult =
+  | { ok: true; path: string; bytesWritten?: number }
+  | { ok: false; error: string }
+
+export interface BaseFileEditOpts {
+  replace?: {
+    target?: string
+    replacement?: string
+    old?: string
+    new?: string
+    find?: string
+    search?: string
+    replace?: string
+    all?: boolean
+  }
+  edits?: Array<{
+    target?: string
+    replacement?: string
+    old?: string
+    new?: string
+    find?: string
+    search?: string
+    replace?: string
+    append?: string
+    prepend?: string
+    insert?: string
+    after?: string
+    before?: string
+    all?: boolean
+    [k: string]: unknown
+  }>
+  content?: string
+  append?: string
+  prepend?: string
+  start?: number
+  end?: number
+}
+
+export type BaseFileEditResult =
+  | { ok: true; path: string; modified: boolean }
+  | { ok: false; error: string }
+
+export type BaseFileListResult =
+  | { ok: true; path: string; entries: BaseFileEntry[] }
+  | { ok: false; error: string }
+
+export type BaseFileStatResult =
+  | { ok: true; exists?: boolean; stat: BaseFileStat }
+  | { ok: false; error: string }
+
+export type BaseFileOpResult =
+  | { ok: true }
+  | { ok: false; error: string }
+
+export interface BaseProcessCreateOpts {
+  command: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+}
+
+export interface BaseProcessInfo {
+  process_id: string
+  command: string
+  args: string[]
+  cwd: string
+  running: boolean
+  exited: boolean
+  exitCode: number | null
+  signal: string | null
+  pid?: number
+  startTime?: number
+  exitTime?: number
+}
+
+export type BaseProcessCreateResult =
+  | { ok: true; process_id: string; command: string; args: string[]; cwd: string }
+  | { ok: false; error: string }
+
+export type BaseProcessStartResult =
+  | { ok: true; process_id: string; pid: number }
+  | { ok: false; error: string }
+
+export type BaseProcessStatusResult =
+  | { ok: true; status: BaseProcessInfo }
+  | { ok: false; error: string }
+
+export type BaseProcessOutputResult =
+  | { ok: true; stdout: string; stderr: string; text: string; offset: number; next_offset: number }
+  | { ok: false; error: string }
+
+export type BaseProcessStopResult =
+  | { ok: true; process_id: string; stopped: boolean; message?: string }
+  | { ok: false; error: string }
+
+export type BaseProcessDeleteResult =
+  | { ok: true; process_id: string; deleted: boolean; message?: string }
+  | { ok: false; error: string }
+
+export type BaseProcessListResult =
+  | { ok: true; processes: BaseProcessInfo[] }
+  | { ok: false; error: string }
+
+export type BaseProcessGetResult =
+  | { ok: true; process: BaseProcessInfo }
+  | { ok: false; error: string }
+

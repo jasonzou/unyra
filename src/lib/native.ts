@@ -10,7 +10,10 @@
 
 import { t } from '../i18n'
 import type {
-  AttachReadResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
+  AttachReadResult, BaseFileEditOpts, BaseFileEditResult, BaseFileListResult, BaseFileOpResult, BaseFileReadResult,
+  BaseFileStatResult, BaseFileWriteResult, BaseProcessCreateOpts, BaseProcessCreateResult, BaseProcessDeleteResult, BaseProcessGetResult,
+  BaseProcessListResult, BaseProcessOutputResult, BaseProcessStartResult, BaseProcessStatusResult,
+  BaseProcessStopResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateFail,
   UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
@@ -24,7 +27,7 @@ import type {
 // 两边原先各写一遍、逐字重复，漏改一侧不会编译报错，只会在运行时炸。
 // 这里按原样转出去，外部从 src/lib/native 引这些类型的写法不用改。
 export type {
-  AttachReadResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
+  AttachReadResult, BaseProcessDeleteResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateFail,
   UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
@@ -358,6 +361,58 @@ export interface NativeBridge {
     scroll(wcId: number, req: WebScrollReq): Promise<WebScrollResult>
     /** 等条件成立（selector/text/urlIncludes/networkIdle/load）：browser.waitFor */
     waitFor(wcId: number, req: WebWaitReq): Promise<WebWaitResult>
+  }
+  /**
+   * 基础真实文件系统与受控系统进程 (files.* / process.*)。
+   * 受目标目录与用户权限白名单保护。
+   */
+  files: {
+    read(path: string, opts?: { encoding?: 'utf8' | 'base64' | 'binary'; maxBytes?: number; offset?: number }): Promise<BaseFileReadResult>
+    write(path: string, content: string, opts?: { encoding?: 'utf8' | 'base64'; overwrite?: boolean }): Promise<BaseFileWriteResult>
+    edit(path: string, opts?: BaseFileEditOpts): Promise<BaseFileEditResult>
+    list(path?: string): Promise<BaseFileListResult>
+    stat(path: string): Promise<BaseFileStatResult>
+    mkdir(path: string): Promise<BaseFileOpResult>
+    copy(from: string, to: string, opts?: { overwrite?: boolean }): Promise<BaseFileOpResult>
+    move(from: string, to: string): Promise<BaseFileOpResult>
+    delete(path: string): Promise<BaseFileOpResult>
+    onChanged?(cb: (payload: { path: string; action: string; content?: string }) => void): () => void
+  }
+  process: {
+    create(opts: BaseProcessCreateOpts): Promise<BaseProcessCreateResult>
+    start(process_id: string): Promise<BaseProcessStartResult>
+    status(process_id: string): Promise<BaseProcessStatusResult>
+    output(process_id: string, opts?: { offset?: number; reset?: boolean }): Promise<BaseProcessOutputResult>
+    stop(process_id: string, opts?: { timeoutMs?: number; force?: boolean }): Promise<BaseProcessStopResult>
+    list(): Promise<BaseProcessListResult>
+    get(process_id: string): Promise<BaseProcessGetResult>
+    delete(process_id: string): Promise<BaseProcessDeleteResult>
+  }
+  syncPermissions(allowedDirs: string[]): Promise<{ ok: boolean }>
+  base?: {
+    files: {
+      read(path: string, opts?: { encoding?: 'utf8' | 'base64' | 'binary'; maxBytes?: number; offset?: number }): Promise<BaseFileReadResult>
+      write(path: string, content: string, opts?: { encoding?: 'utf8' | 'base64'; overwrite?: boolean }): Promise<BaseFileWriteResult>
+      edit(path: string, opts?: BaseFileEditOpts): Promise<BaseFileEditResult>
+      list(path?: string): Promise<BaseFileListResult>
+      stat(path: string): Promise<BaseFileStatResult>
+      mkdir(path: string): Promise<BaseFileOpResult>
+      copy(from: string, to: string, opts?: { overwrite?: boolean }): Promise<BaseFileOpResult>
+      move(from: string, to: string): Promise<BaseFileOpResult>
+      delete(path: string): Promise<BaseFileOpResult>
+      onChanged?(cb: (payload: { path: string; action: string; content?: string }) => void): () => void
+    }
+    process: {
+      create(opts: BaseProcessCreateOpts): Promise<BaseProcessCreateResult>
+      start(process_id: string): Promise<BaseProcessStartResult>
+      status(process_id: string): Promise<BaseProcessStatusResult>
+      output(process_id: string, opts?: { offset?: number; reset?: boolean }): Promise<BaseProcessOutputResult>
+      stop(process_id: string, opts?: { timeoutMs?: number; force?: boolean }): Promise<BaseProcessStopResult>
+      list(): Promise<BaseProcessListResult>
+      get(process_id: string): Promise<BaseProcessGetResult>
+      delete(process_id: string): Promise<BaseProcessDeleteResult>
+    }
+    syncPermissions(allowedDirs: string[]): Promise<{ ok: boolean }>
   }
 }
 

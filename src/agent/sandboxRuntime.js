@@ -78,16 +78,24 @@ function makeApi() {
   for (const full of API_NAMES) {
     // ui.dom 走下面那条特判通道：它要传回调函数，结构化克隆带不过去
     if (full === 'ui.dom') continue
-    const dot = full.indexOf('.')
-    if (dot < 0) {
+    const segs = full.split('.')
+    if (segs.length === 1) {
       // 不带点的顶层 api（wait / tiktok…）：直接挂在 api 上
       api[full] = (...callArgs) => call(full, callArgs)
       continue
     }
-    const group = full.slice(0, dot)
-    const method = full.slice(dot + 1)
-    const bucket = api[group] || (api[group] = {})
-    bucket[method] = (...callArgs) => call(full, callArgs)
+    let cur = api
+    for (let i = 0; i < segs.length - 1; i++) {
+      cur = cur[segs[i]] || (cur[segs[i]] = {})
+    }
+    cur[segs[segs.length - 1]] = (...callArgs) => call(full, callArgs)
+  }
+  // 暴露全局 files 与 process 变量，使得 await files.read(...) 与 await api.files.read(...) 均可直接调用
+  if (api.files) {
+    globalThis.files = api.files
+  }
+  if (api.process) {
+    globalThis.process = api.process
   }
   api.ui = api.ui || {}
   /**
@@ -126,7 +134,31 @@ function makeApi() {
       .join(' ')
     call('log', [line]).catch(() => {})
   }
+
   return api
+}
+
+const DEPRECATED_HINTS = {
+  doc: 'api.doc 已收敛为 api.files：读取教学文档请用 await api.files.read("docs/.../节点名.md")，写入用 await api.files.write("docs/.../节点名.md", 讲义内容)。',
+  docs: 'api.docs 已收敛为 api.files：文件读写请使用 api.files.*。',
+  outline: 'api.outline 已收敛为 api.files：大纲请用 await api.files.write("docs/.../节点名.outline.json", JSON.stringify(大纲对象))。',
+  description: 'api.description 不存在：修改节点描述请用 await api.node.update(path, { description })。',
+  userInfo: 'api.userInfo 已收敛为 api.files：画像请用 await api.files.read("user.yaml")。',
+  state: 'api.state 已收敛为 api.files：界面状态请用 await api.files.read("state.json") 或对应节点的 .meta.json。',
+  tmp: 'api.tmp 已收敛为 api.files：中间数据请存为真实文件，如 await api.files.write("docs/目标/tmp.json", ...)。',
+  exam: 'api.exam 已收敛为 api.files：试卷数据请直接读写相关数据文件。',
+  review: 'api.review 已收敛为 api.files：复习计划请直接读写对应目标下的数据文件。',
+  res: 'api.res 已收敛为 api.files：目标资源文件请直接使用 api.files.* 读写 static/ 目录。',
+  sdoc: 'api.sdoc 已收敛为 api.files：超级文档请使用 api.files.* 读写 superdocs/ 目录。',
+  workspace: 'api.workspace 已收敛为 api.files：工作区真实文件请直接使用 api.files.*。',
+  retrieval: 'api.retrieval 已收敛为 api.files：检索数据请读写相关索引文件。',
+  note: 'api.note 已收敛为 api.files：笔记请用 await api.files.read("docs/.../节点.notes/笔记名.md")，写入用 await api.files.write(...)。',
+  stats: 'api.stats 在本沙箱中不存在：阅读与打卡数据请使用 api.files 读写 docs/目标/reading.json 与 checkin.json。',
+  memory: 'api.memory 在本沙箱中不存在：状态与事实数据已收敛为真实数据文件。',
+  mind: 'api.mind 在本沙箱中不存在：知识图谱结构请通过 node.* 操作，文档内容通过 files.* 读写。',
+  checkin: 'api.checkin 已收敛为 api.files：打卡记录请使用 api.files 读写 docs/目标/checkin.json。',
+  plot: 'api.plot 已收敛为 api.files：绘图与静态资源请直接使用 api.files 读写 static/ 目录。',
+  methods: 'api.methods 不存在：方法调用请使用 api.method.call(name, ...args)。',
 }
 
 async function run(body, timeoutMs) {
@@ -146,8 +178,8 @@ async function run(body, timeoutMs) {
      * 时，await 能不能用取决于 body 自身的形状——同一句 await 时通时不通，
      * 那种不可预测比报错更糟。现在 await 无条件可用。
      */
-    const evaluated = new Function('api', 'return (' + body + ')')()
-    const raw = typeof evaluated === 'function' ? await evaluated(api) : await evaluated
+    const evaluated = new Function('api', 'files', 'process', 'return (' + body + ')')()
+    const raw = typeof evaluated === 'function' ? await evaluated(api, api.files, api.process) : await evaluated
     timerMs = 0
     clearTimeout(runTimer)
     runTimer = null
@@ -171,7 +203,14 @@ async function run(body, timeoutMs) {
     const e = err || {}
     const stack = typeof e.stack === 'string' ? String(e.stack) : ''
     const where = stack ? stack.split('\n').slice(0, 3).join(' | ') : ''
-    const message = e.message ? String(e.message) : String(err)
+    let message = e.message ? String(e.message) : String(err)
+    for (const [key, hint] of Object.entries(DEPRECATED_HINTS)) {
+      const reg = new RegExp(`\\bapi\\.${key}\\b`)
+      if (reg.test(body) || message.includes(`'${key}'`) || message.includes(`"${key}"`)) {
+        message += `\n［提示：${hint}］`
+        break
+      }
+    }
     self.postMessage({ kind: 'done', ok: false, error: message + (where ? '［' + where + '］' : '') })
   }
 }

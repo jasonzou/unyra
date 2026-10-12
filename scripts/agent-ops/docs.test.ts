@@ -126,7 +126,7 @@ export async function toolTests() {
   const r13 = await h.run('((api)=>{ return await api.description.update("只有内容的老写法") })')
   ok(r13.ok && h.store().nodes.find((n) => n.id === childId)?.description === '只有内容的老写法', 'description.update 单参数兼容旧写法', r13.content)
   const r14 = await h.run('((api)=>{ return await api.note.read() })')
-  ok(!r14.ok && r14.content.includes('doc.read'), '旧 api 名给出新写法', r14.content.slice(0, 200))
+  ok(!r14.ok && r14.content.includes('files.read'), '旧 api 名给出新写法', r14.content.slice(0, 200))
   const r15 = await h.run('((api)=>{ return await api.exam.read() })')
   ok(!r15.ok && r15.content.includes('沙箱里没有这个 api'), '未注入 exam 时该组不存在', r15.content.slice(0, 160))
   const r16 = await h.run('((api)=>{ await api.doc.write("", "# 正文"); await api.node.update("", { status: "mastered" }); return "ok" })')
@@ -152,82 +152,31 @@ export async function toolTests() {
  */
 export async function apiNameTests() {
   const calls: Record<string, string> = {
-    'doc.read': "''",
-    'doc.readRange': "'', 0, 5",
-    'doc.find': "'', '极限'",
-    'doc.write': "'', '# 临时测试'",
-    'doc.replace': "'', { start: 0, end: 1, content: 'x' }",
-    'doc.append': "'', '附言'",
-    'doc.annotate': "{ term: '极限', body: '临时注解' }",
     'node.list': '',
     'node.read': "''",
+    'node.paths': "''",
     'node.create': "{ parent: '微积分', title: '临时节点' }",
     'node.title': "''",
-    'node.rename': "'', '临时节点'",
+    'node.rename': "'临时节点', '新临时节点'",
     'node.update': "'', { description: '临时描述' }",
+    'node.annotate': "'', { term: '极限', body: '基本概念' }",
     'node.delete': "''",
     // 迁移：把刚建的临时节点挂到根之下（它已在根之下时回一句「已经在」，同样证明 api 在）
     'node.move': "'临时节点', '微积分'",
-    // 大纲：读回 null 或整份对象都行（这一步只问「api 在不在」；行为在 toolTests 里钉）
-    'outline.read': "'微积分'",
-    'outline.write': "'微积分', { intro: '探针导语', children: [{ title: '探针子目标', summary: '探针' }] }",
-    'description.read': "''",
-    'description.update': "'', '临时描述'",
-    'tmp.set': "{ key: 'k', value: 1 }",
-    'tmp.get': "'k'",
-    'tmp.has': "'k'",
-    'tmp.del': "'k'",
-    'tmp.list': '',
-    'tmp.clear': '',
-    'res.list': '',
-    'res.info': "'" + PNG_UUID + "'",
-    'res.read': "'" + MD_UUID + "'",
-    'res.create': "{ name: '临时资源', ext: 'txt', content: 'x' }",
-    'res.update': "'" + MD_UUID + "', { description: '临时描述' }",
-    'res.delete': "'" + MD_UUID + "'",
-    'res.refs': '',
-    // state 这一组：先写一个错法再删掉，正好把 mistake 与 forget 两条路都走一遍
-    'state.read': '',
-    'state.update': "{ mastery: 60 }",
-    'state.mistake': "'临时错法'",
-    'state.forget': "'临时错法'",
-    'state.check': "{ kind: 'probe', score: 60 }",
-    // exam 这一组以前整组跳过，于是「名单里有、实现里没有」正好漏在它身上；
-    // 现在给它一份桩依赖，四个方法一起点名（delete 的判据另有 examDeleteBlock 的用例）
-    'exam.create': "{ kind: 'quiz', questions: [{ type: 'truefalse', stem: '临时题', answer: ['true'] }] }",
-    'exam.read': '',
-    'exam.grade': "{ summary: '临时', passed: false }",
-    'exam.explain': "{ content: '错在把无穷小当成 0。' }",
-    'exam.delete': '',
-    // 长期记忆：走真的 createMindOps（纯 store 逻辑），写一条再删一条
-    'mind.list': '',
-    'mind.read': "'探针主题'",
-    'mind.write': "{ key: '探针主题', text: '记住的事' }",
-    'mind.delete': "'探针主题'",
-    'mind.clear': '',
-    // 持久化函数：create 先建（call 才有东西可调），delete 收尾；代码先过一遍编译校验
-    'method.create': "{ name: '探针函数', code: '((api, n) => n * 2)' }",
+    // 持久化函数（创建/列表/删除/调用）
     'method.list': '',
-    'method.call': "'探针函数', 21",
+    'method.create': "{ name: '探针函数', code: '((api)=>{ return 1 })' }",
     'method.delete': "'探针函数'",
-    // 超级文档：write 先写一份，read/delete 才有的可操作
-    'sdoc.list': "'微积分'",
-    'sdoc.write': "'微积分', '探针文档', '<p>探针</p>'",
-    'sdoc.read': "'微积分', '探针文档'",
-    'sdoc.delete': "'微积分', '探针文档'",
-    // 工作流：create 登记（list 才有的看、remove 才有的删），走真的 createWorkflowOps
-    'wf.list': '',
-    'wf.create': "{ name: '探针流程', instruction: '第一步：api.tiktok()；第二步：return \"ok\"' }",
-    'wf.remove': "'探针流程'",
-    // 触发：只排队（真起那一轮的是宿主，探针里就是下面那个桩）。
-    // 用内置的「回忆」指名——它不随上面 create / remove 的先后而变化
+    'method.call': "'探针函数', 21",
+    // 自描述能力索引
+    'help': '',
+    // 工作流触发：只排队（真起那一轮的是宿主，探针里就是下面那个桩）
     'wf.invoke': "'recall'",
+    'wf.list': '',
+    'wf.get': "'recall'",
     // 伪编译交货：key 是宿主发出去的那串（探针这里没有待编译登记，走的是「key 对不上」那条路）
     'code.save': "{ key: '0123456789abcdef', js: 'console.log(1)', note: '探针' }",
     'code.silent': "{ key: '0123456789abcdef', reason: '探针：只有定义' }",
-    // 学习者画像：宿主是一份内存画像（见下面 userInfoTests 的行为用例）
-    'userInfo.get': '',
-    'userInfo.update': "{ education: '本科' }",
     // 人机协作与界面：宿主能力是桩（见下面 createExecuteTool 的注入）
     'wait': '0',
     'ask': "{ title: '确认', questions: [{ type: 'short', prompt: '怎么继续？' }] }",
@@ -239,24 +188,6 @@ export async function apiNameTests() {
     'ui.superdoc': "'微积分', '探针文档'",
     // ui.dom 走进程内直调通道：回调在宿主拿到门面（真沙箱由 Worker 侧建门面，行为一致）
     'ui.dom': "async (root) => ({ e: await root.exists('p'), c: await root.count('p') })",
-    /*
-     * 学习过程那一组：全是纯 store 逻辑，Node 里就能真跑。
-     * 顺序有意：settle 先记一次结果（checkin.status 才有「今天已经打过卡」可看）。
-     * 番茄钟那一组只有只读的 status（开始、停止、改时长都是用户按顶栏那颗按钮）。
-     */
-    'reading.list': '',
-    'reading.day': "''",
-    'reading.get': "''",
-    'attention.get': "''",
-    'checkin.settle': "{ correct: 3, total: 4, threshold: 3, passed: true }",
-    'checkin.status': '',
-    // 间隔复习：record 在没有计划的节点上会说明「计划由系统建」，正好核对报错文案
-    'review.read': "''",
-    'review.record': "{ complete: true }",
-    'review.merge': "{ nodeIds: [] }",
-    'review.extend': "{ focus: '收敛与有界' }",
-    'review.adjust': "{ action: 'postpone', days: 2 }",
-    'pomodoro.status': '',
     // 读网页：抓取要网络、落盘要磁盘，探针里给一份假的实现（真链路见 tests/webPage.test.ts）
     'web.webFetch': "'https://example.com/a'",
     'web.read': "'deadbeef', '一级标题'",
@@ -277,10 +208,6 @@ export async function apiNameTests() {
     // 引用 chip：生成（当场对 store 验证可定位）与交付前自查（见 learn/ops/chip）
     'chip.build': "{ type: 'doc' }",
     'chip.check': "'看：#[{type:\"doc\", path:\"微积分\"}]'",
-    // 工作区目录：真实文件在主进程，探针给一份假的（见 fakeWorkspaceIo）
-    'workspace.list': "''",
-    'workspace.read': "'极限/要点.md'",
-    'workspace.write': "{ path: '极限/要点.md', content: '# 要点' }",
     // 内置浏览器：webview 元素在真实渲染层，探针给一份假的宿主（见下面 browser 桩）
     'browser.open': "'https://example.com'",
     'browser.tabs': '',
@@ -298,6 +225,25 @@ export async function apiNameTests() {
     'browser.text': "'w:probe', { ref: 1 }",
     'browser.scroll': "'w:probe', { by: 800 }",
     'browser.waitFor': "'w:probe', { selector: '.done' }",
+    // 基础文件系统：真实路径操作（Node 探针下回假桩，真机走主进程 IPC）
+    'files.read': "''",
+    'files.write': "'', '内容'",
+    'files.edit': "'', { content: '新内容' }",
+    'files.list': "''",
+    'files.stat': "''",
+    'files.mkdir': "''",
+    'files.copy': "'', ''",
+    'files.move': "'', ''",
+    'files.delete': "''",
+    // 基础系统进程任务
+    'process.create': "{ command: 'node' }",
+    'process.start': "'proc_test'",
+    'process.status': "'proc_test'",
+    'process.output': "'proc_test'",
+    'process.stop': "'proc_test'",
+    'process.list': '',
+    'process.get': "'proc_test'",
+    'process.delete': "'proc_test'",
   }
   let s = staticStore()
   let tmpStore: Record<string, unknown> = {}
@@ -438,8 +384,6 @@ export async function apiNameTests() {
   ok(plainLineOf('## 微积分基本定理') === '微积分基本定理', '标题行剥掉井号', plainLineOf('## 微积分基本定理'))
   ok(plainLineOf('- [导数](moji:learn "变化率") 是基础') === '导数 是基础', '链接行只留链接文字', plainLineOf('- [导数](moji:learn "变化率") 是基础'))
   ok(plainLineOf('1. **重点**：看 `这里`') === '重点：看 这里', '强调与行内代码剥掉标记', plainLineOf('1. **重点**：看 `这里`'))
-  // tmp 这一组真的能用（上面每次调用都走了一遍）
-  ok(sawTmpWrite, 'tmp 这一组真的能写进暂存区（clear 之后也留有痕迹）', Object.keys(tmpStore).length)
   // 选配的组没注入时应当不存在——用另起一个不带 exam 的工具来验，别和上面那份混着用
   const bare = createExecuteTool({ ...ops, exam: undefined, runSandbox: fakeRunner })
   const exam = await bare.run({ description: '名单检查', body: '((api)=>{ return await api.exam.read() })' }, { nodeId: childId, goalId })
