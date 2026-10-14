@@ -283,6 +283,9 @@ export function buildDocs(store: LearnStore): Map<string, string> {
 /** 一次摊平里，两片之间最多连着跑多久 */
 const SLICE_BUDGET_MS = 6
 
+/** 节点很少时，分片本身比工作更贵，直接走同步路径避免一次无意义的让出。 */
+const SMALL_STORE_MAX_NODES = 3
+
 /**
  * 分片摊平：每片最多连着跑 `budgetMs` 毫秒，片间 `await yieldToMain()`。
  *
@@ -290,9 +293,13 @@ const SLICE_BUDGET_MS = 6
  * ——日志里量到 98.77ms 一次，主线程整段被占住，期间的点击只能排队。切碎之后总时长不变，
  * 但片与片之间浏览器能处理输入、能画一帧。
  *
- * 小 store 一片就跑完（第一次判断就 done），因此不会为「没什么可摊」的情况白付让出的开销。
+ * 小 store 不值得分片：单个节点的序列化耗时会随数据量变化，单靠时间阈值会让「只有几个节点」
+ * 的保存出现机器相关的偶发让出。先用节点数挡住这条明显的短路径，再对真正的大 store 使用
+ * 时间预算，既避免无意义的宏任务，也保留大数据保存时的响应性。
  */
 export async function buildDocsChunked(store: LearnStore, budgetMs = SLICE_BUDGET_MS): Promise<Map<string, string>> {
+  if (store.nodes.length <= SMALL_STORE_MAX_NODES) return buildDocs(store)
+
   const steps = buildDocsSteps(store)
   let sliceStart = performance.now()
   for (;;) {
