@@ -22,7 +22,8 @@ import {
 import { flushSync } from './flush'
 import { pickLocal, readLocal, readLocalMedia, revealLocal, setLocalWatchList, writeLocal } from './local'
 import { setWsWatchList } from './ws'
-import { closeBehavior, currentRoot, defaultRoot, loadGlobal, pickRoot, setCloseBehavior, setRoot } from './settings'
+import { closeBehavior, currentRoot, defaultRoot, loadGlobal, noticeSettings, pickRoot, setCloseBehavior, setNoticeSettings, setRoot } from './settings'
+import type { NoticeSettings } from '../../shared/ipc'
 
 /* ---------- IPC 注册 ---------- */
 
@@ -41,6 +42,11 @@ export function registerStorageIpc(): void {
   ipcMain.handle('shell:setCloseBehavior', (_e, value: unknown) => setCloseBehavior(value))
 
   ipcMain.handle('storage:pickRoot', () => pickRoot())
+
+  // 远程公告在本机的状态（要不要自动弹、上次弹时的版本号、读过哪些 id）。
+  // 与关窗行为同属「跟机器走」的全局设置，落在同一份 global.yaml（见 settings.ts）
+  ipcMain.handle('notice:get', () => noticeSettings())
+  ipcMain.handle('notice:set', (_e, patch: unknown) => setNoticeSettings((patch ?? {}) as Partial<NoticeSettings>))
 
   ipcMain.handle('storage:list', (_e, rel: unknown) => listDir(rel))
   ipcMain.handle('storage:read', (_e, rel: unknown) => readText(rel))

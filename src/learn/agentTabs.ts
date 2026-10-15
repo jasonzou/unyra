@@ -125,6 +125,26 @@ export function removeAgentTab(
   return { tabs: next, active: neighbor ? agentTabKey(neighbor) : null }
 }
 
+/**
+ * 删除已经没有文档的目标级 Agent 页签。
+ *
+ * 子代理页签刻意不在这里处理：子代理任务允许脱离文档和父页签继续后台运行；固定聊天
+ * 页签也不落在 `tabs` 里。批量文档关闭只应该影响对应目标导师页签。
+ */
+export function removeAgentTabsOfGoals(
+  tabs: AgentTabRef[],
+  active: string | null,
+  goalIds: ReadonlySet<string>,
+): { tabs: AgentTabRef[]; active: string | null } {
+  let next = { tabs, active }
+  for (const ref of tabs) {
+    if (ref.kind === 'goal' && goalIds.has(ref.goalId)) {
+      next = removeAgentTab(next.tabs, next.active, agentTabKey(ref))
+    }
+  }
+  return next
+}
+
 /** 读盘归一化时对会话的最小视图：只用到 id、归属与子代理会话名单 */
 export interface AgentTabConvView {
   id: string

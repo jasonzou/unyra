@@ -27,6 +27,7 @@ import type {
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
   PluginEntry, PluginListResult,
   PluginSourceResult, PluginTogglesResult, SaveFilter, SilentMark, StorageEntry, StorageFail,
+  NoticeSettings,
   StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail, UpdatePhase, UpdateState,
   VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
   VoiceTranscribeResult, WebDomOpResult,
@@ -46,6 +47,7 @@ export type {
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
   PluginEntry, PluginListResult,
   PluginSourceResult, PluginTogglesResult, SaveFilter, SilentMark, StorageEntry, StorageFail,
+  NoticeSettings,
   StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail, UpdatePhase, UpdateState,
   VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
   VoiceTranscribeResult, WebDomOpResult,
@@ -648,6 +650,18 @@ const api = {
       ipcRenderer.on('window:closeRequested', listener)
       return () => ipcRenderer.removeListener('window:closeRequested', listener)
     },
+  },
+  /**
+   * 远程公告在本机的状态（要不要自动弹、上次弹时的版本号、读过哪些 id）。
+   * 与关窗行为一样属于「跟机器走」的全局设置，落在同一份 global.yaml
+   * （见 electron/storage/settings.ts）；渲染层 src/lib/notice.ts 读写它。
+   */
+  notice: {
+    get: (): Promise<NoticeSettings> => ipcRenderer.invoke('notice:get'),
+
+    /** 按字段合并着改（只改传进来的那几项） */
+    set: (patch: Partial<NoticeSettings>): Promise<NoticeSettings> =>
+      ipcRenderer.invoke('notice:set', patch),
   },
 
   files: {

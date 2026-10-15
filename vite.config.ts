@@ -7,9 +7,21 @@ import { defineConfig } from 'vite'
 // 不走 import：那会把整个 package.json（含依赖清单）打进渲染层产物。
 const version = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }).version
 
+/*
+ * 公告地址的**构建期覆盖值**（`VITE_NOTICE_URL=... npm run build`）。
+ *
+ * 默认地址不在这里——它在 src/lib/noticeConfig.ts（唯一一处真值）。这里只负责把
+ * 环境变量原样递进去；渲染层读不到环境变量（它跑在浏览器环境里），只能靠注入。
+ * 与 __APP_VERSION__ 同一套路：构建时替换成字面量，运行时零成本。
+ */
+const noticeUrlEnv = (process.env.VITE_NOTICE_URL ?? '').trim()
+
 // https://vite.dev/config/
 export default defineConfig({
-  define: { __APP_VERSION__: JSON.stringify(version) },
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+    __NOTICE_URL_ENV__: JSON.stringify(noticeUrlEnv),
+  },
   // 生产构建由 Electron 以 file:// 加载，资源必须是相对路径：
   // 默认的 base '/' 在 file:// 下会解析到文件系统根目录，JS/CSS 全部 404 → 白屏。
   base: './',

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, BookOpen, Check, ChevronDown, Compass, Contact, FilePlus, FolderOpen, Globe, History, Loader2, Menu, Paperclip, Sparkles, Star } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Compass, Contact, FilePlus, FolderOpen, Globe, History, Loader2, Menu, Paperclip, Sparkles, Star } from 'lucide-react'
 import type { PendingFile } from '../../../agent/types'
 import type { FavoriteItem, FavoriteRef, KnowledgeNode, LearnStore } from '../../../learn/types'
 import { favoriteKey } from '../../../learn/favorites'
@@ -32,6 +32,7 @@ import {
 import type { User } from '../../../user/types'
 import UserMenu from '../../user/UserMenu'
 import UpdateButton from '../../update/UpdateButton'
+import NoticeButton from '../../notice/NoticeButton'
 import WindowControls from '../../WindowControls'
 import Bullseye from '../../Bullseye'
 import Logo from '../../Logo'
@@ -57,6 +58,7 @@ export function Topbar({
   onOpenSettings,
   onOpenUsage,
   onOpenUpdate,
+  onOpenNotice,
   onToast,
   pomodoro,
   checkin,
@@ -92,6 +94,8 @@ export function Topbar({
   /** 打开用量统计页签（入口在用户菜单，见 UserMenu） */
   onOpenUsage: () => void
   onOpenUpdate: () => void
+  /** 打开公告弹窗（弹窗由 App 渲染，理由见 components/notice/NoticeDialog） */
+  onOpenNotice: () => void
   /** 顶栏那几个「还没做好」的按钮据此说明一句，而不是点了没反应 */
   onToast: (msg: string) => void
 }) {
@@ -227,15 +231,10 @@ export function Topbar({
           )}
         </button>
 
-        {/* 文档与联系方式：位置先占住（需求里明确说「先留空」），点了说明白还没做好 */}
-        <button
-          type="button"
-          title={t('文档')}
-          onClick={() => onToast(t('「文档」还在做：之后这里放教学文档的入口'))}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-all hover:bg-line/60 hover:text-ink"
-        >
-          <BookOpen size={15} />
-        </button>
+        {/* 公告：这里原先占位的是「文档」按钮（那个入口一直没做，现在整颗删掉，
+            位置让给公告）。按钮自己订阅公告状态、自己画那颗未读红点（见
+            components/notice/NoticeButton）——顶栏这一层保持纯展示。 */}
+        <NoticeButton onOpen={onOpenNotice} />
         <button
           type="button"
           title={t('联系方式')}

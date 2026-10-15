@@ -223,6 +223,18 @@ const dict: Record<string, string> = {
   '空格结束': 'Space to stop',
   '空格': 'Space',
 
+  /* ---------- lib/notice.ts：远程公告取不到时的说法（显示在公告弹窗里） ---------- */
+  '公告功能需要在桌面应用里使用。': 'Announcements are only available in the desktop app.',
+  '还没有配置公告地址（见 src/lib/noticeConfig.ts）。':
+    'No announcement URL is configured yet (see src/lib/noticeConfig.ts).',
+  '获取公告超时了。不影响使用，下次启动会自动再试。':
+    'Timed out fetching the announcement. Nothing else is affected; it will retry on the next launch.',
+  '没能获取公告：{0}': 'Could not fetch the announcement: {0}',
+  '没能获取公告（网络或地址有问题）。': 'Could not fetch the announcement (network or URL problem).',
+  '公告不是合法的 JSON，已忽略。': 'The announcement is not valid JSON and was ignored.',
+  '公告缺少必需字段或字段类型不对，已忽略。':
+    'The announcement is missing required fields or has the wrong types and was ignored.',
+
 }
 
 export default dict

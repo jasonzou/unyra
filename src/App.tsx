@@ -7,6 +7,8 @@ import CloseDialog from './components/CloseDialog'
 import UserDialog from './components/user/UserDialog'
 import LoginPage from './components/user/LoginPage'
 import UpdateDialog from './components/update/UpdateDialog'
+import NoticeDialog from './components/notice/NoticeDialog'
+import { bootstrapNotice, startNoticePolling } from './lib/notice'
 import { startupMark } from './lib/startupTrace'
 import { userRepo } from './user/api'
 import { removeUser, updateUser } from './user/store'
@@ -47,6 +49,11 @@ export default function App({ boot }: Props) {
    * 弹窗渲染在这一层而不是顶栏里：顶栏带 backdrop-blur，fixed 定位会被它捕获。
    */
   const [updateOpen, setUpdateOpen] = useState(false)
+  /**
+   * 公告弹窗。与更新弹窗同一套路：状态只有「开不开」一件事，
+   * 内容与失败原因都在 lib/notice 的快照里（见 components/notice/NoticeDialog）。
+   */
+  const [noticeOpen, setNoticeOpen] = useState(false)
   const [toast, setToast] = useState<ToastData | null>(null)
   const [users, setUsers] = useState<User[]>(boot.users)
   const [activeUserId, setActiveUserId] = useState<string | null>(boot.session?.userId ?? null)
@@ -78,6 +85,34 @@ export default function App({ boot }: Props) {
   const [closeAsk, setCloseAsk] = useState(false)
   // 启动打点：App 的第一次提交（此刻界面的骨架已经在 DOM 里了）
   useEffect(() => startupMark('r:app-commit'), [])
+
+  /**
+   * 公告：启动时读本机状态、取一次远程公告，再决定要不要**自动弹出**；
+   * 之后**每 5 分钟轮询一次**（见 lib/notice 的 startNoticePolling），
+   * 中途新到的公告会把顶栏那颗红点点亮。
+   *
+   * 三件事都交给 lib/notice：判定只有一处（shouldAutoShow），这里只负责「弹不弹」。
+   * 「更新后强制弹一次」靠**版本号比对**实现——装上新版本之后存档里的版本号必然对不上，
+   * 于是强制弹一次；弹完把版本号追平，之后完全按用户的设置走。**不重置用户的选择**
+   * （那会让用户发现自己的「不再自动弹出」被悄悄改回去了）。
+   *
+   * 全程静默失败：取不到公告（断网、地址错、格式不对）只是这次没有公告，
+   * 绝不影响应用的主要功能，因此这里连一句提示都不给。
+   */
+  useEffect(() => {
+    let alive = true
+    void bootstrapNotice()
+      .then((r) => {
+        if (alive && r.show) setNoticeOpen(true)
+      })
+      .catch((err: unknown) => console.warn('[notice] 启动时获取公告失败：', err))
+    // 启动那次取完就交给轮询接管（轮询自己会处理「同一时刻只飞一次」）
+    const stopPolling = startNoticePolling()
+    return () => {
+      alive = false
+      stopPolling()
+    }
+  }, [])
   useEffect(() => {
     void loadCloseBehavior()
     return onCloseRequested(() => setCloseAsk(true))
@@ -212,6 +247,8 @@ export default function App({ boot }: Props) {
           hint={!signedIn && wanted !== 'login' ? t('请先登录后再使用') : undefined}
         />
         {closeAsk && <CloseDialog onDecide={handleCloseDecision} />}
+        {/* 公告在登录页也挂着：应用级的消息（新版发布、服务调整）与登没登录无关 */}
+        {noticeOpen && <NoticeDialog onClose={() => setNoticeOpen(false)} />}
         <Toast toast={toast} onHide={() => setToast(null)} />
         <KeyCast />
       </div>
@@ -230,8 +267,10 @@ export default function App({ boot }: Props) {
         onSignOut={handleSignOut}
         onToast={showToast}
         onOpenUpdate={() => setUpdateOpen(true)}
+        onOpenNotice={() => setNoticeOpen(true)}
       />
       {updateOpen && <UpdateDialog onClose={() => setUpdateOpen(false)} />}
+      {noticeOpen && <NoticeDialog onClose={() => setNoticeOpen(false)} />}
       {userOpen && activeUserRecord && (
         <UserDialog
           users={users}
