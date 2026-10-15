@@ -14,7 +14,8 @@ import { removeSuperDoc } from '../../../learn/superdocs'
 import { captureLocalRemove, captureNoteDelete, captureSuperDelete, type ExplorerUndo } from '../../../learn/undo'
 import { nodeDocRel } from '../../../learn/store'
 import { addLocalFile, removeLocalFile } from '../../../learn/localfiles'
-import { openInGroup } from '../../../learn/groups'
+import { claimTab, openGroupedDoc, openInGroup, withOwners } from '../../../learn/groups'
+import { tabKey } from '../../../learn/tabs'
 import { revealPath } from '../../../lib/storage'
 import { droppedFilePath, pickLocalFiles } from '../../../lib/localFiles'
 import { t } from '../../../i18n'
@@ -50,10 +51,15 @@ export function useLibraryActions({ getLatest, set, flush, onToast, openTab, pus
       const r = createNote(s, nodeId)
       if (!r.name) return
       const ref: TabRef = { kind: 'note', nodeId, note: r.name }
+      const node = nodeById(r.store, nodeId)
+      const rootNodeId = node ? r.store.goals.find((g) => g.id === node.goalId)?.rootNodeId ?? null : null
+      const goalOf = (id: string) => nodeById(r.store, id)?.goalId ?? null
+      // 笔记也是节点文档：先打开根大纲建立/恢复目标组，再把空笔记落进组里。
+      const opened = openGroupedDoc(r.store.docArea, ref, rootNodeId, goalOf, Date.now(), 'source')
+      const docArea = withOwners(opened, node ? claimTab(opened.tabOwners, node.goalId, tabKey(ref)) : opened.tabOwners)
       set({
         ...r.store,
-        // 新建的笔记一定是空的：直接开在编辑视图里（用户点「新建」就是要往里写）
-        docArea: openInGroup(r.store.docArea, r.store.docArea.focus, ref, Date.now(), 'source', (id) => nodeById(r.store, id)?.goalId ?? null),
+        docArea,
         activeNodeId: nodeId,
       })
       onToast(t('已新建笔记「{0}」', r.name))

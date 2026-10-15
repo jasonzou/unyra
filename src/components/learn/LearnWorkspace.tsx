@@ -63,10 +63,12 @@ import {
   PUBLIC_OWNER,
   activateIn,
   activeIdsOf,
+  allStoredTabs,
   allTabs,
   claimTab,
   closeIds,
   closeIn,
+  dropTabs,
   findTab,
   focusTabsInGroup,
   focusedGroup,
@@ -1002,8 +1004,18 @@ export default function LearnWorkspace({
             ? ref.conversationId
             : (latestConversation(s, ref.goalId)?.id ?? null)
           : null
+      const hasDocTabs =
+        ref.kind === 'goal'
+          ? allTabs(s.docArea).some((t) => {
+              if (t.ref.kind === 'mind') return t.ref.goalId === ref.goalId
+              const nodeId = tabNodeId(t.ref)
+              return !!nodeId && nodeById(s, nodeId)?.goalId === ref.goalId
+            })
+          : false
       return agentTabCloseBlock(ref, {
-        hasDocTabs: ref.kind === 'goal' ? docGoalIds.has(ref.goalId) : false,
+        // 关闭动作必须按 getLatest() 现算，不能读创建 callback 时的旧 docGoalIds；
+        // 文档区刚关完一枚页签后，旧闭包否则会把导师继续错误地拦住。
+        hasDocTabs,
         running: ref.kind === 'goal' ? !!(convId && agent.runningByConversation[convId]) : false,
       })
     },
@@ -1033,22 +1045,22 @@ export default function LearnWorkspace({
           if (ref && ref.kind === 'goal') doomedGoalIds.add(ref.goalId)
         }
         if (doomedGoalIds.size > 0) {
-          const all = allTabs(cur.docArea)
-          const docIdsToClose = all
-            .filter((t) => {
-              if (t.ref.kind === 'mind') return doomedGoalIds.has(t.ref.goalId)
-              const nid = tabNodeId(t.ref)
-              if (nid) {
-                const n = nodeById(cur, nid)
-                if (n && doomedGoalIds.has(n.goalId)) return true
-              }
-              return false
-            })
-            .map((t) => t.id)
+          const belongsToDoomedGoal = (t: LearnTab): boolean => {
+            if (t.ref.kind === 'mind') return doomedGoalIds.has(t.ref.goalId)
+            const nid = tabNodeId(t.ref)
+            if (!nid) return false
+            const n = nodeById(cur, nid)
+            return !!n && doomedGoalIds.has(n.goalId)
+          }
+          // 活动组和停靠场都算「已打开的文档」：只扫 allTabs 会把关根大纲后停靠的
+          // 页签漏掉，稍后重开大纲时它们又会被恢复出来。
+          const stored = allStoredTabs(cur.docArea)
+          const docIdsToClose = stored.filter(belongsToDoomedGoal).map((t) => t.id)
           if (docIdsToClose.length > 0) {
+            const closedArea = closeIds(cur.docArea, docIdsToClose, { preserveActiveAsBlank: true })
             cur = {
               ...cur,
-              docArea: closeIds(cur.docArea, docIdsToClose),
+              docArea: withOwners(closedArea, dropTabs(closedArea.tabOwners, docIdsToClose)),
               drafts: dropDrafts(cur.drafts, docIdsToClose),
             }
           }
@@ -1409,8 +1421,8 @@ export default function LearnWorkspace({
           ? isAnchorOutline(ref, goalOf, rootOf)
             ? openAnchorOutline(base.docArea, base.docArea.focus, ref, goalOf, Date.now())
             : openOutlineTab(base.docArea, base.docArea.focus, ref, goalOf, Date.now())
-          : (ref.kind === 'teach' || ref.kind === 'ws') && node
-            ? openGroupedDoc(base.docArea, ref, rootOf(node.goalId), goalOf, Date.now(), startView)
+          : nodeId && node
+            ? openGroupedDoc(base.docArea, ref as TabRef & { nodeId: string }, rootOf(node.goalId), goalOf, Date.now(), startView)
             : openInGroup(base.docArea, base.docArea.focus, ref, Date.now(), startView, goalOf)
       /*
        * 登记归属（见 groups/goals）：这枚页签从此记在它所属的目标名下，
@@ -3260,8 +3272,8 @@ export default function LearnWorkspace({
      * 的说明）；组锚大纲带着停靠组归队；阶段大纲与其余页签都是普通开法。
      */
     const docArea =
-      ref.kind === 'teach' || ref.kind === 'ws'
-        ? openGroupedDoc(base.docArea, ref, rootOf(goalOf(ref.nodeId) ?? ''), goalOf, Date.now(), undefined, groupId)
+      nodeId && ref.kind !== 'outline'
+        ? openGroupedDoc(base.docArea, ref as TabRef & { nodeId: string }, rootOf(goalOf(nodeId) ?? ''), goalOf, Date.now(), undefined, groupId)
         : ref.kind === 'outline'
           ? isAnchorOutline(ref, goalOf, rootOf)
             ? openAnchorOutline(base.docArea, groupId, ref, goalOf, Date.now())

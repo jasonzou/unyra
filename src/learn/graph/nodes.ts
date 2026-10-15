@@ -6,7 +6,7 @@ import type { DocKind, KnowledgeNode, LearnStore } from '../types'
 import { emptyDocs, emptyOutline } from '../types'
 import { withVisit } from '../learning'
 import { withoutTmpNodes } from '../../lib/tmpStore'
-import { allTabs, closeIds } from '../groups'
+import { allStoredTabs, closeIds, dropTabs, withOwners } from '../groups'
 import { tabIdsOfNode } from '../tabs'
 import { dropDrafts } from '../drafts'
 import { pruneReading } from '../reading'
@@ -294,7 +294,7 @@ export function deleteNode(store: LearnStore, id: string): LearnStore {
     }
   }
 
-  const doomed = Array.from(doomedNodes).flatMap((did) => tabIdsOfNode(allTabs(store.docArea), did))
+  const doomed = Array.from(doomedNodes).flatMap((did) => tabIdsOfNode(allStoredTabs(store.docArea), did))
   const nodes = store.nodes.filter((n) => !doomedNodes.has(n.id))
   return {
     ...store,
@@ -306,7 +306,7 @@ export function deleteNode(store: LearnStore, id: string): LearnStore {
     exams: store.exams.filter((e) => !doomedNodes.has(e.nodeId)),
     // 节点没了，它那份临时变量（可能是几十万字符的中间数据）也不该留着
     tmp: withoutTmpNodes(store.tmp, doomedNodes),
-    docArea: closeIds(store.docArea, doomed),
+    docArea: withOwners(closeIds(store.docArea, doomed), dropTabs(store.docArea.tabOwners, doomed)),
     // 节点没了，它那几份没保存的正文也没有落点了（同页签：留着只会占着键）
     drafts: dropDrafts(store.drafts, doomed),
     activeNodeId: doomedNodes.has(store.activeNodeId ?? '') ? (parents[0] ?? null) : store.activeNodeId,

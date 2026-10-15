@@ -65,9 +65,11 @@ export {
 export {
   activateIn,
   activeIdsOf,
+  allStoredTabs,
   allTabs,
   closeIds,
   closeIn,
+  ensureAnchorOutlines,
   isAnchorOutline,
   landingAfter,
   moveTab,
