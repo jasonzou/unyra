@@ -13,7 +13,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { isUpdateChannel } from '../update-core'
 import { getLocale, t } from '../i18n'
 
-import type { CloseBehavior, UpdateChannel } from '../../shared/ipc'
+import type { CloseBehavior, NoticeSettings, UpdateChannel } from '../../shared/ipc'
 
 // CloseBehavior 原先在这里也写了一份（与 electron/preload.ts、src/lib/native.ts 逐字重复）：
 // 现在统一用 shared/ipc.ts，并按原样转出去（electron/storage.ts 仍在转它）。
@@ -55,7 +55,17 @@ export interface GlobalSettings {
    * 见 electron/plugins.ts。
    */
   plugins: Record<string, boolean>
+  /**
+   * 远程公告在本机的状态（要不要自动弹、上次弹时的版本号、读过哪些 id）。
+   *
+   * 为什么进全局设置：公告是应用级的，跟机器走——同一台机器换个用户登录不该又弹一遍，
+   * 用户关掉自动弹出也该对这台机器上的所有用户生效。语义见 shared/ipc 的 NoticeSettings。
+   */
+  notice: NoticeSettings
 }
+
+/** 公告状态的默认值：每次打开都弹（autoShow=true），还没弹过（版本号为空） */
+export const DEFAULT_NOTICE: NoticeSettings = { autoShow: true, shownVersion: '', readIds: [] }
 
 /** 全局设置文件名（appdata 内） */
 const GLOBAL_FILE = 'global.yaml'
@@ -132,6 +142,8 @@ export function loadGlobal(): GlobalSettings {
   // 默认正式版：最稳的那一档；尝鲜要用户自己在设置里明确切过去
   let updateChannel: UpdateChannel = 'stable'
   const plugins: Record<string, boolean> = {}
+  // 公告状态：认不出来的字段一律回落到默认（每次打开都弹、没读过任何一条）
+  let notice: NoticeSettings = { ...DEFAULT_NOTICE }
   try {
     const raw = parseYaml(fs.readFileSync(globalPath(), 'utf-8')) as Partial<GlobalSettings> | null
     if (raw && typeof raw.root === 'string') root = raw.root.trim()
@@ -143,11 +155,27 @@ export function loadGlobal(): GlobalSettings {
     if (raw && raw.plugins && typeof raw.plugins === 'object') {
       for (const [id, on] of Object.entries(raw.plugins)) if (typeof on === 'boolean') plugins[id] = on
     }
+    if (raw && raw.notice && typeof raw.notice === 'object') notice = normalizeNotice(raw.notice)
   } catch {
     // 文件不存在或损坏：用默认值，不算错误
   }
-  globalCache = { version: 1, root, closeBehavior, uiLocale, autoUpdate, updateChannel, plugins }
+  globalCache = { version: 1, root, closeBehavior, uiLocale, autoUpdate, updateChannel, plugins, notice }
   return globalCache
+}
+
+/**
+ * 把从磁盘读到的公告状态收敛成一份**永远合法**的值。
+ *
+ * 这份文件是给人看的，手改坏了（比如把 readIds 写成字符串）不该让公告模块拿到
+ * 一个奇怪的形状——它要跨 IPC 传、还要参与渲染层的判定，字段类型必须钉死。
+ */
+function normalizeNotice(raw: Partial<NoticeSettings> | null | undefined): NoticeSettings {
+  const autoShow = typeof raw?.autoShow === 'boolean' ? raw.autoShow : DEFAULT_NOTICE.autoShow
+  const shownVersion = typeof raw?.shownVersion === 'string' ? raw.shownVersion.trim() : ''
+  const readIds = Array.isArray(raw?.readIds)
+    ? raw.readIds.filter((id): id is string => typeof id === 'string' && !!id.trim())
+    : []
+  return { autoShow, shownVersion, readIds }
 }
 
 function persistGlobal(): void {
@@ -303,6 +331,38 @@ export function setUpdateChannel(value: unknown): UpdateChannel {
     // 存不下来：本次运行照样按新的来
   }
   return next.updateChannel
+}
+
+/* ---------- 公告（远程公告的本地状态） ---------- */
+
+/** 当前生效的公告状态（一份拷贝，调用方改它不影响缓存） */
+export function noticeSettings(): NoticeSettings {
+  const n = loadGlobal().notice
+  return { ...n, readIds: [...n.readIds] }
+}
+
+/**
+ * 改公告状态并落盘。**按字段合并**：渲染层每次只改自己关心的那一项
+ * （勾一下「不再自动弹出」、或把已弹版本号追平），不关心的一次都不该动——
+ * 整份替换会让两个并发的写入互相覆盖。
+ *
+ * 与其余几项同一条纪律：认不出来的值忽略，写不进去也只在本次运行里生效，
+ * 不因为一次落盘失败就打断界面。
+ */
+export function setNoticeSettings(patch: Partial<NoticeSettings>): NoticeSettings {
+  const cur = loadGlobal().notice
+  const next: NoticeSettings = normalizeNotice({
+    autoShow: typeof patch.autoShow === 'boolean' ? patch.autoShow : cur.autoShow,
+    shownVersion: typeof patch.shownVersion === 'string' ? patch.shownVersion : cur.shownVersion,
+    readIds: Array.isArray(patch.readIds) ? patch.readIds : cur.readIds,
+  })
+  globalCache = { ...loadGlobal(), notice: next }
+  try {
+    persistGlobal()
+  } catch {
+    // 存不下来：本次运行照样按新的来
+  }
+  return { ...next, readIds: [...next.readIds] }
 }
 
 /* ---------- 选择目录 ---------- */

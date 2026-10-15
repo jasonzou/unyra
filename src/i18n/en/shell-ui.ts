@@ -891,6 +891,20 @@ const dict: Record<string, string> = {
   "描边厚度": "Stroke thickness",
   "立即应用": "Apply now",
   "应用": "Apply",
+
+  /* ---------- 公告弹窗（components/notice/NoticeDialog.tsx）与顶栏入口 ---------- */
+  '公告': 'Announcement',
+  '公告：有 {0} 条没看过': 'Announcements: {0} unread',
+  '软件公告': 'Software notice',
+  '{0} 条公告': '{0} notices',
+  '适用 v{0} 及以上': 'For v{0} and above',
+  '正在获取公告…': 'Loading announcement…',
+  '暂时没有新的公告': 'No new announcements right now',
+  '有新的消息时会在这里显示。': 'New messages will show up here.',
+  '不再自动弹出': 'Don’t open automatically',
+  '更新到新版本后仍会提示一次': 'Still shows once after an update',
+  '勾选后启动时不再自动弹出公告；更新到新版本后仍会提示一次。':
+    'When checked, the announcement will not open automatically at startup; it will still show once after an update.',
 }
 
 export default dict

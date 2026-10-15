@@ -15,7 +15,7 @@ import type {
   BaseProcessListResult, BaseProcessOutputResult, BaseProcessStartResult, BaseProcessStatusResult,
   BaseProcessStopResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
-  PluginEntry, PluginTogglesResult, SaveFilter,
+  NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
   UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
   VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFetchResult, WebLogDetailResult,
@@ -30,7 +30,7 @@ import type {
 export type {
   AttachReadResult, BaseProcessDeleteResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
-  PluginEntry, PluginTogglesResult, SaveFilter,
+  NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
   UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
   VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFetchResult, WebLogDetailResult,
@@ -331,6 +331,16 @@ export interface NativeBridge {
     openRelease(): Promise<boolean>
     /** 订阅状态变化；返回取消订阅函数 */
     onState(cb: (state: UpdateState) => void): () => void
+  }
+  /**
+   * 远程公告在本机的状态（要不要自动弹、上次弹时的版本号、读过哪些 id）。
+   * 与关窗行为一样是「跟机器走」的全局设置（appdata 的 global.yaml），
+   * 这里只读写、不自己存一份——判定的完整逻辑见 src/lib/notice.ts。
+   */
+  notice: {
+    get(): Promise<NoticeSettings>
+    /** 按字段合并着改（只改传进来的那几项） */
+    set(patch: Partial<NoticeSettings>): Promise<NoticeSettings>
   }
   /**
    * 外壳行为：关窗策略与托盘。

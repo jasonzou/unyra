@@ -48,6 +48,18 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/*
+ * 正文里的图片：宽度不许超过容器，高度按比例走。
+ *
+ * 这条原先只写在 .note-preview img 上，而对话气泡与公告弹窗用的是 .moji-agent-md——
+ * 少了它，一张稍微大点的图会把气泡/弹窗横向撑破（图片的固有宽度不认容器）。
+ * 远程图片（https:）是正经内容，CSP 的 img-src 已放行，见 electron/csp.ts。
+ */
+.moji-agent-md img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
 .moji-agent-md strong,
 .moji-agent-md b {
   font-weight: 700;

@@ -120,6 +120,7 @@ import {
   agentTabKey,
   reorderAgentTabs,
   removeAgentTab,
+  removeAgentTabsOfGoals,
   upsertAgentTab,
   visibleAgentTabs,
   withAgentTabs,
@@ -292,6 +293,7 @@ export default function LearnWorkspace({
   onSignOut,
   onToast,
   onOpenUpdate,
+  onOpenNotice,
 }: Props) {
   const { store, set, getLatest, patchQuiet, flush } = useLearnStore()
   /*
@@ -419,6 +421,20 @@ export default function LearnWorkspace({
   const activeNode = activeNodeId ? (nodeById(store, activeNodeId) ?? null) : null
   const activeGoal = activeNode ? (store.goals.find((g) => g.id === activeNode.goalId) ?? null) : null
   const activeGoalId = activeGoal?.id ?? null
+  /**
+   * 顶栏标题只在文档区确实存在目标根大纲时显示。activeNodeId 是导师上下文，关闭文档后
+   * 可能仍然保留；如果不加这道门，文档区已经空了，Topbar 却会继续显示旧目标标题。
+   */
+  const hasTargetOutline = useMemo(
+    () =>
+      tabs.some((t) => {
+        const ref = t.ref
+        if (ref.kind !== 'outline') return false
+        return store.goals.some((g) => g.rootNodeId === ref.nodeId)
+      }),
+    [store.goals, tabs],
+  )
+  const topbarGoalQuestion = hasTargetOutline ? (activeGoal?.question ?? '') : ''
 
   /*
    * 记忆管理页（kind 'mind'）的写入口：**一枚目标一枚页签**，落点由页签自己携带的
@@ -487,9 +503,10 @@ export default function LearnWorkspace({
     /*
      * 记着的激活项不在这个目标名下（切了目标、或它是别家目标的子代理）：
      * 落到本目标这一枚——导师是跟着目标走的，切了目标却还对着上一个目标的导师说话最危险。
-     * 本目标一枚都没有时返回 null：那一栏由界面自己说「打开一份文档，导师就来了」。
+     * 本目标一枚都没有时也必须回到固定聊天：固定聊天是 Agent 栏的底座，不能因为目标导师
+     * 被关闭或旧的 activeAgentTab 失效而让整块 Agent 区消失。
      */
-    return goalAgentTabs.find((t) => t.kind === 'goal') ?? null
+    return goalAgentTabs.find((t) => t.kind === 'goal') ?? freeTabRef
   }, [goalAgentTabs, store.agentActiveTab, freeTabRef])
   const activeAgentTabId = activeAgentTab ? agentTabKey(activeAgentTab) : null
   /**
@@ -1019,7 +1036,7 @@ export default function LearnWorkspace({
         running: ref.kind === 'goal' ? !!(convId && agent.runningByConversation[convId]) : false,
       })
     },
-    [docGoalIds, agent.runningByConversation],
+    [agent.runningByConversation],
   )
 
   /**
@@ -1784,8 +1801,21 @@ export default function LearnWorkspace({
     [store, examTabTitle],
   )
 
+  /**
+   * 文档区全部关闭时的反向联动：目标已经没有活动文档，就移除目标级导师页签。
+   * 固定聊天页签不落在 agentTabs 里，子代理页签也保留，让后台任务不因文档区操作被中断。
+   */
+  const closeAgentTabsForGoals = useCallback((s: LearnStore, goalIds: readonly string[]): LearnStore => {
+    const removed = removeAgentTabsOfGoals(s.agentTabs ?? [], s.agentActiveTab ?? null, new Set(goalIds))
+    return withAgentTabs(
+      s,
+      removed.tabs,
+      removed.active ?? 'free',
+    )
+  }, [])
+
   /*
-   * 保存 / 关页签 / 冲突流整体在 useDocSaveFlow（workspace/）：
+   * 保存 / 关页签 / 冲突流整体在 useDocSaveFlow（workspace）：
    * 暂存入口、Ctrl+S、关页签、两个确认框、本地文件监听是同一条链上的环节，拆开反而难读。
    */
   const {
@@ -1815,6 +1845,7 @@ export default function LearnWorkspace({
     setDocSaveError,
     setLocalSaved,
     docTitle,
+    onGoalsClosed: closeAgentTabsForGoals,
     onToast,
   })
 
@@ -4234,7 +4265,7 @@ export default function LearnWorkspace({
              */
             activeNode={docNode}
             onSelectNode={selectNode}
-            goalQuestion={activeGoal?.question ?? ''}
+            goalQuestion={topbarGoalQuestion}
             // 目标名点开的下拉菜单：存活的 tab 组（点一行切过去，见 switchGoalGroup）
             tabGroups={aliveGoalTabGroups}
             onSwitchGoalGroup={switchGoalGroup}
@@ -4246,6 +4277,7 @@ export default function LearnWorkspace({
             onOpenSettings={onOpenSettings}
             onOpenUsage={onOpenUsage}
             onOpenUpdate={onOpenUpdate}
+            onOpenNotice={onOpenNotice}
             onToast={onToast}
             /* 番茄钟与打卡都是「自给自足的小块」：时钟/倒计时只在这一块里每秒重渲染，
                不会把整个学习区（正文 + 对话栏）一起带上 */

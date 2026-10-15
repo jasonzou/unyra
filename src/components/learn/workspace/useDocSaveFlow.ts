@@ -40,6 +40,7 @@ import {
   focusedGroup,
   focusedTab,
   groupOf,
+  isAnchorOutline,
   ownerOfTab,
   renameTabRef,
   servesGoal,
@@ -90,6 +91,8 @@ export interface DocSaveFlowDeps {
   setLocalSaved: Dispatch<SetStateAction<{ path: string; text: string } | null>>
   /** 焦点格那份文档的标题（保存成功的吐司要说「已保存『…』」） */
   docTitle: string
+  /** 文档区「全部关闭」后，删除已经没有活动文档的目标导师页签；子代理由调用方自行保留 */
+  onGoalsClosed?: (store: LearnStore, goalIds: readonly string[]) => LearnStore
   onToast: (msg: string) => void
 }
 
@@ -126,6 +129,7 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
     setDocSaveError,
     setLocalSaved,
     docTitle,
+    onGoalsClosed,
     onToast,
   } = deps
 
@@ -196,10 +200,44 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
   const applyClose = useCallback(
     (group: string, id: string, mode: TabCloseMode, closingIds?: string[]) => {
       const s = getLatest()
+      const beforeGroup = groupOf(s.docArea, group)
       const beforeTabs = allTabs(s.docArea)
       const goalOfNode = (nodeId: string) => nodeById(s, nodeId)?.goalId ?? null
       /** 「目标 → 根节点」：组锚判据的第二跳（见 groups/tabs 的 isAnchorOutline） */
       const rootOf = (goalId: string) => s.goals.find((g) => g.id === goalId)?.rootNodeId ?? null
+      const goalOfTab = (tab: LearnTab): string | null => {
+        if (tab.ref.kind === 'mind') return tab.ref.goalId
+        const nodeId = tabNodeId(tab.ref)
+        return nodeId ? goalOfNode(nodeId) : null
+      }
+      /*
+       * 反向同步有两种触发：
+       * - 关闭目标根大纲（组锚）：即使 mode 是 self，整组也会进入 parkedTabs，导师页签应关闭；
+       * - 文档区「全部关闭」：只关闭那些在其它活动组也没有文档的目标。
+       * 阶段大纲不算组锚，关闭它不能误删整个目标导师。
+       */
+      const beforeClose = beforeGroup
+        ? closeTabs(beforeGroup.tabs, id, mode, beforeGroup.active, closingIds)
+        : null
+      const closingTabIds = new Set(
+        (beforeGroup?.tabs ?? [])
+          .filter((tab) => !beforeClose?.tabs.some((kept) => kept.id === tab.id))
+          .map((tab) => tab.id),
+      )
+      const closedAnchorGoalIds = new Set<string>()
+      for (const tab of beforeGroup?.tabs ?? []) {
+        if (!closingTabIds.has(tab.id) || !isAnchorOutline(tab.ref, goalOfNode, rootOf)) continue
+        const goalId = goalOfTab(tab)
+        if (goalId) closedAnchorGoalIds.add(goalId)
+      }
+      const allClosedGoalIds =
+        mode === 'all'
+          ? new Set(
+              (beforeGroup?.tabs ?? [])
+                .map(goalOfTab)
+                .filter((goalId): goalId is string => !!goalId),
+            )
+          : new Set<string>()
       /*
        * 落点只在「栏上看得见」的页签里挑，判据与页签栏同一套（见 groups/goals 的 visibleTabs）：
        * 页签实体全住在格子里、栏上只画「公共 + 当前目标」，物理顺序里因此躺着别的目标
@@ -243,9 +281,23 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
       const nextNodeId = nextRef && servesGoal(nextRef, goalOfNode, s.activeGoalId) ? tabNodeId(nextRef) : null
       // 落点也一样：新落到的页签属于别的节点时，节点与会话都得跟着它走（见 retargetNode）
       const base = nextNodeId ? retargetNode(s, nextNodeId) : s
-      set({ ...base, docArea })
+      // 文档区与导师区的反向同步：关闭根大纲本身就代表该目标组离开活动区；
+      // 「全部关闭」则只移除那些在其它活动组也没有文档的目标。停靠场不算活动文档。
+      const remainingGoals = new Set(
+        allTabs(docArea)
+          .map(goalOfTab)
+          .filter((goalId): goalId is string => !!goalId),
+      )
+      const goalsClosed = [...closedAnchorGoalIds]
+      for (const goalId of allClosedGoalIds) {
+        if (!remainingGoals.has(goalId) && !goalsClosed.includes(goalId)) goalsClosed.push(goalId)
+      }
+      const next = onGoalsClosed && goalsClosed.length > 0
+        ? onGoalsClosed({ ...base, docArea }, goalsClosed)
+        : { ...base, docArea }
+      set(next)
     },
-    [getLatest, retargetNode, set],
+    [getLatest, onGoalsClosed, retargetNode, set],
   )
 
   /**

@@ -16,6 +16,7 @@ import {
   normalizeAgentTabs,
   reorderAgentTabs,
   removeAgentTab,
+  removeAgentTabsOfGoals,
   upsertAgentTab,
   visibleAgentTabs,
 } from '../src/learn/agentTabs'
@@ -92,6 +93,20 @@ describe('removeAgentTab', () => {
   it('关不存在的页签原样返回', () => {
     const tabs = [goal('g1')]
     expect(removeAgentTab(tabs, 'ga:g1', 'ga:ghost')).toEqual({ tabs, active: 'ga:g1' })
+  })
+})
+
+describe('removeAgentTabsOfGoals', () => {
+  it('文档区关闭目标后只移除目标导师，保留子代理和其它目标', () => {
+    const tabs = [goal('g1'), goal('g2'), sub('c1', 's1')]
+    const removed = removeAgentTabsOfGoals(tabs, 'ga:g1', new Set(['g1']))
+    expect(removed.tabs.map(agentTabKey)).toEqual(['ga:g2', 'sa:s1'])
+    expect(removed.active).toBe('ga:g2')
+  })
+
+  it('关闭最后一个目标导师时返回空激活项，由宿主回落到固定聊天', () => {
+    const removed = removeAgentTabsOfGoals([goal('g1')], 'ga:g1', new Set(['g1']))
+    expect(removed).toEqual({ tabs: [], active: null })
   })
 })
 

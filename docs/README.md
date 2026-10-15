@@ -42,6 +42,7 @@ README 只负责介绍项目（它是什么、能做什么、怎么装）。**�
 | [performance.md](performance.md) | 怎么录性能日志、怎么把它读成数字、已知的常驻性能负担与实验台 |
 | [development.md](development.md) | 开发环境、脚本、测试的分工与约定 |
 | [packaging-and-release.md](packaging-and-release.md) | 构建产物、反篡改开关、自动更新与发布流程 |
+| [notice.md](notice.md) | 远程公告：JSON 格式、弹 / 不弹的规则、GitHub Actions + Pages 发布流程 |
 
 ## 其他
 

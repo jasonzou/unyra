@@ -20,6 +20,8 @@ export interface Props {
   onToast: (msg: string) => void
   /** 打开更新确认弹窗（弹窗由 App 渲染，理由见 components/update/UpdateButton） */
   onOpenUpdate: () => void
+  /** 打开公告弹窗（顶栏那颗喇叭按钮；弹窗由 App 渲染，理由见 components/notice/NoticeDialog） */
+  onOpenNotice: () => void
 }
 
 /** 拖动读数离分隔线的距离：贴着那条线，又压不到它 */
