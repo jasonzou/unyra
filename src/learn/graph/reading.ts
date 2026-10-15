@@ -7,7 +7,7 @@
  */
 import type { LearnStore, TabRef } from '../types'
 import { withoutTmpNodes } from '../../lib/tmpStore'
-import { allTabs, closeIds } from '../groups'
+import { allStoredTabs, closeIds, dropTabs, withOwners } from '../groups'
 import { dropDrafts } from '../drafts'
 import { readingOfGoal, withGoalReading, type ReadingStore } from '../reading'
 import { nodeById } from './lookup'
@@ -92,7 +92,7 @@ export function deleteGoal(store: LearnStore, goalId: string): LearnStore {
     null
   // 整棵子树都没了：它的节点文档页签、笔记页签一并关掉（与 deleteNode 同一条规则）；
   // 记忆页签挂在目标上（不挂节点，tabNodeIdOf 够不着它），目标没了也得一起关
-  const doomedTabs = allTabs(store.docArea)
+  const doomedTabs = allStoredTabs(store.docArea)
     .filter((t) => removed.has(tabNodeIdOf(t.ref)) || (t.ref.kind === 'mind' && t.ref.goalId === goalId))
     .map((t) => t.id)
   return {
@@ -108,7 +108,7 @@ export function deleteGoal(store: LearnStore, goalId: string): LearnStore {
     conversations: remaining,
     exams: store.exams.filter((e) => !removed.has(e.nodeId)),
     tmp: withoutTmpNodes(store.tmp, removed),
-    docArea: closeIds(store.docArea, doomedTabs),
+    docArea: withOwners(closeIds(store.docArea, doomedTabs), dropTabs(store.docArea.tabOwners, doomedTabs)),
     drafts: dropDrafts(store.drafts, doomedTabs),
     activeGoalId: nextActiveGoalId,
     activeNodeId: nextActiveNode,

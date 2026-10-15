@@ -1,7 +1,7 @@
 /** 这个文件负责：每格的页签列——开关、激活、顺序、常驻名额，以及跨格拖动与拖出去分割 */
 
 import type { DocView, LearnTab, TabRef } from '../types'
-import { closeTabs, isBlankTab, makeTab, reorderTabs, tabKey, type TabCloseMode } from '../tabs'
+import { closeTabs, isBlankTab, makeBlankTab, makeTab, reorderTabs, tabKey, type TabCloseMode } from '../tabs'
 import { groupOf, settle, withDocs, withGroup } from './core'
 import { findTab, focusedGroup, groupIdOfTab } from './focus'
 import { PUBLIC_OWNER, claimTab, dropTabs, goalTabsOf, ownerOfTab, refOwner, withOwners, withParked } from './goals'
@@ -21,6 +21,17 @@ export function allTabs(docs: DocWorkspace): LearnTab[] {
     if (g) out.push(...g.tabs)
   }
   return out
+}
+
+/**
+ * 工作区里所有仍被状态持有的页签：活动组 + 停靠场。
+ *
+ * `allTabs` 只代表当前布局里看得见/可恢复的实体；目标根大纲关闭后，关联页签会暂存在
+ * `parkedTabs`。删除目标或强制关闭导师时必须两边一起清，否则这些页签会在以后重新打开大纲时
+ * 被恢复出来，变成没有来源的文档。
+ */
+export function allStoredTabs(docs: DocWorkspace): LearnTab[] {
+  return [allTabs(docs), ...Object.values(docs.parkedTabs ?? {})].flat()
 }
 
 /**
@@ -217,21 +228,41 @@ export function closeIn(
  * 与 closeIn 的差别只有一处：这里的页签可能同时躺在好几格里（agent 删掉一棵子树），
  * 所以逐格过滤，只把**因此空掉**的那几格收掉。
  */
-export function closeIds(docs: DocWorkspace, ids: string[]): DocWorkspace {
+export function closeIds(
+  docs: DocWorkspace,
+  ids: string[],
+  options?: { preserveActiveAsBlank?: boolean },
+): DocWorkspace {
   const doomed = new Set(ids)
   if (!doomed.size) return docs
   let hit = false
   const groups = docs.groups.map((g) => {
     if (!g.tabs.some((t) => doomed.has(t.id))) return g
     hit = true
-    const tabs = g.tabs.filter((t) => !doomed.has(t.id))
-    return {
-      ...g,
-      tabs,
-      active: g.active && doomed.has(g.active) ? (tabs[tabs.length - 1]?.id ?? null) : g.active,
+    let tabs = g.tabs.filter((t) => !doomed.has(t.id))
+    let active = g.active && doomed.has(g.active) ? (tabs[tabs.length - 1]?.id ?? null) : g.active
+    /*
+     * 强制关闭关联文档时，不能把同一格里不相关的文档顶到眼前：那会表现成「关 Agent
+     * 却自动打开了另一份文档」。保留一个明确的空白落点，其他文档仍留在页签栏里。
+     */
+    if (options?.preserveActiveAsBlank && g.active && doomed.has(g.active) && tabs.length > 0) {
+      const blank = makeBlankTab()
+      tabs = [...tabs, blank]
+      active = blank.id
     }
+    return { ...g, tabs, active }
   })
-  return hit ? settle(withDocs(docs, { groups })) : docs
+
+  let parkedChanged = false
+  const parked: Record<string, LearnTab[]> = {}
+  for (const [goalId, tabs] of Object.entries(docs.parkedTabs ?? {})) {
+    const kept = tabs.filter((t) => !doomed.has(t.id))
+    if (kept.length !== tabs.length) parkedChanged = true
+    if (kept.length > 0) parked[goalId] = kept
+  }
+  if (!hit && !parkedChanged) return docs
+  const next = withDocs(docs, { groups })
+  return withParked(settle(next), Object.keys(parked).length > 0 ? parked : undefined)
 }
 
 /**
@@ -477,8 +508,8 @@ export function unloadAnchoredGroups(
 }
 
 /**
- * 打开一枚**组关联的文档**（教学文档 / 工作区内部文件）：先把它对应的「组」立起来，
- * 文档再进门。
+ * 打开一枚**节点关联的文档**（教学文档、笔记、超级文档、试卷副本、工作区内部文件）：
+ * 先把它对应的「组」立起来，文档再进门。
  *
  * 需求原文（教学文档）：「优化文档打开，如果教学文档不是从大纲打开的，那么打开时需要查看
  * 缓存中的 tab 组是否存在该教学文档对应的大纲。如果存在就将该 tab 组打开。如果不存在就
@@ -502,9 +533,48 @@ export function unloadAnchoredGroups(
  * `into`（可选）：明确指定的落点（拖放落在哪一格）。大纲已在别格时，拖放要听用户的
  * ——文档落进他指的那一格（组可以横跨几格，见 groups/goals 的说明）；没指时跟大纲一格。
  */
+/**
+ * 修复旧状态里「节点文档在场、但目标根大纲不在场」的孤儿页签。
+ *
+ * 正常打开路径都应走 openGroupedDoc；这里再提供一次读盘兜底，覆盖历史版本留下的状态、
+ * 手工改过的 state.json，以及曾经绕过分组入口的旧调用。已有根大纲的目标不会被改动。
+ */
+export function ensureAnchorOutlines(
+  docs: DocWorkspace,
+  goalOfNode: (nodeId: string) => string | null,
+  rootOf: (goalId: string) => string | null,
+): DocWorkspace {
+  const activeBefore = new Map(docs.groups.map((g) => [g.id, g.active] as const))
+  const needed = new Set<string>()
+  for (const tab of allTabs(docs)) {
+    if (tab.ref.kind === 'outline') continue
+    const nodeId = tab.ref.kind === 'teach' || tab.ref.kind === 'note' || tab.ref.kind === 'super' || tab.ref.kind === 'exam' || tab.ref.kind === 'ws'
+      ? tab.ref.nodeId
+      : null
+    const goalId = nodeId ? goalOfNode(nodeId) : null
+    if (goalId) needed.add(goalId)
+  }
+  let next = docs
+  for (const goalId of needed) {
+    const rootNodeId = rootOf(goalId)
+    if (!rootNodeId || groupIdOfTab(next, tabKey({ kind: 'outline', nodeId: rootNodeId }))) continue
+    next = openAnchorOutline(next, next.focus, { kind: 'outline', nodeId: rootNodeId }, goalOfNode, Date.now())
+  }
+  // 修复只补结构，不改变用户上次正在看的正文；openAnchorOutline 内部会把新锚激活，
+  // 这里把原来的 active 恢复回去，避免读盘后「只是补一个大纲，却突然打开另一份文档」。
+  for (const [groupId, active] of activeBefore) {
+    if (!active) continue
+    const g = groupOf(next, groupId)
+    if (g?.tabs.some((t) => t.id === active)) {
+      next = withGroup(next, groupId, (current) => ({ ...current, active }))
+    }
+  }
+  return withDocs(next, { focus: docs.focus })
+}
+
 export function openGroupedDoc(
   docs: DocWorkspace,
-  ref: (TabRef & { kind: 'teach' }) | (TabRef & { kind: 'ws' }),
+  ref: TabRef & { nodeId: string },
   rootNodeId: string | null,
   goalOfNode: (nodeId: string) => string | null,
   at: number,

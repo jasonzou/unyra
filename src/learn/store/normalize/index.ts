@@ -13,7 +13,7 @@ import type {
   WorkflowBook,
 } from '../../types'
 import type { Exam } from '../../exam'
-import { allTabs, focusedTab, normalizeDocs, reconcileOwners, withOwners } from '../../groups'
+import { allTabs, ensureAnchorOutlines, focusedTab, normalizeDocs, reconcileOwners, withOwners, withParked } from '../../groups'
 import { tabNodeId } from '../../tabs'
 import { normalizeAgentTabs } from '../../agentTabs'
 import { normalizeDrafts } from '../../drafts'
@@ -214,7 +214,17 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
      * 文档区：新版读 docs，旧版读顶层的 tabs / activeTab（自动折成单组，见 groups 的
      * normalizeDocs）。两种数据都要认——用户升级之后第一次打开，看到的该还是那排页签。
      */
-    const docArea0 = normalizeDocs(d.docArea, legacy, (raw) => normalizeTab(raw, byId))
+    const docAreaRaw = normalizeDocs(d.docArea, legacy, (raw) => normalizeTab(raw, byId))
+    // 停靠场的键也是目标 id。旧版本只校验了形状，目标删除后留下的停靠组会在下次
+    // 打开大纲时复活文档，因此读盘时先按当前目标表剪掉无主停靠组。
+    const parked = Object.fromEntries(
+      Object.entries(docAreaRaw.parkedTabs ?? {}).filter(([goalId]) => goalIds.has(goalId)),
+    )
+    const docArea0 = ensureAnchorOutlines(
+      withParked(docAreaRaw, Object.keys(parked).length > 0 ? parked : undefined),
+      (nodeId) => byId.get(nodeId)?.goalId ?? null,
+      (goalId) => goals.find((g) => g.id === goalId)?.rootNodeId ?? null,
+    )
     /*
      * 目标页签归属（见 groups/goals）：旧数据里没有这张表，现算补一份。
      *

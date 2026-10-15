@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
   FIRST_GROUP,
+  allStoredTabs,
   allTabs,
   claimTab,
+  closeIds,
   closeIn,
   emptyDocs,
+  ensureAnchorOutlines,
   focusedTab,
   isAnchorOutline,
   openAnchorOutline,
   openOutlineTab,
   openGroupedDoc,
+  openInGroup,
   unloadAnchoredGroups,
   withOwners,
 } from '../src/learn/groups'
@@ -123,5 +127,33 @@ describe('开侧的分派（openOutlineTab 普通开 / openAnchorOutline 锚开�
     expect(allTabs(settled).map((t) => t.id).sort()).toEqual(['o:rootA', 't:childA'].sort())
     expect(settled.parkedTabs).toBeUndefined()
     expect(focusedTab(settled)?.id).toBe('t:childA')
+  })
+})
+
+describe('节点文档组的兜底与强制关闭落点', () => {
+  it('笔记等节点文档也先经过根大纲组，不再成为孤儿页签', () => {
+    const note: TabRef & { nodeId: string } = { kind: 'note', nodeId: 'childA', note: '课堂笔记' }
+    const docs = openGroupedDoc(emptyDocs(), note, 'rootA', goalOfNode, 1)
+    expect(allTabs(docs).map((t) => t.id).sort()).toEqual(['o:rootA', 'n:childA:课堂笔记'].sort())
+  })
+
+  it('修复旧状态中的节点文档孤儿，并保留强制关闭后的空白落点', () => {
+    let docs = openInGroup(emptyDocs(), FIRST_GROUP, teach('childA'), 1)
+    docs = ensureAnchorOutlines(docs, goalOfNode, rootOf)
+    expect(allTabs(docs).map((t) => t.id).sort()).toEqual(['o:rootA', 't:childA'].sort())
+
+    const closed = closeIds(docs, [tabKey(teach('childA'))], { preserveActiveAsBlank: true })
+    expect(focusedTab(closed)?.ref.kind).toBe('blank')
+    expect(allTabs(closed).some((t) => t.id === 'o:rootA')).toBe(true)
+  })
+
+  it('批量关闭也会清掉停靠场里的页签，不会重开大纲时复活', () => {
+    let docs = goalAWorkspace()
+    const before = allTabs(docs)
+    docs = unloadAnchoredGroups(closeIn(docs, FIRST_GROUP, tabKey(outline('rootA')), 'self'), before, goalOfNode, rootOf)
+    const parkedIds = docs.parkedTabs?.goalA?.map((t) => t.id) ?? []
+    expect(parkedIds.length).toBeGreaterThan(0)
+    const closed = closeIds(docs, parkedIds)
+    expect(allStoredTabs(closed).some((t) => parkedIds.includes(t.id))).toBe(false)
   })
 })

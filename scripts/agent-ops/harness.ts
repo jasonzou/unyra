@@ -89,7 +89,10 @@ if (back) {
   ok(child?.notes[0]?.name === '笔记', '笔记名字往返（名字就是文件名）', child?.notes[0]?.name)
   ok(back.conversations.length === 1 && back.conversations[0].goalId === goalId, '会话归属目标', back.conversations)
   ok(
-    allTabs(back.docArea).length === 1 && focusedTab(back.docArea)?.id === noteTab.id,
+    allTabs(back.docArea).length === 2 &&
+      allTabs(back.docArea).some((t) => t.id === noteTab.id) &&
+      allTabs(back.docArea).some((t) => t.id === 'o:' + rootId) &&
+      focusedTab(back.docArea)?.id === noteTab.id,
     '页签随 state 往返（旧版形状读回来也是同一排）',
     back.docArea,
   )
@@ -128,7 +131,7 @@ if (splitBack) {
     layout,
   )
   ok(
-    allTabs(splitBack.docArea).map((t) => t.id).join(',') === 't:' + rootId + ',t:' + childId,
+    allTabs(splitBack.docArea).map((t) => t.id).join(',') === 't:' + rootId + ',t:' + childId + ',o:' + rootId,
     '两格里的页签按布局顺序往返',
     allTabs(splitBack.docArea).map((t) => t.id),
   )
