@@ -31,17 +31,24 @@ export function normalizeAskForm(raw: unknown): { ok: true; form: AskFormPayload
   for (const [i, rawQ] of rawQuestions.entries()) {
     const q = asRecord(rawQ)
     const n = i + 1
-    const type = q.type === 'single' || q.type === 'multiple' || q.type === 'short' ? q.type : null
+    const rawType = asText(q.type).trim().toLowerCase()
+    let type: AskQuestion['type'] | null = null
+    if (rawType === 'single') type = 'single'
+    else if (rawType === 'multiple') type = 'multiple'
+    else if (rawType === 'short') type = 'short'
+    else if (rawType === 'slider' || rawType === 'range') type = 'slider'
+    else if (rawType === 'dual_slider' || rawType === 'dual_range') type = 'dual_slider'
+    else if (rawType === 'upload' || rawType === 'file') type = 'upload'
     if (!type) {
       return {
         ok: false,
-        content: `第 ${n} 题的 type 只认 'single'（单选）/ 'multiple'（多选）/ 'short'（简答），收到「${String(q.type ?? '（没给）')}」`,
+        content: `第 ${n} 题的 type 只认 'single'（单选）/ 'multiple'（多选）/ 'short'（简答）/ 'slider'（单滑块）/ 'dual_slider'（双滑块）/ 'upload'（附件上传），收到「${String(q.type ?? '（没给）')}」`,
       }
     }
     const prompt = asText(q.prompt).trim()
     if (!prompt) return { ok: false, content: `第 ${n} 题（${type}）没有题干 prompt；要问什么得写清楚` }
     const options: AskOption[] = []
-    if (type !== 'short') {
+    if (type === 'single' || type === 'multiple') {
       const rawOptions = Array.isArray(q.options) ? q.options : []
       if (rawOptions.length < 2) {
         return { ok: false, content: `第 ${n} 题（${type}）的 options 至少要 2 项；收到 ${rawOptions.length} 项。简答请用 type: 'short'` }
@@ -60,6 +67,52 @@ export function normalizeAskForm(raw: unknown): { ok: true; form: AskFormPayload
         return { ok: false, content: `第 ${n} 题的 options 里没有可用的选项文字（label 不能全为空）` }
       }
     }
+
+    let min: number | undefined
+    let max: number | undefined
+    let step: number | undefined
+    let unit: string | undefined
+    let defaultValue: number | [number, number] | undefined
+
+    if (type === 'slider' || type === 'dual_slider') {
+      const rawMin = typeof q.min === 'number' ? q.min : Number(q.min)
+      min = Number.isFinite(rawMin) ? rawMin : 0
+      const rawMax = typeof q.max === 'number' ? q.max : Number(q.max)
+      max = Number.isFinite(rawMax) ? rawMax : 100
+      if (min >= max) {
+        max = min + 100
+      }
+      const rawStep = typeof q.step === 'number' ? q.step : Number(q.step)
+      step = Number.isFinite(rawStep) && rawStep > 0 ? rawStep : 1
+      unit = asText(q.unit).trim()
+
+      if (type === 'slider') {
+        const rawDef = typeof q.defaultValue === 'number' ? q.defaultValue : Number(q.defaultValue)
+        defaultValue = Number.isFinite(rawDef) ? Math.min(max, Math.max(min, rawDef)) : min
+      } else {
+        if (Array.isArray(q.defaultValue) && q.defaultValue.length >= 2) {
+          const d0 = Number(q.defaultValue[0])
+          const d1 = Number(q.defaultValue[1])
+          const low = Number.isFinite(d0) ? Math.min(max, Math.max(min, d0)) : min
+          const high = Number.isFinite(d1) ? Math.min(max, Math.max(low, d1)) : max
+          defaultValue = [low, high]
+        } else {
+          defaultValue = [min, max]
+        }
+      }
+    }
+
+    let accept: string | undefined
+    let multipleFiles: boolean | undefined
+    let maxSizeMb: number | undefined
+
+    if (type === 'upload') {
+      accept = asText(q.accept).trim() || undefined
+      multipleFiles = Boolean(q.multipleFiles ?? q.multiple)
+      const rawMaxMb = typeof q.maxSizeMb === 'number' ? q.maxSizeMb : Number(q.maxSizeMb)
+      maxSizeMb = Number.isFinite(rawMaxMb) && rawMaxMb > 0 ? rawMaxMb : 32
+    }
+
     let when: AskQuestion['when'] = null
     const rawWhen = asRecord(q.when)
     if (rawWhen.id || rawWhen.oneOf) {
@@ -88,7 +141,16 @@ export function normalizeAskForm(raw: unknown): { ok: true; form: AskFormPayload
       userInfo = rawField
     }
     // required 字段已废：模型给了也忽略——用户想答哪题答哪题，留空不是错误
-    questions.push({ id, type, prompt: prompt.slice(0, 300), options, when, ...(userInfo ? { userInfo } : {}) })
+    questions.push({
+      id,
+      type,
+      prompt: prompt.slice(0, 300),
+      options,
+      when,
+      ...(userInfo ? { userInfo } : {}),
+      ...(type === 'slider' || type === 'dual_slider' ? { min, max, step, unit, defaultValue } : {}),
+      ...(type === 'upload' ? { accept, multipleFiles, maxSizeMb } : {}),
+    })
   }
   return { ok: true, form: { title, questions } }
 }

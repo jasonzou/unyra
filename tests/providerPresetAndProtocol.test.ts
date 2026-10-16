@@ -198,4 +198,339 @@ describe('提供商预设与自定义协议联动及切换测试', () => {
       'https://proxy.example.com/messages',
     )
   })
+
+  it('未配置 Key 的预设提供商仍存在于 providers 列表中且可识别状态', () => {
+    const dsPreset = presetOf('deepseek')!
+    const unconfiguredProvider: ProviderConfig = {
+      id: dsPreset.id,
+      kind: 'provider',
+      label: '',
+      baseUrl: '',
+      apiKey: '',
+      models: [],
+    }
+
+    const settings: AiSettings = {
+      version: 3,
+      providers: [unconfiguredProvider],
+      global: {
+        providerId: '',
+        model: '',
+        effort: 'medium',
+      },
+    }
+
+    // 存在于列表但未配置完成
+    expect(settings.providers.some((p) => p.id === dsPreset.id)).toBe(true)
+    expect(unconfiguredProvider.apiKey.trim() === '').toBe(true)
+
+    // 重复选择已添加预设时，能够正确识别已存在项并不产生重复条目
+    const exists = settings.providers.find((p) => p.id === dsPreset.id)
+    expect(exists).toBeDefined()
+    expect(exists?.id).toBe('deepseek')
+  })
+
+  it('各家非思考模式预设配置完整且适配正确参数', () => {
+    // 阿里云百炼：通过 enableThinkingParam 发送 enable_thinking: false
+    const dashscope = presetOf('dashscope')!
+    expect(dashscope.quirks?.enableThinkingParam).toBe(true)
+    expect(dashscope.quirks?.omitReasoningEffort).toBe(true)
+    expect(dashscope.effortMap?.none).toBe('omit')
+
+    // 硅基流动：支持 enableThinkingParam
+    const siliconflow = presetOf('siliconflow')!
+    expect(siliconflow.quirks?.enableThinkingParam).toBe(true)
+    expect(siliconflow.effortMap?.none).toBe('omit')
+
+    // 火山方舟：支持 enableThinkingParam
+    const volcengine = presetOf('volcengine')!
+    expect(volcengine.quirks?.enableThinkingParam).toBe(true)
+    expect(volcengine.effortMap?.none).toBe('omit')
+
+    // Google Gemini：支持 thinkingConfigParam（thinking_budget: 0）
+    const gemini = presetOf('gemini')!
+    expect(gemini.quirks?.thinkingConfigParam).toBe(true)
+    expect(gemini.quirks?.omitReasoningEffort).toBe(true)
+    expect(gemini.effortMap?.none).toBe('omit')
+
+    // OpenAI 官方：reasoning_effort: 'none'
+    const openai = presetOf('openai')!
+    expect(openai.effortMap?.none).toBe('none')
+
+    // DeepSeek 官方：thinking.type 机制（非思考时发送 thinking: { type: "disabled" }）
+    const deepseek = presetOf('deepseek')!
+    expect(deepseek.quirks?.thinkingStyle).toBe('thinking_type')
+    expect(deepseek.quirks?.thinkingTypeParam).toBe(true)
+    expect(deepseek.quirks?.omitReasoningEffort).toBeUndefined()
+
+    // Ollama 本地模型：think 机制
+    const ollama = presetOf('ollama')!
+    expect(ollama.quirks?.thinkingStyle).toBe('think')
+    expect(ollama.quirks?.thinkParam).toBe(true)
+    expect(ollama.quirks?.omitReasoningEffort).toBe(true)
+  })
+
+  it('设置保存与归一化时完整保留 quirks 特殊参数', () => {
+    const customConfig: ProviderConfig = {
+      id: `${CUSTOM_PREFIX}test-quirks`,
+      kind: 'custom',
+      label: 'Custom Provider',
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-123',
+      models: [],
+      quirks: {
+        thinkingStyle: 'thinking_type',
+        thinkingTypeParam: true,
+        omitReasoningEffort: true,
+        tokenParam: 'max_completion_tokens',
+      },
+    }
+
+    const resolved = resolveDraft(customConfig)
+    expect(resolved.quirks?.thinkingStyle).toBe('thinking_type')
+    expect(resolved.quirks?.thinkingTypeParam).toBe(true)
+    expect(resolved.quirks?.omitReasoningEffort).toBe(true)
+    expect(resolved.quirks?.tokenParam).toBe('max_completion_tokens')
+  })
+
+  it('bodyFor 在各平台和模型下的非思考请求参数与模型自适应', async () => {
+    const { bodyFor } = await import('../src/ai/client')
+
+    // 1. DeepSeek 官方：deepseek-chat 设定 none 时输出 thinking: { type: 'disabled' } 且不携带 reasoning_effort
+    const dsResolved = resolveDraft({
+      id: 'deepseek',
+      kind: 'provider',
+      label: 'DeepSeek',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-test',
+      models: [],
+    })
+    const dsBodyNone = bodyFor(dsResolved, {
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: true,
+      reasoningEffort: 'none',
+    })
+    expect(dsBodyNone.model).toBe('deepseek-chat')
+    expect(dsBodyNone.thinking).toEqual({ type: 'disabled' })
+    expect(dsBodyNone.reasoning_effort).toBeUndefined()
+
+    // 2. DeepSeek 官方：若用户选择了纯推理模型 deepseek-reasoner，但在非思考模式下，自动降级切换为 deepseek-chat 并禁用思考
+    const dsReasonerBodyNone = bodyFor(dsResolved, {
+      model: 'deepseek-reasoner',
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: true,
+      reasoningEffort: 'none',
+    })
+    expect(dsReasonerBodyNone.model).toBe('deepseek-chat')
+    expect(dsReasonerBodyNone.thinking).toEqual({ type: 'disabled' })
+    expect(dsReasonerBodyNone.reasoning_effort).toBeUndefined()
+
+    // 3. DeepSeek 官方：开启思考时保持 deepseek-reasoner 并发送 thinking: { type: 'enabled' } 与 reasoning_effort
+    const dsReasonerBodyHigh = bodyFor(dsResolved, {
+      model: 'deepseek-reasoner',
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: true,
+      reasoningEffort: 'high',
+    })
+    expect(dsReasonerBodyHigh.model).toBe('deepseek-reasoner')
+    expect(dsReasonerBodyHigh.thinking).toEqual({ type: 'enabled' })
+    expect(dsReasonerBodyHigh.reasoning_effort).toBe('high')
+
+    // 4. 阿里云百炼 / 硅基流动：发送 enable_thinking: false
+    const dashscopeResolved = resolveDraft({
+      id: 'dashscope',
+      kind: 'provider',
+      label: 'Dashscope',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      apiKey: 'sk-test',
+      models: [],
+    })
+    const dashBodyNone = bodyFor(dashscopeResolved, {
+      model: 'qwen-plus',
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: true,
+      reasoningEffort: 'none',
+    })
+    expect(dashBodyNone.enable_thinking).toBe(false)
+    expect(dashBodyNone.reasoning_effort).toBeUndefined()
+
+    const dashBodyHigh = bodyFor(dashscopeResolved, {
+      model: 'qwen-plus',
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: true,
+      reasoningEffort: 'high',
+    })
+    expect(dashBodyHigh.enable_thinking).toBe(true)
+
+    // 5. Google Gemini：发送 thinking_config: { thinking_budget: 0 }
+    const geminiResolved = resolveDraft({
+      id: 'gemini',
+      kind: 'provider',
+      label: 'Gemini',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      apiKey: 'sk-test',
+      models: [],
+    })
+    const geminiBodyNone = bodyFor(geminiResolved, {
+      model: 'gemini-2.5-pro',
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: true,
+      reasoningEffort: 'none',
+    })
+    expect(geminiBodyNone.thinking_config).toEqual({ thinking_budget: 0 })
+    expect(geminiBodyNone.reasoning_effort).toBeUndefined()
+
+    // 6. Ollama 本地模型：发送 think: false / true
+    const ollamaResolved = resolveDraft({
+      id: 'ollama',
+      kind: 'provider',
+      label: 'Ollama',
+      baseUrl: 'http://localhost:11434/v1',
+      apiKey: '',
+      models: [],
+    })
+    const ollamaBodyNone = bodyFor(ollamaResolved, {
+      model: 'deepseek-r1:8b',
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: true,
+      reasoningEffort: 'none',
+    })
+    expect(ollamaBodyNone.think).toBe(false)
+
+    // 7. OpenRouter 网关：发送 reasoning: { effort: 'none', enabled: false }
+    const openrouterResolved = resolveDraft({
+      id: 'openrouter',
+      kind: 'provider',
+      label: 'OpenRouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'sk-test',
+      models: [],
+    })
+    const openrouterBodyNone = bodyFor(openrouterResolved, {
+      model: 'deepseek/deepseek-r1',
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: true,
+      reasoningEffort: 'none',
+    })
+    expect(openrouterBodyNone.reasoning).toEqual({ effort: 'none', enabled: false })
+    expect(openrouterBodyNone.reasoning_effort).toBe('none')
+
+    // 8. 自定义提供商（未配 quirks，但地址包含 deepseek）：自动推断并发送 thinking: { type: 'disabled' }
+    const customDsResolved: any = {
+      id: 'custom:ds-proxy',
+      label: 'Custom DS',
+      baseUrl: 'https://my-proxy.internal/deepseek/v1',
+      apiKey: 'sk-test',
+    }
+    const customDsBodyNone = bodyFor(customDsResolved, {
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: true,
+      reasoningEffort: 'none',
+    })
+    expect(customDsBodyNone.thinking).toEqual({ type: 'disabled' })
+    expect(customDsBodyNone.reasoning_effort).toBeUndefined()
+  })
+
+  it('流式接收时在 non-thinking 模式下绝对抑制 reasoning 并清洗 <think> 标签', async () => {
+    const { streamChatWith } = await import('../src/ai/client')
+
+    const provider = resolveDraft({
+      id: 'deepseek',
+      kind: 'provider',
+      label: 'DeepSeek',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-test',
+      models: [],
+    })
+
+    const origFetch = globalThis.fetch
+
+    // 1. 模拟上游泄漏 reasoning_content，在 reasoningEffort: 'none' 下应完全屏蔽
+    const sseWithLeakedReasoning = [
+      'data: {"choices":[{"delta":{"reasoning_content":"Thinking secretly..."}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"Final Answer"}}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('')
+
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(sseWithLeakedReasoning))
+            controller.close()
+          },
+        }),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      ),
+    )
+
+    const receivedDeltas: Array<{ content?: string; reasoning?: string }> = []
+    const res1 = await streamChatWith(provider, 'deepseek-chat', {
+      messages: [{ role: 'user', content: 'test' }],
+      reasoningEffort: 'none',
+      onDelta: (d) => receivedDeltas.push(d),
+    })
+
+    expect(receivedDeltas.some((d) => d.reasoning)).toBe(false)
+    expect(res1.reasoning).toBe('')
+    expect(res1.content).toBe('Final Answer')
+
+    // 2. 模拟本地模型在 content 中返回 <think>...</think>，在 reasoningEffort: 'none' 下应完全剥除
+    const sseWithThinkTag = [
+      'data: {"choices":[{"delta":{"content":"<think>Internal thought process</think>Direct Result"}}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('')
+
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(sseWithThinkTag))
+            controller.close()
+          },
+        }),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      ),
+    )
+
+    const receivedDeltas2: Array<{ content?: string; reasoning?: string }> = []
+    const res2 = await streamChatWith(provider, 'deepseek-chat', {
+      messages: [{ role: 'user', content: 'test' }],
+      reasoningEffort: 'none',
+      onDelta: (d) => receivedDeltas2.push(d),
+    })
+
+    expect(receivedDeltas2.some((d) => d.reasoning)).toBe(false)
+    expect(res2.content).toBe('Direct Result')
+
+    // 3. 模拟开启思考时，<think> 标签内容转为 reasoning 事件
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(sseWithThinkTag))
+            controller.close()
+          },
+        }),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      ),
+    )
+
+    const receivedDeltas3: Array<{ content?: string; reasoning?: string }> = []
+    const res3 = await streamChatWith(provider, 'deepseek-chat', {
+      messages: [{ role: 'user', content: 'test' }],
+      reasoningEffort: 'high',
+      onDelta: (d) => receivedDeltas3.push(d),
+    })
+
+    expect(receivedDeltas3.some((d) => d.reasoning === 'Internal thought process')).toBe(true)
+    expect(res3.reasoning).toBe('Internal thought process')
+    expect(res3.content).toBe('Direct Result')
+
+    globalThis.fetch = origFetch
+  })
 })
+
+

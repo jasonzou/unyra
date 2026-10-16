@@ -7,16 +7,23 @@
  * 重建菜单并写进 global.yaml；这里只负责启动时读一次存档，
  * 以及给设置界面与登录页一个不牵扯外观设置的改名入口。
  */
-import { setLocale, type Locale } from '../i18n'
+import { setLocale, loadCustomLocalesFromDisk, type Locale } from '../i18n'
 
 export type { Locale }
 
-/** 启动时读一次全局语言并应用；读不到（非 Electron、新装）就保持 i18n 按系统语言的猜测 */
+/** 启动时加载外部自定义语言包，并读取一次全局语言配置应用；读不到就保持 i18n 按系统语言的猜测 */
 export async function loadUiLocale(): Promise<void> {
+  // 先把 locales/ 目录下的自定义语言加载进来
   try {
-    const api = (window as unknown as { mojiNative?: { getUiLocale?: () => Promise<'zh' | 'en'> } }).mojiNative
+    await loadCustomLocalesFromDisk()
+  } catch {
+    // ignore
+  }
+
+  try {
+    const api = (window as unknown as { mojiNative?: { getUiLocale?: () => Promise<string> } }).mojiNative
     const l = await api?.getUiLocale?.()
-    if (l === 'zh' || l === 'en') setLocale(l)
+    if (typeof l === 'string' && l.trim()) setLocale(l.trim())
   } catch {
     // 读不到就按系统语言猜：这不是值得打断启动的错误
   }

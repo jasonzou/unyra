@@ -716,7 +716,104 @@ export function ConfigBody({
             </div>
           </div>
 
-          {/* ④ 模型的高级能力微调（上下文与多模态） */}
+          {/* ④ 思考与推理参数控制 */}
+          <div className="rounded-xl border border-line bg-card/50 p-4">
+            <h4 className="mb-1 text-[12px] font-medium text-ink-strong">{t('思考与推理参数控制')}</h4>
+            <p className="mb-3 text-[11px] text-ink-faint">
+              {t('各家平台关闭思考或控制思维链的方式不同。开启相应参数后，应用切到「None（非思考模式）」或执行翻译时会自动发送对应指令。')}
+            </p>
+            <div className="flex flex-col gap-2.5">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={cfg.quirks?.thinkingTypeParam ?? preset?.quirks?.thinkingTypeParam ?? (preset?.quirks?.thinkingStyle === 'thinking_type')}
+                  onChange={(e) =>
+                    patchProvider(cfg.id, {
+                      quirks: {
+                        ...(cfg.quirks ?? preset?.quirks),
+                        thinkingTypeParam: e.target.checked,
+                        thinkingStyle: e.target.checked ? 'thinking_type' : undefined,
+                      },
+                    })
+                  }
+                  className="mt-0.5 rounded border-line text-seal focus:ring-seal"
+                />
+                <div>
+                  <span className="text-[12px] font-medium text-ink-strong">
+                    {t('发送 thinking.type 参数（DeepSeek 官方 API 标准）')}
+                  </span>
+                  <p className="text-[11px] text-ink-faint">
+                    {t('非思考模式发送 thinking: { type: "disabled" }，思考模式发送 thinking: { type: "enabled" }。')}
+                  </p>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={cfg.quirks?.enableThinkingParam ?? preset?.quirks?.enableThinkingParam ?? false}
+                  onChange={(e) =>
+                    patchProvider(cfg.id, {
+                      quirks: { ...(cfg.quirks ?? preset?.quirks), enableThinkingParam: e.target.checked },
+                    })
+                  }
+                  className="mt-0.5 rounded border-line text-seal focus:ring-seal"
+                />
+                <div>
+                  <span className="text-[12px] font-medium text-ink-strong">
+                    {t('发送 enable_thinking 参数（阿里云百炼 / 硅基流动 / 火山方舟）')}
+                  </span>
+                  <p className="text-[11px] text-ink-faint">
+                    {t('非思考模式发送 enable_thinking: false，思考模式发送 enable_thinking: true。')}
+                  </p>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={cfg.quirks?.thinkingConfigParam ?? preset?.quirks?.thinkingConfigParam ?? false}
+                  onChange={(e) =>
+                    patchProvider(cfg.id, {
+                      quirks: { ...(cfg.quirks ?? preset?.quirks), thinkingConfigParam: e.target.checked },
+                    })
+                  }
+                  className="mt-0.5 rounded border-line text-seal focus:ring-seal"
+                />
+                <div>
+                  <span className="text-[12px] font-medium text-ink-strong">
+                    {t('发送 thinking_config 参数（Google Gemini）')}
+                  </span>
+                  <p className="text-[11px] text-ink-faint">
+                    {t('非思考模式发送 thinking_config: { thinking_budget: 0 }。')}
+                  </p>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={cfg.quirks?.thinkParam ?? preset?.quirks?.thinkParam ?? false}
+                  onChange={(e) =>
+                    patchProvider(cfg.id, {
+                      quirks: { ...(cfg.quirks ?? preset?.quirks), thinkParam: e.target.checked },
+                    })
+                  }
+                  className="mt-0.5 rounded border-line text-seal focus:ring-seal"
+                />
+                <div>
+                  <span className="text-[12px] font-medium text-ink-strong">
+                    {t('发送 think 参数（Ollama 本地模型）')}
+                  </span>
+                  <p className="text-[11px] text-ink-faint">
+                    {t('非思考模式发送 think: false，思考模式发送 think: true。')}
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* ⑤ 模型的高级能力微调（上下文与多模态） */}
           {entries.length > 0 && (
             <div className="rounded-xl border border-line bg-card/50 p-4">
               <h4 className="mb-2 text-[12px] font-medium text-ink-strong">{t('模型属性微调')}</h4>

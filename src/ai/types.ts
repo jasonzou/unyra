@@ -322,12 +322,13 @@ export interface StreamChatResult {
  * 各家字段名不同（OpenAI 兼容是 reasoning_effort，Command Code 网关也是），
  * 无法识别的服务会忽略它——由 client 按协议决定怎么发。
  */
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max'
+export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'max'
 
 /** 全部档位，按由浅到深排列（UI 直接用它渲染） */
-export const REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high', 'max']
+export const REASONING_EFFORTS: ReasoningEffort[] = ['none', 'low', 'medium', 'high', 'max']
 
 export const REASONING_LABEL: Record<ReasoningEffort, string> = {
+  none: 'None',
   low: 'Low',
   medium: 'Medium',
   high: 'High',
@@ -336,6 +337,7 @@ export const REASONING_LABEL: Record<ReasoningEffort, string> = {
 
 /** 每档配一句人话，避免用户不知道该选哪个（UI 展示用） */
 export const REASONING_HINT: Record<ReasoningEffort, string> = {
+  none: '非思考模式，极速直接回答',
   low: '快，短问答与批注',
   medium: '平衡，日常讲解',
   high: '深，教学与出卷',
@@ -343,11 +345,12 @@ export const REASONING_HINT: Record<ReasoningEffort, string> = {
 }
 
 /**
- * 每档的荧光色，**由低到高 = 荧光绿 / 荧光黄 / 荧光紫 / 荧光红**：
+ * 每档的荧光色，由关闭到最高 = 石板灰 / 荧光绿 / 荧光黄 / 荧光紫 / 荧光红：
  * 滑条整条用它当底色，不看文字也能一眼认出「现在开到了多深」——
- * 绿是「轻」，红是「重」。
+ * 灰是「无思考」，绿是「轻」，红是「重」。
  */
 export const REASONING_NEON: Record<ReasoningEffort, string> = {
+  none: '#94a3b8',
   low: '#39ff14',
   medium: '#ffe814',
   high: '#c04bff',
@@ -377,7 +380,7 @@ export type EffortMap = { [K in ReasoningEffort]?: string }
  * 埋点在 client 的两个出口（streamChatWith / chatCompleteWith），调用方自己声明；
  * 没声明的落 'other'——宁可进「其他」也不该猜。
  */
-export type UsagePurpose = 'chat' | 'guard' | 'title' | 'annotate' | 'exam' | 'test' | 'other'
+export type UsagePurpose = 'chat' | 'guard' | 'title' | 'annotate' | 'exam' | 'test' | 'translate' | 'other'
 
 /** 一次流式补全的入参：提供商信息由 client 注入，这里只描述「说什么」 */
 export interface StreamChatOptions {

@@ -47,7 +47,7 @@ export function registerIpc(): void {
    * 两边都是幂等的，重复调用没有代价），并顺手落盘：语言跟机器走（global.yaml），
    * 下次启动渲染层直接来读，不必等这里再推一次。
    */
-  ipcMain.on('ui-locale', (_e, l: 'zh' | 'en') => {
+  ipcMain.on('ui-locale', (_e, l: string) => {
     setLocale(l)
     setUiLocale(l)
     rebuildAppMenu()

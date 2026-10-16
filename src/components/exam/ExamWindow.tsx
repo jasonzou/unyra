@@ -38,7 +38,7 @@ import { t } from '../../i18n'
 
 const PAD_X = 20
 const PAD_TOP = 16
-const PAD_BOTTOM = 64
+const PAD_BOTTOM = 24
 const PAPER_MAX_W = 768
 
 const EMPTY_QUESTIONS: ExamQuestion[] = []
@@ -161,7 +161,7 @@ export default function ExamWindow() {
     (questionId: string, smooth = true) => {
       const el = itemRefs.current.get(questionId)
       if (!el) return
-      el.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' })
+      el.scrollIntoView({ block: 'nearest', behavior: smooth ? 'smooth' : 'auto' })
     },
     [],
   )
@@ -258,7 +258,7 @@ export default function ExamWindow() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-paper text-ink select-none">
+    <div className="flex h-full min-h-screen flex-col bg-paper text-ink select-none">
       {/* 紧凑顶栏 HUD */}
       <header className="app-drag relative flex shrink-0 items-center justify-between border-b border-line bg-card/90 px-4 h-12">
         {/* 左侧：标题与卷面属性 */}
@@ -405,11 +405,11 @@ export default function ExamWindow() {
             </div>
           </div>
 
-          {/* 紧凑悬浮答题坞 */}
-          <div className="pointer-events-none fixed inset-x-0 bottom-3 z-20 flex justify-center">
-            <div className="pointer-events-auto flex max-w-[min(94vw,900px)] flex-col items-center gap-1.5">
-              {stripOpen && (
-                <div className="moji-in-soft flex max-h-[120px] flex-wrap items-center justify-center gap-1 overflow-y-auto rounded-lg border border-line-strong/80 bg-card/95 p-2 shadow-md backdrop-blur">
+          {/* 底部固定答题坞 */}
+          <footer className="shrink-0 border-t border-line bg-card/95 backdrop-blur z-20">
+            {stripOpen && (
+              <div className="border-b border-line/50 p-2.5 max-h-[140px] overflow-y-auto">
+                <div className="mx-auto flex max-w-[min(94vw,900px)] flex-wrap items-center justify-center gap-1.5">
                   {questions.map((q, i) => {
                     const done = !isBlank(q, answers[q.id])
                     const current = q.id === lastAnswered
@@ -423,7 +423,7 @@ export default function ExamWindow() {
                             (done ? t('已作答') : t('还没答')) + (current ? ' · ' + t('刚答过这题') : ''))
                         }
                         className={
-                          'flex h-6 min-w-6 items-center justify-center rounded border px-1 text-[11px] tabular-nums transition ' +
+                          'flex h-6 min-w-6 items-center justify-center rounded border px-1 text-[11px] tabular-nums transition cursor-pointer ' +
                           (done
                             ? 'border-seal/50 bg-seal/15 font-semibold text-seal-deep'
                             : 'border-dashed border-line-strong bg-paper/30 text-ink-faint hover:border-line hover:text-ink') +
@@ -435,41 +435,51 @@ export default function ExamWindow() {
                     )
                   })}
                 </div>
-              )}
-              <div className="flex items-center gap-0.5 rounded-full border border-line-strong/80 bg-card/95 px-1.5 py-0.5 shadow-sm backdrop-blur">
+              </div>
+            )}
+            <div className="mx-auto flex h-11 max-w-[min(96vw,900px)] items-center justify-between px-3">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={gotoPrev}
                   disabled={activeIdx <= 0}
                   title={t('上一题')}
-                  className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-line/50 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+                  className="flex items-center gap-1 rounded border border-line bg-paper/60 px-2 py-1 text-[11.5px] font-medium text-ink-soft transition hover:bg-line/50 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                 >
                   <ChevronLeft size={12} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStripOpen((v) => !v)}
-                  title={stripOpen ? t('收起题号条') : t('展开题号条')}
-                  className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-ink-soft transition hover:text-ink"
-                >
-                  <span>{t('已答 {0}/{1}', answeredCount, questions.length)}</span>
-                  <ChevronDown
-                    size={11}
-                    className={'transition-transform duration-200 ' + (stripOpen ? '' : 'rotate-180')}
-                  />
+                  <span>{t('上一题')}</span>
                 </button>
                 <button
                   type="button"
                   onClick={gotoNext}
                   disabled={activeIdx >= questions.length - 1}
                   title={t('下一题')}
-                  className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-line/50 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+                  className="flex items-center gap-1 rounded border border-line bg-paper/60 px-2 py-1 text-[11.5px] font-medium text-ink-soft transition hover:bg-line/50 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                 >
+                  <span>{t('下一题')}</span>
                   <ChevronRight size={12} />
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setStripOpen((v) => !v)}
+                title={stripOpen ? t('收起题号条') : t('展开题号条')}
+                className="flex items-center gap-1.5 rounded-full border border-line-strong/80 bg-paper/70 px-3 py-1 text-[11.5px] font-medium text-ink-strong shadow-2xs backdrop-blur transition hover:bg-paper hover:border-line cursor-pointer"
+              >
+                <span>{t('答题卡')}</span>
+                <span className="text-[11px] text-ink-faint tabular-nums">({answeredCount}/{questions.length})</span>
+                <ChevronDown
+                  size={11}
+                  className={'transition-transform duration-200 ' + (stripOpen ? 'rotate-180' : '')}
+                />
+              </button>
+
+              <div className="text-[11px] tabular-nums text-ink-faint">
+                <span>{t('已完成 {0}%', answeredPercent)}</span>
+              </div>
             </div>
-          </div>
+          </footer>
         </div>
       )}
 

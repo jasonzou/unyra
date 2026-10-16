@@ -653,6 +653,10 @@ const dict: Record<string, string> = {
   '先选一个知识点：工作流要在它的上下文里跑': 'Pick a knowledge node first: the workflow runs in its context',
   '已启动「{0}」': 'Started "{0}"',
   '已删除工作流「{0}」': 'Deleted workflow "{0}"',
+  '答题卡': 'Answer sheet',
+  '已完成 {0}%': '{0}% completed',
+  '你的选择': 'Your choice',
+  '你的作答：': 'Your answer:',
 }
 
 export default dict

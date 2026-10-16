@@ -185,7 +185,7 @@ export default function SettingsPanel({ onRootChanged, onToast }: Props) {
   const createFromPreset = (preset: ProviderPreset) => {
     const exists = draft.providers.find((p) => p.id === preset.id)
     if (exists) {
-      setStatus({ kind: 'ok', msg: t('{0} 已经创建过了，已打开它的配置', preset.label) })
+      setStatus({ kind: 'ok', msg: t('{0} 已经在列表中，已打开它的配置', preset.label) })
       setPage({ view: 'config', providerId: exists.id })
       return
     }
@@ -364,6 +364,7 @@ export default function SettingsPanel({ onRootChanged, onToast }: Props) {
                   onPickDefault={(providerId, model) =>
                     updateDraft((d) => ({ ...d, global: { ...d.global, providerId, model } }), true)
                   }
+                  onDelete={removeProvider}
                 />
               ) : (
                 <ProviderConfigPage

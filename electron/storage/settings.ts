@@ -35,7 +35,7 @@ export interface GlobalSettings {
    * 不该换一个用户登录就变回去。语言状态的拥有者是渲染层（src/i18n），
    * 这里只是默认值（系统语言）与落盘处。
    */
-  uiLocale: 'zh' | 'en'
+  uiLocale: string
   /**
    * 要不要自动检查并下载更新。同样跟机器走：更新装在机器上，不是装在某个用户名下。
    * 关掉之后：启动时不查、轮询也不查（**连请求都不发**），
@@ -136,7 +136,7 @@ export function loadGlobal(): GlobalSettings {
   let root = ''
   let closeBehavior: CloseBehavior = 'ask'
   // 界面语言没存过时按系统语言猜（与 electron/i18n 的探测同一套）
-  let uiLocale: 'zh' | 'en' = getLocale()
+  let uiLocale: string = getLocale()
   // 默认开：装了新版本才修得上 bug，这是绝大多数人想要的默认
   let autoUpdate = true
   // 默认正式版：最稳的那一档；尝鲜要用户自己在设置里明确切过去
@@ -243,17 +243,18 @@ export function setCloseBehavior(value: unknown): CloseBehavior {
 /* ---------- 界面语言 ---------- */
 
 /** 当前生效的界面语言（跟机器走；语言状态的拥有者是渲染层，这里只管默认值与落盘） */
-export function uiLocale(): 'zh' | 'en' {
+export function uiLocale(): string {
   return loadGlobal().uiLocale
 }
 
 /**
- * 存界面语言并落盘。认不出来的值忽略；写不进去也只在这次运行里生效——
+ * 存界面语言并落盘。写不进去也只在这次运行里生效——
  * 与关窗行为同一条纪律：不值得让一次点击失败。
  */
-export function setUiLocale(value: unknown): 'zh' | 'en' {
-  if (value !== 'zh' && value !== 'en') return uiLocale()
-  const next: GlobalSettings = { ...loadGlobal(), uiLocale: value }
+export function setUiLocale(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) return uiLocale()
+  const clean = value.trim()
+  const next: GlobalSettings = { ...loadGlobal(), uiLocale: clean }
   globalCache = next
   try {
     persistGlobal()

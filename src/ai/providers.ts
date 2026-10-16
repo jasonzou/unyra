@@ -39,11 +39,40 @@ export const MODALITY_LABEL: Record<InputModality, string> = {
  *   个别兼容实现遇到这个字段直接 400，此时关掉——代价是拿不到真实用量，
  *   界面会退化成估算值。
  */
+export type ThinkingControlStyle =
+  | 'thinking_type'      // DeepSeek 官方标准: thinking: { type: 'disabled' | 'enabled' }
+  | 'enable_thinking'    // 阿里云百炼 / 硅基流动 / 火山方舟: enable_thinking: false | true
+  | 'thinking_config'    // Google Gemini: thinking_config: { thinking_budget: 0 }
+  | 'think'              // Ollama 本地模型: think: false | true
+  | 'reasoning_effort'   // OpenAI 官方标准: reasoning_effort: 'none' | 'low' | ...
+
 export interface ProviderQuirks {
   tokenParam?: 'max_tokens' | 'max_completion_tokens'
   omitTemperature?: boolean
   omitReasoningEffort?: boolean
   omitStreamUsage?: boolean
+  /** 思考控制风格：定义该提供商使用何种线格式控制思考/非思考模式 */
+  thinkingStyle?: ThinkingControlStyle
+  /**
+   * 是否使用 thinking.type 控制思考（DeepSeek 官方等）
+   * 当思考档位为 'none' 时发送 thinking: { type: 'disabled' }，开启思考时发送 thinking: { type: 'enabled' }
+   */
+  thinkingTypeParam?: boolean
+  /**
+   * 是否使用 enable_thinking 参数控制思考（阿里云百炼、硅基流动、火山方舟等）
+   * 当思考档位为 'none' 时发送 enable_thinking: false，开启思考时发送 enable_thinking: true
+   */
+  enableThinkingParam?: boolean
+  /**
+   * 是否使用 thinking_config 参数控制思考（Google Gemini 等）
+   * 当思考档位为 'none' 时发送 thinking_config: { thinking_budget: 0 }
+   */
+  thinkingConfigParam?: boolean
+  /**
+   * 是否使用 think 参数控制思考（Ollama 本地模型）
+   * 当思考档位为 'none' 时发送 think: false，开启思考时发送 think: true
+   */
+  thinkParam?: boolean
 }
 
 /**
@@ -207,7 +236,8 @@ export const PROVIDERS: ProviderPreset[] = [
     note: '中文与推理能力强，支持工具调用。',
     baseUrl: 'https://api.deepseek.com',
     toolCalls: true,
-    effortMap: { medium: 'high' },
+    quirks: { thinkingStyle: 'thinking_type', thinkingTypeParam: true },
+    effortMap: { none: 'omit', medium: 'high' },
     consoleUrl: 'https://platform.deepseek.com/api_keys',
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>',
@@ -222,6 +252,7 @@ export const PROVIDERS: ProviderPreset[] = [
     note: '长上下文见长，Kimi K2 系列支持工具调用。',
     baseUrl: 'https://api.moonshot.cn/v1',
     toolCalls: true,
+    effortMap: { none: 'omit' },
     consoleUrl: 'https://platform.moonshot.cn/console/api-keys',
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>',
@@ -233,7 +264,7 @@ export const PROVIDERS: ProviderPreset[] = [
     note: 'GLM 系列，工具调用稳定，国内直连。',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     toolCalls: true,
-    effortMap: { medium: 'high' },
+    effortMap: { none: 'omit', medium: 'high' },
     consoleUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>',
@@ -245,7 +276,8 @@ export const PROVIDERS: ProviderPreset[] = [
     note: '百炼平台的 OpenAI 兼容模式，Qwen 系列支持工具调用。',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     toolCalls: true,
-    quirks: { omitReasoningEffort: true },
+    quirks: { thinkingStyle: 'enable_thinking', enableThinkingParam: true, omitReasoningEffort: true },
+    effortMap: { none: 'omit' },
     consoleUrl: 'https://bailian.console.aliyun.com/',
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>',
@@ -257,6 +289,8 @@ export const PROVIDERS: ProviderPreset[] = [
     note: '字节跳动方舟平台，支持推理接入点与常用大模型。',
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
     toolCalls: true,
+    quirks: { thinkingStyle: 'enable_thinking', enableThinkingParam: true, omitReasoningEffort: true },
+    effortMap: { none: 'omit' },
     consoleUrl: 'https://console.volcengine.com/ark',
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>',
@@ -268,6 +302,8 @@ export const PROVIDERS: ProviderPreset[] = [
     note: '托管多家开源大模型的聚合平台，性价比高。',
     baseUrl: 'https://api.siliconflow.cn/v1',
     toolCalls: true,
+    quirks: { thinkingStyle: 'enable_thinking', enableThinkingParam: true, omitReasoningEffort: true },
+    effortMap: { none: 'omit' },
     consoleUrl: 'https://cloud.siliconflow.cn/account/ak',
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>',
@@ -279,6 +315,7 @@ export const PROVIDERS: ProviderPreset[] = [
     note: '聚合网关，一个 Key 调用全球主流模型；模型名形如 vendor/model。',
     baseUrl: 'https://openrouter.ai/api/v1',
     toolCalls: true,
+    effortMap: { none: 'none' },
     consoleUrl: 'https://openrouter.ai/keys',
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>',
@@ -303,7 +340,8 @@ export const PROVIDERS: ProviderPreset[] = [
     baseUrl: 'https://api.openai.com/v1',
     toolCalls: true,
     consoleUrl: 'https://platform.openai.com/api-keys',
-    quirks: { tokenParam: 'max_completion_tokens' },
+    quirks: { tokenParam: 'max_completion_tokens', thinkingStyle: 'reasoning_effort' },
+    effortMap: { none: 'none' },
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>',
     form: presetForm({
@@ -339,6 +377,8 @@ export const PROVIDERS: ProviderPreset[] = [
     note: 'Gemini 系列模型，走 Gemini 的 OpenAI 兼容端点。',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     toolCalls: true,
+    quirks: { thinkingConfigParam: true, omitReasoningEffort: true },
+    effortMap: { none: 'omit' },
     consoleUrl: 'https://aistudio.google.com/apikey',
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>（Google AI Studio 的 Key）',
@@ -350,6 +390,7 @@ export const PROVIDERS: ProviderPreset[] = [
     note: 'xAI Grok 系列，OpenAI 兼容协议。',
     baseUrl: 'https://api.x.ai/v1',
     toolCalls: true,
+    effortMap: { none: 'none' },
     consoleUrl: 'https://console.x.ai/',
     chatPath: '/chat/completions',
     authHint: 'Authorization: Bearer <Key>',
@@ -361,6 +402,8 @@ export const PROVIDERS: ProviderPreset[] = [
     note: '本地离线运行的开源模型服务，默认端口 11434。',
     baseUrl: 'http://localhost:11434/v1',
     toolCalls: true,
+    quirks: { thinkingStyle: 'think', thinkParam: true, omitReasoningEffort: true },
+    effortMap: { none: 'omit' },
     chatPath: '/chat/completions',
     authHint: '本地通常无需 API Key（留空即可）',
     form: presetForm({

@@ -21,9 +21,10 @@ const dict: Record<string, string> = {
   '人格与格式都以一条隐藏指令进入上下文：切换从下一轮开始生效，不改系统提示词、不重发历史。': 'Both persona and format enter the context as one hidden instruction: switches take effect from the next turn — no system-prompt change, no history resent.',
   '文档格式已切到「{0}」，从下一轮开始生效': 'Document format switched to "{0}", effective from the next turn',
 
-  /* ---------- EffortSlider（REASONING_HINT 四档） ---------- */
+  /* ---------- EffortSlider（REASONING_HINT 五档） ---------- */
   '思考等级': 'Reasoning effort',
   '思考等级：{0}（{1}）': 'Reasoning effort: {0} ({1})',
+  '非思考模式，极速直接回答': 'No reasoning — fastest direct responses',
   '快，短问答与批注': 'Fast — short answers and quick notes',
   '平衡，日常讲解': 'Balanced — everyday explanations',
   '深，教学与出卷': 'Deep — teaching and exam generation',
@@ -210,6 +211,15 @@ const dict: Record<string, string> = {
   '提交': 'Submit',
   '下一题': 'Next',
   '下一题（答案都留着）': 'Next question (answers are kept)',
+  '当前值': 'Current value',
+  '选择范围': 'Select range',
+  '选择数值': 'Select value',
+  '点击或拖拽文件到此处上传': 'Click or drag files here to upload',
+  '支持格式：{0}': 'Supported formats: {0}',
+  '最大 {0}MB': 'Max {0}MB',
+  '可选多个文件': 'Multiple files allowed',
+  '已添加附件 ({0})': 'Attached files ({0})',
+  '移除附件': 'Remove attachment',
 
   /* ---------- useComposer：附件闸门的提示 ---------- */
   '当前模型不支持图片输入：可在设置里给这个模型勾上「图像」': 'The current model does not accept image input — enable "Image" for it in Settings',

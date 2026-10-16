@@ -146,7 +146,7 @@ function rootOf(baseUrl: string): string {
 }
 
 /** 组装请求体：把 quirks 翻译成对应字段，未声明的差异一律按标准字段处理 */
-function bodyFor(
+export function bodyFor(
   p: ResolvedProvider,
   opts: {
     model: string
@@ -159,9 +159,17 @@ function bodyFor(
     json?: boolean
   },
 ): Record<string, unknown> {
+  const isNone = opts.reasoningEffort === 'none'
+  let targetModel = opts.model
+  if (isNone && targetModel.toLowerCase() === 'deepseek-reasoner') {
+    // DeepSeek 官方 API 的 deepseek-reasoner 端点强制开启推理，不可关闭思考；
+    // 非思考模式下自动对齐到官方非思考模型 deepseek-chat，以实现极速直接回答。
+    targetModel = 'deepseek-chat'
+  }
+
   const tokenParam = p.quirks?.tokenParam ?? 'max_tokens'
   const body: Record<string, unknown> = {
-    model: opts.model,
+    model: targetModel,
     /**
      * 内容在这里翻译成 OpenAI 的线格式：纯文本仍是字符串（兼容性最好），
      * 只有带图的消息才变成 [text, image_url] 数组（见 ai/content）。
@@ -176,14 +184,117 @@ function bodyFor(
   if (opts.temperature !== undefined && !p.quirks?.omitTemperature) {
     body.temperature = opts.temperature
   }
-  // 思考等级：OpenAI 兼容协议统一用 reasoning_effort；
-  // 不认这个字段的服务会忽略它（少数会 400，那就把该提供商的 quirks 关掉）。
-  // 发什么先过 effortMap（模型/提供商/预设三级级联，'omit' = 这档不发）；
-  // 没映射的走协议默认——OpenAI 系没有 max，封顶到 high，避免发服务端不认的值。
-  if (opts.reasoningEffort !== undefined && !p.quirks?.omitReasoningEffort) {
-    const wired = p.effortMap?.[opts.reasoningEffort]
-    if (wired !== 'omit') {
-      body.reasoning_effort = wired || (opts.reasoningEffort === 'max' ? 'high' : opts.reasoningEffort)
+  // 思考等级处理：各家平台线格式各异（DeepSeek thinking.type / 阿里百炼 enable_thinking /
+  // 硅基流动 / Gemini thinking_config / Ollama think / OpenAI reasoning_effort / OpenRouter reasoning）。
+  // 优先遵循已配置的 quirks；若未显式指定，根据 baseUrl、提供商 id 与模型名做智能自适应推断。
+  if (opts.reasoningEffort !== undefined) {
+    const modelLower = targetModel.toLowerCase()
+    const baseLower = p.baseUrl.toLowerCase()
+    const idLower = p.id.toLowerCase()
+
+    const style = p.quirks?.thinkingStyle
+    let useThinkingType = style === 'thinking_type' || !!p.quirks?.thinkingTypeParam
+    let useEnableThinking = style === 'enable_thinking' || !!p.quirks?.enableThinkingParam
+    let useThinkingConfig = style === 'thinking_config' || !!p.quirks?.thinkingConfigParam
+    let useOllamaThink =
+      style === 'think' ||
+      !!p.quirks?.thinkParam ||
+      idLower === 'ollama' ||
+      baseLower.includes(':11434') ||
+      baseLower.includes('ollama')
+    let useOpenRouter = idLower === 'openrouter' || baseLower.includes('openrouter.ai')
+
+    // 未显式配置 quirks 时的智能推断兜底（防御用户自建提供商或未带 quirks 的历史配置）
+    if (!style && !useThinkingType && !useEnableThinking && !useThinkingConfig && !useOllamaThink && !useOpenRouter) {
+      if (idLower === 'deepseek' || baseLower.includes('deepseek') || modelLower.includes('deepseek')) {
+        useThinkingType = true
+      } else if (
+        idLower === 'dashscope' ||
+        idLower === 'siliconflow' ||
+        idLower === 'volcengine' ||
+        baseLower.includes('dashscope') ||
+        baseLower.includes('siliconflow') ||
+        baseLower.includes('volces') ||
+        baseLower.includes('aliyun') ||
+        modelLower.includes('qwen') ||
+        modelLower.includes('qwq')
+      ) {
+        useEnableThinking = true
+      } else if (
+        idLower === 'gemini' ||
+        baseLower.includes('generativelanguage.googleapis.com') ||
+        modelLower.includes('gemini')
+      ) {
+        useThinkingConfig = true
+      }
+    }
+
+    // 1. DeepSeek 官方风格：thinking: { type: 'disabled' | 'enabled' }
+    // 官方规范：禁用思考时只发 thinking.type='disabled'，严禁同时发 reasoning_effort（否则 400）；
+    // 开启思考时发送 thinking.type='enabled'，并可由 reasoning_effort 携带 low/high/max。
+    if (useThinkingType) {
+      body.thinking = { type: isNone ? 'disabled' : 'enabled' }
+      if (!isNone && !p.quirks?.omitReasoningEffort) {
+        const wired = p.effortMap?.[opts.reasoningEffort]
+        if (wired && wired !== 'omit') {
+          body.reasoning_effort = wired
+        } else {
+          body.reasoning_effort = opts.reasoningEffort === 'max' ? 'high' : opts.reasoningEffort
+        }
+      }
+    }
+
+    // 2. 阿里云百炼 / 硅基流动 / 火山方舟风格：enable_thinking: false | true
+    if (useEnableThinking) {
+      body.enable_thinking = !isNone
+    }
+
+    // 3. Google Gemini 风格：thinking_config.thinking_budget = 0
+    if (useThinkingConfig && isNone) {
+      body.thinking_config = { thinking_budget: 0 }
+    }
+
+    // 4. Ollama 风格：think: false | true
+    if (useOllamaThink) {
+      body.think = !isNone
+    }
+
+    // 5. OpenRouter 风格：reasoning: { effort: 'none', enabled: false }
+    if (useOpenRouter) {
+      if (isNone) {
+        body.reasoning = { effort: 'none', enabled: false }
+        body.reasoning_effort = 'none'
+      } else {
+        const effortVal =
+          p.effortMap?.[opts.reasoningEffort] ?? (opts.reasoningEffort === 'max' ? 'high' : opts.reasoningEffort)
+        if (effortVal !== 'omit') {
+          body.reasoning = { effort: effortVal }
+          body.reasoning_effort = effortVal
+        }
+      }
+    }
+
+    // 6. OpenAI 标准 reasoning_effort（当没有使用上述专有参数时）
+    if (
+      !p.quirks?.omitReasoningEffort &&
+      !useThinkingType &&
+      !useEnableThinking &&
+      !useThinkingConfig &&
+      !useOllamaThink &&
+      !useOpenRouter
+    ) {
+      const wired = p.effortMap?.[opts.reasoningEffort]
+      if (isNone) {
+        if (wired && wired !== 'omit') {
+          body.reasoning_effort = wired
+        } else if (!wired) {
+          body.reasoning_effort = 'none'
+        }
+      } else {
+        if (wired !== 'omit') {
+          body.reasoning_effort = wired || (opts.reasoningEffort === 'max' ? 'high' : opts.reasoningEffort)
+        }
+      }
     }
   }
   /**
@@ -327,6 +438,9 @@ async function openAiStream(
   let buffer = ''
   let content = ''
   let reasoning = ''
+  let fallbackContent = ''
+  let inThinkBlock = false
+  let tagBuffer = ''
   let finishReason: string | null = null
   const toolCalls = new Map<number, ChatToolCall>()
   /** 用量的原始帧：字段名各家不一，收完再统一翻译 */
@@ -334,6 +448,69 @@ async function openAiStream(
   const onAbort = () => void reader.cancel().catch(() => {})
   opts.signal?.addEventListener('abort', onAbort, { once: true })
   let idle: ReturnType<typeof setTimeout> | null = null
+
+  const processContentDelta = (text: string) => {
+    let raw = tagBuffer + text
+    tagBuffer = ''
+
+    while (raw.length > 0) {
+      if (inThinkBlock) {
+        const endIdx = raw.indexOf('</think>')
+        if (endIdx !== -1) {
+          const thinkText = raw.slice(0, endIdx)
+          if (opts.reasoningEffort !== 'none' && thinkText) {
+            reasoning += thinkText
+            opts.onDelta?.({ reasoning: thinkText })
+          }
+          inThinkBlock = false
+          raw = raw.slice(endIdx + 8)
+        } else {
+          const lastOpen = raw.lastIndexOf('<')
+          if (lastOpen !== -1 && '</think>'.startsWith(raw.slice(lastOpen))) {
+            const thinkText = raw.slice(0, lastOpen)
+            if (opts.reasoningEffort !== 'none' && thinkText) {
+              reasoning += thinkText
+              opts.onDelta?.({ reasoning: thinkText })
+            }
+            tagBuffer = raw.slice(lastOpen)
+            break
+          } else {
+            if (opts.reasoningEffort !== 'none') {
+              reasoning += raw
+              opts.onDelta?.({ reasoning: raw })
+            }
+            break
+          }
+        }
+      } else {
+        const startIdx = raw.indexOf('<think>')
+        if (startIdx !== -1) {
+          const before = raw.slice(0, startIdx)
+          if (before) {
+            content += before
+            opts.onDelta?.({ content: before })
+          }
+          inThinkBlock = true
+          raw = raw.slice(startIdx + 7)
+        } else {
+          const lastOpen = raw.lastIndexOf('<')
+          if (lastOpen !== -1 && '<think>'.startsWith(raw.slice(lastOpen))) {
+            const before = raw.slice(0, lastOpen)
+            if (before) {
+              content += before
+              opts.onDelta?.({ content: before })
+            }
+            tagBuffer = raw.slice(lastOpen)
+            break
+          } else {
+            content += raw
+            opts.onDelta?.({ content: raw })
+            break
+          }
+        }
+      }
+    }
+  }
 
   const handleLine = (line: string) => {
     const trimmed = line.trim()
@@ -368,15 +545,19 @@ async function openAiStream(
     const choice = json.choices?.[0]
     if (!choice) return
     const delta = choice.delta ?? {}
-    // 思维链字段各家命名不一，取到哪个算哪个
+    // 思维链字段各家命名不一（reasoning_content / reasoning）；
+    // 严格尊重用户思考等级：当明确为 none（非思考模式）时，绝不抛出 reasoning 事件
     const thinking = delta.reasoning_content ?? delta.reasoning
     if (thinking) {
-      reasoning += thinking
-      opts.onDelta?.({ reasoning: thinking })
+      if (opts.reasoningEffort !== 'none') {
+        reasoning += thinking
+        opts.onDelta?.({ reasoning: thinking })
+      } else {
+        fallbackContent += thinking
+      }
     }
     if (delta.content) {
-      content += delta.content
-      opts.onDelta?.({ content: delta.content })
+      processContentDelta(delta.content)
     }
     for (const tc of delta.tool_calls ?? []) {
       const idx = tc.index ?? 0
@@ -423,9 +604,23 @@ async function openAiStream(
   }
   if (buffer) handleLine(buffer)
 
+  if (tagBuffer) {
+    if (!inThinkBlock) {
+      content += tagBuffer
+      opts.onDelta?.({ content: tagBuffer })
+    }
+    tagBuffer = ''
+  }
+
+  // 兜底保障：非思考模式下，若服务端异常地把答复全塞在 reasoning 字段且 content 为空，回退作为 content
+  if (opts.reasoningEffort === 'none' && !content.trim() && fallbackContent.trim()) {
+    content = fallbackContent
+    opts.onDelta?.({ content: fallbackContent })
+  }
+
   return {
     content,
-    reasoning,
+    reasoning: opts.reasoningEffort === 'none' ? '' : reasoning,
     toolCalls: [...toolCalls.values()],
     finishReason,
     usage: usageFrame ? translateUsage(usageFrame) : undefined,
@@ -493,7 +688,10 @@ export async function chatCompleteWith(
     choices?: Array<{ message?: { content?: string } }>
     usage?: Record<string, unknown>
   }
-  const content = data.choices?.[0]?.message?.content ?? ''
+  let content = data.choices?.[0]?.message?.content ?? ''
+  if (opts.reasoningEffort === 'none') {
+    content = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+  }
   // 非流式响应的 usage 就在信封里（OpenAI 兼容协议的约定）；没有就退回估算
   recordRequest(provider, model, opts.purpose, data.usage ? translateUsage(data.usage) : estimateUsage(opts.messages, undefined, content), Date.now() - startedAt)
   return content

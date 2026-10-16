@@ -69,7 +69,7 @@ export default function App({ boot }: Props) {
   // 菜单与原生对话框说不了 React 的语言（见 electron/i18n）。桥断了就断：尽力而为。
   useLocale()
   useEffect(() => {
-    const native = window as unknown as { mojiNative?: { setUiLocale?: (l: 'zh' | 'en') => void } }
+    const native = window as unknown as { mojiNative?: { setUiLocale?: (l: string) => void } }
     setLocaleBridge((l) => native.mojiNative?.setUiLocale?.(l))
     native.mojiNative?.setUiLocale?.(getLocale())
     return () => setLocaleBridge(null)

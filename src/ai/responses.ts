@@ -116,7 +116,9 @@ export function buildResponsesBody(opts: {
   if (opts.reasoningEffort) {
     const wired = opts.effortMap?.[opts.reasoningEffort]
     if (wired !== 'omit') {
-      body.reasoning = { effort: wired || (opts.reasoningEffort === 'max' ? 'high' : opts.reasoningEffort) }
+      body.reasoning = {
+        effort: wired || (opts.reasoningEffort === 'none' ? 'none' : opts.reasoningEffort === 'max' ? 'high' : opts.reasoningEffort),
+      }
     }
   }
   // 注意：Responses 不接受 max_tokens（用 max_output_tokens），
@@ -226,7 +228,7 @@ export async function responsesStream(
       case 'response.reasoning_summary_text.delta':
       case 'response.reasoning_text.delta': {
         const delta = typeof ev.delta === 'string' ? ev.delta : ''
-        if (delta) {
+        if (delta && opts.reasoningEffort !== 'none') {
           reasoning += delta
           opts.onDelta?.({ reasoning: delta })
         }
@@ -323,7 +325,7 @@ export async function responsesStream(
   if (!finishReason) finishReason = toolCalls.length ? 'tool_calls' : 'stop'
   return {
     content,
-    reasoning,
+    reasoning: opts.reasoningEffort === 'none' ? '' : reasoning,
     toolCalls,
     finishReason,
     usage: usageFrame ? translateResponsesUsage(usageFrame) : undefined,

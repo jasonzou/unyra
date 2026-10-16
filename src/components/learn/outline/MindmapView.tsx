@@ -48,7 +48,7 @@ import { t } from '../../../i18n'
 import { TINT_PALETTE, tintColor, type TintSwatch } from './mindmapTint'
 import { MINDMAP_MAX_ZOOM, MINDMAP_MIN_ZOOM, SELECT_ZOOM, centerPanFor, edgeOtherEnd } from './mindmapNav'
 import MarkdownView from '../../MarkdownView'
-import { renderNote } from '../../../lib/markdown'
+import { renderInline, renderNote } from '../../../lib/markdown'
 import {
   attemptScore,
   examTotalPoints,
@@ -3046,33 +3046,71 @@ function PreviewNodeCard({
                     const res = attempt.results?.find((r) => r.questionId === q.id)
                     return (
                       <div key={q.id} className="rounded-lg border border-line/60 bg-card/40 p-2.5">
-                        <div className="flex items-center gap-1.5 mb-1 text-[11px] font-medium text-ink">
-                          <span className="text-ink-faint">#{idx + 1}</span>
-                          <span className="rounded bg-line/60 px-1 py-0.5 text-[10px] text-ink-soft">
-                            {QUESTION_TYPE_LABEL[q.type] || q.type}
-                          </span>
-                          <span className="flex-1 truncate">{q.stem}</span>
+                        <div className="flex items-center justify-between mb-1.5 text-[11px] font-medium text-ink">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-ink-faint">#{idx + 1}</span>
+                            <span className="rounded bg-line/60 px-1 py-0.5 text-[10px] text-ink-soft">
+                              {QUESTION_TYPE_LABEL[q.type] || q.type}
+                            </span>
+                            <span className="text-[10px] text-ink-faint tabular-nums">
+                              {t('（{0} 分）', q.points)}
+                            </span>
+                          </div>
                           {res?.correct != null && (
-                            <span className={`text-[10px] font-semibold ${res.correct ? 'text-emerald-600' : 'text-rose-500'}`}>
+                            <span className={`text-[10px] font-semibold ${res.correct ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}`}>
                               {res.correct ? t('正确') : t('错误')}
+                              {res.score != null ? ` (${res.score}分)` : ''}
                             </span>
                           )}
                         </div>
+
+                        {/* 题干 Markdown 渲染 */}
+                        <div className="text-[11.5px] leading-relaxed text-ink mb-1.5">
+                          <MarkdownView html={renderNote(q.stem)} className="text-[11.5px]" />
+                        </div>
+
+                        {/* 配图 */}
+                        {q.image && (
+                          <div className="my-1.5 flex justify-center rounded border border-line/60 bg-paper/30 p-2 moji-exam-figure" dangerouslySetInnerHTML={{ __html: q.image }} />
+                        )}
+
+                        {/* 选项作答 */}
                         {q.options && (
-                          <div className="pl-3 space-y-0.5 text-[10.5px] text-ink-soft">
+                          <div className="pl-2 space-y-1 text-[11px] text-ink-soft">
                             {q.options.map((opt) => {
                               const isChosen = ans?.value?.includes(opt.id)
                               return (
-                                <div key={opt.id} className={isChosen ? 'font-semibold text-seal' : ''}>
-                                  {opt.id}. {opt.text}
+                                <div key={opt.id} className={`flex items-start gap-1.5 ${isChosen ? 'font-semibold text-seal' : ''}`}>
+                                  <span className="shrink-0">{opt.id}.</span>
+                                  <span className="flex-1 min-w-0" dangerouslySetInnerHTML={{ __html: renderInline(opt.text) }} />
+                                  {isChosen && (
+                                    <span className="shrink-0 rounded bg-seal/15 px-1 py-0.2 text-[9.5px] text-seal-deep">
+                                      {t('你的选择')}
+                                    </span>
+                                  )}
                                 </div>
                               )
                             })}
                           </div>
                         )}
+
+                        {/* 非选择题的作答 */}
+                        {(q.type === 'fill' || q.type === 'short') && ans?.text && (
+                          <div className="mt-1.5 rounded border border-line/60 bg-paper/40 p-2 text-[11px] text-ink-soft">
+                            <span className="text-[10px] font-semibold text-ink-faint block mb-0.5">{t('你的作答：')}</span>
+                            <div className="text-[11px] leading-relaxed text-ink">
+                              <MarkdownView html={renderNote(ans.text)} className="text-[11px]" />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 评语 Markdown 渲染 */}
                         {res?.comment && (
-                          <div className="mt-1 text-[10.5px] text-amber-600 dark:text-amber-400 pl-3">
-                            {t('评语：{0}', res.comment)}
+                          <div className="mt-2 rounded bg-amber-500/10 border border-amber-500/20 p-2 text-[11px] text-amber-700 dark:text-amber-300">
+                            <div className="font-semibold mb-0.5 text-[10px]">{t('评语')}</div>
+                            <div className="text-[11px] leading-relaxed">
+                              <MarkdownView html={renderNote(res.comment)} className="text-[11px]" />
+                            </div>
                           </div>
                         )}
                       </div>

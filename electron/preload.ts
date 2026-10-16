@@ -30,10 +30,10 @@ import type {
   NoticeSettings,
   StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail, UpdatePhase, UpdateState,
   VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
-  VoiceTranscribeResult, WebDomOpResult,
+  VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult,
   WebFetchResult, WebLogDetailResult, WebLogsOpts, WebLogsResult, WebPageFetchReq,
   WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult, WebScrollReq,
-  WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebWaitReq, WebWaitResult,
+  WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
 } from '../shared/ipc'
 
 // 这些契约形状统一在 shared/ipc.ts（渲染层与主进程共用一份，见该文件顶部）：
@@ -95,10 +95,10 @@ const api = {
    * 界面语言（zh / en）。语言状态的拥有者是渲染层：挂载时与每次切换都推一份过来，
    * 主进程收到后换掉自己的 t() 并重建应用菜单（`ui-locale` 频道，处理器在 app/ipc.ts）。
    */
-  setUiLocale: (l: 'zh' | 'en') => { ipcRenderer.send('ui-locale', l) },
+  setUiLocale: (l: string) => { ipcRenderer.send('ui-locale', l) },
 
   /** 启动时读一次存档（global.yaml）：语言跟机器走，见 src/lib/uiLocale 的 loadUiLocale */
-  getUiLocale: (): Promise<'zh' | 'en'> => ipcRenderer.invoke('ui-locale:get'),
+  getUiLocale: (): Promise<string> => ipcRenderer.invoke('ui-locale:get'),
 
   /**
    * 把「允许代理的 host 列表」同步给主进程。
@@ -590,6 +590,13 @@ const api = {
       ipcRenderer.on('web:guest-input', listener)
       return () => ipcRenderer.removeListener('web:guest-input', listener)
     },
+    onTranslate: (cb: (payload: WebTranslatePayload) => void): (() => void) => {
+      const listener = (_e: unknown, p: WebTranslatePayload): void => cb(p)
+      ipcRenderer.on('web:translate', listener)
+      return () => ipcRenderer.removeListener('web:translate', listener)
+    },
+    fastTranslate: (text: string, targetLang?: string): Promise<WebFastTranslateResult> =>
+      ipcRenderer.invoke('web:fastTranslate', { text, targetLang }),
     /** 页面快照：Accessibility 树 → 带 ref 的可交互元素清单（browser.* 的「看」通道） */
     snapshot: (wcId: number): Promise<WebSnapshotResult> => ipcRenderer.invoke('web:snapshot', wcId),
     /** 页面滚到目标元素并高亮突出（browser.point） */

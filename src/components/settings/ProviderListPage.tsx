@@ -3,8 +3,9 @@
  */
 
 import { useState } from 'react'
-import { Plus, Settings2, SlidersHorizontal, Sparkles, Star } from 'lucide-react'
+import { Plus, Settings2, SlidersHorizontal, Sparkles, Star, Trash2 } from 'lucide-react'
 import {
+  isConfigured,
   labelOf,
   modelEntriesOf,
   modelsOf,
@@ -26,6 +27,7 @@ export function ProviderListPage({
   onAddCustom,
   onEffort,
   onPickDefault,
+  onDelete,
 }: {
   draft: AiSettings
   configured: ProviderConfig[]
@@ -34,6 +36,7 @@ export function ProviderListPage({
   onAddCustom: () => void
   onEffort: (e: ReasoningEffort) => void
   onPickDefault: (providerId: string, model: string) => void
+  onDelete?: (id: string) => void
 }) {
   const [creating, setCreating] = useState(false)
   const createdIds = new Set(draft.providers.map((p) => p.id))
@@ -49,7 +52,7 @@ export function ProviderListPage({
       <section>
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[12.5px] font-medium text-ink-strong">
-            {t('已配置的提供商')}
+            {t('已添加的提供商')}
             <span className="ml-2 text-[11px] font-normal text-ink-faint">
               {t('点击进入配置（配置会自动保存）')}
             </span>
@@ -64,7 +67,7 @@ export function ProviderListPage({
           </button>
         </div>
 
-        {configured.length === 0 ? (
+        {draft.providers.length === 0 ? (
           <div className="rounded-xl border border-dashed border-line bg-card/40 px-4 py-8 text-center">
             <p className="text-[12.5px] font-medium text-ink-strong">
               {t('尚未添加任何模型提供商')}
@@ -75,14 +78,18 @@ export function ProviderListPage({
           </div>
         ) : (
           <ul className="flex flex-col gap-2">
-            {configured.map((p) => {
+            {draft.providers.map((p) => {
+              const isReady = isConfigured(p)
               const entries = modelEntriesOf(p)
               return (
-                <li key={p.id}>
+                <li
+                  key={p.id}
+                  className="group flex items-center gap-2 rounded-xl border border-line bg-card p-1 shadow-2xs transition hover:border-seal/40 hover:bg-seal/[0.02]"
+                >
                   <button
                     type="button"
                     onClick={() => onOpen(p.id)}
-                    className="flex w-full items-center gap-3.5 rounded-xl border border-line bg-card px-3.5 py-3 text-left shadow-2xs transition hover:border-seal/40 hover:bg-seal/[0.02]"
+                    className="flex min-w-0 flex-1 items-center gap-3.5 px-2.5 py-2 text-left"
                   >
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line/80 bg-paper shadow-2xs">
                       <ProviderLogo id={p.id} protocol={protocolOf(p)} size={22} />
@@ -93,23 +100,54 @@ export function ProviderListPage({
                         <span className="shrink-0 rounded bg-line/60 px-1.5 py-0.5 text-[10px] text-ink-soft">
                           {t(compatLabel(protocolOf(p)))}
                         </span>
-                        {p.id === draft.global.providerId && (
-                          <span className="flex shrink-0 items-center gap-0.5 rounded bg-seal/10 px-1.5 py-0.5 text-[10.5px] font-medium text-seal-deep">
-                            <Star size={9} />
-                            {t('默认')}
+                        {isReady ? (
+                          p.id === draft.global.providerId && (
+                            <span className="flex shrink-0 items-center gap-0.5 rounded bg-seal/10 px-1.5 py-0.5 text-[10.5px] font-medium text-seal-deep">
+                              <Star size={9} />
+                              {t('默认')}
+                            </span>
+                          )
+                        ) : (
+                          <span className="flex shrink-0 items-center gap-0.5 rounded bg-warn/15 px-1.5 py-0.5 text-[10.5px] font-medium text-warn-deep">
+                            {t('未完成配置')}
                           </span>
                         )}
                       </div>
                       <div className="mt-0.5 flex items-center gap-2 text-[11px] text-ink-faint">
-                        <span className="truncate font-mono">
-                          {entries.length
-                            ? entries.map((m) => m.id).join(' · ')
-                            : t('未配置模型（点击添加）')}
-                        </span>
+                        {isReady ? (
+                          <span className="truncate font-mono">
+                            {entries.length
+                              ? entries.map((m) => m.id).join(' · ')
+                              : t('未配置模型（点击添加）')}
+                          </span>
+                        ) : (
+                          <span className="truncate text-warn-deep/90">
+                            {t('未填写 API Key，点击继续配置')}
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <Settings2 size={14} className="shrink-0 text-ink-faint" />
                   </button>
+                  <div className="flex items-center gap-1 pr-2">
+                    {onDelete && (
+                      <button
+                        type="button"
+                        title={t('删除提供商')}
+                        onClick={() => onDelete(p.id)}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint opacity-50 transition hover:bg-danger/10 hover:text-danger hover:opacity-100"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title={t('点击进入配置')}
+                      onClick={() => onOpen(p.id)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-faint transition hover:bg-line/70 hover:text-ink"
+                    >
+                      <Settings2 size={14} />
+                    </button>
+                  </div>
                 </li>
               )
             })}
@@ -142,15 +180,14 @@ export function ProviderListPage({
                   <button
                     key={p.id}
                     type="button"
-                    disabled={added}
                     onClick={() => {
                       setCreating(false)
                       onPickPreset(p)
                     }}
-                    title={added ? t('该提供商已添加') : t(p.note)}
+                    title={added ? t('该提供商已添加，点击查看或继续配置') : t(p.note)}
                     className={`flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition ${
                       added
-                        ? 'cursor-not-allowed border-line bg-line/30 opacity-60'
+                        ? 'border-seal/30 bg-seal/[0.04] hover:border-seal/60 hover:bg-seal/[0.08] hover:shadow-2xs'
                         : 'border-line bg-paper hover:border-seal/50 hover:bg-seal/[0.04] hover:shadow-2xs'
                     }`}
                   >
@@ -158,11 +195,18 @@ export function ProviderListPage({
                       <ProviderLogo id={p.id} size={18} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[11.5px] font-medium text-ink-strong">
-                        {t(p.label)}
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-[11.5px] font-medium text-ink-strong">
+                          {t(p.label)}
+                        </span>
+                        {added && (
+                          <span className="shrink-0 rounded bg-seal/10 px-1 py-0.2 text-[9.5px] font-medium text-seal-deep">
+                            {t('已添加')}
+                          </span>
+                        )}
                       </div>
                       <div className="truncate text-[10px] text-ink-faint">
-                        {added ? t('已添加') : t(p.note)}
+                        {added ? t('已添加 · 点击配置') : t(p.note)}
                       </div>
                     </div>
                   </button>

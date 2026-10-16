@@ -241,8 +241,9 @@ export function buildEnvelope(opts: {
     max_tokens: Math.min(opts.maxTokens ?? CC_MAX_TOKENS, CC_MAX_TOKENS),
     stream: true,
   }
-  if (opts.temperature !== undefined) params.temperature = opts.temperature
-  if (opts.reasoningEffort !== undefined) params.reasoning_effort = opts.reasoningEffort
+  if (opts.reasoningEffort !== undefined && opts.reasoningEffort !== 'none') {
+    params.reasoning_effort = opts.reasoningEffort
+  }
 
   return {
     config: {
@@ -486,7 +487,7 @@ export async function commandCodeStream(
       }
       case 'reasoning-delta': {
         const text = typeof event.text === 'string' ? event.text : ''
-        if (text) {
+        if (text && opts.reasoningEffort !== 'none') {
           reasoning += text
           opts.onDelta?.({ reasoning: text })
         }
@@ -578,7 +579,13 @@ export async function commandCodeStream(
     )
   }
 
-  return { content, reasoning, toolCalls, finishReason, usage }
+  return {
+    content,
+    reasoning: opts.reasoningEffort === 'none' ? '' : reasoning,
+    toolCalls,
+    finishReason,
+    usage,
+  }
 }
 
 /** HTTP 层错误 → 用户能看懂的中文提示 */
