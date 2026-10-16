@@ -1,14 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  AlertCircle,
   Bug,
   Check,
-  CheckCircle2,
   Copy,
   Cpu,
-  FolderCheck,
-  FolderOpen,
-  FolderPlus,
   Layers,
   RefreshCw,
   Search,
@@ -33,32 +28,18 @@ interface ToolsTabProps {
 }
 
 export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTabProps) {
-  // 选项卡内部视图：'all' | 'context' | 'catalog' | 'permissions' | 'process'
-  const [subTab, setSubTab] = useState<'all' | 'context' | 'catalog' | 'permissions' | 'process'>('all')
+  // 选项卡内部视图：'all' | 'context' | 'catalog' | 'process'
+  const [subTab, setSubTab] = useState<'all' | 'context' | 'catalog' | 'process'>('all')
 
   // API 目录搜索与分类过滤
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string>('all')
   const [copiedName, setCopiedName] = useState<string | null>(null)
 
-  // 目标根目录与放行目录白名单管理
-  const [currentRootDir, setCurrentRootDir] = useState<string>('')
-  const [newDirPath, setNewDirPath] = useState('')
-  const [pathError, setPathError] = useState<string | null>(null)
-
   // 活动进程列表
   const [processes, setProcesses] = useState<BaseProcessInfo[]>([])
   const [isRefreshingProc, setIsRefreshingProc] = useState(false)
   const [clearedSnapshot, setClearedSnapshot] = useState(false)
-
-  // 获取目标数据根目录
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.mojiNative?.storage?.info) {
-      window.mojiNative.storage.info().then((info) => {
-        if (info?.root) setCurrentRootDir(info.root)
-      }).catch(() => {})
-    }
-  }, [])
 
   // 刷新进程列表
   const refreshProcesses = async () => {
@@ -106,59 +87,6 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
     const next = { ...settings, dev: { ...settings.dev, ...patch } }
     onChange(next)
     if (patch.contextDebugger === false) clearContextRecords()
-  }
-
-  // 添加放行目录
-  const handleAddAllowedDir = (dirToAdd?: string) => {
-    const target = (dirToAdd || newDirPath).trim()
-    if (!target) {
-      setPathError(t('目录路径不能为空'))
-      return
-    }
-    const currentList = settings.permissions?.allowedDirs || []
-    if (currentList.includes(target)) {
-      setPathError(t('该目录已在放行白名单中'))
-      return
-    }
-    setPathError(null)
-    const nextList = [...currentList, target]
-    const nextSettings: AgentSettings = {
-      ...settings,
-      permissions: {
-        ...(settings.permissions || { allowedDirs: [] }),
-        allowedDirs: nextList,
-      },
-    }
-    onChange(nextSettings)
-    setNewDirPath('')
-  }
-
-  // 移除放行目录
-  const handleRemoveAllowedDir = (dirToRemove: string) => {
-    const currentList = settings.permissions?.allowedDirs || []
-    const nextList = currentList.filter((d) => d !== dirToRemove)
-    const nextSettings: AgentSettings = {
-      ...settings,
-      permissions: {
-        ...(settings.permissions || { allowedDirs: [] }),
-        allowedDirs: nextList,
-      },
-    }
-    onChange(nextSettings)
-  }
-
-  // 弹原生目录选择框
-  const handlePickDirectory = async () => {
-    if (typeof window !== 'undefined' && window.mojiNative?.storage?.pickRoot) {
-      try {
-        const res = await window.mojiNative.storage.pickRoot()
-        if (res.ok && res.root && !res.canceled) {
-          handleAddAllowedDir(res.root)
-        }
-      } catch {
-        // fallback
-      }
-    }
   }
 
   // 强制终止进程
@@ -235,7 +163,6 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
             { key: 'all', label: '全部总览', icon: Layers },
             { key: 'context', label: '上下文治理与健康度', icon: Bug },
             { key: 'catalog', label: '沙箱 API 检索', icon: Terminal },
-            { key: 'permissions', label: '文件安全放行白名单', icon: FolderCheck },
             { key: 'process', label: '系统进程任务监控', icon: Cpu },
           ].map((item) => (
             <button
@@ -332,114 +259,7 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
         </section>
       )}
 
-      {/* 2. 原生工具文件系统权限与放行目录 */}
-      {(subTab === 'all' || subTab === 'permissions') && (
-        <section className="rounded-2xl border border-line bg-card p-5 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="flex h-5 w-5 items-center justify-center rounded-md bg-seal/10 text-seal">
-                  <FolderCheck size={13} />
-                </span>
-                <h4 className="text-[13.5px] font-bold text-ink-strong">{t('真实文件系统权限放行与安全边界')}</h4>
-              </div>
-              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
-                {t('files.* 原生 API 对当前学习目标根目录拥有完全读写权限；操作外部真实系统路径须显式在此加入放行白名单，否则自动拦截。')}
-              </p>
-            </div>
-          </div>
-
-          {/* 目标根目录默认授权卡片 */}
-          <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3.5 flex items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-emerald-700">
-                  {t('完全受信任 · 默认最高权限')}
-                </span>
-                <span className="text-[11.5px] font-medium text-ink-strong">{t('当前学习数据根目录')}</span>
-              </div>
-              <code className="mt-1 block truncate font-mono text-[11px] text-ink-soft" title={currentRootDir || t('当前工作区存储根')}>
-                {currentRootDir || t('正在获取系统根路径…')}
-              </code>
-            </div>
-            <CheckCircle2 size={18} className="shrink-0 text-emerald-500" />
-          </div>
-
-          {/* 外部目录添加控件 */}
-          <div className="mt-4 flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={newDirPath}
-                onChange={(e) => {
-                  setNewDirPath(e.target.value)
-                  if (pathError) setPathError(null)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleAddAllowedDir()
-                }}
-                placeholder={t('输入允许 Agent 访问的外部系统真实绝对路径，如 E:\\project\\docs')}
-                className="min-w-0 flex-1 rounded-xl border border-line bg-paper px-3 py-2 text-[12px] text-ink-strong outline-none transition placeholder:text-ink-faint focus:border-seal focus:ring-2 focus:ring-seal/15 font-mono"
-              />
-              <button
-                type="button"
-                onClick={handlePickDirectory}
-                className="flex shrink-0 items-center gap-1.5 rounded-xl border border-line bg-paper px-3 py-2 text-[12px] font-medium text-ink-soft transition hover:bg-paper-deep hover:text-ink-strong shadow-2xs"
-                title={t('在系统文件选择器中浏览')}
-              >
-                <FolderOpen size={14} />
-                <span>{t('浏览')}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleAddAllowedDir()}
-                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-seal px-4 py-2 text-[12px] font-medium text-white shadow-2xs transition hover:bg-seal-deep"
-              >
-                <FolderPlus size={14} />
-                <span>{t('放行目录')}</span>
-              </button>
-            </div>
-            {pathError && (
-              <p className="flex items-center gap-1 text-[11px] text-warn-deep">
-                <AlertCircle size={12} />
-                <span>{pathError}</span>
-              </p>
-            )}
-          </div>
-
-          {/* 放行白名单清单 */}
-          <div className="mt-3 overflow-hidden rounded-xl border border-line bg-paper-deep/30">
-            <div className="border-b border-line bg-paper-deep/60 px-3.5 py-2 text-[11.5px] font-semibold text-ink-strong">
-              {t('已放行的外部白名单目录 ({0})', (settings.permissions?.allowedDirs || []).length)}
-            </div>
-            {(settings.permissions?.allowedDirs || []).length === 0 ? (
-              <div className="p-4 text-center text-[11.5px] text-ink-faint">
-                {t('暂无外部放行目录。除当前学习目标数据根目录外，Agent 尝试访问其他外部路径均会被安全拦截。')}
-              </div>
-            ) : (
-              <ul className="divide-y divide-line/60">
-                {(settings.permissions?.allowedDirs || []).map((dir) => (
-                  <li key={dir} className="flex items-center justify-between gap-3 px-3.5 py-2 hover:bg-paper/50 transition">
-                    <code className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-strong" title={dir}>
-                      {dir}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveAllowedDir(dir)}
-                      className="rounded p-1 text-ink-faint transition hover:bg-warn/10 hover:text-warn-deep"
-                      title={t('移除此放行目录')}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* 3. 系统进程任务监控与生命周期保障 */}
+      {/* 2. 系统进程任务监控与生命周期保障 */}
       {(subTab === 'all' || subTab === 'process') && (
         <section className="rounded-2xl border border-line bg-card p-5 shadow-sm">
           <div className="flex items-start justify-between gap-4">

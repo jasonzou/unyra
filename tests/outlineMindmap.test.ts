@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { KnowledgeNode, LearnStore } from '../src/learn/types'
 import { emptyOutline, type OutlineEntry } from '../src/learn/types'
 import { emptyLearnStore } from '../src/learn/store/empty'
-import { buildMindmapTree } from '../src/components/learn/outline/MindmapView'
+import { buildMindmapTree, PREVIEW_CARD_W, PREVIEW_CARD_H } from '../src/components/learn/outline/MindmapView'
 import { SELECT_ZOOM, centerPanFor, edgeOtherEnd } from '../src/components/learn/outline/mindmapNav'
 
 const NOW = 1700000000000
@@ -239,22 +239,22 @@ describe('选中节点的镜头 (centerPanFor)', () => {
     expect(SELECT_ZOOM).toBe(1.2)
   })
 
-  it('把节点摆到画面正中（在选中档 120% 下）', () => {
+  it('把节点摆到水平居中、垂直偏移 40%（在选中档 120% 下）', () => {
     const view = { width: 1000, height: 600 }
     const box = { x: 400, y: 300, width: 224, height: 98 }
     const pan = centerPanFor(box, view, SELECT_ZOOM)
 
-    // 缩放之后再平移，这个节点的中心应当正好落在视口中心
+    // 缩放之后再平移，这个节点的中心应当落在水平居中、垂直偏移 40%
     expect(onScreen(box.x + box.width / 2, pan.x, SELECT_ZOOM)).toBe(view.width / 2)
-    expect(onScreen(box.y + box.height / 2, pan.y, SELECT_ZOOM)).toBe(view.height / 2)
+    expect(onScreen(box.y + box.height / 2, pan.y, SELECT_ZOOM)).toBe(view.height * 0.4)
   })
 
-  it('100% 时也居中（默认档，两条式子在这里重合）', () => {
+  it('100% 时也水平居中、垂直 40%（默认档）', () => {
     const view = { width: 1000, height: 600 }
     const box = { x: 400, y: 300, width: 224, height: 98 }
     const pan = centerPanFor(box, view, 1)
     expect(onScreen(box.x + box.width / 2, pan.x, 1)).toBe(view.width / 2)
-    expect(onScreen(box.y + box.height / 2, pan.y, 1)).toBe(view.height / 2)
+    expect(onScreen(box.y + box.height / 2, pan.y, 1)).toBe(view.height * 0.4)
   })
 
   it('放大档与 100% 档算出来的平移**不一样**（漏乘缩放就会被这条抓住）', () => {
@@ -264,20 +264,20 @@ describe('选中节点的镜头 (centerPanFor)', () => {
     expect(centerPanFor(box, view, SELECT_ZOOM)).not.toEqual(centerPanFor(box, view, 1))
   })
 
-  it('水平与垂直同时居中（不是只居一边）', () => {
+  it('水平居中且垂直偏移40%', () => {
     const view = { width: 800, height: 500 }
     // 故意挑一个贴边的位置：两个方向都得被拉回来
     const box = { x: 0, y: 0, width: 200, height: 90 }
     const pan = centerPanFor(box, view, 1)
     expect(pan.x).toBe(800 / 2 - 100)
-    expect(pan.y).toBe(500 / 2 - 45)
+    expect(pan.y).toBe(500 * 0.4 - 45)
     expect(pan.x).toBe(300)
-    expect(pan.y).toBe(205)
+    expect(pan.y).toBe(155)
   })
 
-  it('已经在正中的节点：平移量为 0（不会自己漂走）', () => {
+  it('已经在目标位置的节点：平移量为 0（不会自己漂走）', () => {
     const view = { width: 1000, height: 600 }
-    const box = { x: 1000 / 2 - 112, y: 600 / 2 - 49, width: 224, height: 98 }
+    const box = { x: 1000 / 2 - 112, y: 600 * 0.4 - 49, width: 224, height: 98 }
     const pan = centerPanFor(box, view, 1)
     expect(pan.x).toBe(0)
     expect(pan.y).toBe(0)
@@ -301,5 +301,48 @@ describe('点连线跳到另一端 (edgeOtherEnd)', () => {
 
   it('选中跟这条线不相干的节点 → 往下游走（总得有个去处）', () => {
     expect(edgeOtherEnd(edge, '别的节点')).toBe('child')
+  })
+})
+
+describe('文档预览节点 (Preview Node)', () => {
+  it('预览卡片标准尺寸为 500 * 700，并正确作为子节点挂载', () => {
+    expect(PREVIEW_CARD_W).toBe(500)
+    expect(PREVIEW_CARD_H).toBe(700)
+
+    const root = makeNode({
+      id: 'root_node',
+      title: '学习导图根节点',
+      outline: {
+        intro: '',
+        children: [{ key: '子目标1', title: '子目标1', summary: '' }],
+        updatedAt: NOW,
+      },
+    })
+    const store: LearnStore = {
+      ...emptyLearnStore(),
+      nodes: [root],
+    }
+
+    const treeWithPreview = buildMindmapTree(store, root, {
+      parentNodeId: root.id,
+      kind: 'doc',
+      title: '导图教学文档预览',
+    })
+
+    const previewNode = treeWithPreview.children.find((c) => c.isPreview)
+    expect(previewNode).toBeDefined()
+    expect(previewNode?.width).toBe(500)
+    expect(previewNode?.height).toBe(700)
+    expect(previewNode?.id).toBe(`preview:${root.id}`)
+  })
+
+  it('预览节点居中平移计算使用 100% 缩放 (zoom=1) 且垂直居中 (verticalRatio=0.5)', () => {
+    const view = { width: 1200, height: 800 }
+    const previewBox = { x: 300, y: 100, width: 500, height: 700 }
+    const pan = centerPanFor(previewBox, view, 1.0, 0.5)
+    expect(pan.x).toBe(1200 / 2 - (300 + 250))
+    expect(pan.y).toBe(800 * 0.5 - (100 + 350))
+    expect(pan.x).toBe(50)
+    expect(pan.y).toBe(-50)
   })
 })

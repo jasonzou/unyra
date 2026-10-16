@@ -24,6 +24,7 @@ import { bootstrapUsers } from '../user/store'
 import { reconcileBackgroundAssets } from '../user/background'
 import { restoreSession, type Session } from '../user/session'
 import { hydrateLearnStore } from '../learn/store'
+import { autoMigrateIfNeeded } from './migration/autoMigrate'
 import { loadPlugins } from './plugins'
 // 内置功能性插件要在 loadPlugins 之前完成登记（开关按 id 认它，见 lib/plugins）
 import './voice/plugin'
@@ -51,6 +52,9 @@ export async function enterUserScope(uid: string | null): Promise<void> {
   await hydrateUsageLog(uid)
   // 自由聊天的会话同样跟着用户走（users/{uid}/free-chat.json，learn/freeChat）
   await hydrateFreeChat(uid)
+  if (uid) {
+    await autoMigrateIfNeeded(uid)
+  }
   await hydrateLearnStore(uid)
   startupMark('r:learn-done')
   refreshAppearance()

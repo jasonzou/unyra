@@ -54,6 +54,7 @@
     "lucide-react": "^1.48.0",
     "marked": "^18.0.14",
     "marked-katex-extension": "^5.1.13",
+    "mermaid": "^12.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "sherpa-onnx-node": "^1.13.8",

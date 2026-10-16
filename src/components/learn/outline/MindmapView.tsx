@@ -22,10 +22,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
+  ExternalLink,
   FileText,
   FlaskConical,
   FolderMinus,
   FolderPlus,
+  HelpCircle,
   Maximize2,
   Minus,
   Palette,
@@ -36,14 +38,72 @@ import {
 } from 'lucide-react'
 import type { KnowledgeNode, LearnStore, MasteryStatus, OutlineEntry, TabRef } from '../../../learn/types'
 import { notesOf, superDocsOf } from '../../../learn/types'
+import { findNote } from '../../../learn/notes'
+import { readSuperDoc } from '../../../learn/superdocs'
 import { outlineChildNodeOf, outlineEntryKey } from '../../../learn/outline'
 import { examsOfNode } from '../../../learn/graph'
 import { DocTypeIcon } from '../docTypes'
 import type { ExamActions, NodeDocActions } from '../explorer/types'
-import { ExamList } from '../explorer/DocRow'
 import { t } from '../../../i18n'
 import { TINT_PALETTE, tintColor, type TintSwatch } from './mindmapTint'
-import { SELECT_ZOOM, centerPanFor, edgeOtherEnd } from './mindmapNav'
+import { MINDMAP_MAX_ZOOM, MINDMAP_MIN_ZOOM, SELECT_ZOOM, centerPanFor, edgeOtherEnd } from './mindmapNav'
+import MarkdownView from '../../MarkdownView'
+import { renderNote } from '../../../lib/markdown'
+import {
+  attemptScore,
+  examTotalPoints,
+  QUESTION_TYPE_LABEL,
+} from '../../../learn/exam'
+
+export type PreviewKind = 'doc' | 'note' | 'exam' | 'super'
+
+export interface ActivePreviewInfo {
+  parentNodeId: string
+  kind: PreviewKind
+  title: string
+  noteName?: string
+  superName?: string
+  examId?: string
+  attemptId?: string
+}
+
+export const PREVIEW_CARD_W = 500
+export const PREVIEW_CARD_H = 700
+
+export const PREVIEW_TYPE_THEME: Record<
+  PreviewKind,
+  {
+    label: string
+    color: string
+    border: string
+    bgMix: string
+  }
+> = {
+  doc: {
+    label: '教学文档',
+    color: '#059669',
+    border: '#10b981',
+    bgMix: '#059669',
+  },
+  note: {
+    label: '笔记',
+    color: '#d97706',
+    border: '#f59e0b',
+    bgMix: '#d97706',
+  },
+  exam: {
+    label: '考试记录',
+    color: '#9333ea',
+    border: '#a855f7',
+    bgMix: '#9333ea',
+  },
+  super: {
+    label: '超级文档',
+    color: '#2563eb',
+    border: '#3b82f6',
+    bgMix: '#2563eb',
+  },
+}
 
 export interface MindmapViewProps {
   store: LearnStore
@@ -165,6 +225,10 @@ export interface MindmapNodeData {
   width: number
   height: number
   subtreeHeight: number
+  // 预览节点特性
+  isPreview?: boolean
+  previewInfo?: ActivePreviewInfo
+  previewParentNode?: KnowledgeNode
 }
 
 interface MindmapEdge {
@@ -222,7 +286,11 @@ const TIP_BORDER = 2
  * 递归构建以 node 为根的思维导图节点树。
  * 遵循严格规矩：思维导图仅包括 node 本身和其子孙节点，绝不渲染父级节点。
  */
-export function buildMindmapTree(store: LearnStore, rootNode: KnowledgeNode): MindmapNodeData {
+export function buildMindmapTree(
+  store: LearnStore,
+  rootNode: KnowledgeNode,
+  activePreview?: ActivePreviewInfo | null,
+): MindmapNodeData {
   const visited = new Set<string>()
 
   function buildNode(
@@ -235,6 +303,30 @@ export function buildMindmapTree(store: LearnStore, rootNode: KnowledgeNode): Mi
     visited.add(curNode.id)
     const outline = curNode.outline
     const children: MindmapNodeData[] = []
+
+    // 若当前节点挂载了活动的文档/笔记/试卷/超级文档预览子节点，将其作为子节点插入
+    if (activePreview && curNode.id === activePreview.parentNodeId) {
+      children.push({
+        id: `preview:${curNode.id}`,
+        key: `preview:${curNode.id}`,
+        title: activePreview.title,
+        summary: '',
+        status: 'learning',
+        isRoot: false,
+        depth: depth + 1,
+        branchIndex,
+        realNode: null,
+        children: [],
+        x: 0,
+        y: 0,
+        width: PREVIEW_CARD_W,
+        height: PREVIEW_CARD_H,
+        subtreeHeight: 0,
+        isPreview: true,
+        previewInfo: activePreview,
+        previewParentNode: curNode,
+      })
+    }
 
     if (outline?.children?.length) {
       for (let i = 0; i < outline.children.length; i++) {
@@ -407,7 +499,7 @@ type DocKey = 'note' | 'exam' | 'super'
  * 会糊成一片，所以颜色必须铺满整张卡片。
  */
 const CARD_BASE =
-  'group/card absolute cursor-pointer overflow-visible rounded-xl backdrop-blur-md transition-[box-shadow,transform] duration-150'
+  'group/card absolute cursor-pointer overflow-visible rounded-xl backdrop-blur-md moji-node-sprout transition-[left,top,box-shadow,transform] duration-300 ease-[cubic-bezier(0.2,0,0,1)]'
 
 /** 按比例把某个颜色混进透明 / 卡片底色（CSS color-mix，运行时按主题解析） */
 function mix(color: string, pct: number, base = 'transparent'): string {
@@ -468,6 +560,8 @@ export default function MindmapView({
 }: MindmapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
+  const isSpacePressedRef = useRef(false)
+  const isMiddleDownRef = useRef(false)
   const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
 
   const [pan, setPan] = useState({ x: PADDING, y: PADDING })
@@ -671,9 +765,65 @@ export default function MindmapView({
    */
   const [openTip, setOpenTip] = useState<{ id: string; key: DocKey; anchorX: number } | null>(null)
 
+  /** 活动的文档/笔记/试卷/超级文档预览节点配置（500*700 只读，可活动替换与关闭） */
+  const [activePreview, setActivePreview] = useState<ActivePreviewInfo | null>(null)
+  const [isClosingPreview, setIsClosingPreview] = useState(false)
+  const closeTimerRef = useRef<number | null>(null)
+
+  const openPreview = useCallback((info: ActivePreviewInfo) => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+    setIsClosingPreview(false)
+    // 展开父节点
+    setCollapsedIds((prev) => {
+      if (prev.has(info.parentNodeId)) {
+        const next = new Set(prev)
+        next.delete(info.parentNodeId)
+        return next
+      }
+      return prev
+    })
+    setActivePreview(info)
+    setSelectedId(`preview:${info.parentNodeId}`)
+  }, [])
+
+  const closePreview = useCallback(() => {
+    if (!activePreview || isClosingPreview) return
+    setIsClosingPreview(true)
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = window.setTimeout(() => {
+      setActivePreview(null)
+      setIsClosingPreview(false)
+      closeTimerRef.current = null
+      setSelectedId((prev) => (prev?.startsWith('preview:') ? activePreview.parentNodeId : prev))
+    }, 200)
+  }, [activePreview, isClosingPreview])
+
+  const activePreviewRef = useRef(activePreview)
+  activePreviewRef.current = activePreview
+  const isClosingPreviewRef = useRef(isClosingPreview)
+  isClosingPreviewRef.current = isClosingPreview
+  const closePreviewRef = useRef(closePreview)
+  closePreviewRef.current = closePreview
+
+  // 当相机缩放尺寸小于 80% (0.8) 时，如果场上存在预览节点则自动收起
+  useEffect(() => {
+    if (zoom < 0.8 && activePreview && !isClosingPreview) {
+      closePreview()
+    }
+  }, [zoom, activePreview, isClosingPreview, closePreview])
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    }
+  }, [])
+
   // 构建思维导图并计算几何布局
   const { nodes, edges, totalWidth, totalHeight, rawTree } = useMemo(() => {
-    const tree = buildMindmapTree(store, node)
+    const tree = buildMindmapTree(store, node, activePreview)
     computeSubtreeHeights(tree, collapsedIds)
     assignCoordinates(tree, 0, 0, collapsedIds)
 
@@ -717,7 +867,7 @@ export default function MindmapView({
       totalHeight: Math.max(450, h),
       rawTree: tree,
     }
-  }, [store, node, collapsedIds])
+  }, [store, node, collapsedIds, activePreview])
 
   // 折叠 / 展开单个节点
   const toggleCollapse = useCallback((id: string, e: React.MouseEvent) => {
@@ -757,7 +907,7 @@ export default function MindmapView({
     const padY = 72
     const scaleX = (rect.width - padX) / totalWidth
     const scaleY = (rect.height - padY) / totalHeight
-    const newZoom = Math.min(1.2, Math.max(0.25, Math.min(scaleX, scaleY)))
+    const newZoom = Math.min(MINDMAP_MAX_ZOOM, Math.max(MINDMAP_MIN_ZOOM, Math.min(scaleX, scaleY)))
     const roundedZoom = Math.round(newZoom * 100) / 100
     const nextPan = {
       x: (rect.width - totalWidth * roundedZoom) / 2,
@@ -816,6 +966,27 @@ export default function MindmapView({
   )
 
   /**
+   * 预览节点获得焦点时，相机缩放改为 100% (1.0)，并将文档居中
+   */
+  const centerOnPreview = useCallback(
+    (target: MindmapNodeData) => {
+      if (!containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return
+      // 预览节点获得焦点时相机缩放固定为 100% (1.0)
+      const PREVIEW_ZOOM = 1.0
+      // 垂直与水平绝对居中 (verticalRatio = 0.5)
+      const nextPan = centerPanFor(target, rect, PREVIEW_ZOOM, 0.5)
+      triggerTransition()
+      panRef.current = nextPan
+      zoomRef.current = PREVIEW_ZOOM
+      setZoom(PREVIEW_ZOOM)
+      setPan(nextPan)
+    },
+    [triggerTransition],
+  )
+
+  /**
    * 选中某个节点。**点节点的任何部位都会走到这里**（卡片正文、标题、底栏按钮、
    * tip 里的行、右键菜单），这是「不管点哪儿都算选中」那一句的落点。
    *
@@ -827,10 +998,98 @@ export default function MindmapView({
     (target: MindmapNodeData): void => {
       if (selectedId === target.id) return
       setSelectedId(target.id)
-      centerOnNode(target)
+      if (target.isPreview) {
+        centerOnPreview(target)
+      } else {
+        centerOnNode(target)
+      }
     },
-    [selectedId, centerOnNode],
+    [selectedId, centerOnNode, centerOnPreview],
   )
+
+  // 当预览节点被创建或替换时，自动调整相机缩放与位置使其水平与垂直居中并包含文档
+  useEffect(() => {
+    if (!activePreview) return
+    const previewId = `preview:${activePreview.parentNodeId}`
+    const target = nodeIndex.get(previewId)
+    if (target) {
+      centerOnPreview(target)
+    }
+  }, [activePreview, nodeIndex, centerOnPreview])
+
+  const selectedIdRef = useRef(selectedId)
+  selectedIdRef.current = selectedId
+  const nodeIndexRef = useRef(nodeIndex)
+  nodeIndexRef.current = nodeIndex
+
+  /**
+   * 画面尺寸发生变化时自动校正相机位置：
+   * 当侧栏展开/收起、分屏调整或窗口尺寸改变时，如果当前有选中的节点，自动将其重新定位到水平居中、垂直40%；
+   * 若无选中节点，则按尺寸变化量等量平移，确保视觉中心点不偏移出画面，防止镜头切边或被遮挡。
+   *
+   * 采用与手势/滚轮一致的 ref + RAF + 防抖提交策略，避免尺寸过渡动画（如侧栏 300ms 过渡）过程中
+   * 逐帧调用 setPan 触发大量 React 重渲染导致与 DOM transform 冲突发生画面抽搐。
+   */
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+
+    let prevWidth = el.clientWidth
+    let prevHeight = el.clientHeight
+
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const { width, height } = entry.contentRect
+      if (width <= 0 || height <= 0) return
+
+      // 若先前处于隐藏状态（尺寸 <= 0），仅记录新尺寸，不触发平移
+      if (prevWidth <= 0 || prevHeight <= 0) {
+        prevWidth = width
+        prevHeight = height
+        return
+      }
+
+      const diffW = width - prevWidth
+      const diffH = height - prevHeight
+      // 忽略小于 0.5px 的亚像素微小抖动
+      if (Math.abs(diffW) < 0.5 && Math.abs(diffH) < 0.5) return
+
+      if (!isDraggingRef.current) {
+        const curSelectedId = selectedIdRef.current
+        const target = curSelectedId ? nodeIndexRef.current.get(curSelectedId) : null
+        let nextPan: { x: number; y: number }
+        if (target) {
+          if (target.isPreview) {
+            const fitZoomX = (width - 80) / target.width
+            const fitZoomY = (height - 80) / target.height
+            const desiredZoom = Math.max(MINDMAP_MIN_ZOOM, Math.min(MINDMAP_MAX_ZOOM, Math.min(fitZoomX, fitZoomY, 1.0)))
+            setZoom(desiredZoom)
+            zoomRef.current = desiredZoom
+            nextPan = centerPanFor(target, { width, height }, desiredZoom, 0.5)
+          } else {
+            nextPan = centerPanFor(target, { width, height }, zoomRef.current, 0.4)
+          }
+        } else {
+          nextPan = {
+            x: panRef.current.x + diffW / 2,
+            y: panRef.current.y + diffH / 2,
+          }
+        }
+        // 尺寸变动期间关闭 CSS transition，避免动画帧与 CSS 补间冲突导致抽搐
+        setIsTransitioning(false)
+        gestureRef.current = true
+        panRef.current = nextPan
+        schedulePaint()
+        scheduleCommit()
+      }
+      prevWidth = width
+      prevHeight = height
+    })
+
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [schedulePaint, scheduleCommit])
 
   /**
    * 开/关某个节点的某一类文档 tip（同时只开一个）。
@@ -876,9 +1135,13 @@ export default function MindmapView({
       if (!target) return
       // 走到这儿的两端必然不同（线不连自己），所以直接落位，不必再问「是不是已经选中」
       setSelectedId(target.id)
-      centerOnNode(target)
+      if (target.isPreview) {
+        centerOnPreview(target)
+      } else {
+        centerOnNode(target)
+      }
     },
-    [selectedId, nodeIndex, centerOnNode],
+    [selectedId, nodeIndex, centerOnNode, centerOnPreview],
   )
 
   // ---------- 右键改色菜单 ----------
@@ -909,7 +1172,7 @@ export default function MindmapView({
     }
   }, [tintMenu])
 
-  // 鼠标拖拽平移画布（支持左键空白处与中键滚轮拖动）
+  // 鼠标拖拽平移画布（支持中键滚轮拖动与按住空格键+左键拖动）
   const onMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       dragMovedRef.current = false
@@ -918,12 +1181,6 @@ export default function MindmapView({
       // 连线上的按下不算「点空白」：点线要跳到另一端，而那一头要靠当前选中是谁来判断，
       // 这里要是先把选中清掉，点线的语义就没了。
       const onEdge = !!target.closest('[data-mm-edge]')
-      if (selectedId !== null && !onCard && !onEdge) {
-        // 空白处一点就取消选中
-        setSelectedId(null)
-      }
-      if (target.closest('button, a, input')) return
-      if (!onCard) setOpenTip(null)
 
       /**
        * 只是「按下了」：记个起点，**什么都不改**。
@@ -941,9 +1198,18 @@ export default function MindmapView({
         }
       }
 
-      // 双击滚轮（中键）检测：双击滚轮自动缩放并居中完整显示思维导图
+      // 按住空格键 + 鼠标左键按下：拖拽平移画布
+      if (e.button === 0 && isSpacePressedRef.current) {
+        e.preventDefault()
+        isDraggingRef.current = true
+        armDrag()
+        return
+      }
+
+      // 中键按下：按住中键拖拽平移相机视角；双击中键恢复全图居中
       if (e.button === 1) {
         e.preventDefault()
+        isMiddleDownRef.current = true
         const now = Date.now()
         if (now - lastMiddleClickRef.current < 380) {
           fitView()
@@ -956,9 +1222,15 @@ export default function MindmapView({
         return
       }
 
-      if (e.button !== 0) return
-      isDraggingRef.current = true
-      armDrag()
+      if (selectedId !== null && !onCard && !onEdge) {
+        // 空白处一点就取消选中
+        setSelectedId(null)
+      }
+      if (target.closest('button, a, input')) return
+      if (!onCard) setOpenTip(null)
+
+      // 鼠标左键不再直接拖动相机视角，改为仅按住空格+左键或按住鼠标中键拖动；左键用于点击与选中交互
+      if (e.button === 0) return
     },
     [fitView, selectedId],
   )
@@ -1007,17 +1279,82 @@ export default function MindmapView({
   )
 
   const onMouseUp = useCallback(() => {
+    isMiddleDownRef.current = false
     if (!isDraggingRef.current) return
     isDraggingRef.current = false
+    if (containerRef.current) {
+      containerRef.current.style.cursor = isSpacePressedRef.current ? 'grab' : ''
+    }
     // 没进过平移态（只是点了一下，或者滚轮手势还没结束）：没有要交回的相机
     if (!gestureRef.current || !panningRef.current) return
     panningRef.current = false
-    if (containerRef.current) containerRef.current.style.cursor = ''
     setPanning(false)
     promoteCanvas(false)
     // 一次提交：把手势期间写在 DOM 上的结果交回 state，两边对齐
     commitCamera()
   }, [promoteCanvas, commitCamera])
+
+  // 监听空格键按下与释放：支持按住空格键+左键拖拽平移画布，以及全局 mouseup 兜底
+  useEffect(() => {
+    const isInputTarget = (target: EventTarget | null) => {
+      if (!target || !(target instanceof HTMLElement)) return false
+      const tag = target.tagName.toLowerCase()
+      return tag === 'input' || tag === 'textarea' || target.isContentEditable
+    }
+
+    const isVisible = () => {
+      const el = containerRef.current
+      if (!el) return false
+      return el.offsetWidth > 0 && el.offsetHeight > 0
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat && !isInputTarget(e.target)) {
+        if (!isVisible()) return
+        isSpacePressedRef.current = true
+        if (containerRef.current && !isDraggingRef.current) {
+          containerRef.current.style.cursor = 'grab'
+        }
+      }
+    }
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        isSpacePressedRef.current = false
+        if (containerRef.current && !isDraggingRef.current) {
+          containerRef.current.style.cursor = ''
+        }
+      }
+    }
+
+    const handleWindowBlur = () => {
+      isSpacePressedRef.current = false
+      isMiddleDownRef.current = false
+      if (containerRef.current && !isDraggingRef.current) {
+        containerRef.current.style.cursor = ''
+      }
+    }
+
+    const handleWindowMouseUp = (e: MouseEvent) => {
+      if (e.button === 1 || (e.buttons & 4) === 0) {
+        isMiddleDownRef.current = false
+      }
+      if (isDraggingRef.current) {
+        onMouseUp()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('blur', handleWindowBlur)
+    window.addEventListener('mouseup', handleWindowMouseUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', handleWindowBlur)
+      window.removeEventListener('mouseup', handleWindowMouseUp)
+    }
+  }, [onMouseUp])
 
   // 监听容器原生 wheel 事件并关闭 passive，以便 preventDefault 生效并消除浏览器警告；
   // 同时以鼠标所在位置为锚点进行缩放，使镜头向鼠标所指的目标精准推进或拉远
@@ -1026,46 +1363,78 @@ export default function MindmapView({
     if (!el) return
 
     const handleWheel = (e: WheelEvent) => {
+      const targetEl = e.target as HTMLElement | null
+      const isInsidePreview = Boolean(targetEl?.closest('[data-preview-card], [data-preview-scroll]'))
+
+      // 按住鼠标滚轮（鼠标中键）时禁用滚轮滚动，防止拖动画面的过程中意外触发缩放或滚动
+      if (isMiddleDownRef.current || (e.buttons & 4) !== 0) {
+        e.preventDefault()
+        return
+      }
+
+      // 如果滚轮事件发生在文档预览卡片内部且未按住 Ctrl/Cmd，则允许卡片正文区域正常原生滚动浏览，不拦截亦不平移画布
+      if (isInsidePreview && !e.ctrlKey && !e.metaKey) {
+        return
+      }
+
       e.preventDefault()
-      if (Math.abs(e.deltaY) < 0.1) return
 
-      const rect = el.getBoundingClientRect()
-      const cursorX = e.clientX - rect.left
-      const cursorY = e.clientY - rect.top
+      // 按住 Ctrl / Cmd 才能滚轮缩放
+      if (e.ctrlKey || e.metaKey) {
+        if (Math.abs(e.deltaY) < 0.1) return
 
-      // 缩放比率：支持平滑触控板与传统滚轮步进，向上滚放大，向下滚缩小
-      const factor = Math.min(1.25, Math.max(0.8, Math.exp(-e.deltaY * 0.0018)))
-      const curZoom = zoomRef.current
-      const curPan = panRef.current
+        const rect = el.getBoundingClientRect()
+        const cursorX = e.clientX - rect.left
+        const cursorY = e.clientY - rect.top
 
-      const rawNextZoom = curZoom * factor
-      const nextZoom = Math.min(2.5, Math.max(0.25, Math.round(rawNextZoom * 1000) / 1000))
-      if (Math.abs(nextZoom - curZoom) < 0.0001) return
+        // 缩放比率：支持平滑触控板与传统滚轮步进，向上滚放大，向下滚缩小
+        const factor = Math.min(1.25, Math.max(0.8, Math.exp(-e.deltaY * 0.0018)))
+        const curZoom = zoomRef.current
+        const curPan = panRef.current
 
-      // 以鼠标光标所在点为锚点：缩放前后鼠标指针下的画布世界坐标保持不动，镜头随鼠标朝向推进或拉远
-      const nextPanX = cursorX - ((cursorX - curPan.x) / curZoom) * nextZoom
-      const nextPanY = cursorY - ((cursorY - curPan.y) / curZoom) * nextZoom
+        const rawNextZoom = curZoom * factor
+        // 限制大纲视图的缩放最大尺度为 120%
+        const nextZoom = Math.min(MINDMAP_MAX_ZOOM, Math.max(MINDMAP_MIN_ZOOM, Math.round(rawNextZoom * 1000) / 1000))
+        if (Math.abs(nextZoom - curZoom) < 0.0001) return
 
-      /*
-       * 与拖动同一套：手势期间只写 DOM。触控板的滚轮事件是一串连续事件，
-       * 每一下都 setState 等于每一下都重渲染整棵导图；这里排一帧画一次，
-       * 等手上停下来（scheduleCommit）再把结果交回 state。
-       *
-       * 两处**故意与拖动不同**：
-       * - 不提升合成层（promoteCanvas）。提升之后这一层是一张现成的贴图，缩放会先把
-       *   它拉大再重画，中间那几帧是虚的；而缩放本来就要改倍率，不像纯平移那样能白拿。
-       * - 不关悬停反馈（setPanning）。缩放是**以光标为锚点**的（见上面那行），
-       *   光标底下那一点的世界坐标根本不动，卡片不会在指针底下换人——没有那场补间雨。
-       *
-       * 顺手指掉过渡：刚点完「+」就滚轮的话，那 240ms 里镜头会跟着过渡慢慢追，
-       * 手感像拖着一根橡皮筋。
-       */
-      setIsTransitioning(false)
-      gestureRef.current = true
-      panRef.current = { x: nextPanX, y: nextPanY }
-      zoomRef.current = nextZoom
-      schedulePaint()
-      scheduleCommit()
+        // 以鼠标光标所在点为锚点：缩放前后鼠标指针下的画布世界坐标保持不动，镜头随鼠标朝向推进或拉远
+        const nextPanX = cursorX - ((cursorX - curPan.x) / curZoom) * nextZoom
+        const nextPanY = cursorY - ((cursorY - curPan.y) / curZoom) * nextZoom
+
+        setIsTransitioning(false)
+        gestureRef.current = true
+        panRef.current = { x: nextPanX, y: nextPanY }
+        zoomRef.current = nextZoom
+        if (nextZoom < 0.8 && activePreviewRef.current && !isClosingPreviewRef.current) {
+          closePreviewRef.current()
+        }
+        schedulePaint()
+        scheduleCommit()
+      } else {
+        // 普通滚轮：让相机朝上朝下移动；按住 Shift 朝左右移动
+        // 减少鼠标滚轮位移量（系数 0.4），位移更细腻可控
+        const WHEEL_PAN_SPEED = 0.4
+        setIsTransitioning(false)
+        gestureRef.current = true
+
+        if (e.shiftKey) {
+          // Shift + 滚轮：左右移动相机视角
+          const rawDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+          const delta = rawDelta * WHEEL_PAN_SPEED
+          panRef.current = {
+            x: panRef.current.x - delta,
+            y: panRef.current.y,
+          }
+        } else {
+          // 垂直移动：上下移动相机视角
+          panRef.current = {
+            x: panRef.current.x - e.deltaX * WHEEL_PAN_SPEED,
+            y: panRef.current.y - e.deltaY * WHEEL_PAN_SPEED,
+          }
+        }
+        schedulePaint()
+        scheduleCommit()
+      }
     }
 
     el.addEventListener('wheel', handleWheel, { passive: false })
@@ -1081,7 +1450,7 @@ export default function MindmapView({
     const cy = rect.height / 2
     const curZoom = zoomRef.current
     const curPan = panRef.current
-    const nextZoom = Math.min(2.5, Math.round((curZoom + 0.15) * 100) / 100)
+    const nextZoom = Math.min(MINDMAP_MAX_ZOOM, Math.round((curZoom + 0.15) * 100) / 100)
     if (nextZoom === curZoom) return
     const nextPan = {
       x: cx - ((cx - curPan.x) / curZoom) * nextZoom,
@@ -1101,7 +1470,7 @@ export default function MindmapView({
     const cy = rect.height / 2
     const curZoom = zoomRef.current
     const curPan = panRef.current
-    const nextZoom = Math.max(0.25, Math.round((curZoom - 0.15) * 100) / 100)
+    const nextZoom = Math.max(MINDMAP_MIN_ZOOM, Math.round((curZoom - 0.15) * 100) / 100)
     if (nextZoom === curZoom) return
     const nextPan = {
       x: cx - ((cx - curPan.x) / curZoom) * nextZoom,
@@ -1112,6 +1481,9 @@ export default function MindmapView({
     zoomRef.current = nextZoom
     setPan(nextPan)
     setZoom(nextZoom)
+    if (nextZoom < 0.8 && activePreview && !isClosingPreview) {
+      closePreview()
+    }
   }, [triggerTransition])
 
   const resetZoom = useCallback(() => {
@@ -1143,7 +1515,7 @@ export default function MindmapView({
       onMouseUp={onMouseUp}
       onMouseLeave={onMouseUp}
       onDoubleClick={onDoubleClick}
-      className="bg-dot-grid relative h-full w-full cursor-grab select-none overflow-hidden"
+      className="bg-dot-grid relative h-full w-full select-none overflow-hidden"
     >
       {/* 缩放/平移的思维导图主画布 */}
       <div
@@ -1156,7 +1528,7 @@ export default function MindmapView({
            * 手势（拖动 / 滚轮）期间由 paintCamera 直接写 DOM 抢在前面，
            * 并由那个 layout effect 在每次渲染后补回手势的值——两者不打架的原因见 panRef 那段。
            */
-          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
           width: totalWidth,
           height: totalHeight,
         }}
@@ -1192,8 +1564,12 @@ export default function MindmapView({
                 ? BRANCH_PALETTES[edge.branchIndex % BRANCH_PALETTES.length]
                 : null
 
-            const strokeColor =
-              edge.status === 'mastered'
+            const isPreviewEdge = edge.to.startsWith('preview:')
+            const pTheme = isPreviewEdge && activePreview ? PREVIEW_TYPE_THEME[activePreview.kind] : null
+
+            const strokeColor = pTheme
+              ? pTheme.border
+              : edge.status === 'mastered'
                 ? 'url(#edge-grad-mastered)'
                 : edge.status === 'uncreated'
                   ? 'url(#edge-grad-line)'
@@ -1201,8 +1577,9 @@ export default function MindmapView({
                     ? `url(#edge-grad-${edge.branchIndex % BRANCH_PALETTES.length})`
                     : 'var(--color-seal)'
 
-            const glowColor =
-              edge.status === 'mastered'
+            const glowColor = pTheme
+              ? pTheme.color
+              : edge.status === 'mastered'
                 ? 'var(--color-ok)'
                 : pal
                   ? pal.color
@@ -1225,6 +1602,10 @@ export default function MindmapView({
                   stroke={glowColor}
                   strokeWidth={6}
                   strokeOpacity={isDark ? 0.18 : 0.12}
+                  style={{
+                    transition: 'd 300ms cubic-bezier(0.2, 0, 0, 1), opacity 200ms ease',
+                    opacity: isPreviewEdge && isClosingPreview ? 0 : 1,
+                  }}
                 />
                 {/* 悬停高亮：一亮就说明「这条线点得动」。与选中节点相连的那几条平时也透着一点，
                     扫一眼就知道从这里能往哪走 */}
@@ -1240,18 +1621,34 @@ export default function MindmapView({
                     (panning ? '' : 'transition-opacity duration-150 group-hover/edge:opacity-30 ') +
                     (connected ? 'opacity-15' : 'opacity-0')
                   }
+                  style={{
+                    transition: 'd 300ms cubic-bezier(0.2, 0, 0, 1)',
+                  }}
                 />
                 {/* 主分支曲线 */}
                 <path
                   d={pathData}
                   fill="none"
                   stroke={strokeColor}
-                  strokeWidth={edge.status === 'uncreated' ? 1.75 : 2.5}
+                  strokeWidth={isPreviewEdge ? 3 : edge.status === 'uncreated' ? 1.75 : 2.5}
                   strokeDasharray={strokeDash}
                   strokeLinecap="round"
+                  style={{
+                    transition: 'd 300ms cubic-bezier(0.2, 0, 0, 1), opacity 200ms ease',
+                    opacity: isPreviewEdge && isClosingPreview ? 0 : 1,
+                  }}
                 />
                 {/* 起始连接珠 */}
-                <circle cx={edge.x1} cy={edge.y1} r={3} fill={glowColor} opacity={0.7} />
+                <circle
+                  cx={edge.x1}
+                  cy={edge.y1}
+                  r={3}
+                  fill={glowColor}
+                  opacity={isPreviewEdge && isClosingPreview ? 0 : 0.7}
+                  style={{
+                    transition: 'cx 300ms cubic-bezier(0.2, 0, 0, 1), cy 300ms cubic-bezier(0.2, 0, 0, 1), opacity 200ms ease',
+                  }}
+                />
                 {/* 终点连接珠 */}
                 <circle
                   cx={edge.x2}
@@ -1264,7 +1661,10 @@ export default function MindmapView({
                         ? 'var(--color-ink-faint)'
                         : glowColor
                   }
-                  opacity={0.85}
+                  opacity={isPreviewEdge && isClosingPreview ? 0 : 0.85}
+                  style={{
+                    transition: 'cx 300ms cubic-bezier(0.2, 0, 0, 1), cy 300ms cubic-bezier(0.2, 0, 0, 1), opacity 200ms ease',
+                  }}
                 />
                 {/*
                   点击热区：一条 2.5px 的曲线是点不中的，所以另铺一条 16px 的透明线来收点击。
@@ -1279,7 +1679,7 @@ export default function MindmapView({
                   stroke="transparent"
                   strokeWidth={16}
                   strokeLinecap="round"
-                  style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                  style={{ pointerEvents: 'stroke', cursor: 'pointer', transition: 'd 300ms cubic-bezier(0.2, 0, 0, 1)' }}
                   onClick={(e) => {
                     e.stopPropagation()
                     onEdgeClick(edge)
@@ -1294,6 +1694,24 @@ export default function MindmapView({
 
         {/* HTML 节点卡片层 */}
         {nodes.map((item) => {
+          if (item.isPreview && item.previewInfo) {
+            return (
+              <PreviewNodeCard
+                key={item.id}
+                item={item}
+                activePreview={item.previewInfo}
+                store={store}
+                docs={docs}
+                exams={exams}
+                onOpenNode={onOpenNode}
+                onClose={closePreview}
+                onSelect={() => selectNode(item)}
+                selected={selectedId === item.id}
+                isClosing={isClosingPreview}
+              />
+            )
+          }
+
           const isCollapsed = collapsedIds.has(item.id)
           const hasChildren = item.children.length > 0
           const pal = item.branchIndex >= 0 ? BRANCH_PALETTES[item.branchIndex % BRANCH_PALETTES.length] : null
@@ -1387,18 +1805,35 @@ export default function MindmapView({
                    * 点它 = 选中这个节点 + 打开教学文档，两件事一起做——标题既是这一支的名字，
                    * 也是它的正文入口，没有理由要用户点两下。
                    */
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      selectNode(item)
-                      onOpenNode(item.realNode!.id)
-                    }}
-                    title={t('打开「{0}」的教学文档', item.title)}
-                    className="block w-full truncate text-left text-[14px] leading-snug font-bold text-seal underline decoration-seal/40 decoration-1 underline-offset-[3px] transition hover:text-seal-deep hover:decoration-seal"
-                  >
-                    {item.title}
-                  </button>
+                  <div className="flex items-center gap-1 min-w-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openPreview({
+                          parentNodeId: item.id,
+                          kind: 'doc',
+                          title: item.title,
+                        })
+                      }}
+                      title={t('预览「{0}」的教学文档', item.title)}
+                      className="truncate text-left text-[14px] leading-snug font-bold text-seal underline decoration-seal/40 decoration-1 underline-offset-[3px] transition hover:text-seal-deep hover:decoration-seal flex-1"
+                    >
+                      {item.title}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        selectNode(item)
+                        onOpenNode(item.realNode!.id)
+                      }}
+                      title={t('在页签栏打开教学文档')}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-seal hover:bg-seal/10 transition"
+                    >
+                      <ExternalLink size={12} />
+                    </button>
+                  </div>
                 ) : (
                   <span
                     className="block truncate text-[14px] leading-snug font-semibold text-ink-soft"
@@ -1568,7 +2003,9 @@ export default function MindmapView({
                   docs={docs}
                   exams={exams}
                   activeTab={activeTab}
+                  activePreview={activePreview}
                   onClose={() => setOpenTip(null)}
+                  onPreview={openPreview}
                 />
               )}
             </div>
@@ -1583,7 +2020,7 @@ export default function MindmapView({
         会正好压在这块面板上，把唯一的按钮埋掉——而那时卡片底栏的「生成」就是同一个动作，
         用户不会因此少一条路。
       */}
-      {rawTree.children.length === 0 && selectedId === null && (
+      {rawTree.children.filter((c) => !c.isPreview).length === 0 && selectedId === null && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
           <div className="pointer-events-auto flex max-w-sm flex-col items-center rounded-2xl border border-line/60 bg-paper/90 px-8 py-7 text-center shadow-lg backdrop-blur-md dark:bg-card/90">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-seal/25 bg-seal/10 text-seal">
@@ -1620,7 +2057,7 @@ export default function MindmapView({
           <FolderMinus size={13} />
         </ToolbarButton>
         <span className="mx-1 h-4 w-px bg-line/60" />
-        <ToolbarButton onClick={zoomOut} title={t('缩小 (滚轮下)')}>
+        <ToolbarButton onClick={zoomOut} title={t('缩小 (Ctrl+滚轮下)')} disabled={zoom <= MINDMAP_MIN_ZOOM}>
           <Minus size={13} />
         </ToolbarButton>
         <button
@@ -1631,7 +2068,7 @@ export default function MindmapView({
         >
           {Math.round(zoom * 100)}%
         </button>
-        <ToolbarButton onClick={zoomIn} title={t('放大 (滚轮上)')}>
+        <ToolbarButton onClick={zoomIn} title={t('放大 (Ctrl+滚轮上)')} disabled={zoom >= MINDMAP_MAX_ZOOM}>
           <Plus size={13} />
         </ToolbarButton>
         <span className="mx-1 h-4 w-px bg-line/60" />
@@ -1641,6 +2078,8 @@ export default function MindmapView({
         <ToolbarButton onClick={resetZoom} title={t('归位')}>
           <RotateCcw size={13} />
         </ToolbarButton>
+        <span className="mx-1 h-4 w-px bg-line/60" />
+        <OutlineHelpButton />
       </div>
 
       {/* 左下角图例：状态辨认 + 分支色 + 改色提示，收进一颗小胶囊 */}
@@ -1672,24 +2111,95 @@ export default function MindmapView({
   )
 }
 
+/**
+ * 大纲页面右下角帮助按钮：鼠标经过时弹出 tip 显示操作说明
+ */
+function OutlineHelpButton() {
+  const [showTip, setShowTip] = useState(false)
+
+  return (
+    <div
+      className="relative flex items-center"
+      onMouseEnter={() => setShowTip(true)}
+      onMouseLeave={() => setShowTip(false)}
+    >
+      <button
+        type="button"
+        title={t('操作说明')}
+        aria-label={t('操作说明')}
+        className={`flex h-7 w-7 items-center justify-center rounded-full text-ink-soft transition hover:bg-paper-deep hover:text-ink ${
+          showTip ? 'bg-paper-deep text-ink' : ''
+        }`}
+      >
+        <HelpCircle size={13} />
+      </button>
+
+      {showTip && (
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute right-0 bottom-full mb-2.5 w-72 select-none rounded-2xl border border-line-strong/80 bg-paper/95 p-3.5 shadow-2xl backdrop-blur-md dark:bg-card/95"
+        >
+          <div className="mb-2.5 flex items-center gap-1.5 border-b border-line/60 pb-2">
+            <HelpCircle size={14} className="text-seal" />
+            <span className="text-[12.5px] font-semibold text-ink">{t('思维导图操作说明')}</span>
+          </div>
+          <div className="space-y-2 text-[11px] leading-relaxed text-ink-soft">
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 font-medium text-ink">{t('平移画面')}</span>
+              <span className="text-right text-ink-faint">{t('中键拖拽 / 空格+左键拖拽')}</span>
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 font-medium text-ink">{t('缩放画面')}</span>
+              <span className="text-right text-ink-faint">{t('Ctrl+滚轮（最大 120%）')}</span>
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 font-medium text-ink">{t('画面滚动')}</span>
+              <span className="text-right text-ink-faint">{t('滚轮上下 / Shift+滚轮左右')}</span>
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 font-medium text-ink">{t('聚焦节点')}</span>
+              <span className="text-right text-ink-faint">{t('点击节点（置于垂直 40%）')}</span>
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 font-medium text-ink">{t('跳转对端')}</span>
+              <span className="text-right text-ink-faint">{t('点击连线跳到所连节点')}</span>
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 font-medium text-ink">{t('全图居中')}</span>
+              <span className="text-right text-ink-faint">{t('双击空白处 / 中键双击')}</span>
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 font-medium text-ink">{t('节点改色')}</span>
+              <span className="text-right text-ink-faint">{t('右键点击节点打开改色面板')}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** 悬浮工具栏里的一颗按钮：图标 + 可选文字；圆形 hover 底，与胶囊外框呼应 */
 function ToolbarButton({
   onClick,
   title,
   label,
   children,
+  disabled = false,
 }: {
   onClick: () => void
   title: string
   label?: string
   children: React.ReactNode
+  disabled?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
-      className="flex h-7 items-center justify-center gap-1 rounded-full px-2 text-[11px] font-medium text-ink-soft transition hover:bg-paper-deep hover:text-ink active:scale-95"
+      disabled={disabled}
+      className="flex h-7 items-center justify-center gap-1 rounded-full px-2 text-[11px] font-medium text-ink-soft transition hover:bg-paper-deep hover:text-ink active:scale-95 disabled:pointer-events-none disabled:opacity-35"
     >
       {children}
       {label && <span>{label}</span>}
@@ -1729,7 +2239,9 @@ function NodeDocTip({
   docs,
   exams,
   activeTab,
+  activePreview,
   onClose,
+  onPreview,
 }: {
   node: KnowledgeNode
   kind: DocKey
@@ -1739,13 +2251,36 @@ function NodeDocTip({
   docs: NodeDocActions
   exams: ExamActions
   activeTab: TabRef | null
+  activePreview?: ActivePreviewInfo | null
   onClose: () => void
+  onPreview: (info: ActivePreviewInfo) => void
 }) {
-  // 一次只开一份试卷的历次考试（与侧栏同一套做法）
-  const [openExam, setOpenExam] = useState<string | null>(null)
   const notes = notesOf(node)
   const supers = superDocsOf(node)
   const nodeExams = examsOfNode(store, node.id)
+
+  const [expandedExamIds, setExpandedExamIds] = useState<Set<string>>(() => {
+    const initial = new Set<string>()
+    if (activePreview?.kind === 'exam' && activePreview.examId) {
+      initial.add(activePreview.examId)
+    }
+    if (activeTab?.kind === 'exam' && activeTab.examId) {
+      initial.add(activeTab.examId)
+    }
+    return initial
+  })
+
+  const toggleExam = (examId: string) => {
+    setExpandedExamIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(examId)) {
+        next.delete(examId)
+      } else {
+        next.add(examId)
+      }
+      return next
+    })
+  }
 
   const rows =
     kind === 'note' ? notes.length : kind === 'exam' ? nodeExams.length : supers.length
@@ -1860,6 +2395,14 @@ function NodeDocTip({
                 activeTab?.kind === 'note' && activeTab.nodeId === node.id && activeTab.note === note.name
               }
               docs={docs}
+              onPreview={() =>
+                onPreview({
+                  parentNodeId: node.id,
+                  kind: 'note',
+                  title: note.name,
+                  noteName: note.name,
+                })
+              }
             />
           ))}
 
@@ -1869,31 +2412,134 @@ function NodeDocTip({
               key={sd.name}
               icon={<DocTypeIcon kind="super" size={12} />}
               label={sd.name}
-              hint={t('打开《{0}》', sd.name)}
+              hint={t('预览《{0}》', sd.name)}
               active={
                 activeTab?.kind === 'super' && activeTab.nodeId === node.id && activeTab.name === sd.name
               }
-              onOpen={() => docs.onOpenSuperDoc(node.id, sd.name)}
+              onOpen={() =>
+                onPreview({
+                  parentNodeId: node.id,
+                  kind: 'super',
+                  title: sd.name,
+                  superName: sd.name,
+                })
+              }
+              onOpenTab={() => docs.onOpenSuperDoc(node.id, sd.name)}
               onDelete={() => docs.onDeleteSuperDoc(node.id, sd.name)}
               icon2={<FlaskConical size={11} />}
             />
           ))}
 
-        {kind === 'exam' && (
-          <ExamList
-            nodeExams={nodeExams}
-            node={node}
-            docs={docs}
-            exams={exams}
-            activeTab={activeTab}
-            openExam={openExam}
-            setOpenExam={setOpenExam}
-            onOpenMenu={() => {
-              /* 图里不做右键菜单：菜单是侧栏那一套（那一行能做什么），
-                 图上的 tip 只给「打开 / 删除」两件最直接的事 */
-            }}
-          />
-        )}
+        {kind === 'exam' &&
+          nodeExams.map((exam) => {
+            const isExpanded = expandedExamIds.has(exam.id)
+            const hasAttempts = exam.attempts.length > 0
+            return (
+              <div key={exam.id} className="flex flex-col gap-0.5 border-b border-line/40 pb-1 last:border-b-0">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  title={
+                    hasAttempts
+                      ? isExpanded
+                        ? t('收起考试记录')
+                        : t('展开考试记录')
+                      : t('暂无考试记录')
+                  }
+                  onClick={() => {
+                    if (hasAttempts) {
+                      toggleExam(exam.id)
+                    }
+                  }}
+                  className={`group/row flex w-full items-center gap-1.5 rounded-md py-1 pl-1.5 pr-1 text-left text-[11.5px] transition text-ink-soft hover:bg-line/40 hover:text-ink ${
+                    hasAttempts ? 'cursor-pointer' : 'cursor-default'
+                  }`}
+                >
+                  <DocTypeIcon kind="exam" size={12} />
+                  <span className="min-w-0 flex-1 truncate font-medium">{exam.title}</span>
+                  <span className="shrink-0 text-[10px] text-ink-faint">
+                    {hasAttempts ? t('{0} 次考试', exam.attempts.length) : t('未考')}
+                  </span>
+                  {hasAttempts && (
+                    <ChevronDown
+                      size={12}
+                      className={`shrink-0 text-ink-faint transition-transform duration-200 ${
+                        isExpanded ? '' : '-rotate-90'
+                      }`}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    title={t('在页签栏开考')}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      exams.onStart(node.id, exam.id)
+                    }}
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-seal/10 hover:text-seal transition cursor-pointer"
+                  >
+                    <ExternalLink size={11} />
+                  </button>
+                </div>
+                {isExpanded && hasAttempts && (
+                  <div className="pl-4 flex flex-col gap-0.5 mt-0.5">
+                    {exam.attempts.map((att, idx) => {
+                      const when = new Date(att.startedAt)
+                      const stamp =
+                        when.getMonth() + 1 + '/' + when.getDate() +
+                        ' ' + String(when.getHours()).padStart(2, '0') +
+                        ':' + String(when.getMinutes()).padStart(2, '0')
+                      const scoreVal = attemptScore(att)
+                      const scoreStr = scoreVal != null ? `(${scoreVal}分)` : ''
+                      const isAttActive =
+                        (activePreview?.kind === 'exam' &&
+                          activePreview.examId === exam.id &&
+                          activePreview.attemptId === att.id) ||
+                        (activeTab?.kind === 'exam' &&
+                          activeTab.examId === exam.id &&
+                          activeTab.attemptId === att.id)
+                      return (
+                        <div
+                          key={att.id}
+                          role="button"
+                          tabIndex={0}
+                          title={t('预览第 {0} 次作答副本', idx + 1)}
+                          onClick={() =>
+                            onPreview({
+                              parentNodeId: node.id,
+                              kind: 'exam',
+                              title: `${exam.title} (${stamp})`,
+                              examId: exam.id,
+                              attemptId: att.id,
+                            })
+                          }
+                          className={`group/row flex w-full items-center gap-1 rounded py-0.5 pl-1.5 pr-1 text-[10.5px] transition cursor-pointer ${
+                            isAttActive
+                              ? 'bg-seal/10 font-medium text-seal'
+                              : 'text-ink-faint hover:bg-line/30 hover:text-ink'
+                          }`}
+                        >
+                          <span className="truncate flex-1">
+                            #{idx + 1} · {stamp} {scoreStr}
+                          </span>
+                          <button
+                            type="button"
+                            title={t('在页签栏打开本次考试副本')}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              docs.onOpenAttempt(node.id, exam.id, att.id)
+                            }}
+                            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-seal/10 hover:text-seal transition"
+                          >
+                            <ExternalLink size={10} />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
       </div>
     </div>
   )
@@ -1908,20 +2554,23 @@ function NoteTipRow({
   name,
   active,
   docs,
+  onPreview,
 }: {
   node: KnowledgeNode
   name: string
   active: boolean
   docs: NodeDocActions
+  onPreview: () => void
 }) {
   const [renaming, setRenaming] = useState(false)
   return (
     <TipRow
       icon={<DocTypeIcon kind="note" size={12} />}
       label={name}
-      hint={t('打开《{0}》；双击改名', name)}
+      hint={t('预览《{0}》；双击改名', name)}
       active={active}
-      onOpen={() => docs.onOpenNote(node.id, name)}
+      onOpen={onPreview}
+      onOpenTab={() => docs.onOpenNote(node.id, name)}
       onDoubleClick={() => setRenaming(true)}
       onDelete={() => docs.onDeleteNote(node.id, name)}
       renaming={
@@ -1984,6 +2633,7 @@ function TipRow({
   hint,
   active,
   onOpen,
+  onOpenTab,
   onDelete,
   onDoubleClick,
   renaming,
@@ -1994,6 +2644,7 @@ function TipRow({
   hint: string
   active: boolean
   onOpen: () => void
+  onOpenTab?: () => void
   onDelete: () => void
   onDoubleClick?: () => void
   /** 就地改名时整行换成输入框 */
@@ -2015,13 +2666,26 @@ function TipRow({
         if (e.key === 'Enter') onOpen()
       }}
       className={
-        'group/row flex w-full items-center gap-1.5 rounded-md py-1 pl-1.5 pr-1 text-left text-[11.5px] transition ' +
+        'group/row flex w-full items-center gap-1.5 rounded-md py-1 pl-1.5 pr-1 text-left text-[11.5px] transition cursor-pointer ' +
         (active ? 'bg-line/60 text-ink-strong' : 'text-ink-soft hover:bg-line/40 hover:text-ink')
       }
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {icon2 && <span className="shrink-0 text-ink-faint">{icon2}</span>}
+      {onOpenTab && (
+        <button
+          type="button"
+          title={t('在页签栏打开《{0}》', label)}
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpenTab()
+          }}
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-seal/10 hover:text-seal transition"
+        >
+          <ExternalLink size={11} />
+        </button>
+      )}
       <button
         type="button"
         title={t('删除《{0}》', label)}
@@ -2134,4 +2798,305 @@ function usePrefersDark(): boolean {
     return () => mq.removeEventListener('change', on)
   }, [])
   return dark
+}
+
+/**
+ * 预览子节点卡片：
+ * 尺寸 400 * 600，只读预览教学文档、笔记、试卷/考试记录、超级文档。
+ * 顶部带有类型徽章、标题、在页签栏打开的按钮（指向右上箭头）、关闭按钮。
+ * 当相机选中该卡片时自动调整缩放和居中。
+ */
+function PreviewNodeCard({
+  item,
+  activePreview,
+  store,
+  docs,
+  exams,
+  onOpenNode,
+  onClose,
+  onSelect,
+  selected,
+  isClosing,
+}: {
+  item: MindmapNodeData
+  activePreview: ActivePreviewInfo
+  store: LearnStore
+  docs: NodeDocActions
+  exams: ExamActions
+  onOpenNode: (nodeId: string) => void
+  onClose: () => void
+  onSelect: () => void
+  selected: boolean
+  isClosing?: boolean
+}) {
+  const theme = PREVIEW_TYPE_THEME[activePreview.kind]
+  const parentNode = store.nodes.find((n) => n.id === activePreview.parentNodeId)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  // 保证卡片内滚动不被外层画布的 wheel 监听器拦截或触发画布平移
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      // 未按住 Ctrl/Cmd 键时，阻止事件冒泡到画布容器，允许容器原生滚动浏览
+      if (!e.ctrlKey && !e.metaKey) {
+        e.stopPropagation()
+      }
+    }
+    el.addEventListener('wheel', onWheel, { passive: true })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  const handleOpenInTab = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    switch (activePreview.kind) {
+      case 'doc':
+        onOpenNode(activePreview.parentNodeId)
+        break
+      case 'note':
+        if (activePreview.noteName) {
+          docs.onOpenNote(activePreview.parentNodeId, activePreview.noteName)
+        }
+        break
+      case 'super':
+        if (activePreview.superName) {
+          docs.onOpenSuperDoc(activePreview.parentNodeId, activePreview.superName)
+        }
+        break
+      case 'exam':
+        if (activePreview.attemptId && activePreview.examId) {
+          docs.onOpenAttempt(activePreview.parentNodeId, activePreview.examId, activePreview.attemptId)
+        } else if (activePreview.examId) {
+          exams.onStart(activePreview.parentNodeId, activePreview.examId)
+        }
+        break
+    }
+  }
+
+  // 根据不同类型获取内容
+  const docMarkdown = useMemo(() => {
+    if (activePreview.kind === 'doc') {
+      return parentNode?.docs?.teaching ?? ''
+    }
+    if (activePreview.kind === 'note' && parentNode && activePreview.noteName) {
+      const n = findNote(notesOf(parentNode), activePreview.noteName)
+      return n?.content ?? ''
+    }
+    return ''
+  }, [activePreview, parentNode])
+
+  const docHtml = useMemo(() => {
+    if (activePreview.kind === 'doc' || activePreview.kind === 'note') {
+      return renderNote(docMarkdown)
+    }
+    return ''
+  }, [activePreview.kind, docMarkdown])
+
+  const superDoc = useMemo(() => {
+    if (activePreview.kind !== 'super' || !activePreview.superName) return null
+    return readSuperDoc(store, activePreview.parentNodeId, activePreview.superName)
+  }, [activePreview, store])
+
+  const exam = useMemo(() => {
+    if (activePreview.kind !== 'exam' || !activePreview.examId) return null
+    return store.exams.find((e) => e.id === activePreview.examId)
+  }, [activePreview, store.exams])
+
+  const attempt = useMemo(() => {
+    if (!exam || !activePreview.attemptId) return null
+    return exam.attempts.find((a) => a.id === activePreview.attemptId)
+  }, [exam, activePreview.attemptId])
+
+  const attemptScoreVal = attempt ? attemptScore(attempt) : null
+  const totalPoints = exam ? examTotalPoints(exam) : 0
+
+  return (
+    <div
+      role="region"
+      tabIndex={0}
+      data-mm-card=""
+      data-preview-card=""
+      onClick={(e) => {
+        e.stopPropagation()
+        onSelect()
+      }}
+      onMouseDown={(e) => {
+        // 阻止 mousedown 冒泡到画布容器，防止拖动滚动条或选中文本时意外触发画布平移
+        e.stopPropagation()
+      }}
+      style={{
+        left: item.x,
+        top: item.y,
+        width: item.width,
+        height: item.height,
+        borderColor: theme.border,
+        boxShadow: selected
+          ? `0 0 0 2px ${theme.border}, 0 16px 36px -8px rgba(0,0,0,0.22)`
+          : '0 8px 24px -6px rgba(0,0,0,0.12)',
+      }}
+      className={`absolute flex flex-col rounded-2xl border-2 bg-paper text-ink dark:bg-card z-20 select-none overflow-hidden transition-[left,top,box-shadow,border-color] duration-300 ease-[cubic-bezier(0.2,0,0,1)] ${
+        isClosing ? 'moji-preview-collapse' : 'moji-preview-sprout'
+      }`}
+    >
+      {/* 顶部标题栏 */}
+      <div
+        className="flex h-11 shrink-0 items-center justify-between border-b px-3 gap-2"
+        style={{
+          borderColor: `${theme.border}40`,
+          backgroundColor: `${theme.border}12`,
+        }}
+      >
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <span
+            className="shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold text-white shadow-2xs"
+            style={{ backgroundColor: theme.color }}
+          >
+            {theme.label}
+          </span>
+          <button
+            type="button"
+            onClick={handleOpenInTab}
+            title={t('在页签栏打开《{0}》', activePreview.title)}
+            className="truncate text-left text-[12px] font-bold text-seal underline decoration-seal/40 decoration-1 underline-offset-[3px] transition hover:text-seal-deep hover:decoration-seal cursor-pointer"
+          >
+            {activePreview.title}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            title={t('关闭预览')}
+            onClick={(e) => {
+              e.stopPropagation()
+              onClose()
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-ink-soft transition hover:bg-black/10 dark:hover:bg-white/10 hover:text-ink cursor-pointer"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+
+      {/* 正文区域（只读） */}
+      <div
+        ref={scrollRef}
+        data-preview-scroll=""
+        className="flex-1 min-h-0 overflow-y-auto p-4 select-text"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {(activePreview.kind === 'doc' || activePreview.kind === 'note') && (
+          docMarkdown.trim() ? (
+            <MarkdownView html={docHtml} className="text-[12px] leading-relaxed" />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center text-ink-faint text-[12px]">
+              <FileText size={28} className="mb-2 opacity-30" />
+              <span>{activePreview.kind === 'doc' ? t('还没有教学文档内容') : t('笔记内容为空')}</span>
+            </div>
+          )
+        )}
+
+        {activePreview.kind === 'super' && (
+          superDoc?.html ? (
+            <iframe
+              srcDoc={superDoc.html}
+              sandbox="allow-scripts"
+              className="h-full w-full border-0 rounded-lg bg-card"
+              title={activePreview.title}
+            />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center text-ink-faint text-[12px]">
+              <FlaskConical size={28} className="mb-2 opacity-30" />
+              <span>{t('超级文档内容为空')}</span>
+            </div>
+          )
+        )}
+
+        {activePreview.kind === 'exam' && exam && (
+          <div className="flex flex-col gap-3 text-[12px]">
+            {attempt ? (
+              <>
+                <div className="flex items-center justify-between rounded-xl border border-line bg-line/20 p-2.5">
+                  <div>
+                    <span className="text-[11px] text-ink-faint">{t('得分')}</span>
+                    <div className="text-[16px] font-bold text-ink">
+                      {attemptScoreVal != null ? `${attemptScoreVal} / ${totalPoints} 分` : t('未判分')}
+                    </div>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                      attempt.passed ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {attempt.passed ? t('已通过') : t('未通过')}
+                  </span>
+                </div>
+
+                {attempt.explanation && (
+                  <div className="rounded-xl border border-line bg-card/60 p-3">
+                    <div className="text-[11px] font-semibold text-ink-soft mb-1.5">{t('错题讲解 / 解析')}</div>
+                    <MarkdownView html={renderNote(attempt.explanation)} className="text-[11.5px] leading-relaxed" />
+                  </div>
+                )}
+
+                <div className="space-y-2 mt-1">
+                  <div className="text-[11px] font-semibold text-ink-soft">{t('作答详情 ({0} 题)', exam.questions.length)}</div>
+                  {exam.questions.map((q, idx) => {
+                    const ans = attempt.answers.find((a) => a.questionId === q.id)
+                    const res = attempt.results?.find((r) => r.questionId === q.id)
+                    return (
+                      <div key={q.id} className="rounded-lg border border-line/60 bg-card/40 p-2.5">
+                        <div className="flex items-center gap-1.5 mb-1 text-[11px] font-medium text-ink">
+                          <span className="text-ink-faint">#{idx + 1}</span>
+                          <span className="rounded bg-line/60 px-1 py-0.5 text-[10px] text-ink-soft">
+                            {QUESTION_TYPE_LABEL[q.type] || q.type}
+                          </span>
+                          <span className="flex-1 truncate">{q.stem}</span>
+                          {res?.correct != null && (
+                            <span className={`text-[10px] font-semibold ${res.correct ? 'text-emerald-600' : 'text-rose-500'}`}>
+                              {res.correct ? t('正确') : t('错误')}
+                            </span>
+                          )}
+                        </div>
+                        {q.options && (
+                          <div className="pl-3 space-y-0.5 text-[10.5px] text-ink-soft">
+                            {q.options.map((opt) => {
+                              const isChosen = ans?.value?.includes(opt.id)
+                              return (
+                                <div key={opt.id} className={isChosen ? 'font-semibold text-seal' : ''}>
+                                  {opt.id}. {opt.text}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                        {res?.comment && (
+                          <div className="mt-1 text-[10.5px] text-amber-600 dark:text-amber-400 pl-3">
+                            {t('评语：{0}', res.comment)}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-8 text-center text-ink-faint">
+                <p className="text-[12px]">{t('试卷本身不支持预览，请在考试记录中查看作答副本')}</p>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => exams.onStart(activePreview.parentNodeId, exam.id)}
+                    className="rounded-xl bg-seal px-3.5 py-1.5 text-center text-[12px] font-semibold text-white shadow-2xs hover:bg-seal-deep transition cursor-pointer"
+                  >
+                    {t('在页签栏开考')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }

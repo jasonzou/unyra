@@ -12,7 +12,7 @@
  */
 
 /** 公式排版件、代码块、函数图像：它们的文字与源文不同形，定位与映射一律跳过 */
-export const SKIP_SELECTOR = 'pre, code, .katex, .katex-display, .moji-plot'
+export const SKIP_SELECTOR = 'pre, code, .katex, .katex-display, .moji-plot, .moji-mermaid'
 
 /** 定位用的那一档：在上面基础上再排掉按钮（光标不该落在按钮上，见 docDom 的用法） */
 export const SKIP_SELECTOR_INTERACTIVE = SKIP_SELECTOR + ', button, [role=button]'

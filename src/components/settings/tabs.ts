@@ -5,6 +5,7 @@
 import {
   AppWindow,
   Bot,
+  Database,
   HardDrive,
   Info,
   Keyboard,
@@ -15,7 +16,7 @@ import {
 } from 'lucide-react'
 import { isDevUnlocked } from '../../lib/devMode'
 
-export type TabKey = 'ai' | 'appearance' | 'input' | 'window' | 'storage' | 'plugins' | 'update' | 'about' | 'dev'
+export type TabKey = 'ai' | 'appearance' | 'input' | 'window' | 'storage' | 'migration' | 'plugins' | 'update' | 'about' | 'dev'
 
 export interface SubTab {
   key: string
@@ -39,7 +40,7 @@ export const loadSavedTab = (): TabKey => {
   try {
     const v = localStorage.getItem(TAB_STORAGE_KEY)
     if (v === 'dev') return isDevUnlocked() ? 'dev' : 'ai'
-    const keys: TabKey[] = ['ai', 'appearance', 'input', 'window', 'storage', 'plugins', 'update', 'about']
+    const keys: TabKey[] = ['ai', 'appearance', 'input', 'window', 'storage', 'migration', 'plugins', 'update', 'about']
     return keys.includes(v as TabKey) ? (v as TabKey) : 'ai'
   } catch {
     return 'ai'
@@ -75,6 +76,7 @@ export const TABS: SettingsTabItem[] = [
   // 与前两项（跟着用户走、存在用户目录里）不是一回事，所以分开列在后面
   { key: 'window', label: '窗口', icon: AppWindow },
   { key: 'storage', label: '存储', icon: HardDrive },
+  { key: 'migration', label: '数据迁移', icon: Database },
   // 插件自成一类：用户插件跟着数据目录走（{root}/plugins/），内置插件的开关跟机器走。
   // 这一页按**类别**分组（见 lib/plugins 的 PluginCategory）——目前只有 Markdown 文档插件
   { key: 'plugins', label: '插件', icon: PlugZap },

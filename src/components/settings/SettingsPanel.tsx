@@ -40,6 +40,7 @@ import { WindowPanel } from './WindowPanel'
 import { AboutPanel } from './AboutPanel'
 import { UpdatePanel } from './UpdatePanel'
 import { StoragePanel } from './StoragePanel'
+import { MigrationPanel } from './MigrationPanel'
 import { DevPanel } from './DevPanel'
 import { PluginsPanel } from './PluginsPanel'
 import { PluginVoicePage } from './PluginVoicePage'
@@ -300,7 +301,9 @@ export default function SettingsPanel({ onRootChanged, onToast }: Props) {
                   ? t('窗口')
                   : tab === 'storage'
                     ? t('数据存储')
-                    : tab === 'plugins'
+                    : tab === 'migration'
+                      ? t('数据迁移')
+                      : tab === 'plugins'
                       ? pluginPage
                         ? t('语音输入')
                         : t('插件')
@@ -401,6 +404,8 @@ export default function SettingsPanel({ onRootChanged, onToast }: Props) {
           <WindowPanel onToast={onToast} />
         ) : tab === 'storage' ? (
           <StoragePanel onRootChanged={onRootChanged} onToast={onToast} />
+        ) : tab === 'migration' ? (
+          <MigrationPanel onToast={onToast} />
         ) : tab === 'plugins' ? (
           pluginPage === VOICE_PLUGIN_ID ? (
             <div className={pane(4, true)}>

@@ -23,6 +23,7 @@ import { showMainWindow, flashMainWindow } from './windows'
 import { rebuildTrayMenu, hideToTray, quitApp, showTrayBalloon } from './tray'
 import { pdfFooter, pdfPageSize, saveFilters } from './exportPdf'
 import type { ExportPdfPayload } from './exportPdf'
+import { getFocusedAppName } from './focusedApp'
 
 /* ---------- IPC ---------- */
 
@@ -85,6 +86,7 @@ export function registerIpc(): void {
    * 发送型（send）就够——有没有钉上不需要回执，警告该做的事渲染层已经做了。
    */
   ipcMain.on('window:flashTop', () => flashMainWindow())
+  ipcMain.handle('window:getFocusedApp', () => getFocusedAppName())
 
   /**
    * 渲染层明确要求「用系统浏览器打开这个地址」。

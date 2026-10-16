@@ -51,6 +51,7 @@ export interface GuardRound {
   at: number
   screen: boolean
   camera: boolean
+  focusedApp?: string
   images: { mime: string; data: string }[]
   /** 随图发给模型的现场说明（番茄钟走到哪了、距上次交互多久） */
   context: string
@@ -379,9 +380,19 @@ async function runRound(): Promise<void> {
       const frame = captureFrame('camera')
       if (frame) images.push(frame)
     }
+    let focusedApp: string | undefined
+    if (typeof window !== 'undefined' && window.mojiNative?.window?.getFocusedApp) {
+      try {
+        focusedApp = await window.mojiNative.window.getFocusedApp()
+      } catch {
+        // ignore
+      }
+    }
+
     const sinceInput = lastInputAt === null ? null : Date.now() - lastInputAt
     const context = [
       hooks?.contextLine() ?? '',
+      focusedApp ? t('当前焦点应用：{0}', focusedApp) : '',
       lastInputAt === null
         ? t('还没有收到过任何交互')
         : t('距上一次与应用交互 {0} 秒', Math.round((Date.now() - lastInputAt) / 1000)),
@@ -427,6 +438,7 @@ async function runRound(): Promise<void> {
       at: Date.now(),
       screen: session.monitors.screen,
       camera: session.monitors.camera,
+      focusedApp,
       images,
       context,
       raw,
@@ -445,8 +457,12 @@ async function runRound(): Promise<void> {
      * 这一轮附了什么画面用一句固定的注记说清——它在历史里必须逐字节稳定。
      */
     const framesNote = round.screen && round.camera
-      ? t('（附屏幕截图与摄像头画面）')
+      ? (round.focusedApp ? t('（附屏幕截图、摄像头画面与焦点应用「{0}」）', round.focusedApp) : t('（附屏幕截图与摄像头画面）'))
       : round.screen
+        ? (round.focusedApp ? t('（附屏幕截图与焦点应用「{0}」）', round.focusedApp) : t('（附屏幕截图）'))
+        : round.camera
+          ? (round.focusedApp ? t('（附摄像头画面与焦点应用「{0}」）', round.focusedApp) : t('（附摄像头画面）'))
+          : (round.focusedApp ? t('（附焦点应用「{0}」）', round.focusedApp) : t('（无画面附件）'))
         ? t('（附屏幕截图）')
         : t('（附摄像头画面）')
     history.push(

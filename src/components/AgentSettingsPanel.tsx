@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import TabButton from './TabButton'
 import {
+  Brain,
   CheckCircle2,
   Cpu,
+  FolderCheck,
   GraduationCap,
   Sparkles,
   Terminal,
@@ -19,9 +21,12 @@ import { isDevUnlocked } from '../lib/devMode'
 import { REASONING_EFFORTS, REASONING_LABEL } from '../ai/types'
 import { BUILTIN_EFFORT, type WorkflowEffortSetting, type WorkflowRow, type WorkflowTier } from '../learn/workflows'
 import { getActiveSkills } from '../agent/skill/registry'
+import type { LearningGoal, MindStore } from '../learn/types'
 import { SkillsTab } from './agent-settings/SkillsTab'
 import { McpTab } from './agent-settings/McpTab'
 import { ToolsTab } from './agent-settings/ToolsTab'
+import { PermissionsTab } from './agent-settings/PermissionsTab'
+import { MemoryTab } from './agent-settings/MemoryTab'
 import ConfirmDialog from './ConfirmDialog'
 import DevUnlock from './DevUnlock'
 import { pane } from './Pane'
@@ -34,9 +39,11 @@ import { t } from '../i18n'
  *
  * 分页：
  * - 「对话」：上下文压缩阈值与自动折叠策略。
+ * - 「记忆」：导师跨对话沉淀的长期偏好、薄弱点与认知记录 (Mind)。
  * - 「技能」：专业思维模型、解题框架与认知规范 (Skills)。
  * - 「MCP 服务」：Model Context Protocol 开放工具与远端/本地上下文服务。
- * - 「工具」：沙箱与原生 API (文件系统白名单、进程监控、上下文健康度)。
+ * - 「工具」：沙箱与原生 API (进程监控、上下文健康度、API 目录)。
+ * - 「权限」：真实文件系统访问白名单与安全沙箱边界授权。
  * - 「工作流」：导师代跑的任务模板（出卷、回忆、超级实验室等）。
  * - 「开发者」：三击标题解锁，底层调试口令与诊断开关。
  */
@@ -57,17 +64,28 @@ interface Props {
   onRemoveWorkflow?: (row: WorkflowRow) => void
   /** 改一条工作流的思考档位（三态；内置与登记通吃，键 = id 记在全局 efforts 表） */
   onWorkflowEffort?: (row: WorkflowRow, effort: WorkflowEffortSetting) => void
+  /** 学习目标清单（记忆管理页用） */
+  goals?: LearningGoal[]
+  /** 记忆存储（store.minds，按目标归档） */
+  minds?: MindStore
+  onMindWrite?: (goalId: string, input: { key?: string; text: string }) => void
+  onMindUpdate?: (goalId: string, id: string, text: string) => void
+  onMindDelete?: (goalId: string, idOrKey: string) => void
+  onMindClear?: (goalId: string) => void
+  onToast?: (msg: string) => void
 }
 
-type TabKey = 'chat' | 'skills' | 'mcp' | 'tools' | 'flow' | 'dev'
+type TabKey = 'chat' | 'memory' | 'skills' | 'mcp' | 'tools' | 'permissions' | 'flow' | 'dev'
 
 const TAB_KEY = 'moji:agent-settings:tab'
 
 const TABS: Array<{ key: TabKey; label: string; icon: typeof Sparkles }> = [
   { key: 'chat', label: '对话与压缩', icon: Sparkles },
+  { key: 'memory', label: '记忆管理', icon: Brain },
   { key: 'skills', label: '专业技能', icon: GraduationCap },
   { key: 'mcp', label: 'MCP 服务', icon: Cpu },
   { key: 'tools', label: '工具与上下文', icon: Wrench },
+  { key: 'permissions', label: '权限设置', icon: FolderCheck },
   { key: 'flow', label: '工作流', icon: Workflow },
 ]
 const DEV_TAB: { key: TabKey; label: string; icon: typeof Sparkles } = {
@@ -80,7 +98,16 @@ const savedTab = (): TabKey => {
   try {
     const v = localStorage.getItem(TAB_KEY) as TabKey | null
     if (v === 'dev') return isDevUnlocked() ? 'dev' : 'chat'
-    if (v === 'chat' || v === 'skills' || v === 'mcp' || v === 'tools' || v === 'flow') return v
+    if (
+      v === 'chat' ||
+      v === 'memory' ||
+      v === 'skills' ||
+      v === 'mcp' ||
+      v === 'tools' ||
+      v === 'permissions' ||
+      v === 'flow'
+    )
+      return v
   } catch {
     // localStorage 不可用时回落到第一页
   }
@@ -105,6 +132,13 @@ export default function AgentSettingsPanel({
   onRunWorkflow,
   onRemoveWorkflow,
   onWorkflowEffort,
+  goals = [],
+  minds = {},
+  onMindWrite,
+  onMindUpdate,
+  onMindDelete,
+  onMindClear,
+  onToast = () => {},
 }: Props) {
   /** 三击「超级导师设置」标题：开发者分页的隐藏入口 */
   const [devEntry, setDevEntry] = useState(false)
@@ -122,6 +156,11 @@ export default function AgentSettingsPanel({
   // 统计各模块的活跃徽标数
   const activeSkillsCount = getActiveSkills(settings.skills).length
   const activeMcpCount = (settings.mcp?.servers || []).filter((s) => s.enabled).length
+  const totalMindsCount = Object.values(minds).reduce(
+    (acc, items) => acc + (Array.isArray(items) ? items.length : 0),
+    0,
+  )
+  const allowedDirsCount = (settings.permissions?.allowedDirs || []).length
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 bg-paper">
@@ -151,6 +190,8 @@ export default function AgentSettingsPanel({
             if (tb.key === 'skills' && activeSkillsCount > 0) badgeText = activeSkillsCount
             else if (tb.key === 'mcp' && activeMcpCount > 0) badgeText = activeMcpCount
             else if (tb.key === 'flow' && flowRows) badgeText = flowRows.length
+            else if (tb.key === 'memory' && totalMindsCount > 0) badgeText = totalMindsCount
+            else if (tb.key === 'permissions' && allowedDirsCount > 0) badgeText = allowedDirsCount
 
             return (
               <TabButton
@@ -213,7 +254,11 @@ export default function AgentSettingsPanel({
                       ? t('Model Context Protocol (MCP)')
                       : tab === 'tools'
                         ? t('工具与上下文管理')
-                        : t('对话与上下文设置')}
+                        : tab === 'permissions'
+                          ? t('权限设置与安全沙箱')
+                          : tab === 'memory'
+                            ? t('Agent 长期记忆管理 (Mind)')
+                            : t('对话与上下文设置')}
             </h2>
             <p className="text-[11.5px] text-ink-faint mt-0.5">
               {tab === 'dev'
@@ -225,8 +270,12 @@ export default function AgentSettingsPanel({
                     : tab === 'mcp'
                       ? t('连接开放协议服务，赋予导师操作真实世界系统与网络的能力')
                       : tab === 'tools'
-                        ? t('原生系统文件与进程权限放行、上下文健康度及沙箱能力目录')
-                        : t('只影响对话区里的超级导师自身，与全局 AI 设置保持独立')}
+                        ? t('原生系统进程监控、上下文健康度及沙箱能力目录')
+                        : tab === 'permissions'
+                          ? t('真实文件系统访问白名单授权与安全沙箱边界治理')
+                          : tab === 'memory'
+                            ? t('超级导师跨对话沉淀的认知、学习偏好与薄弱点记录')
+                            : t('只影响对话区里的超级导师自身，与全局 AI 设置保持独立')}
             </p>
           </div>
 
@@ -240,6 +289,16 @@ export default function AgentSettingsPanel({
         <div className="flex-1 min-h-0 overflow-y-auto">
           {tab === 'chat' ? (
             <ChatTab settings={settings} hasKey={hasKey} model={model} onChange={onChange} />
+          ) : tab === 'memory' ? (
+            <MemoryTab
+              goals={goals}
+              minds={minds}
+              onWrite={onMindWrite || (() => {})}
+              onUpdate={onMindUpdate || (() => {})}
+              onDelete={onMindDelete || (() => {})}
+              onClear={onMindClear || (() => {})}
+              onToast={onToast}
+            />
           ) : tab === 'skills' ? (
             <SkillsTab
               settings={settings.skills}
@@ -255,6 +314,11 @@ export default function AgentSettingsPanel({
               settings={settings}
               onChange={onChange}
               onOpenContextDebugger={onOpenContextDebugger}
+            />
+          ) : tab === 'permissions' ? (
+            <PermissionsTab
+              settings={settings}
+              onChange={onChange}
             />
           ) : tab === 'flow' && flowRows && onRunWorkflow && onRemoveWorkflow && onWorkflowEffort ? (
             <FlowTab rows={flowRows} onRun={onRunWorkflow} onRemove={onRemoveWorkflow} onEffort={onWorkflowEffort} />

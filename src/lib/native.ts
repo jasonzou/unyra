@@ -251,6 +251,8 @@ export interface NativeBridge {
     notify(payload: { title: string; body?: string }): Promise<{ ok: boolean; error?: string }>
     /** 主窗口「闪现置顶」：钉在最上层但不抢焦点，拿到焦点或超时自动解除。守卫的分心警告用它 */
     flashTop(): void
+    /** 获取系统当前获得焦点的应用名称（严格专注守卫用） */
+    getFocusedApp(): Promise<string>
   }
   /**
    * 考试窗口的**主窗口那一侧**。考试窗口是第二个 BrowserWindow，加载同一份渲染产物

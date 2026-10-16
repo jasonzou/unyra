@@ -3441,6 +3441,8 @@ export default function LearnWorkspace({
     )
     /** 这一格挂着的网页页签：WebTabLayer 常驻层只挂一份，切页签只藏不卸（见下） */
     const gWebTabs = gVisibleTabs.filter((x): x is WebTab => x.ref.kind === 'web')
+    /** 这一格挂着的大纲页签：keepalive 常驻，切页签只藏不卸，切回时保留导图相机视角与选中状态 */
+    const gOutlineTabs = (g.group?.tabs ?? []).filter((x) => x.ref.kind === 'outline')
     /** 这一格的正文层：切页签的过场、查找条与数据属性都挂在它身上 */
     const boxProps = {
       'data-doc-area': groupId,
@@ -3691,6 +3693,13 @@ export default function LearnWorkspace({
                 onRunWorkflow={runWorkflowRow}
                 onRemoveWorkflow={removeWorkflowRow}
                 onWorkflowEffort={setWorkflowEffortRow}
+                goals={store.goals}
+                minds={store.minds ?? {}}
+                onMindWrite={mindWrite}
+                onMindUpdate={mindUpdate}
+                onMindDelete={mindDelete}
+                onMindClear={mindClear}
+                onToast={onToast}
               />
             ) : gTab?.ref.kind === 'draft' ? (
               /*
@@ -3789,25 +3798,12 @@ export default function LearnWorkspace({
                 key 绑报告 id：换一份报告重挂，加载态从头来。
               */
               <FocusReportView key={gTab.ref.reportId} reportId={gTab.ref.reportId} />
-            ) : gTab?.ref.kind === 'outline' && g.node ? (
+            ) : gTab?.ref.kind === 'outline' ? (
               /*
-                大纲页：目标级的思维导图（见 OutlineView）。它不走源码/预览、不进常驻列表、
-                也没有暂存——路线要改，就在图里点某个节点的「生成大纲」交给导师。
-                教学文档从这里点进去（大纲是唯一入口）。
-                key 绑目标根节点：换一个目标就重挂，相机与选中状态从头开始。
+                大纲页：思维导图采用 keepalive 常驻（见下方的 gOutlineTabs），
+                切去其它页签时仅隐藏保活，切回时零延迟复原相机与状态。这里让出位置。
               */
-              <OutlineView
-                key={g.node.id}
-                store={store}
-                node={g.node}
-                onOpenNode={(id) => openTab({ kind: 'teach', nodeId: id })}
-                onCreateChild={createOutlineChild}
-                onGenerate={(n) => startOutline(n.id)}
-                onSetTint={setNodeTint}
-                docs={explorerDocs}
-                exams={explorerExams}
-                activeTab={gTab?.ref ?? null}
-              />
+              null
             ) : gTab?.ref.kind === 'super' && g.node && g.superDoc ? (
               /*
                 超级文档：一份完整的可交互 HTML。预览跑在沙箱化的 iframe 里
@@ -3946,6 +3942,36 @@ export default function LearnWorkspace({
                       ),
                   }}
                 />
+              )
+            })}
+
+            {/*
+              大纲页常驻层（keepalive）：只要大纲页签在这一格开着，思维导图就常挂在 DOM 中，
+              切去其它页签时仅藏不卸，切回时零延迟复原导图相机与选中状态。
+            */}
+            {gOutlineTabs.map((tab) => {
+              const oNode = tab.ref.kind === 'outline' ? nodeById(store, tab.ref.nodeId) : null
+              if (!oNode) return null
+              const isActive = gTab?.id === tab.id
+              return (
+                <div
+                  key={tab.id}
+                  data-outline-pane={isActive ? 'active' : 'idle'}
+                  className={isActive ? 'relative flex min-h-0 flex-1 flex-col' : 'hidden'}
+                  {...(!isActive ? { hidden: true } : {})}
+                >
+                  <OutlineView
+                    store={store}
+                    node={oNode}
+                    onOpenNode={(id) => openTab({ kind: 'teach', nodeId: id })}
+                    onCreateChild={createOutlineChild}
+                    onGenerate={(n) => startOutline(n.id)}
+                    onSetTint={setNodeTint}
+                    docs={explorerDocs}
+                    exams={explorerExams}
+                    activeTab={gTab?.ref ?? null}
+                  />
+                </div>
               )
             })}
           </div>
