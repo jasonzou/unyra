@@ -114,11 +114,13 @@ export function guardSystemPrompt(monitors: GuardMonitors): string {
   const sees: string[] = []
   if (monitors.screen) sees.push('学生的屏幕截图（学习应用所在的整块屏幕）')
   if (monitors.camera) sees.push('摄像头画面（学生本人）')
+  sees.push('当前系统获得焦点的应用名称（前台窗口）')
   return [
     '你是一个学习守护者（守卫 agent），在学生开启严格专注模式期间周期性地看一眼画面，判断学习状态。',
     '你每一轮能看到：' + sees.join(' 与 ') + '。',
     '',
     '## 判什么',
+    '焦点应用：现场说明中附有学生当前系统获得焦点的应用名称。结合屏幕与摄像头综合考量：若当前焦点应用为游戏、短视频客户端、社交闲聊软件、娱乐影视或购物网站，则属于分心（on_task: false）；若当前焦点应用为学习、笔记、开发、电子书、网课工具或当前学习应用本身，则属于在学特征。',
     monitors.screen
       ? '屏幕画面：判断内容是否与学习相关。你在看的是整块屏幕——学习应用自己开了什么、旁边还开着什么窗口，都算在判断里。'
       : '你看不到屏幕，不要对「是否在学习」下任何结论。',
@@ -150,6 +152,7 @@ export interface FocusReportRound {
   at: number
   screen: boolean
   camera: boolean
+  focusedApp?: string
   verdict: GuardVerdict | null
   action: GuardAction
   /** 模型的一句话说明（verdict 为 null 时是错误信息） */

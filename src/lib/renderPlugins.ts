@@ -79,6 +79,7 @@ export interface PluginRenderContext {
  */
 const PLUGIN_LIBS: Record<string, () => Promise<unknown>> = {
   'function-plot': () => import('function-plot'),
+  mermaid: () => import('mermaid'),
   katex: () => Promise.resolve(katex),
 }
 

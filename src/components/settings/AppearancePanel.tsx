@@ -127,8 +127,9 @@ export function AppearancePanel({
   appearance,
   onChange,
   onToast,
+  activeSubTab,
   highlightSubTab,
-  onSubTabChange,
+  onSubTabChange: _onSubTabChange,
 }: Props) {
   const locale = useLocale()
   const customBg = appearance.customBg ?? DEFAULT_CUSTOM_BACKGROUND
@@ -211,30 +212,12 @@ export function AppearancePanel({
     }, 200)
   }
 
-  // 二级 tab 滚动联动监听：当用户在面板内滚动时，自动高亮视口上方的对应二级 tab
+  // 二级 tab 过滤模式：切换子 tab 时将面板滚动条重置到顶部
   useEffect(() => {
-    const container = containerRef.current
-    if (!container || !onSubTabChange) return
-
-    const subIds = ['theme', 'background', 'typography', 'locale', 'features']
-    const handleScroll = () => {
-      const cTop = container.getBoundingClientRect().top
-      let currentSub = subIds[0]
-      for (const id of subIds) {
-        const el = document.getElementById(`settings-section-${id}`)
-        if (el) {
-          const rect = el.getBoundingClientRect()
-          if (rect.top - cTop <= 100) {
-            currentSub = id
-          }
-        }
-      }
-      onSubTabChange(currentSub)
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0
     }
-
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
-  }, [onSubTabChange])
+  }, [activeSubTab])
 
   const activeGroup =
     customBg.groups.find((g) => g.id === customBg.activeGroupId) ??
@@ -402,7 +385,8 @@ export function AppearancePanel({
       </div>
 
       {/* 主题选择卡片网格 */}
-      <section id="settings-section-theme" className="flex flex-col gap-4 scroll-mt-4">
+      {(!activeSubTab || activeSubTab === 'theme') && (
+        <section id="settings-section-theme" className="flex flex-col gap-4 scroll-mt-4">
         <div>
           <div
             key={getHighlightKey('theme')}
@@ -518,9 +502,11 @@ export function AppearancePanel({
           ))}
         </div>
       </section>
+      )}
 
       {/* 全局图片背景与幻灯片 */}
-      <section id="settings-section-background" className="flex flex-col gap-4 rounded-xl border border-line bg-card/60 p-4 scroll-mt-4">
+      {(!activeSubTab || activeSubTab === 'background') && (
+        <section id="settings-section-background" className="flex flex-col gap-4 rounded-xl border border-line bg-card/60 p-4 scroll-mt-4">
         {/* 隐藏的文件输入框 */}
         <input
           ref={fileInputRef}
@@ -950,9 +936,11 @@ export function AppearancePanel({
           </div>
         )}
       </section>
+      )}
 
       {/* 全局字体与文字描边 */}
-      <section id="settings-section-typography" className="flex flex-col gap-3 rounded-xl border border-line bg-card/60 p-3.5 scroll-mt-4">
+      {(!activeSubTab || activeSubTab === 'typography') && (
+        <section id="settings-section-typography" className="flex flex-col gap-3 rounded-xl border border-line bg-card/60 p-3.5 scroll-mt-4">
         <div className="flex items-center justify-between">
           <div
             key={getHighlightKey('typography')}
@@ -1172,9 +1160,11 @@ export function AppearancePanel({
           </div>
         </div>
       </section>
+      )}
 
       {/* 界面语言 */}
-      <section id="settings-section-locale" className="flex flex-col gap-2 rounded-xl border border-line bg-card/60 p-3.5 scroll-mt-4">
+      {(!activeSubTab || activeSubTab === 'locale') && (
+        <section id="settings-section-locale" className="flex flex-col gap-2 rounded-xl border border-line bg-card/60 p-3.5 scroll-mt-4">
         <div
           key={getHighlightKey('locale')}
           className={`flex items-center gap-1.5 text-[13px] font-medium text-ink-strong ${
@@ -1219,9 +1209,11 @@ export function AppearancePanel({
           })}
         </div>
       </section>
+      )}
 
       {/* 辅助与提示（教学演示模式 + 顶栏小技巧提示） */}
-      <div id="settings-section-features" className="flex flex-col gap-3 scroll-mt-4">
+      {(!activeSubTab || activeSubTab === 'features') && (
+        <div id="settings-section-features" className="flex flex-col gap-3 scroll-mt-4">
         {/* 教学与演示模式 */}
         <section className="rounded-xl border border-line bg-card/60 p-3.5">
           <div className="flex items-start justify-between gap-4">
@@ -1277,6 +1269,7 @@ export function AppearancePanel({
           </div>
         </section>
       </div>
+      )}
 
       {/* 自动保存状态提示条 */}
       <div className="flex items-center gap-1.5 rounded-lg border border-line bg-card/50 px-3 py-2 text-[11px] text-ink-soft">

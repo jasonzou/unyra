@@ -456,6 +456,8 @@ const api = {
      * （见 electron/app/mainWindow.ts 的 flashMainWindow）。守卫的分心警告用它。
      */
     flashTop: (): void => ipcRenderer.send('window:flashTop'),
+    /** 获取系统当前获得焦点的应用名称（严格专注守卫用） */
+    getFocusedApp: (): Promise<string> => ipcRenderer.invoke('window:getFocusedApp'),
   },
 
   /**

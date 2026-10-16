@@ -3,6 +3,7 @@
  * 「只描述目标、不含当前节点」的前缀（这是它能被前缀缓存命中的前提，见下面的说明）。
  */
 import { PLOT_SYNTAX_GUIDE } from '../../lib/plot'
+import { MERMAID_SYNTAX_GUIDE } from '../../lib/mermaid'
 import { EXECUTE_GUIDE } from './executeGuide'
 import {
   CHIP_GUIDE,
@@ -58,6 +59,8 @@ export function buildTeacherSystem(opts: {
     GOAL_OUTLINE_GUIDE,
     '',
     PLOT_SYNTAX_GUIDE,
+    '',
+    MERMAID_SYNTAX_GUIDE,
     '',
     RICH_CONTENT_GUIDE,
     '',

@@ -29,29 +29,32 @@ export interface ViewSize {
  * 分成两个文件放迟早会出现「这边改成 1.2、那边还按 1 算」——那正是图像偏掉的经典成因。
  */
 export const SELECT_ZOOM = 1.2
+/** 大纲视图缩放最大尺度限制为 120% */
+export const MINDMAP_MAX_ZOOM = 1.2
+/** 大纲视图缩放最小尺度 */
+export const MINDMAP_MIN_ZOOM = 0.25
 
 /**
- * 把一块矩形摆到视口**正中**所需要的平移量。
+ * 把一块矩形摆到视口水平居中、垂直偏移 40% 所需要的平移量。
  *
- * 需求原文：「选中节点的调节镜头改一下，改为 100% 缩放，节点显示在垂直和水平居中位置」，
- * 后来又改成「选中时的相机缩放加到一百二」——所以缩放是个参数，调用方给 1.2。
+ * 需求原文：「相机跟随被选中节点的位置改为垂直40%」。
+ * 节点水平落位在视口中心（50%），垂直落位在视口 40% 高度处（上方 40%、下方 60% 留给子级展开与气泡）。
  *
- * 算式只有一条：「矩形的中心点」与「视口的中心点」重合。缩放的参与方式是
- * **先缩放再平移**（元素在 `scale(z)` 之下，世界坐标乘 z 才是屏幕坐标），
- * 于是目标的中心在屏幕上落在 `中心*z + pan`，让它等于视口中心即得：
+ * 算式：缩放的参与方式是先缩放再平移（元素在 scale(z) 之下，世界坐标乘 z 才是屏幕坐标），
+ * 于是目标的中心在屏幕上落在 中心*z + pan，让它等于目标落位即可：
  *
- *   pan = 视口中心 - 目标中心 * z
- *
- * 忘了乘这个 z，放大之后就会明显偏（z=1 时恰好看不出来，是最容易蒙混过关的一档）。
+ *   pan.x = view.width * 0.5 - 目标中心.x * z
+ *   pan.y = view.height * 0.4 - 目标中心.y * z
  */
 export function centerPanFor(
   box: { x: number; y: number; width: number; height: number },
   view: ViewSize,
   zoom = 1,
+  verticalRatio = 0.4,
 ): { x: number; y: number } {
   return {
     x: view.width / 2 - (box.x + box.width / 2) * zoom,
-    y: view.height / 2 - (box.y + box.height / 2) * zoom,
+    y: view.height * verticalRatio - (box.y + box.height / 2) * zoom,
   }
 }
 

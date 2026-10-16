@@ -150,7 +150,7 @@ export function McpTab({ settings, onChange }: McpTabProps) {
   return (
     <div className={pane(4)}>
       {/* 顶部概览卡片 */}
-      <section className="relative overflow-hidden rounded-2xl border border-line-strong/60 bg-gradient-to-br from-card via-card to-paper-deep/50 p-4 shadow-sm">
+      <section className="relative z-10 rounded-2xl border border-line-strong/60 bg-gradient-to-br from-card via-card to-paper-deep/50 p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -180,20 +180,26 @@ export function McpTab({ settings, onChange }: McpTabProps) {
               </button>
 
               {showPresets && (
-                <div className="absolute right-0 top-full z-20 mt-1.5 w-[260px] rounded-xl border border-line-strong bg-card p-1.5 shadow-xl">
-                  <div className="px-2 py-1 text-[11px] font-medium text-ink-faint">{t('官方与常用预设')}</div>
-                  {MCP_PRESETS.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => addFromPreset(p)}
-                      className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-line/50"
-                    >
-                      <span className="text-[12px] font-medium text-ink-strong">{p.name}</span>
-                      <span className="text-[10.5px] text-ink-faint line-clamp-1">{p.description}</span>
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowPresets(false)}
+                  />
+                  <div className="absolute right-0 top-full z-50 mt-1.5 w-[260px] rounded-xl border border-line-strong bg-card p-1.5 shadow-xl">
+                    <div className="px-2 py-1 text-[11px] font-medium text-ink-faint">{t('官方与常用预设')}</div>
+                    {MCP_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => addFromPreset(p)}
+                        className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-line/50"
+                      >
+                        <span className="text-[12px] font-medium text-ink-strong">{p.name}</span>
+                        <span className="text-[10.5px] text-ink-faint line-clamp-1">{p.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
 

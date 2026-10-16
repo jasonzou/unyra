@@ -1,4 +1,4 @@
-import { Monitor, Camera, ShieldCheck, AlertTriangle, Pause } from 'lucide-react'
+import { Monitor, Camera, ShieldCheck, AlertTriangle, Pause, AppWindow } from 'lucide-react'
 import { useState, useSyncExternalStore } from 'react'
 import { guardSnapshot, subscribeGuard, type GuardRound, type GuardSession } from '../../agent/guardRuntime'
 import { guardSystemPrompt } from '../../learn/focusGuard'
@@ -108,7 +108,12 @@ function GuardRoundCard({ round }: { round: GuardRound }) {
     <div className="mb-2.5 rounded-lg border border-line bg-card">
       <div className="flex flex-wrap items-center gap-2 border-b border-line/60 px-3 py-1.5">
         <span className="font-mono text-[10.5px] text-ink-faint">{fmtClock(round.at)}</span>
-        <span className="flex items-center gap-1 text-[10.5px] text-ink-faint">
+        <span className="flex items-center gap-1.5 text-[10.5px] text-ink-faint">
+          {round.focusedApp && (
+            <span className="flex items-center gap-0.5 rounded bg-paper-deep/60 px-1 py-0.5 text-ink" title={t('当前焦点应用')}>
+              <AppWindow size={10} className="text-ink-soft" /> {round.focusedApp}
+            </span>
+          )}
           {round.screen && (
             <span className="flex items-center gap-0.5">
               <Monitor size={10} /> {t('屏幕')}

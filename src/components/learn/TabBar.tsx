@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { BookOpen, CornerDownRight, CornerLeftUp, FileX, FoldHorizontal, Globe, OctagonX, Plus, Star, Unlink, X } from 'lucide-react'
 import { DocTypeIcon, WebTabTypeIcon } from './docTypes'
 import type { DependencyEdge, LearnStore, LearnTab, TabRef, WebTabMeta } from '../../learn/types'
-import { TAB_CLOSE_LABEL, dragSlotDelta, isDocumentTab, tabNodeId, type TabCloseMode } from '../../learn/tabs'
+import { TAB_CLOSE_LABEL, dragSlotDelta, isBlankTab, isDocumentTab, tabNodeId, type TabCloseMode } from '../../learn/tabs'
 import { setTabMarkHandlers } from '../../lib/tabMark'
 import { docChipDrop, docChipHover, type ChipPayload } from '../../lib/docChip'
 import { CHIP_MIME, parseChipJson } from '../../lib/chipSyntax'
@@ -514,6 +514,7 @@ export default function TabBar({
     return map
   }, [tabs, activeTab, ancestorDistMap, descendantDistMap])
   const activeTabTitle = activeTab ? titleOf(activeTab.ref) : ''
+  const hasBlankTab = useMemo(() => tabs.some(isBlankTab), [tabs])
   const rootRef = useRef<HTMLDivElement | null>(null)
   const stripRef = useRef<HTMLDivElement | null>(null)
   /** 上边框上那颗棱形：它停在**当前页签**正上方，右键拖它就换页签 */
@@ -1277,7 +1278,7 @@ export default function TabBar({
 
           也刻意**不抢焦点、不选中**：它只负责开一个新页签，页签自己会变成激活项。
         */}
-        {onNewTab && (
+        {onNewTab && !hasBlankTab && (
           <button
             type="button"
             title={t('新页签')}

@@ -12,6 +12,7 @@ import { t } from '../i18n'
 import { hydrateCodeBlocks } from './codeHighlight'
 import { hydrateCodeRun } from './codeBlockMenu'
 import { hydratePlots } from './plot'
+import { MERMAID_LANG, mermaidBlock, hydrateMermaid } from './mermaid'
 import { registerRenderPlugin, type PluginRenderContext } from './renderPlugins'
 import { languageCount } from '../syntax/LanguageAliases'
 
@@ -83,6 +84,19 @@ registerRenderPlugin({
   fences: [PLOT_LANG],
   render: (source: string, ctx: PluginRenderContext) => plotBlock(source, ctx),
   hydrate: (root: HTMLElement) => hydratePlots(root),
+})
+
+/**
+ * Mermaid 图表渲染：认领 ```mermaid 围栏。
+ * 同步产出占位容器，在 DOM 提交后异步动态载入 Mermaid 库并渲染成矢量图。
+ */
+registerRenderPlugin({
+  id: 'mermaid',
+  name: 'Mermaid 图表',
+  builtin: true,
+  fences: [MERMAID_LANG],
+  render: (source: string, ctx: PluginRenderContext) => mermaidBlock(source, ctx),
+  hydrate: (root: HTMLElement) => hydrateMermaid(root),
 })
 
 /**

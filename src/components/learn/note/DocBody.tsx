@@ -191,7 +191,7 @@ function DocPending() {
       </div>
       <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-faint">{hint}</p>
       <div className="relative mt-3 min-h-0 flex-1 overflow-hidden" aria-hidden="true">
-        {/* 行高与行距按正文的实际行距给（15.5px × 1.8 ≈ 28px 一行）：
+        {/* 行高与行距按正文的实际行距给（15.81px × 1.9 ≈ 30px 一行）：
             太密就成了一片条纹，看不出是「一行行文字」 */}
         <div className="absolute inset-0 space-y-4">
           {Array.from({ length: SKELETON_ROWS }, (_, i) => (

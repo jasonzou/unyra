@@ -224,7 +224,7 @@ export default function SourceEditor({
   // 字号系数：直接写在根元素上，与预览共用同一个设置
   useEffect(() => {
     const view = viewRef.current
-    if (view) view.dom.style.fontSize = Math.round(13 * scale * 10) / 10 + 'px'
+    if (view) view.dom.style.fontSize = Math.round(15.6 * scale * 10) / 10 + 'px'
   }, [scale])
 
   const chars = countSourceWords(value)
