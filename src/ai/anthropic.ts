@@ -44,6 +44,7 @@ export const ANTHROPIC_VERSION = '2023-06-01'
  * 四档在这里全部有确定落点，不需要 EffortMap（预算对老模型的兼容性也最好）。
  */
 const THINKING_BUDGET: Record<ReasoningEffort, number> = {
+  none: 0,
   low: 2048,
   medium: 8192,
   high: 16384,
@@ -190,7 +191,9 @@ export function buildAnthropicBody(opts: {
     }))
   }
   // extended thinking：预算必须小于 max_tokens，否则服务端直接 400
-  if (opts.reasoningEffort) {
+  if (opts.reasoningEffort === 'none') {
+    body.thinking = { type: 'disabled' }
+  } else if (opts.reasoningEffort) {
     const budget = Math.min(THINKING_BUDGET[opts.reasoningEffort], (body.max_tokens as number) - 1024)
     if (budget > 0) body.thinking = { type: 'enabled', budget_tokens: budget }
   }
@@ -355,8 +358,10 @@ export async function anthropicStream(
           content += delta.text
           opts.onDelta?.({ content: delta.text })
         } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-          reasoning += delta.thinking
-          opts.onDelta?.({ reasoning: delta.thinking })
+          if (opts.reasoningEffort !== 'none') {
+            reasoning += delta.thinking
+            opts.onDelta?.({ reasoning: delta.thinking })
+          }
         } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
           const b = openBlocks.get(index)
           if (b) b.json += delta.partial_json
@@ -442,7 +447,13 @@ export async function anthropicStream(
   // 流结束时仍未收到 content_block_stop 的工具块：也收进来，避免丢调用
   for (const index of [...openBlocks.keys()]) closeBlock(index)
 
-  return { content, reasoning, toolCalls, finishReason, usage: anthropicUsage(usageIn, usageOut) }
+  return {
+    content,
+    reasoning: opts.reasoningEffort === 'none' ? '' : reasoning,
+    toolCalls,
+    finishReason,
+    usage: anthropicUsage(usageIn, usageOut),
+  }
 }
 
 /** Anthropic 的错误体是 { error: { type, message } }，翻译成人话 */

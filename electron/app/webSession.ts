@@ -13,13 +13,15 @@
  * 下载不挂 will-download：Electron 默认弹系统「另存为」，够用。
  */
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, Menu, session, shell, webContents, type Debugger, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, session, shell, webContents, type Debugger, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import { ProxyAgent } from 'undici'
 import { canOpenExternal } from '../link-core'
 import { mainWindow } from './mainWindow'
 import { t } from '../i18n'
 import { axNodesToElements, type AxRawNode } from '../../shared/axTree'
 import type {
   WebDomOpResult,
+  WebFastTranslateResult,
   WebLogDetailResult,
   WebLogsResult,
   WebPageFetchReq,
@@ -31,6 +33,7 @@ import type {
   WebScrollResult,
   WebSnapshotResult,
   WebTextResult,
+  WebTranslatePayload,
   WebWaitReq,
   WebWaitResult,
 } from '../../shared/ipc'
@@ -927,6 +930,139 @@ function registerLogIpc(): void {
       await new Promise((r) => setTimeout(r, 250))
     }
   })
+
+  ipcMain.handle(
+    'web:fastTranslate',
+    async (_e, payload: { text?: string; targetLang?: string }): Promise<WebFastTranslateResult> => {
+      return fastTranslateCore(payload?.text ?? '', payload?.targetLang)
+    },
+  )
+}
+
+let cachedProxyUrl = ''
+let cachedProxyAgent: ProxyAgent | undefined
+
+/**
+ * 获取翻译网络请求的分发器：优先解析系统/会话代理，未解析时回退至系统环境变量代理。
+ * Node.js 原生 fetch 默认不穿透 HTTP_PROXY/HTTPS_PROXY，在此补全以支持海外直连公共翻译 RPC。
+ */
+export async function getTranslationDispatcher(targetUrl: string): Promise<ProxyAgent | undefined> {
+  let proxy = ''
+  try {
+    if (session && typeof session.fromPartition === 'function') {
+      const ses = session.fromPartition(WEB_PARTITION)
+      if (ses && typeof ses.resolveProxy === 'function') {
+        const resolved = await ses.resolveProxy(targetUrl)
+        const match = resolved.match(/PROXY\s+([^;\s]+)/i)
+        if (match && match[1]) {
+          proxy = match[1].startsWith('http') ? match[1] : `http://${match[1]}`
+        }
+      }
+    }
+  } catch {
+    // 忽略 resolveProxy 异常
+  }
+
+  if (!proxy) {
+    const envProxy =
+      process.env.HTTPS_PROXY ||
+      process.env.https_proxy ||
+      process.env.HTTP_PROXY ||
+      process.env.http_proxy ||
+      process.env.ALL_PROXY ||
+      process.env.all_proxy
+    if (envProxy) {
+      proxy = envProxy.trim()
+    }
+  }
+
+  if (!proxy) return undefined
+
+  if (!proxy.startsWith('http://') && !proxy.startsWith('https://')) {
+    proxy = `http://${proxy}`
+  }
+
+  if (proxy === cachedProxyUrl && cachedProxyAgent) {
+    return cachedProxyAgent
+  }
+
+  try {
+    cachedProxyAgent = new ProxyAgent(proxy)
+    cachedProxyUrl = proxy
+    return cachedProxyAgent
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 极速双语/文本翻译核心：优先直连 Google Translate 公共接口，超时或不可达时无缝降级至 MyMemory 免费服务。
+ * 纯文字翻译，零 Token 消耗、无需用户配置 Key。支持网络代理调度与防止同文回写/超额警告污染。
+ */
+export async function fastTranslateCore(text: string, targetLang = 'zh-CN'): Promise<WebFastTranslateResult> {
+  const clean = text.trim()
+  if (!clean) return { ok: true, text: '' }
+
+  const googleUrl =
+    'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=' +
+    encodeURIComponent(targetLang) +
+    '&dt=t&q=' +
+    encodeURIComponent(clean)
+
+  // 1. 尝试 Google Translate 公开 RPC (海外/有代理时毫秒级直达)
+  try {
+    const dispatcher = await getTranslationDispatcher(googleUrl)
+    const res = await fetch(googleUrl, {
+      signal: AbortSignal.timeout(3000),
+      ...(dispatcher ? { dispatcher } : {}),
+    } as RequestInit)
+    if (res.ok) {
+      const data = (await res.json()) as unknown
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const translated = data[0]
+          .map((item) => (Array.isArray(item) ? item[0] : ''))
+          .filter(Boolean)
+          .join('')
+          .trim()
+        if (translated && translated !== clean) {
+          return { ok: true, text: translated, source: 'google' }
+        }
+      }
+    }
+  } catch {
+    // 超时或不可达，平滑降级
+  }
+
+  // 2. 降级走 MyMemory 免费公共翻译接口（国内免代理直连）
+  try {
+    const langpair = 'auto|' + targetLang
+    const myMemoryUrl =
+      'https://api.mymemory.translated.net/get?q=' +
+      encodeURIComponent(clean) +
+      '&langpair=' +
+      encodeURIComponent(langpair)
+    const dispatcher = await getTranslationDispatcher(myMemoryUrl)
+    const res = await fetch(myMemoryUrl, {
+      signal: AbortSignal.timeout(5000),
+      ...(dispatcher ? { dispatcher } : {}),
+    } as RequestInit)
+    if (res.ok) {
+      const data = (await res.json()) as { responseData?: { translatedText?: string } }
+      const translated = data?.responseData?.translatedText?.trim()
+      if (
+        translated &&
+        !translated.toUpperCase().includes('MYMEMORY WARNING') &&
+        translated !== clean
+      ) {
+        return { ok: true, text: translated, source: 'mymemory' }
+      }
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: msg }
+  }
+
+  return { ok: false, error: '极速翻译接口暂时不可用，请稍后重试或切换为 AI 翻译' }
 }
 
 function clampTimeout(v: unknown): number {
@@ -1025,27 +1161,113 @@ export function setupWebBrowser(): void {
       const d = markDrag.get(contents.id)
       markDrag.delete(contents.id)
       if (d?.moved) return
-      Menu.buildFromTemplate([
+
+      const selectedText = (params.selectionText ?? '').trim()
+      const hasSelection = selectedText.length > 0
+
+      const template: MenuItemConstructorOptions[] = []
+
+      if (hasSelection) {
+        template.push(
+          {
+            label: t('翻译选中文本'),
+            submenu: [
+              {
+                label: t('⚡ 极速翻译（免费公用）'),
+                click: () => {
+                  mainWindow()?.webContents.send('web:translate', {
+                    wcId: contents.id,
+                    mode: 'selection',
+                    engine: 'fast',
+                    text: selectedText,
+                    x: params.x,
+                    y: params.y,
+                  } satisfies WebTranslatePayload)
+                },
+              },
+              {
+                label: t('🤖 AI 深度翻译'),
+                click: () => {
+                  mainWindow()?.webContents.send('web:translate', {
+                    wcId: contents.id,
+                    mode: 'selection',
+                    engine: 'ai',
+                    text: selectedText,
+                    x: params.x,
+                    y: params.y,
+                  } satisfies WebTranslatePayload)
+                },
+              },
+            ],
+          },
+          { type: 'separator' },
+        )
+      }
+
+      template.push(
         { label: t('复制'), role: 'copy', enabled: params.editFlags.canCopy },
         { label: t('粘贴'), role: 'paste', enabled: params.editFlags.canPaste },
         { type: 'separator' },
+        {
+          label: t('整页双语翻译'),
+          submenu: [
+            {
+              label: t('⚡ 极速双语翻译（免费公用）'),
+              click: () => {
+                mainWindow()?.webContents.send('web:translate', {
+                  wcId: contents.id,
+                  mode: 'page',
+                  engine: 'fast',
+                } satisfies WebTranslatePayload)
+              },
+            },
+            {
+              label: t('🤖 AI 深度双语翻译'),
+              click: () => {
+                mainWindow()?.webContents.send('web:translate', {
+                  wcId: contents.id,
+                  mode: 'page',
+                  engine: 'ai',
+                } satisfies WebTranslatePayload)
+              },
+            },
+            { type: 'separator' },
+            {
+              label: t('隐藏 / 显示双语对照'),
+              click: () => {
+                mainWindow()?.webContents.send('web:translate', {
+                  wcId: contents.id,
+                  mode: 'toggle',
+                } satisfies WebTranslatePayload)
+              },
+            },
+            {
+              label: t('清除网页译文'),
+              click: () => {
+                mainWindow()?.webContents.send('web:translate', {
+                  wcId: contents.id,
+                  mode: 'clear',
+                } satisfies WebTranslatePayload)
+              },
+            },
+          ],
+        },
+        { type: 'separator' },
         { label: t('刷新'), click: () => contents.reload() },
         { type: 'separator' },
-        /*
-         * 检查元素：开的是 **guest** 的 DevTools（inspectElement 作用于这份 WebContents），
-         * 与宿主窗口自己的 DevTools 互不相干。默认 dock 进宿主窗口会把网页区挤一条缝，
-         * 所以先按应用的惯例开成独立窗（windows.ts 同款），再定位到点的那个元素。
-         */
         {
           label: t('检查元素'),
           click: () => {
-            // DevTools 要独占调试插槽：先把日志采集让位（暂停），关掉 DevTools 会自动收回
             yieldDebuggerToDevtools(contents)
             if (!contents.isDevToolsOpened()) contents.openDevTools({ mode: 'detach' })
             contents.inspectElement(params.x, params.y)
           },
         },
-      ]).popup({ window: BrowserWindow.fromWebContents(contents.hostWebContents ?? contents) ?? undefined })
+      )
+
+      Menu.buildFromTemplate(template).popup({
+        window: BrowserWindow.fromWebContents(contents.hostWebContents ?? contents) ?? undefined,
+      })
     })
 
     contents.on('before-input-event', (e, input) => {

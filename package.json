@@ -1,7 +1,7 @@
 {
   "name": "unyra",
   "private": true,
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "归一 Unyra · 探索式学习：本地优先的 AI 学习辅助桌面应用",
   "author": "maplexrain",
   "type": "module",
@@ -59,6 +59,7 @@
     "react-dom": "^19.3.0",
     "sherpa-onnx-node": "^1.13.8",
     "tailwindcss": "^4.3.3",
+    "undici": "^7.29.1",
     "vscode-oniguruma": "^2.0.1",
     "vscode-textmate": "^9.3.2",
     "yaml": "^2.9.1"

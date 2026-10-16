@@ -18,10 +18,10 @@ import type {
   NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
   UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
-  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFetchResult, WebLogDetailResult,
+  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebLogDetailResult,
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
-  WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebWaitReq, WebWaitResult,
+  WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
 } from '../../shared/ipc'
 
 // 这些契约形状统一在 shared/ipc.ts（与 electron/preload.ts 共用一份，见该文件顶部）：
@@ -33,10 +33,10 @@ export type {
   NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
   UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
-  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFetchResult, WebLogDetailResult,
+  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebLogDetailResult,
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
-  WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebWaitReq, WebWaitResult,
+  WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
 }
 
 export type PluginList =
@@ -382,6 +382,10 @@ export interface NativeBridge {
     onGuestInput(
       cb: (p: { wcId: number; type: string; button: number; buttons: number; x: number; y: number }) => void,
     ): () => void
+    /** 订阅来自右键菜单的翻译指令 */
+    onTranslate(cb: (payload: WebTranslatePayload) => void): () => void
+    /** 极速翻译单条或短文本（免费公共接口） */
+    fastTranslate(text: string, targetLang?: string): Promise<WebFastTranslateResult>
     /** 页面快照：Accessibility 树 → 带 ref 的可交互元素清单（browser.* 的「看」通道） */
     snapshot(wcId: number): Promise<WebSnapshotResult>
     /** 页面滚到目标元素并高亮突出（browser.point） */

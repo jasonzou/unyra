@@ -43,6 +43,7 @@ const PURPOSE_LABEL: Record<UsagePurpose, string> = {
   annotate: '注解释义',
   exam: '试卷',
   test: '连接测试',
+  translate: '双语翻译',
   other: '其他',
 }
 
@@ -54,6 +55,7 @@ const PURPOSE_STYLE: Record<UsagePurpose, string> = {
   annotate: 'bg-ok/15 text-ok-deep border-ok/30',
   exam: 'bg-anno-purple/15 text-anno-purple border-anno-purple/30',
   test: 'bg-line/70 text-ink-soft border-line',
+  translate: 'bg-seal/15 text-seal-deep border-seal/30',
   other: 'bg-line/50 text-ink-faint border-line/60',
 }
 
@@ -65,6 +67,7 @@ const PURPOSE_COLOR: Record<UsagePurpose, string> = {
   annotate: '#059669',
   exam: '#9333ea',
   test: '#78716c',
+  translate: '#0284c7',
   other: '#64748b',
 }
 

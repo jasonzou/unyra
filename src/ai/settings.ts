@@ -26,6 +26,7 @@ import {
   PROVIDERS,
   presetOf,
   type InputModality,
+  type ProviderQuirks,
 } from './providers'
 import {
   asReasoningEffort,
@@ -107,6 +108,8 @@ export interface ProviderConfig {
   maxTokens?: number
   /** 额外请求头（部分网关要求 App 标识等） */
   extraHeaders?: Record<string, string>
+  /** 该提供商的特殊请求参数配置（覆盖预设） */
+  quirks?: ProviderQuirks
   /**
    * 这家提供商的思考档位映射（见 EffortMap）。同名键覆盖内置预设的映射，
    * 又被模型级（ModelEntry.effortMap）覆盖——级联合成在 resolveProvider / resolveGlobal。
@@ -268,6 +271,59 @@ function cleanEffortMap(raw: unknown): EffortMap | undefined {
   return any ? out : undefined
 }
 
+/**
+ * 提供商特殊参数（Quirks）的清洗：过滤非法字段与空值，保证落盘与运行时结构一致。
+ */
+function cleanQuirks(raw: unknown): ProviderQuirks | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  const quirks: ProviderQuirks = {}
+  let any = false
+  if (r.tokenParam === 'max_tokens' || r.tokenParam === 'max_completion_tokens') {
+    quirks.tokenParam = r.tokenParam
+    any = true
+  }
+  if (typeof r.omitTemperature === 'boolean') {
+    quirks.omitTemperature = r.omitTemperature
+    any = true
+  }
+  if (typeof r.omitReasoningEffort === 'boolean') {
+    quirks.omitReasoningEffort = r.omitReasoningEffort
+    any = true
+  }
+  if (typeof r.omitStreamUsage === 'boolean') {
+    quirks.omitStreamUsage = r.omitStreamUsage
+    any = true
+  }
+  if (
+    r.thinkingStyle === 'thinking_type' ||
+    r.thinkingStyle === 'enable_thinking' ||
+    r.thinkingStyle === 'thinking_config' ||
+    r.thinkingStyle === 'think' ||
+    r.thinkingStyle === 'reasoning_effort'
+  ) {
+    quirks.thinkingStyle = r.thinkingStyle
+    any = true
+  }
+  if (typeof r.thinkingTypeParam === 'boolean') {
+    quirks.thinkingTypeParam = r.thinkingTypeParam
+    any = true
+  }
+  if (typeof r.enableThinkingParam === 'boolean') {
+    quirks.enableThinkingParam = r.enableThinkingParam
+    any = true
+  }
+  if (typeof r.thinkingConfigParam === 'boolean') {
+    quirks.thinkingConfigParam = r.thinkingConfigParam
+    any = true
+  }
+  if (typeof r.thinkParam === 'boolean') {
+    quirks.thinkParam = r.thinkParam
+    any = true
+  }
+  return any ? quirks : undefined
+}
+
 /** 把任意来源的数据规范成一个模型条目；字符串视为「只有 ID 的旧数据」 */
 function normalizeModel(raw: unknown): ModelEntry | null {
   if (typeof raw === 'string') {
@@ -420,6 +476,7 @@ function normalizeConfig(raw: unknown, fallbackId: string, dropLegacyDefaults = 
   }
 
   const extraHeaders = cleanHeaders(parsed.extraHeaders)
+  const quirks = cleanQuirks(parsed.quirks)
   const effortMap = cleanEffortMap(parsed.effortMap)
   // 兼容格式只对自定义提供商有意义；值不合法就退回 openai（最常见）
   const rawCompat = str(parsed.compat).trim() as ProviderProtocol
@@ -448,6 +505,7 @@ function normalizeConfig(raw: unknown, fallbackId: string, dropLegacyDefaults = 
       ? { maxTokens: Math.floor(parsed.maxTokens) }
       : {}),
     ...(extraHeaders ? { extraHeaders } : {}),
+    ...(quirks ? { quirks } : {}),
     ...(effortMap ? { effortMap } : {}),
   }
 }
@@ -678,16 +736,18 @@ export function resolveProvider(settings: AiSettings = loadAiSettings()): Resolv
   const cfg = globalProvider(settings)
   if (!cfg) throw new AiRequestError('尚未配置任何 AI 提供商，请先在设置里创建')
   const preset = isCustomConfig(cfg) ? undefined : presetOf(cfg.id)
+  const quirks = preset?.quirks || cfg.quirks ? { ...preset?.quirks, ...cfg.quirks } : undefined
+  const effortMap = preset?.effortMap || cfg.effortMap ? { ...preset?.effortMap, ...cfg.effortMap } : undefined
   return {
     id: cfg.id,
     label: labelOf(cfg),
     baseUrl: baseUrlOf(cfg),
     apiKey: cfg.apiKey.trim(),
     extraHeaders: cfg.extraHeaders,
-    quirks: preset?.quirks,
+    quirks,
     // 思考档位映射：预设兜底，用户在提供商级的配置覆盖它
     // （模型级还有一层，在 resolveGlobal 里覆盖——那里才认得「选中的是哪个模型」）
-    effortMap: { ...preset?.effortMap, ...cfg.effortMap },
+    effortMap,
     // 协议：自定义看它选的兼容格式，内置看预设
     protocol: protocolOf(cfg),
     modelsPath: preset?.modelsPath,

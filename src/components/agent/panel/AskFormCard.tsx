@@ -6,41 +6,55 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, HelpCircle } from 'lucide-react'
-import type { AskAnswers, AskFormPayload, AskQuestion } from '../../../agent/tools'
+import { Check, ChevronLeft, ChevronRight, FileText, HelpCircle, Upload, X } from 'lucide-react'
+import type { AskAnswers, AskFileAttachment, AskFormPayload, AskQuestion } from '../../../agent/tools'
 import { renderInline } from '../../../lib/markdown'
 import { NO_AUTOFILL } from '../../../lib/autofill'
 import { t } from '../../../i18n'
 
 /* ---------- 结构化表单（api.ask） ---------- */
 
-/** 一道题的本地作答：picked 存选项 id，other 是「其他」的补充输入，text 是简答正文 */
+/** 一道题的本地作答 */
 interface AskDraft {
   picked: string[]
   other: string
   text: string
+  sliderValue?: number
+  rangeValue?: [number, number]
+  files?: AskFileAttachment[]
 }
 
-const EMPTY_DRAFT: AskDraft = { picked: [], other: '', text: '' }
+function initDraft(q: AskQuestion): AskDraft {
+  const min = q.min ?? 0
+  const max = q.max ?? 100
+  return {
+    picked: [],
+    other: '',
+    text: '',
+    sliderValue: q.type === 'slider' ? (typeof q.defaultValue === 'number' ? q.defaultValue : min) : undefined,
+    rangeValue: q.type === 'dual_slider' ? (Array.isArray(q.defaultValue) ? q.defaultValue : [min, max]) : undefined,
+    files: q.type === 'upload' ? [] : undefined,
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
 
 /**
- * api.ask 弹出的表单卡：单选 / 多选（都自动带一个「其他」，选了就能补充）与简答。
- *
- * **一次只问一道题**：答完这道（或点了下一题）再翻到下一道，也能翻回去改——
- * 一长串问题一次性铺开，人看到第三题就想关掉；一道一道来，每张卡只有一件事要 decision。
- * 翻题方向带着动画：前进从右边滑入、退回从左边滑入（见 index.css 的 moji-step-in-*），
- * 「刚才那题在后面」这个空间感靠方向撑着。
- *
- * **没有必答题**：任何一题都可以留空直接提交（用户懒得答的时候不该被拦着）；
- * 留空的题交回去只有 id/type/prompt，导师自己看情况处理。
- *
- * 题目上标了 userInfo 的（导师在问「你的教育程度？」这类画像字段）会带一枚「存进我的资料」小标：
- * 那一题的答案在提交时**直接写进用户资料**（见 learn/useAgent 的 applyAskToProfile），
- * 导师不必再调 api.userInfo.update。这事要让人看得见——用户有权知道哪一句回答会被存下来。
- *
- * 条件逻辑在渲染时现算：某道题的 when 引用前面某题的答案（选项 id、选项文字或
- * 「其他」补充的原文），命中才显示——前面选了什么，直接影响后面问什么。
- * 被条件藏起来的题目不会出现在交回去的答案里。
+ * api.ask 弹出的表单卡：单选 / 多选（都自动带一个「其他」，选了就能补充）、简答、
+ * 单滑块、双滑块（范围滑块）与文件上传附件。
  */
 export function AskFormCard({
   form,
@@ -52,11 +66,13 @@ export function AskFormCard({
   onCancel: () => void
 }) {
   const [drafts, setDrafts] = useState<Record<string, AskDraft>>(() =>
-    Object.fromEntries(form.questions.map((q) => [q.id, EMPTY_DRAFT])),
+    Object.fromEntries(form.questions.map((q) => [q.id, initDraft(q)])),
   )
   /** 现在翻到第几题（**可见题目**里的下标）；dir 记录翻的方向，滑入动画跟着它走 */
   const [step, setStep] = useState(0)
   const [dir, setDir] = useState<1 | -1>(1)
+  const [isDragging, setIsDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   /** 单选题选中后自动翻下一题的那颗定时器：再点别的选项、或卸载时要能收掉 */
   const advanceTimer = useRef<number | null>(null)
   useEffect(
@@ -66,9 +82,9 @@ export function AskFormCard({
     [],
   )
 
-  const draftOf = (id: string): AskDraft => drafts[id] ?? EMPTY_DRAFT
+  const draftOf = (id: string): AskDraft => drafts[id] ?? initDraft(form.questions.find((x) => x.id === id) ?? { id, type: 'short', prompt: '', options: [] })
   const patch = (id: string, next: Partial<AskDraft>) =>
-    setDrafts((prev) => ({ ...prev, [id]: { ...(prev[id] ?? EMPTY_DRAFT), ...next } }))
+    setDrafts((prev) => ({ ...prev, [id]: { ...(prev[id] ?? initDraft(form.questions.find((x) => x.id === id) ?? { id, type: 'short', prompt: '', options: [] })), ...next } }))
 
   /** 当前答案下，一道题该不该显示 */
   const visibleOf = (q: AskQuestion): boolean => {
@@ -76,7 +92,13 @@ export function AskFormCard({
     const ref = form.questions.find((x) => x.id === q.when!.id)
     if (!ref) return false
     const d = draftOf(ref.id)
-    const values = [...d.picked, ...ref.options.filter((o) => d.picked.includes(o.id)).map((o) => o.label), d.other.trim()]
+    const values = [
+      ...d.picked,
+      ...ref.options.filter((o) => d.picked.includes(o.id)).map((o) => o.label),
+      d.other.trim(),
+      d.sliderValue !== undefined ? String(d.sliderValue) : '',
+      ...(d.files ? d.files.map((f) => f.name) : []),
+    ]
     return q.when.oneOf.some((v) => values.includes(v))
   }
   const visible = form.questions.filter(visibleOf)
@@ -115,6 +137,37 @@ export function AskFormCard({
     }, 240)
   }
 
+  const handleFiles = async (fileList: FileList | File[]) => {
+    if (!q || q.type !== 'upload') return
+    const newFiles: AskFileAttachment[] = []
+    const maxBytes = (q.maxSizeMb ?? 32) * 1024 * 1024
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i]
+      if (file.size > maxBytes) {
+        continue
+      }
+      let dataUrl: string | undefined
+      if (file.type.startsWith('image/') || file.size < 5 * 1024 * 1024) {
+        try {
+          dataUrl = await readFileAsDataUrl(file)
+        } catch {
+          // ignore
+        }
+      }
+      const filePath = (file as unknown as { path?: string }).path || undefined
+      newFiles.push({
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        path: filePath,
+        dataUrl,
+      })
+      if (!q.multipleFiles) break
+    }
+    const curFiles = q.multipleFiles ? (draftOf(q.id).files ?? []) : []
+    patch(q.id, { files: q.multipleFiles ? [...curFiles, ...newFiles] : newFiles })
+  }
+
   const submit = () => {
     const answers: AskAnswers = visible.map((q0) => {
       const d = draftOf(q0.id)
@@ -125,6 +178,15 @@ export function AskFormCard({
       const base = { id: q0.id, type: q0.type, prompt: q0.prompt }
       if (q0.type === 'short') {
         return { ...base, ...(d.text.trim() ? { text: d.text.trim() } : {}) }
+      }
+      if (q0.type === 'slider') {
+        return { ...base, value: d.sliderValue ?? (q0.min ?? 0) }
+      }
+      if (q0.type === 'dual_slider') {
+        return { ...base, rangeValue: d.rangeValue ?? [q0.min ?? 0, q0.max ?? 100] }
+      }
+      if (q0.type === 'upload') {
+        return { ...base, ...(d.files && d.files.length ? { files: d.files } : {}) }
       }
       return {
         ...base,
@@ -192,7 +254,7 @@ export function AskFormCard({
                 </span>
               )}
             </div>
-            {q.type !== 'short' ? (
+            {q.type === 'single' || q.type === 'multiple' ? (
               <div className="mt-1 flex flex-col gap-1">
                 {q.options.map((o) => {
                   const checked = draftOf(q.id).picked.includes(o.id)
@@ -254,7 +316,7 @@ export function AskFormCard({
                   />
                 </label>
               </div>
-            ) : (
+            ) : q.type === 'short' ? (
               <textarea
                 value={draftOf(q.id).text}
                 onChange={(e) => patch(q.id, { text: e.target.value })}
@@ -263,7 +325,185 @@ export function AskFormCard({
                 className="mt-1 w-full resize-y rounded-lg border border-line bg-paper/60 px-2.5 py-1.5 text-[12px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/50"
                 {...NO_AUTOFILL}
               />
-            )}
+            ) : q.type === 'slider' ? (
+              <div className="mt-1 rounded-lg border border-line bg-paper/50 p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11.5px] font-medium text-ink-soft">{t('当前值')}</span>
+                  <span className="inline-flex items-center gap-1 rounded bg-seal/10 px-2 py-0.5 text-[12px] font-bold text-seal-deep tabular-nums">
+                    {draftOf(q.id).sliderValue ?? (q.min ?? 0)}
+                    {q.unit && <span className="text-[10px] font-normal">{q.unit}</span>}
+                  </span>
+                </div>
+                <div className="relative flex items-center py-1">
+                  <input
+                    type="range"
+                    min={q.min ?? 0}
+                    max={q.max ?? 100}
+                    step={q.step ?? 1}
+                    value={draftOf(q.id).sliderValue ?? (q.min ?? 0)}
+                    onChange={(e) => patch(q.id, { sliderValue: Number(e.target.value) })}
+                    className="w-full accent-seal cursor-pointer h-2 rounded-lg bg-line/80"
+                  />
+                </div>
+                <div className="flex justify-between text-[10.5px] text-ink-faint tabular-nums">
+                  <span>{q.min ?? 0}{q.unit}</span>
+                  <span>{q.max ?? 100}{q.unit}</span>
+                </div>
+              </div>
+            ) : q.type === 'dual_slider' ? (() => {
+              const min = q.min ?? 0
+              const max = q.max ?? 100
+              const step = q.step ?? 1
+              const range = draftOf(q.id).rangeValue ?? [min, max]
+              const [low, high] = range
+              const span = max - min || 1
+              const lowPct = Math.max(0, Math.min(100, ((low - min) / span) * 100))
+              const highPct = Math.max(0, Math.min(100, ((high - min) / span) * 100))
+
+              return (
+                <div className="mt-1 rounded-lg border border-line bg-paper/50 p-3 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11.5px] font-medium text-ink-soft">{t('选择范围')}</span>
+                    <span className="inline-flex items-center gap-1 rounded bg-seal/10 px-2 py-0.5 text-[12px] font-bold text-seal-deep tabular-nums">
+                      <span>{low}</span>
+                      <span className="text-ink-faint font-normal">~</span>
+                      <span>{high}</span>
+                      {q.unit && <span className="text-[10px] font-normal">{q.unit}</span>}
+                    </span>
+                  </div>
+                  <div className="relative h-6 flex items-center">
+                    <div className="absolute inset-x-0 h-2 rounded-lg bg-line/80" />
+                    <div
+                      className="absolute h-2 rounded-lg bg-seal/70"
+                      style={{ left: `${lowPct}%`, width: `${Math.max(0, highPct - lowPct)}%` }}
+                    />
+                    <input
+                      type="range"
+                      min={min}
+                      max={max}
+                      step={step}
+                      value={low}
+                      onChange={(e) => {
+                        const v = Math.min(Number(e.target.value), high)
+                        patch(q.id, { rangeValue: [v, high] })
+                      }}
+                      className="absolute inset-x-0 w-full pointer-events-none appearance-none bg-transparent cursor-pointer [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-seal [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-card [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-sm z-10"
+                    />
+                    <input
+                      type="range"
+                      min={min}
+                      max={max}
+                      step={step}
+                      value={high}
+                      onChange={(e) => {
+                        const v = Math.max(Number(e.target.value), low)
+                        patch(q.id, { rangeValue: [low, v] })
+                      }}
+                      className="absolute inset-x-0 w-full pointer-events-none appearance-none bg-transparent cursor-pointer [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-seal [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-card [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-sm z-20"
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10.5px] text-ink-faint tabular-nums">
+                    <span>{min}{q.unit}</span>
+                    <span>{max}{q.unit}</span>
+                  </div>
+                </div>
+              )
+            })() : q.type === 'upload' ? (
+              <div className="mt-1 space-y-2">
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setIsDragging(false)
+                    if (e.dataTransfer.files?.length) {
+                      void handleFiles(e.dataTransfer.files)
+                    }
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={
+                    'flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-4 text-center cursor-pointer transition-colors ' +
+                    (isDragging
+                      ? 'border-seal bg-seal/10 text-seal-deep'
+                      : 'border-line/80 hover:border-seal/50 bg-paper/40 hover:bg-paper/70 text-ink-soft')
+                  }
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple={q.multipleFiles}
+                    accept={q.accept}
+                    onChange={(e) => {
+                      if (e.target.files?.length) {
+                        void handleFiles(e.target.files)
+                      }
+                      e.target.value = ''
+                    }}
+                    className="hidden"
+                  />
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-seal/10 text-seal mb-2">
+                    <Upload size={16} />
+                  </div>
+                  <div className="text-[12px] font-medium text-ink">
+                    {t('点击或拖拽文件到此处上传')}
+                  </div>
+                  <div className="text-[10.5px] text-ink-faint mt-0.5">
+                    {q.accept ? `${t('支持格式：{0}', q.accept)} · ` : ''}
+                    {t('最大 {0}MB', q.maxSizeMb ?? 32)}
+                    {q.multipleFiles ? ` · ${t('可选多个文件')}` : ''}
+                  </div>
+                </div>
+
+                {draftOf(q.id).files && draftOf(q.id).files!.length > 0 && (
+                  <div className="space-y-1 mt-2">
+                    <div className="text-[10.5px] font-semibold text-ink-soft">
+                      {t('已添加附件 ({0})', draftOf(q.id).files!.length)}
+                    </div>
+                    <div className="space-y-1 max-h-36 overflow-y-auto">
+                      {draftOf(q.id).files!.map((file, fIdx) => (
+                        <div
+                          key={fIdx}
+                          className="flex items-center gap-2 rounded-lg border border-line bg-card p-2 text-[11.5px]"
+                        >
+                          {file.type.startsWith('image/') && file.dataUrl ? (
+                            <img
+                              src={file.dataUrl}
+                              alt={file.name}
+                              className="h-8 w-8 rounded object-cover border border-line shrink-0"
+                            />
+                          ) : (
+                            <div className="flex h-8 w-8 items-center justify-center rounded bg-line/50 text-ink-soft shrink-0">
+                              <FileText size={16} />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium text-ink" title={file.name}>
+                              {file.name}
+                            </div>
+                            <div className="text-[10px] text-ink-faint tabular-nums">
+                              {formatBytes(file.size)}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const cur = draftOf(q.id).files ?? []
+                              patch(q.id, { files: cur.filter((_, idx0) => idx0 !== fIdx) })
+                            }}
+                            className="flex h-6 w-6 items-center justify-center rounded text-ink-faint hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                            title={t('移除附件')}
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : (

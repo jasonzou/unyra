@@ -47,6 +47,24 @@ export type WebDomOpResult = { ok: true; result?: unknown } | { error: string }
  *  渲染层 src/learn/web/browserOps 与 src/learn/webDocs 的 livePageForAgent。 */
 export type WebReadHtmlResult = { html: string; url: string; title: string } | { error: string }
 
+export type TranslationEngine = 'fast' | 'ai'
+
+/** 内置浏览器翻译指令载荷。谁在用：主进程 electron/app/webSession.ts ↔ 渲染层 WebTabLayer */
+export interface WebTranslatePayload {
+  wcId: number
+  mode: 'selection' | 'page' | 'toggle' | 'clear'
+  engine?: TranslationEngine
+  text?: string
+  x?: number
+  y?: number
+}
+
+/** 极速翻译单条或批量请求结果 */
+export type WebFastTranslateResult =
+  | { ok: true; text: string; source?: string }
+  | { ok: false; error: string }
+
+
 /* ---------- 页签日志与直发请求（browser.logs / logDetail / fetch / record，见 shared/webLogs） ---------- */
 
 /** browser.logs 的过滤参数。谁在用：preload browser.logs ↔ 主进程 web:logs（折叠与缓冲见 shared/webLogs）。 */

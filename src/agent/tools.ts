@@ -18,9 +18,11 @@
 export type {
   AskAnswer,
   AskAnswers,
+  AskFileAttachment,
   AskFormPayload,
   AskOption,
   AskQuestion,
+  AskQuestionType,
   AttentionOps,
   CheckinOps,
   CodeOps,

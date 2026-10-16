@@ -12,13 +12,16 @@ export type StatusState = { kind: 'idle' } | { kind: 'busy' } | { kind: 'ok'; ms
 /** 把一条配置解析成可发请求的形式（与 settings 的 resolveProvider 同口径） */
 export function resolveDraft(cfg: ProviderConfig, extraHeaders?: Record<string, string>): ResolvedProvider {
   const preset = cfg.kind === 'custom' ? undefined : presetOf(cfg.id)
+  const quirks = preset?.quirks || cfg.quirks ? { ...preset?.quirks, ...cfg.quirks } : undefined
+  const effortMap = preset?.effortMap || cfg.effortMap ? { ...preset?.effortMap, ...cfg.effortMap } : undefined
   return {
     id: cfg.id,
     label: labelOf(cfg),
     baseUrl: baseUrlOf(cfg),
     apiKey: cfg.apiKey.trim(),
     extraHeaders,
-    quirks: preset?.quirks,
+    quirks,
+    effortMap,
     protocol: protocolOf(cfg),
     modelsPath: preset?.modelsPath,
     maxTokens: cfg.maxTokens ?? preset?.maxTokens,

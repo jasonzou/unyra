@@ -99,6 +99,35 @@ function isDarkModeActive(): boolean {
   return false
 }
 
+/**
+ * 计算并保留 Mermaid 图表的自然固有尺寸，防止小尺寸图表被强制撑大至 100% 容器宽度导致巨大拉伸
+ */
+export function computeMermaidSvgMaxWidth(
+  styleMaxWidth?: string | null,
+  viewBox?: string | null,
+  widthAttr?: string | null,
+): string {
+  let naturalWidth = 0
+  if (styleMaxWidth && styleMaxWidth.endsWith('px')) {
+    naturalWidth = parseFloat(styleMaxWidth)
+  } else {
+    if (viewBox) {
+      const parts = viewBox.trim().split(/[\s,]+/)
+      if (parts.length === 4) {
+        naturalWidth = parseFloat(parts[2])
+      }
+    }
+    if (!naturalWidth && widthAttr && !widthAttr.includes('%')) {
+      naturalWidth = parseFloat(widthAttr)
+    }
+  }
+
+  if (naturalWidth > 0 && Number.isFinite(naturalWidth)) {
+    return `min(100%, ${Math.round(naturalWidth)}px)`
+  }
+  return '100%'
+}
+
 function hydrateOne(el: HTMLElement): (() => void) | null {
   const stage = el.querySelector<HTMLElement>('.moji-mermaid-stage')
   if (!stage) return null
@@ -129,6 +158,25 @@ function hydrateOne(el: HTMLElement): (() => void) | null {
         theme: isDark ? 'dark' : 'default',
         securityLevel: 'loose',
         fontFamily: 'inherit',
+        fontSize: 13,
+        flowchart: {
+          useMaxWidth: true,
+          htmlLabels: true,
+          curve: 'basis',
+          nodeSpacing: 30,
+          rankSpacing: 35,
+          padding: 10,
+        },
+        sequence: {
+          useMaxWidth: true,
+          actorFontSize: 13,
+          noteFontSize: 12,
+          messageFontSize: 13,
+        },
+        themeVariables: {
+          fontFamily: 'inherit',
+          fontSize: '13px',
+        },
       })
       const { svg, bindFunctions } = await mermaid.render(id, raw)
       if (disposed) return
@@ -138,7 +186,11 @@ function hydrateOne(el: HTMLElement): (() => void) | null {
       stage.innerHTML = svg
       const svgEl = stage.querySelector('svg')
       if (svgEl) {
-        svgEl.style.maxWidth = '100%'
+        svgEl.style.maxWidth = computeMermaidSvgMaxWidth(
+          svgEl.style.maxWidth,
+          svgEl.getAttribute('viewBox'),
+          svgEl.getAttribute('width'),
+        )
         svgEl.style.height = 'auto'
         svgEl.style.display = 'inline-block'
       }

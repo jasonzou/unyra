@@ -11,6 +11,7 @@ import { t } from '../../i18n'
  * 思考档位视觉强调色：雅致的微宝石质感色调（轻快薄荷绿 → 暖琥珀金 → 深入紫罗兰 → 极致珊瑚红）
  */
 const EFFORT_ACCENTS: Record<ReasoningEffort, { dot: string; glow: string }> = {
+  none: { dot: '#94a3b8', glow: 'rgba(148, 163, 184, 0.3)' },
   low: { dot: '#10b981', glow: 'rgba(16, 185, 129, 0.3)' },
   medium: { dot: '#f59e0b', glow: 'rgba(245, 158, 11, 0.3)' },
   high: { dot: '#8b5cf6', glow: 'rgba(139, 92, 246, 0.3)' },
@@ -97,7 +98,10 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
       </div>
 
       {/* 档位标签列表 */}
-      <div className="relative z-10 grid h-full w-full grid-cols-4 items-center">
+      <div
+        className="relative z-10 grid h-full w-full items-center"
+        style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}
+      >
         {levels.map((e) => {
           const isActive = e === value
           const levelAccent = EFFORT_ACCENTS[e]

@@ -184,7 +184,9 @@ export const SANDBOX_API_CATALOG: ApiGroup[] = [
         name: 'ask',
         signature: 'ask({ title?, questions: [...] })',
         summary:
-          '结构化表单（阻塞到提交）：题型 single / multiple（自动附「其他」+补充输入）与 short；' +
+          '结构化表单（阻塞到提交）：题型 single / multiple（自动附「其他」+补充输入）、short（简答）、' +
+          'slider（单滑块，可配 min/max/step/unit/defaultValue）、dual_slider（双滑块范围选择）、' +
+          'upload（附件上传，可配 accept/multipleFiles/maxSizeMb）；' +
           '题目给 when: { id, oneOf } 实现「前面选了什么影响后面问什么」；返回 answers，用户取消时 cancelled: true',
         availability: 'always',
       },

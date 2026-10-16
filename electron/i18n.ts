@@ -16,7 +16,7 @@ import { app } from 'electron'
 import dict from './i18n-strings'
 
 /** 界面语言。'zh' 是源文案（中文即键，无字典查询），'en' 查表 */
-export type Locale = 'zh' | 'en'
+export type Locale = 'zh' | 'en' | (string & {})
 
 let current: Locale | null = null
 const listeners = new Set<() => void>()
@@ -37,9 +37,8 @@ export function getLocale(): Locale {
 }
 
 export function setLocale(l: Locale): void {
-  const next: Locale = l === 'en' ? 'en' : 'zh'
-  if (next === getLocale()) return
-  current = next
+  if (l === getLocale()) return
+  current = l
   for (const fn of [...listeners]) fn()
 }
 

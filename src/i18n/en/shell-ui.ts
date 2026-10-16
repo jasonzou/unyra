@@ -213,6 +213,12 @@ const dict: Record<string, string> = {
 
   /* ---------- 设置 → 模型：提供商列表 ---------- */
   '已配置的提供商': 'Configured providers',
+  '已添加的提供商': 'Added providers',
+  '未完成配置': 'Configuration incomplete',
+  '未填写 API Key，点击继续配置': 'API Key not set, click to continue configuration',
+  '该提供商已添加，点击查看或继续配置': 'This provider is already added; click to view or configure',
+  '已添加 · 点击配置': 'Added · Click to configure',
+  '{0} 已经在列表中，已打开它的配置': '{0} is already in the list; opened its configuration',
   '点击进入配置': 'Click to configure',
   '创建提供商': 'Create provider',
   '还没有提供商。点右上「创建提供商」，从预设里挑一家，或用自定义接入中转 / 内网 / 本地模型。': 'No providers yet. Click "Create provider" at the top right to pick a preset, or use a custom entry for relays / intranets / local models.',
