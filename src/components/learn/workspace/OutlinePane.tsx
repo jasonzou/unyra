@@ -9,7 +9,7 @@
  * 当 active 变为 true 时才解除冻结并渲染最新状态。
  */
 
-import { memo, useEffect } from 'react'
+import { memo } from 'react'
 import type { KnowledgeNode, LearnStore, OutlineEntry, TabRef } from '../../../learn/types'
 import type { ExamActions, NodeDocActions } from '../explorer/types'
 import OutlineView from '../OutlineView'
@@ -62,20 +62,6 @@ export const OutlinePane = memo(function OutlinePane({
   focusTarget,
   onFocusHandled,
 }: OutlinePaneProps) {
-  if (active) {
-    const t0 = (window as any).__tabSwitchT0
-    const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
-    console.log(`[TabSwitch] ${prefix}🗺️ OutlinePane rendered active=true for tabId="${_tabId}", title="${node.title}"`)
-  }
-
-  useEffect(() => {
-    if (active) {
-      const t0 = (window as any).__tabSwitchT0
-      const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
-      console.log(`[TabSwitch] ${prefix}🕒 OutlinePane useEffect (active=true for tabId="${_tabId}")`)
-    }
-  }, [active, _tabId])
-
   return (
     <div
       data-outline-pane={active ? 'active' : 'idle'}

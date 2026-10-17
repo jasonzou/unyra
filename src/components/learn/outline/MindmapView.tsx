@@ -571,10 +571,6 @@ export default memo(function MindmapView({
   focusTarget,
   onFocusHandled,
 }: MindmapViewProps) {
-  const t0 = (window as any).__tabSwitchT0
-  const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
-  console.log(`[TabSwitch] ${prefix}🧠 MindmapView rendered for node="${node.title}"`)
-
   const containerRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
   const isSpacePressedRef = useRef(false)
@@ -844,7 +840,6 @@ export default memo(function MindmapView({
 
   // 构建思维导图并计算几何布局
   const { nodes, edges, totalWidth, totalHeight, rawTree } = useMemo(() => {
-    const tStart = performance.now()
     const tree = buildMindmapTree(store, node, activePreview)
     computeSubtreeHeights(tree, collapsedIds)
     assignCoordinates(tree, 0, 0, collapsedIds)
@@ -881,11 +876,6 @@ export default memo(function MindmapView({
     const { nodes: flatNodes, edges: flatEdges } = flattenTree(tree, collapsedIds)
     const w = (Number.isFinite(maxX) ? maxX : 200) - (Number.isFinite(minX) ? minX : 0) + PADDING * 2
     const h = (Number.isFinite(maxY) ? maxY : 100) - (Number.isFinite(minY) ? minY : 0) + PADDING * 2
-
-    const elapsed = (performance.now() - tStart).toFixed(1)
-    const t0 = (window as any).__tabSwitchT0
-    const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
-    console.log(`[TabSwitch] ${prefix}🌲 Mindmap tree layout computed in ${elapsed}ms (nodes: ${flatNodes.length}, edges: ${flatEdges.length})`)
 
     return {
       nodes: flatNodes,

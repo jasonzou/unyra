@@ -25,6 +25,7 @@ import { inputCountOf, inputTimeline } from '../../learn/examRecords'
 import { renderInline, renderNote } from '../../lib/markdown'
 import { pad2 } from '../../lib/time'
 import MarkdownView from '../MarkdownView'
+import ZenResizeHandles from './workspace/ZenResizeHandles'
 import { t } from '../../i18n'
 
 /**
@@ -115,8 +116,9 @@ export default function ExamCopyView({ exam, attempt }: Props) {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-card select-text">
-      <div className="doc-measure px-5 py-5 sm:px-6">
+    <div className="h-full overflow-y-auto overflow-x-hidden bg-card select-text">
+      <div className="doc-measure relative px-5 py-5 sm:px-6">
+        <ZenResizeHandles />
         {/* --- 紧凑高效成绩总览看板 --- */}
         <section className="rounded-lg border border-line bg-card p-4 shadow-2xs">
           {/* 标头行 */}

@@ -94,6 +94,7 @@ import {
   type TabOwners,
 } from '../../learn/groups'
 import { makeBlankTab, makeTab, newBlankKey, newDraftKey, newWebKey, tabKey, tabNodeId, tabTitle, tabTrail, fileNameOf as localFileNameOf } from '../../learn/tabs'
+import { setZenActive } from '../../learn/zen'
 import { pickLocalFiles } from '../../lib/localFiles'
 import { addLocalFile } from '../../learn/localfiles'
 import { normalizeWebInput } from '../../learn/webUrl'
@@ -363,12 +364,6 @@ export default function LearnWorkspace({
   const [creatingGoalBusy, setCreatingGoalBusy] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  const lastSwitchLogRef = useRef<number>(0)
-  const t0Switch = (window as any).__tabSwitchT0
-  if (typeof t0Switch === 'number' && t0Switch !== lastSwitchLogRef.current && performance.now() - t0Switch < 1000) {
-    lastSwitchLogRef.current = t0Switch
-    console.log(`[TabSwitch] ${(performance.now() - t0Switch).toFixed(1)}ms: 🏢 LearnWorkspace rendered`)
-  }
   /*
    * 学习状态与试卷**都没有应用内的窗口**：两块都是文档区右上角悬浮组里的一块 tip
    * （鼠标经过即展开，见 components/learn/DocFloat），试卷的作答在独立的考试窗口里
@@ -815,78 +810,24 @@ export default function LearnWorkspace({
     if (pure && !tabs.length) setPure(false)
   }, [pure, tabs.length, setPure])
 
-  /** 纯净阅读下的内容宽度（镜像对称拖拽调整并持久化） */
-  const [zenWidth, setZenWidth] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem('moji:zen-width')
-      if (saved) {
-        const n = parseInt(saved, 10)
-        if (Number.isFinite(n) && n >= 480 && n <= 2400) return n
-      }
-    } catch {}
-    return 860
-  })
-  const [zenDragging, setZenDragging] = useState<{
-    side: 'left' | 'right'
-    startX: number
-    startWidth: number
-  } | null>(null)
-  const zenHudValRef = useRef<HTMLSpanElement | null>(null)
-  const currentDragWRef = useRef<number>(zenWidth)
-
+  /** 纯净阅读（Zen mode）：同步全局属性与宽度 CSS 变量 */
   useEffect(() => {
+    setZenActive(pure)
     if (pure) {
-      document.documentElement.setAttribute('data-zen', 'true')
-      document.documentElement.style.setProperty('--zen-width', `${zenWidth}px`)
-    } else {
-      document.documentElement.removeAttribute('data-zen')
-    }
-  }, [pure, zenWidth])
-
-  const onZenResizeStart = (e: React.PointerEvent, side: 'left' | 'right') => {
-    e.preventDefault()
-    e.stopPropagation()
-    currentDragWRef.current = zenWidth
-    setZenDragging({
-      side,
-      startX: e.clientX,
-      startWidth: zenWidth,
-    })
-  }
-
-  useEffect(() => {
-    if (!zenDragging) return
-
-    const onPointerMove = (e: PointerEvent) => {
-      const delta = e.clientX - zenDragging.startX
-      const mult = zenDragging.side === 'right' ? 2 : -2
-      const maxW = Math.max(480, window.innerWidth - 32)
-      const nextW = Math.min(maxW, Math.max(480, Math.round(zenDragging.startWidth + delta * mult)))
-      currentDragWRef.current = nextW
-      document.documentElement.style.setProperty('--zen-width', `${nextW}px`)
-      if (zenHudValRef.current) {
-        zenHudValRef.current.textContent = `${nextW}px`
-      }
-    }
-
-    const onPointerUp = () => {
-      const finalW = currentDragWRef.current
-      setZenWidth(finalW)
+      let initW = 860
       try {
-        localStorage.setItem('moji:zen-width', String(finalW))
+        const saved = localStorage.getItem('moji:zen-width')
+        if (saved) {
+          const n = parseInt(saved, 10)
+          if (Number.isFinite(n) && n >= 480 && n <= 2400) initW = n
+        }
       } catch {}
-      setZenDragging(null)
+      document.documentElement.style.setProperty('--zen-width', `${initW}px`)
     }
-
-    window.addEventListener('pointermove', onPointerMove)
-    window.addEventListener('pointerup', onPointerUp)
-    window.addEventListener('pointercancel', onPointerUp)
     return () => {
-      window.removeEventListener('pointermove', onPointerMove)
-      window.removeEventListener('pointerup', onPointerUp)
-      window.removeEventListener('pointercancel', onPointerUp)
+      setZenActive(false)
     }
-  }, [zenDragging])
+  }, [pure])
 
   // 现取一次设置：判断能否用 AI，并把当前提供商名字带进提示文案
   const aiSettings = loadAiSettings()
@@ -1711,26 +1652,16 @@ export default function LearnWorkspace({
    */
   const activateTab = useCallback(
     (id: string) => {
-      const t0 = performance.now()
-      ;(window as any).__tabSwitchT0 = t0
       const s = getLatest()
       const tab = findTab(s.docArea, id)
       const group = groupIdOfTab(s.docArea, id)
       if (!tab || !group) return
       const fromTab = focusedTab(s.docArea)
-      console.log(`[TabSwitch] 0.0ms: 🖱️ Tab clicked -> id="${id}" (kind="${tab.ref.kind}", from="${fromTab?.id ?? 'none'}")`)
       const nodeId = tabNodeId(tab.ref)
       const base = nodeId ? retargetNode(s, nodeId) : s
       const wasActive = fromTab?.id === id && s.docArea.focus === group
       // activateIn 顺手把焦点挪到那一格：点别处的页签，接下来的动作（开文档、Ctrl+W）都该落在那一格
       set({ ...base, docArea: activateIn(base.docArea, group, id) })
-      console.log(`[TabSwitch] ${(performance.now() - t0).toFixed(1)}ms: 📦 Store state dispatched`)
-      requestAnimationFrame(() => {
-        console.log(`[TabSwitch] ${(performance.now() - t0).toFixed(1)}ms: 🎨 Frame 1 committed (DOM updated)`)
-        requestAnimationFrame(() => {
-          console.log(`[TabSwitch] ${(performance.now() - t0).toFixed(1)}ms: 🚀 Frame 2 painted (visual complete)`)
-        })
-      })
       // 同一枚页签没有 activeTab 变化，单独唤醒侧栏完成重复定位。
       if (wasActive) requestReveal()
     },
@@ -3835,11 +3766,7 @@ export default function LearnWorkspace({
             <div
               ref={isFocused ? docBox : undefined}
               {...boxProps}
-              style={pure ? { width: 'var(--zen-width, 860px)', maxWidth: '100%' } : undefined}
-              className={
-                'flex h-full min-h-0 flex-col overflow-hidden ' +
-                (pure ? 'relative mx-auto flex-none' : 'flex-1')
-              }
+              className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
               onDragOver={(e) => {
               // 整个正文区都是 chip 的落点：资源管理器 / 收藏里拖来的引用，拖到这里
               // 直接开成本格的页签（不必再瞄准上面那条窄页签栏）。系统文件拖入
@@ -3884,26 +3811,6 @@ export default function LearnWorkspace({
               toggleZen()
             }}
           >
-            {/* 纯净阅读拖拽边框与手柄（两边都可拖拽，镜像对称缩放） */}
-            {pure && (
-              <>
-                <div
-                  onPointerDown={(e) => onZenResizeStart(e, 'left')}
-                  className="group/zen-l absolute -left-2 top-0 bottom-0 z-30 w-4 cursor-ew-resize select-none flex items-center justify-center"
-                  title={t('拖拽调整阅读宽度（镜像对称）')}
-                >
-                  <div className="h-full w-0 border-l border-dashed border-line-strong transition-colors group-hover/zen-l:border-seal" />
-                </div>
-                <div
-                  onPointerDown={(e) => onZenResizeStart(e, 'right')}
-                  className="group/zen-r absolute -right-2 top-0 bottom-0 z-30 w-4 cursor-ew-resize select-none flex items-center justify-center"
-                  title={t('拖拽调整阅读宽度（镜像对称）')}
-                >
-                  <div className="h-full w-0 border-r border-dashed border-line-strong transition-colors group-hover/zen-r:border-seal" />
-                </div>
-              </>
-            )}
-
             {gTab?.ref.kind === 'web' ? (
               /*
                 网页页签：正文不归 React 画（guest 进程自己渲染），由下面挂着的
@@ -4844,15 +4751,6 @@ export default function LearnWorkspace({
           onConfirm={() => setGuardFuse(null)}
           onCancel={() => setGuardFuse(null)}
         />
-      )}
-      {zenDragging && (
-        <>
-          <div className="fixed inset-0 z-[99] cursor-ew-resize select-none" />
-          <div className="pointer-events-none fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 rounded-lg border border-line-strong bg-card/95 px-3 py-1.5 shadow-[0_8px_24px_rgba(31,27,23,0.18)] text-[12px] tabular-nums text-ink-strong backdrop-blur-xs">
-            <span className="text-ink-faint">{t('纯净阅读宽度')}</span>
-            <span ref={zenHudValRef} className="font-semibold text-seal">{zenWidth}px</span>
-          </div>
-        </>
       )}
     </div>
   )

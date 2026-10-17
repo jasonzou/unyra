@@ -55,10 +55,6 @@ export default memo(function OutlineView({
   focusTarget,
   onFocusHandled,
 }: OutlineViewProps) {
-  const t0 = (window as any).__tabSwitchT0
-  const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
-  console.log(`[TabSwitch] ${prefix}👁️ OutlineView rendered for node="${node.title}"`)
-
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-paper dark:bg-card/30">
       <div className="relative min-h-0 flex-1">

@@ -74,18 +74,10 @@ export const DocPane = memo(function DocPane({
 }: DocPaneProps) {
   // memo（samePane）挡住了无关重渲染：界面语言变化要自己订阅才跟得上
   useLocale()
-  if (active) {
-    const t0 = (window as any).__tabSwitchT0
-    const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
-    console.log(`[TabSwitch] ${prefix}📄 DocPane rendered active=true for tabId="${tabId}", title="${node.title}"`)
-  }
   // 登记「这一片在用」：常驻名额按它排（见 learn/resident）。
   // 写在 effect 里是因为它是外部状态，不是渲染结果；只有真的显示出来时才记。
   useEffect(() => {
     if (active) {
-      const t0 = (window as any).__tabSwitchT0
-      const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
-      console.log(`[TabSwitch] ${prefix}🕒 DocPane useEffect (touchRecent for tabId="${tabId}")`)
       touchRecent(tabId)
     }
   }, [active, tabId])

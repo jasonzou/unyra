@@ -75,7 +75,6 @@ export function touchRecent(id: string, cap: number = RESIDENT_MAX): void {
   if (next.length === recent.length && next.every((v, i) => v === next[i])) return
   recent = next
   snapshot = next
-  console.log(`[TabSwitch] 🔄 touchRecent updated resident list (${next.length} tabs), notifying ${listeners.size} external store listeners`)
   for (const listener of listeners) listener()
 }
 

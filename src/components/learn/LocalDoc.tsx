@@ -12,6 +12,7 @@ import type { OutlineHandle } from '../../lib/outline'
 import MarkdownView from '../MarkdownView'
 import SourceEditor, { type SaveState } from './SourceEditor'
 import { DocStatChip } from './DocFloat'
+import ZenResizeHandles from './workspace/ZenResizeHandles'
 import { useDocOutline } from './note/useDocView'
 import { t } from '../../i18n'
 
@@ -352,14 +353,15 @@ export default function LocalDoc({
         <span className="tabular-nums">{t('{0} 字', wordCount)}</span>
       </DocStatChip>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {/* 复制同样走源文：预览里选的这一段，进剪贴板的该是它 Markdown 的样子（见 lib/copySource） */}
         <div
           ref={bodyRef}
-          className="note-preview moji-node-note doc-measure px-7 py-6"
+          className="note-preview moji-node-note doc-measure relative px-7 py-6"
           style={{ '--doc-scale': scale } as CSSProperties}
           onCopy={(e) => copySelectionAsMarkdown(e, e.currentTarget, text)}
         >
+          <ZenResizeHandles />
           <MarkdownView html={html} resolveLocalImage={resolveLocalImage} />
         </div>
       </div>
