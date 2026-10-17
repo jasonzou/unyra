@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { t } from '../../i18n'
+import { isWeb } from '../../lib/native'
 import { startLoopback, type LoopbackSession } from '../../lib/audio/loopback'
 import { addBreath, applyGravity, barCount, barRanges, sampleBars, smoothBars } from '../../lib/audio/bars'
 
@@ -88,6 +89,10 @@ export default function SystemAudioWave() {
     }
 
     const start = (): void => {
+      if (isWeb()) {
+        setTip(t('电台律动 · 呼吸待机'))
+        return
+      }
       void (async () => {
         try {
           const s = await startLoopback({
