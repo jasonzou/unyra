@@ -30,11 +30,7 @@ import type {
 
 // 本地微服务的基础地址（同一主机端口，或跨端口开发调试时指定）
 const getApiBase = (): string => {
-  if (typeof window === 'undefined') return 'http://localhost:3800'
-  // 若前端运行在 Vite 调试端口 (5173)，API 路由到服务端的 3800
-  if (window.location.port === '5173') {
-    return 'http://localhost:3800'
-  }
+  if (typeof window === 'undefined') return 'http://127.0.0.1:3800'
   return ''
 }
 

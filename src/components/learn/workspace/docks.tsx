@@ -208,6 +208,14 @@ export function GuardPreviewTile({ kind }: { kind: 'screen' | 'camera' }) {
     if (stream) void video.play().catch(() => {})
   }, [version, kind])
 
+  useEffect(() => {
+    if (!isWeb()) return
+    const timer = window.setInterval(() => {
+      setVersion((v) => (v + 1) % 100000)
+    }, 2500)
+    return () => window.clearInterval(timer)
+  }, [])
+
   if (isWeb()) {
     return (
       <div className="relative aspect-video overflow-hidden rounded-md border border-line bg-black/80">
@@ -215,15 +223,13 @@ export function GuardPreviewTile({ kind }: { kind: 'screen' | 'camera' }) {
           src={`/api/guard/preview/${kind}?v=${version}`}
           alt={kind}
           className="h-full w-full object-contain"
-          onError={(e) => {
-            ;(e.target as HTMLElement).style.opacity = '0'
-          }}
-          onLoad={(e) => {
-            ;(e.target as HTMLElement).style.opacity = '1'
-          }}
         />
         <span className="absolute bottom-1 left-1.5 rounded bg-black/55 px-1 py-px text-[9.5px] text-white/90">
           {kind === 'screen' ? t('屏幕') : t('摄像头')}
+        </span>
+        <span className="absolute top-1 right-1.5 flex items-center gap-1 rounded bg-black/55 px-1 py-px text-[9px] text-emerald-400">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          {t('实时')}
         </span>
       </div>
     )

@@ -39,6 +39,12 @@ export default defineConfig({
     include: ['function-plot'],
   },
   server: {
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3800',
+        changeOrigin: true,
+      },
+    },
     watch: {
       /**
        * 别去看编辑器原子保存时留下的临时文件。

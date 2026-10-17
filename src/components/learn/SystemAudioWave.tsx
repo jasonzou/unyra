@@ -90,11 +90,11 @@ export default function SystemAudioWave() {
 
     const createWebLoopbackSession = async (): Promise<LoopbackSession> => {
       let active = true
-      let lastData = new Uint8Array(64)
+      let lastData = new Uint8Array(1024)
       const poll = async () => {
         while (active && !disposed) {
           try {
-            const res = await fetch('/api/audio/spectrum?bins=64')
+            const res = await fetch('/api/audio/spectrum?bins=1024')
             const json = (await res.json()) as { ok: boolean; data?: number[] }
             if (json.ok && Array.isArray(json.data)) {
               lastData = new Uint8Array(json.data)
@@ -102,7 +102,7 @@ export default function SystemAudioWave() {
           } catch {
             // ignore network jitter
           }
-          await new Promise((r) => window.setTimeout(r, 120))
+          await new Promise((r) => window.setTimeout(r, 60))
         }
       }
       void poll()
@@ -113,7 +113,7 @@ export default function SystemAudioWave() {
           into.set(lastData.subarray(0, Math.min(into.length, lastData.length)))
           return true
         },
-        bins: () => 64,
+        bins: () => 1024,
         sampleRate: () => 44100,
         via: () => '微服务后端 (/api/audio/spectrum)',
         stop: () => {
@@ -145,7 +145,7 @@ export default function SystemAudioWave() {
           freq = new Uint8Array(s.bins())
           realloc(barCount(Math.max(1, width)))
           attempts = 0
-          setTip(isWeb() ? t('正在监听服务端音频律动') : t('正在监听系统音频'))
+          setTip(isWeb() ? t('电台律动 · 实时音频') : t('正在监听系统音频'))
         } catch (err) {
           if (disposed) return
           session = null
