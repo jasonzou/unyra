@@ -5,11 +5,11 @@
 import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
-  ChevronRight,
   Cpu,
   FolderOpen,
   PlugZap,
   RefreshCw,
+  Settings,
   ShieldAlert,
   Trash2,
 } from 'lucide-react'
@@ -198,18 +198,20 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
                         </div>
 
                         {/* 右侧：配置按钮与开关 */}
-                        <div className="flex shrink-0 items-center gap-2.5">
+                        <div className="flex shrink-0 items-center gap-2">
                           {p.configurable && (
                             <button
                               type="button"
+                              title={t('配置')}
+                              aria-label={t('配置')}
                               onClick={() => onOpenConfig(p.id)}
-                              className="flex items-center gap-1 rounded-lg border border-line bg-card px-2.5 py-1 text-[11.5px] font-medium text-ink transition hover:border-line-strong hover:bg-card/80"
+                              className="flex h-7 w-7 items-center justify-center border-0 rounded-none bg-transparent text-ink-soft transition hover:text-ink cursor-pointer"
                             >
-                              <span>{t('配置')}</span>
-                              <ChevronRight size={12} className="text-ink-faint" />
+                              <Settings size={15} />
                             </button>
                           )}
                           <Switch
+                            bare
                             on={p.enabled}
                             disabled={busy === p.id || !!blocked}
                             onChange={(next) => {

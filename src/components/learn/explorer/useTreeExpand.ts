@@ -12,12 +12,20 @@ export function useTreeExpand(store: LearnStore, activeNodeId: string | null) {
   const [manual, setManual] = useState<Map<string, boolean>>(new Map())
   const autoOpenRef = useRef<Set<string>>(new Set())
 
+  const isGoalRoot = useCallback(
+    (id: string) => store.goals.some((g) => g.rootNodeId === id),
+    [store.goals],
+  )
+
   // 当前节点的祖先链：累积至 autoOpenRef，保证只加不减，且不触发渲染期 setState 级联重跑
+  // 注意：目标根节点不自动加入 autoOpenRef，保证工作区默认折叠
   const activeChain = useMemo(() => {
     if (!activeNodeId) return new Set<string>()
     const chain = ancestors(store, activeNodeId)
     for (const id of chain) {
-      autoOpenRef.current.add(id)
+      if (!store.goals.some((g) => g.rootNodeId === id)) {
+        autoOpenRef.current.add(id)
+      }
     }
     return new Set(chain)
   }, [store, activeNodeId])
@@ -26,20 +34,23 @@ export function useTreeExpand(store: LearnStore, activeNodeId: string | null) {
     (id: string) => {
       const m = manual.get(id)
       if (m !== undefined) return m
+      // 目标根节点（工作区）默认不展开，需用户主动点击箭头展开
+      if (isGoalRoot(id)) return false
       return autoOpenRef.current.has(id) || activeChain.has(id)
     },
-    [manual, activeChain],
+    [manual, activeChain, isGoalRoot],
   )
 
   const toggle = useCallback(
     (id: string) =>
       setManual((prev) => {
         const next = new Map(prev)
-        const currentOpen = prev.get(id) ?? (autoOpenRef.current.has(id) || activeChain.has(id))
+        const currentOpen =
+          prev.get(id) ?? (isGoalRoot(id) ? false : autoOpenRef.current.has(id) || activeChain.has(id))
         next.set(id, !currentOpen)
         return next
       }),
-    [activeChain],
+    [activeChain, isGoalRoot],
   )
 
   useEffect(

@@ -497,14 +497,18 @@ export function unloadAnchoredGroups(
     const deadGoal = goalOfNode(dead.ref.nodeId)
     if (!deadGoal) continue
     const victims = goalTabsOf(next.tabOwners, allTabs(next), goalOfNode, deadGoal)
-    if (!victims.length) continue
-    parkedNext = { ...(parkedNext ?? docs.parkedTabs ?? {}), [deadGoal]: victims }
+    // 即使 victims 为空（该目标名下除根大纲外没有打开其他文档），也保留 dead 作为停靠场占位，
+    // 从而保证关掉大纲后，该目标依然留在 parkedTabs 缓存中，不会从 topbar 目标页签组列表中消失。
+    const toPark = victims.length > 0 ? victims : [dead]
+    parkedNext = { ...(parkedNext ?? docs.parkedTabs ?? {}), [deadGoal]: toPark }
     for (const v of victims) parkedIds.push(v.id)
-    next = closeIds(next, victims.map((v) => v.id))
+    if (victims.length > 0) {
+      next = closeIds(next, victims.map((v) => v.id))
+    }
   }
-  if (!parkedIds.length) return next
-  // 停靠的页签从归属表里撤掉：归队时再登记回去（restoreParkedTabs 里那一句 claimTab）
-  return withParked(withOwners(next, dropTabs(next.tabOwners, parkedIds)), parkedNext ?? undefined)
+  if (!parkedIds.length && !parkedNext) return next
+  const owners = parkedIds.length > 0 ? dropTabs(next.tabOwners, parkedIds) : next.tabOwners
+  return withParked(withOwners(next, owners), parkedNext ?? undefined)
 }
 
 /**

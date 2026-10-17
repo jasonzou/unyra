@@ -128,6 +128,8 @@ export interface MindmapViewProps {
   activeTab: TabRef | null
   /** 外部指定的聚焦/选中节点目标（如 chip 路由） */
   focusTarget?: { nodeId: string; nonce: number } | null
+  /** 外部聚焦已完成的回调 */
+  onFocusHandled?: () => void
 }
 
 /**
@@ -560,6 +562,7 @@ export default function MindmapView({
   exams,
   activeTab,
   focusTarget,
+  onFocusHandled,
 }: MindmapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
@@ -1036,8 +1039,11 @@ export default function MindmapView({
   }, [nodes, nodeIndex, centerOnNode, activePreview])
 
   // 外部传入 focusTarget 时（如子大纲 chip 路由），展开其所有祖先节点并自动选中居中
+  const lastHandledFocusNonceRef = useRef<number | null>(null)
   useEffect(() => {
     if (!focusTarget?.nodeId) return
+    if (lastHandledFocusNonceRef.current === focusTarget.nonce) return
+
     const targetNodeId = focusTarget.nodeId
     const parentMap = new Map<string, string>()
     for (const edge of store.edges || []) {
@@ -1065,9 +1071,15 @@ export default function MindmapView({
     }
     const target = nodeIndex.get(targetNodeId)
     if (target) {
-      selectNode(target)
+      lastHandledFocusNonceRef.current = focusTarget.nonce
+      setSelectedId(target.id)
+      requestAnimationFrame(() => {
+        const latest = nodeIndexRef.current.get(targetNodeId) ?? target
+        centerOnNode(latest)
+      })
+      onFocusHandled?.()
     }
-  }, [focusTarget?.nonce, nodeIndex, selectNode, store.edges])
+  }, [focusTarget, nodeIndex, centerOnNode, store.edges, onFocusHandled])
 
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId

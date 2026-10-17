@@ -26,6 +26,8 @@ import { draftOf, dropDraft, dropDrafts, putDraft, stageDraft } from '../../../l
 import {
   closeTabs,
   draftFileName,
+  isBlankTab,
+  makeBlankTab,
   tabTitle,
   tabNodeId,
   fileNameOf as localFileNameOf,
@@ -33,6 +35,7 @@ import {
 } from '../../../learn/tabs'
 import {
   PUBLIC_OWNER,
+  activateIn,
   allTabs,
   closeIn,
   dropTabs,
@@ -45,6 +48,7 @@ import {
   renameTabRef,
   servesGoal,
   unloadAnchoredGroups,
+  withDocs,
   withOwners,
 } from '../../../learn/groups'
 import { nodeById, updateDoc, writeNote } from '../../../learn/graph'
@@ -292,26 +296,35 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
         s.activeGoalId && (!remainingGoals.has(s.activeGoalId) || goalsClosed.includes(s.activeGoalId)),
       )
       let base: LearnStore = s
+      let nextDocArea = docArea
       if (isCurrentGoalClosed) {
-        const landingGoal = nextRef ? goalOfTab({ ref: nextRef } as LearnTab) : null
-        if (nextRef && landingGoal && remainingGoals.has(landingGoal)) {
-          const nextNode = tabNodeId(nextRef) ?? rootOf(landingGoal)
-          base = nextNode ? retargetNode(s, nextNode) : { ...s, activeGoalId: landingGoal, activeNodeId: null }
-        } else if (remainingGoals.size > 0) {
-          const nextGoal = [...remainingGoals][0]
-          const nextRoot = rootOf(nextGoal)
-          base = nextRoot ? retargetNode(s, nextRoot) : { ...s, activeGoalId: nextGoal, activeNodeId: null }
-        } else {
-          base = { ...s, activeGoalId: null, activeNodeId: null }
+        // tab组从tab栏卸载时，不要让tab组列表中其他的列表顶上，而是留下一个空白（只剩新页签）的tab栏
+        // 且清除 activeGoalId 与 activeNodeId，确保资源管理器与 Topbar 不残留选中状态
+        const g = groupOf(docArea, docArea.focus) ?? docArea.groups[0]
+        if (g) {
+          const existingBlank = g.tabs.find(isBlankTab)
+          if (existingBlank) {
+            nextDocArea = activateIn(docArea, g.id, existingBlank.id)
+          } else {
+            const blank = makeBlankTab()
+            nextDocArea = activateIn(
+              withDocs(docArea, {
+                groups: docArea.groups.map((grp) => (grp.id === g.id ? { ...grp, tabs: [...grp.tabs, blank] } : grp)),
+              }),
+              g.id,
+              blank.id,
+            )
+          }
         }
+        base = { ...s, activeGoalId: null, activeNodeId: null }
       } else {
         const nextNodeId = nextRef && servesGoal(nextRef, goalOfNode, s.activeGoalId) ? tabNodeId(nextRef) : null
         base = nextNodeId ? retargetNode(s, nextNodeId) : s
       }
 
       const next = onGoalsClosed && goalsClosed.length > 0
-        ? onGoalsClosed({ ...base, docArea }, goalsClosed)
-        : { ...base, docArea }
+        ? onGoalsClosed({ ...base, docArea: nextDocArea }, goalsClosed)
+        : { ...base, docArea: nextDocArea }
       set(next)
     },
     [getLatest, onGoalsClosed, retargetNode, set],

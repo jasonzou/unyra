@@ -435,7 +435,7 @@ export function useAgent(opts: {
       const agentSettings = loadAgentSettings()
       const personaId = agentSettings.persona
       const announcer = needsPersonaAnnounce(conv.messages, personaId)
-        ? [personaMessage(personaId, Date.now(), crypto.randomUUID())]
+        ? [personaMessage(personaId, Date.now(), crypto.randomUUID(), agentSettings.customPersonas)]
         : []
 
       /*
@@ -444,7 +444,7 @@ export function useAgent(opts: {
        * 被压缩掉（retired）之后自动补回来。
        */
       const formatAnnouncer = needsDocFormatAnnounce(conv.messages, agentSettings.docFormat)
-        ? [docFormatMessage(agentSettings.docFormat, Date.now(), crypto.randomUUID())]
+        ? [docFormatMessage(agentSettings.docFormat, Date.now(), crypto.randomUUID(), agentSettings.customDocFormats)]
         : []
 
       // 动态技能清单注入：不在系统提示词中硬编码，而在消息流中按需注入与变更更新（保持前缀缓存稳定）

@@ -30,6 +30,8 @@ export interface OutlineViewProps {
   activeTab: TabRef | null
   /** 外部指定的聚焦/选中节点目标（如 chip 路由） */
   focusTarget?: { nodeId: string; nonce: number } | null
+  /** 外部聚焦已完成的回调 */
+  onFocusHandled?: () => void
 }
 
 export default function OutlineView({
@@ -43,6 +45,7 @@ export default function OutlineView({
   exams,
   activeTab,
   focusTarget,
+  onFocusHandled,
 }: OutlineViewProps) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-paper dark:bg-card/30">
@@ -58,6 +61,7 @@ export default function OutlineView({
           exams={exams}
           activeTab={activeTab}
           focusTarget={focusTarget}
+          onFocusHandled={onFocusHandled}
         />
       </div>
     </div>

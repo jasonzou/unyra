@@ -89,10 +89,11 @@ import {
   visibleTabs,
   withGroup,
   withOwners,
+  withParked,
   type DocLayout,
   type TabOwners,
 } from '../../learn/groups'
-import { makeTab, newBlankKey, newDraftKey, newWebKey, tabKey, tabNodeId, tabTitle, tabTrail, fileNameOf as localFileNameOf } from '../../learn/tabs'
+import { makeBlankTab, makeTab, newBlankKey, newDraftKey, newWebKey, tabKey, tabNodeId, tabTitle, tabTrail, fileNameOf as localFileNameOf } from '../../learn/tabs'
 import { pickLocalFiles } from '../../lib/localFiles'
 import { addLocalFile } from '../../learn/localfiles'
 import { normalizeWebInput } from '../../learn/webUrl'
@@ -808,6 +809,66 @@ export default function LearnWorkspace({
     if (pure && !tabs.length) setPure(false)
   }, [pure, tabs.length, setPure])
 
+  /** 纯净阅读下的内容宽度（镜像对称拖拽调整并持久化） */
+  const [zenWidth, setZenWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('moji:zen-width')
+      if (saved) {
+        const n = parseInt(saved, 10)
+        if (Number.isFinite(n) && n >= 480 && n <= 2400) return n
+      }
+    } catch {}
+    return 860
+  })
+  const [zenDragging, setZenDragging] = useState<{
+    side: 'left' | 'right'
+    startX: number
+    startWidth: number
+  } | null>(null)
+
+  const onZenResizeStart = (e: React.PointerEvent, side: 'left' | 'right') => {
+    e.preventDefault()
+    e.stopPropagation()
+    setZenDragging({
+      side,
+      startX: e.clientX,
+      startWidth: zenWidth,
+    })
+  }
+
+  useEffect(() => {
+    if (!zenDragging) return
+
+    const onPointerMove = (e: PointerEvent) => {
+      const delta = e.clientX - zenDragging.startX
+      const mult = zenDragging.side === 'right' ? 2 : -2
+      const maxW = Math.max(480, window.innerWidth - 32)
+      const nextW = Math.min(maxW, Math.max(480, Math.round(zenDragging.startWidth + delta * mult)))
+      setZenWidth(nextW)
+    }
+
+    const onPointerUp = (e: PointerEvent) => {
+      const delta = e.clientX - zenDragging.startX
+      const mult = zenDragging.side === 'right' ? 2 : -2
+      const maxW = Math.max(480, window.innerWidth - 32)
+      const nextW = Math.min(maxW, Math.max(480, Math.round(zenDragging.startWidth + delta * mult)))
+      setZenWidth(nextW)
+      try {
+        localStorage.setItem('moji:zen-width', String(nextW))
+      } catch {}
+      setZenDragging(null)
+    }
+
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerUp)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerUp)
+    }
+  }, [zenDragging])
+
   // 现取一次设置：判断能否用 AI，并把当前提供商名字带进提示文案
   const aiSettings = loadAiSettings()
   const hasKey = hasApiKey(aiSettings)
@@ -1522,7 +1583,7 @@ export default function LearnWorkspace({
    */
   const aliveGoalTabGroups = useMemo(() => {
     const owners = store.docArea.tabOwners
-    const all = allTabs(store.docArea)
+    const all = allStoredTabs(store.docArea)
     const goalOfNode = (nodeId: string) => nodeById(store, nodeId)?.goalId ?? null
     return store.goals
       .map((g) => ({
@@ -1852,6 +1913,56 @@ export default function LearnWorkspace({
       removed.active ?? 'free',
     )
   }, [])
+
+  /**
+   * 顶栏目标名菜单：清空某个目标的页签组缓存。
+   */
+  const dropGoalCache = useCallback(
+    (goalId: string) => {
+      const s = getLatest()
+      const goalOfNode = (nodeId: string) => nodeById(s, nodeId)?.goalId ?? null
+      // 1. 从停靠场里清理该目标缓存
+      const nextParked = { ...(s.docArea.parkedTabs ?? {}) }
+      delete nextParked[goalId]
+
+      // 2. 找到当前活动页签中属于该目标的页签并关闭
+      const all = allTabs(s.docArea)
+      const victims = goalTabsOf(s.docArea.tabOwners, all, goalOfNode, goalId)
+      let docArea = s.docArea
+      if (victims.length > 0) {
+        docArea = closeIds(docArea, victims.map((v) => v.id), { preserveActiveAsBlank: true })
+      }
+
+      // 3. 从归属表中移除该目标
+      const nextOwners = { ...(docArea.tabOwners ?? {}) }
+      delete nextOwners[goalId]
+      docArea = withOwners(withParked(docArea, Object.keys(nextParked).length > 0 ? nextParked : undefined), nextOwners)
+
+      // 4. 清理导师页签中属于该目标的页签
+      let nextStore = closeAgentTabsForGoals({ ...s, docArea }, [goalId])
+
+      // 5. 如果当前激活的目标就是它，清空激活目标与节点，文档区置空白
+      if (nextStore.activeGoalId === goalId) {
+        const fg = focusedGroup(docArea)
+        if (fg) {
+          const blank = makeBlankTab()
+          docArea = withGroup(docArea, fg.id, (g) => ({
+            ...g,
+            tabs: [blank],
+            active: blank.id,
+          }))
+        }
+        nextStore = {
+          ...nextStore,
+          docArea,
+          activeGoalId: null,
+          activeNodeId: null,
+        }
+      }
+      set(nextStore)
+    },
+    [getLatest, set, closeAgentTabsForGoals],
+  )
 
   /*
    * 保存 / 关页签 / 冲突流整体在 useDocSaveFlow（workspace）：
@@ -3620,10 +3731,33 @@ export default function LearnWorkspace({
             e.stopPropagation()
           }}
         >
-          {/* 正文这一层：切页签的过场只加在它上面，右侧悬浮组不跟着晃。
-              data-doc-area：大纲栏据此判断「焦点在不在文档区里」（固定时 Tab 切换展开收起） */}
+          {/* 纯净阅读模式下：可拖拽调整宽度的居中容器 */}
           <div
-            ref={isFocused ? docBox : undefined}
+            className={'flex h-full min-h-0 flex-1 flex-col' + (pure ? ' relative mx-auto' : '')}
+            style={pure ? { width: `${zenWidth}px`, maxWidth: '100%' } : undefined}
+          >
+            {/* 纯净阅读拖拽边框与手柄（两边都可拖拽，镜像对称缩放） */}
+            {pure && (
+              <>
+                <div
+                  onPointerDown={(e) => onZenResizeStart(e, 'left')}
+                  className="group/zen-l absolute -left-2 top-0 bottom-0 z-30 w-4 cursor-ew-resize select-none flex items-center justify-center"
+                  title={t('拖拽调整阅读宽度（镜像对称）')}
+                >
+                  <div className="h-full w-0 border-l border-dashed border-line-strong transition-colors group-hover/zen-l:border-seal" />
+                </div>
+                <div
+                  onPointerDown={(e) => onZenResizeStart(e, 'right')}
+                  className="group/zen-r absolute -right-2 top-0 bottom-0 z-30 w-4 cursor-ew-resize select-none flex items-center justify-center"
+                  title={t('拖拽调整阅读宽度（镜像对称）')}
+                >
+                  <div className="h-full w-0 border-r border-dashed border-line-strong transition-colors group-hover/zen-r:border-seal" />
+                </div>
+              </>
+            )}
+
+            <div
+              ref={isFocused ? docBox : undefined}
             {...boxProps}
             onDragOver={(e) => {
               // 整个正文区都是 chip 的落点：资源管理器 / 收藏里拖来的引用，拖到这里
@@ -4027,11 +4161,13 @@ export default function LearnWorkspace({
                     exams={explorerExams}
                     activeTab={gTab?.ref ?? null}
                     focusTarget={outlineFocus}
+                    onFocusHandled={() => setOutlineFocus(null)}
                   />
                 </div>
               )
             })}
           </div>
+        </div>
 
           {/*
             网页层（见 components/learn/web/WebTabLayer）：常挂在格子里、切去文档时
@@ -4352,6 +4488,7 @@ export default function LearnWorkspace({
             // 目标名点开的下拉菜单：存活的 tab 组（点一行切过去，见 switchGoalGroup）
             tabGroups={aliveGoalTabGroups}
             onSwitchGoalGroup={switchGoalGroup}
+            onDropGoalCache={dropGoalCache}
             store={store}
             user={user}
             onOpenSidebar={() => setSidebarOpen(true)}
@@ -4429,6 +4566,7 @@ export default function LearnWorkspace({
                           vision={vision}
                           onNotice={onToast}
                           onOpenAgentSettings={() => openTab({ kind: 'agentSettings' })}
+                          onOpenSettings={() => openTab({ kind: 'agentSettings' })}
                           onOpenMinds={() => {
                             if (props.goalId) openTab({ kind: 'mind', goalId: props.goalId })
                           }}
@@ -4653,6 +4791,15 @@ export default function LearnWorkspace({
           onConfirm={() => setGuardFuse(null)}
           onCancel={() => setGuardFuse(null)}
         />
+      )}
+      {zenDragging && (
+        <>
+          <div className="fixed inset-0 z-[99] cursor-ew-resize select-none" />
+          <div className="pointer-events-none fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 rounded-lg border border-line-strong bg-card/95 px-3 py-1.5 shadow-[0_8px_24px_rgba(31,27,23,0.18)] text-[12px] tabular-nums text-ink-strong backdrop-blur-xs">
+            <span className="text-ink-faint">{t('纯净阅读宽度')}</span>
+            <span className="font-semibold text-seal">{zenWidth}px</span>
+          </div>
+        </>
       )}
     </div>
   )

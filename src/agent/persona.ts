@@ -17,8 +17,8 @@ import { t } from '../i18n'
  * 而且被压缩掉之后要能补回来——否则长对话聊到一半，导师会悄悄变回默认语气。
  */
 
-/** 三种人格的 id。存进设置与消息里，改名会让老数据认不出来，所以取语义化的短词 */
-export type PersonaId = 'concise' | 'standard' | 'adhd'
+/** 人格 id。内置 concise | standard | adhd，支持自定义扩展 */
+export type PersonaId = string
 
 export interface Persona {
   id: PersonaId
@@ -32,6 +32,8 @@ export interface Persona {
   tagline: string
   /** 进入上下文的那一整段指令（含共同底线，自足：模型看不到别的解释） */
   instruction: string
+  /** 是否为用户自定义人格 */
+  isCustom?: boolean
 }
 
 /**
@@ -214,9 +216,15 @@ export const PERSONAS: Persona[] = [
 /** 默认人格。老设置文件里没有这一项时按它走 */
 export const DEFAULT_PERSONA: PersonaId = 'standard'
 
+/** 获取所有人格列表（内置 + 自定义） */
+export function allPersonas(customPersonas?: Persona[]): Persona[] {
+  return [...PERSONAS, ...(customPersonas ?? [])]
+}
+
 /** 认一个 id（手改过的设置文件、旧数据里可能是别的字符串）；认不出就给默认的那个 */
-export function personaOf(id: unknown): Persona {
-  return PERSONAS.find((p) => p.id === id) ?? PERSONAS[1]
+export function personaOf(id: unknown, customPersonas?: Persona[]): Persona {
+  const all = allPersonas(customPersonas)
+  return all.find((p) => p.id === id) ?? PERSONAS[1]
 }
 
 /**
@@ -236,8 +244,13 @@ export function needsPersonaAnnounce(messages: ConversationMessage[], id: Person
  * hidden + mark：它与工作流的指令是同一种东西——用户看得见一条分界条（知道导师换了人格），
  * 而正文只在上下文里。id 由调用方给（宿主那一层才有 crypto.randomUUID）。
  */
-export function personaMessage(id: PersonaId, at: number, uuid: string): ConversationMessage {
-  const persona = personaOf(id)
+export function personaMessage(
+  id: PersonaId,
+  at: number,
+  uuid: string,
+  customPersonas?: Persona[],
+): ConversationMessage {
+  const persona = personaOf(id, customPersonas)
   return {
     id: uuid,
     role: 'user',

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, Check, ChevronDown, Compass, Contact, FilePlus, FolderOpen, Globe, History, Loader2, Menu, Paperclip, Sparkles, Star } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Compass, Contact, FilePlus, FolderOpen, Globe, History, Loader2, Menu, Paperclip, Sparkles, Star, X } from 'lucide-react'
 import type { PendingFile } from '../../../agent/types'
 import type { FavoriteItem, FavoriteRef, KnowledgeNode, LearnStore } from '../../../learn/types'
 import { favoriteKey } from '../../../learn/favorites'
@@ -50,6 +50,7 @@ export function Topbar({
   goalQuestion,
   tabGroups,
   onSwitchGoalGroup,
+  onDropGoalCache,
   store,
   user,
   onOpenSidebar,
@@ -85,6 +86,8 @@ export function Topbar({
   tabGroups: Array<{ goalId: string; title: string; count: number; current: boolean }>
   /** 切到一个目标的 tab 组（不强制落回大纲：那个组正开着什么就接着看什么） */
   onSwitchGoalGroup: (goalId: string) => void
+  /** 清空该目标的 tab 组缓存（移出停靠场与当前活动页签） */
+  onDropGoalCache?: (goalId: string) => void
   store: LearnStore
   user: User | null
   onOpenSidebar: () => void
@@ -261,6 +264,7 @@ export function Topbar({
             onSwitchGoalGroup(goalId)
             setGoalMenu(null)
           }}
+          onDropGoalCache={onDropGoalCache}
           onClose={() => setGoalMenu(null)}
         />
       )}
@@ -355,11 +359,13 @@ function GoalGroupsMenu({
   menu,
   groups,
   onPick,
+  onDropGoalCache,
   onClose,
 }: {
   menu: { x: number; y: number }
   groups: Array<{ goalId: string; title: string; count: number; current: boolean }>
   onPick: (goalId: string) => void
+  onDropGoalCache?: (goalId: string) => void
   onClose: () => void
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
@@ -379,21 +385,39 @@ function GoalGroupsMenu({
       <div className="px-2.5 py-1 text-[10.5px] text-ink-faint">{t('目标页签组（点一行切过去）')}</div>
       {groups.length ? (
         groups.map((g) => (
-          <button
+          <div
             key={g.goalId}
-            type="button"
-            role="menuitem"
-            onClick={() => onPick(g.goalId)}
-            className={
-              'flex w-full items-center gap-2 rounded-md py-1.5 pl-2 pr-2.5 text-left text-[12px] transition hover:bg-line/60 ' +
-              (g.current ? 'font-medium text-ink-strong' : 'text-ink')
-            }
+            className="group/item flex w-full items-center gap-1 rounded-md py-0.5 pl-2 pr-1.5 transition hover:bg-line/60"
           >
-            <Bullseye size={12} className={'shrink-0 ' + (g.current ? 'text-seal' : 'text-ink-faint')} />
-            <span className="min-w-0 flex-1 truncate">{g.title}</span>
-            <span className="shrink-0 font-mono text-[10.5px] text-ink-faint">{g.count}</span>
-            {g.current && <Check size={12} className="shrink-0 text-seal" />}
-          </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => onPick(g.goalId)}
+              className={
+                'flex min-w-0 flex-1 items-center gap-2 py-1 text-left text-[12px] ' +
+                (g.current ? 'font-medium text-ink-strong' : 'text-ink')
+              }
+            >
+              <Bullseye size={12} className={'shrink-0 ' + (g.current ? 'text-seal' : 'text-ink-faint')} />
+              <span className="min-w-0 flex-1 truncate">{g.title}</span>
+              <span className="shrink-0 font-mono text-[10.5px] text-ink-faint">{g.count}</span>
+              {g.current && <Check size={12} className="shrink-0 text-seal" />}
+            </button>
+            {onDropGoalCache && (
+              <button
+                type="button"
+                title={t('清空该组缓存')}
+                aria-label={t('清空该组缓存')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDropGoalCache(g.goalId)
+                }}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-faint opacity-0 transition-opacity hover:bg-line hover:text-ink-strong group-hover/item:opacity-100 cursor-pointer"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
         ))
       ) : (
         <div className="px-2.5 py-2 text-[11px] leading-relaxed text-ink-faint">
