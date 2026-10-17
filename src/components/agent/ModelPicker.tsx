@@ -287,7 +287,7 @@ export default function ModelPicker({ onChanged }: Props) {
           setLeaving(null)
         }}
         title={t('切换提供商与模型')}
-        className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] text-ink-soft transition hover:text-ink"
+        className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-lg px-2 text-[11.5px] text-ink-soft transition hover:text-ink"
       >
         <ProviderLogo
           id={provider?.id}
@@ -296,13 +296,13 @@ export default function ModelPicker({ onChanged }: Props) {
           className="shrink-0"
           fallback={<Cpu size={12} className="shrink-0 text-ink-faint" />}
         />
-        <span className="min-w-0 truncate font-mono" title={modelLabel || undefined}>
+        <span className="min-w-0 truncate font-mono leading-none" title={modelLabel || undefined}>
           {shortLabel || t('未选模型')}
         </span>
-        <span className="flex shrink-0 items-center gap-1 rounded bg-line/70 px-1 text-[10px] text-ink-soft">
+        <span className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded bg-line/70 px-1.5 text-[10.5px] leading-none text-ink-soft">
           {/* 荧光点与滑条同色：收起状态下也能看出当前开到哪一档 */}
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: REASONING_NEON[effort] }} />
-          {REASONING_LABEL[effort]}
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: REASONING_NEON[effort] }} />
+          <span className="leading-none">{REASONING_LABEL[effort]}</span>
         </span>
         <ChevronRight size={12} className={`shrink-0 text-ink-faint transition ${open ? 'rotate-90' : ''}`} />
       </button>

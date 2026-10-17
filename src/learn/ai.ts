@@ -24,3 +24,4 @@
 
 export { generateShortAnnotation } from './ai/annotation'
 export { buildTeacherSystem } from './ai/teacherSystem'
+export { buildFreeChatSystem } from './ai/chatSystem'

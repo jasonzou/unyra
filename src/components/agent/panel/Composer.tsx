@@ -615,21 +615,10 @@ export function Composer(props: ComposerProps) {
               <span className="shrink-0">· {t('子会话只读')}</span>
             </span>
           )}
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            {/*
-              这里原先有一颗「添加图片」的按钮，现在**没有它**了：附件统一从
-              左下角「更多 → 文件」进——那个入口不设扩展名过滤，图片本来就是它的一部分。
-              两颗按钮做同一件事，只会让人猜「图片走哪条、文件走哪条」。
-              贴图这条路照旧：拖进来、Ctrl+V 都行，本来就是习惯动作，不必有按钮。
-            */}
+          <div className="flex shrink-0 items-center gap-1.5">
             {subAgentSlot}
-            {!subMode && strategySlot}
             {!subMode && <ModelPicker onChanged={onModelChanged} />}
-            {/*
-              语音输入：发送键左边那颗话筒（见 MicButton 与 lib/voice）。
-              只有插件开着时才画——它是「设置 → 插件」里的一项功能。
-              识别结果插到光标处：认得 chip、也不吃掉用户已经写好的字。
-            */}
+            {!subMode && strategySlot}
             {!subMode && (
               <MicButton
                 onText={(text) => {
@@ -638,6 +627,8 @@ export function Composer(props: ComposerProps) {
                 }}
               />
             )}
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {/*
               发送键那两个分支的规矩：
 
