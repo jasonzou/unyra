@@ -3,6 +3,7 @@ import type { AnnotationStyle, DocKind, KnowledgeNode } from '../../learn/types'
 import type { LocalImageResolver } from '../../lib/docImages'
 import { canAnnotate } from '../../lib/annotation'
 import { renderNote } from '../../lib/markdown'
+import { maskChipTokens, restoreChipTokens } from '../../lib/chipSyntax'
 import { countVisibleWords, countVisibleWordsFromHtml } from '../../lib/wordCount'
 import { useReadingTracker } from '../../learn/useReadingTracker'
 import { readingDocKey, type ReadingDelta } from '../../learn/reading'
@@ -136,7 +137,10 @@ export default memo(function NodeNote({
   const bodyRef = useRef<HTMLDivElement | null>(null)
   /** 当前文档的正文（由上层给：见 DocSource 的说明） */
   const content = doc.content
-  const html = useMemo(() => renderNote(content), [content])
+  const html = useMemo(() => {
+    const { masked, tokens } = maskChipTokens(content)
+    return restoreChipTokens(renderNote(masked), tokens)
+  }, [content])
 
   /**
    * 词条还注解得了吗。两种不放行的情况：

@@ -324,6 +324,19 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     return opts.nodeOps.create(pr.ref.id, { ...a, title })
   }, log)
 
+  wrapApi(api, 'node.createTree', (args) => {
+    if (!opts.nodeOps.createTree) return { error: '当前环境不支持 node.createTree' }
+    const input = asRecord(args[0])
+    const rawParent = input.parent !== undefined ? String(input.parent).trim() : ''
+    let parentId: string | undefined
+    if (rawParent && !['当前', '当前节点', '本节点', 'this', 'current', '.', '@'].includes(rawParent)) {
+      const pr = nodeRef(rawParent)
+      if ('error' in pr) return { error: pr.error }
+      parentId = pr.ref.id
+    }
+    return opts.nodeOps.createTree(parentId, input)
+  }, log)
+
   wrapApi(api, 'node.move', (args) => {
     const r = nodeRef(args[0])
     if ('error' in r) return { error: r.error }

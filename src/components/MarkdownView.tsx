@@ -19,7 +19,8 @@ import {
   tryNodeLinkFromEvent,
   trySuperLinkFromEvent,
 } from '../lib/nodeLink'
-import { isExternalHref, openExternalLink } from '../lib/externalLink'
+import { isExternalHref, openWebLink } from '../lib/externalLink'
+import { hydrateChipTokens } from '../lib/docChip'
 import { flashHeading } from '../lib/headingFlash'
 import { headingJumpTarget, headingSlug, headingsOf } from '../lib/outline'
 import { smoothScrollTo } from '../lib/smoothScroll'
@@ -182,7 +183,10 @@ const MarkdownView = memo(function MarkdownView({
     const undoPlugins = hydrateRenderPlugins(el)
     // 资源引用（moji:static）与图像、注解同一套：渲染期的活儿在 DOM 提交后做
     const undoStatic = hydrateStaticFiles(el)
+    // 引用 chip（#[{…}]）：转换为可点击标签页卡片，正文与消息气泡同一套
+    const undoChips = hydrateChipTokens(el)
     return () => {
+      undoChips()
       undoStatic()
       undoPlugins()
       undoAnno?.()
@@ -268,17 +272,14 @@ const MarkdownView = memo(function MarkdownView({
           return
         }
         /*
-         * 外链（http/https/mailto）：**交给系统浏览器**，不在应用内打开。
-         *
-         * 主进程那三道拦截（新窗口、主框架、子框架，见 electron/main.ts 的 hardenLinks）是兜底；
-         * 这里先接住是让意图明确——否则会是「先发起一次导航，再被主进程拦下来」，
-         * 那一下虽然看不见，但地址栏式的语义是错的（这不是一次站内跳转）。
+         * 外链（http/https/mailto）：按用户规范，优先在应用内通过浏览器页签打开；
+         * 仅特殊协议（如 mailto:）或未注册处理器时交给外部系统浏览器。
          */
         const target = e.target instanceof Element ? e.target.closest('a[href]') : null
         const href = target?.getAttribute('href') ?? ''
         if (href && isExternalHref(href)) {
           e.preventDefault()
-          void openExternalLink(href)
+          openWebLink(href)
         }
       }}
     />

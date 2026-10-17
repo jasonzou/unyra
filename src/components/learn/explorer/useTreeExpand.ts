@@ -60,6 +60,8 @@ export function useTreeExpand(store: LearnStore, activeNodeId: string | null) {
         setManual((prev) => {
           let next: Map<string, boolean> | null = null
           for (const id of req.nodes) {
+            // 目标根节点的工作区默认折叠，只允许用户主动点击左侧箭头展开，定位广播绝不自动展开它
+            if (isGoalRoot(id)) continue
             autoOpenRef.current.add(id)
             if (prev.get(id) === true) continue
             if (!next) next = new Map(prev)
@@ -68,7 +70,7 @@ export function useTreeExpand(store: LearnStore, activeNodeId: string | null) {
           return next ?? prev
         })
       }),
-    [],
+    [isGoalRoot],
   )
 
   return { isOpen, toggle }

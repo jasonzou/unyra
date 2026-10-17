@@ -127,7 +127,7 @@ export function revealOfTab(
       }
     case 'outline':
       return {
-        keys: [`row:doc:outline:${tab.nodeId}`],
+        keys: [`row:doc:outline:${tab.nodeId}`, `row:doc:teach:${tab.nodeId}`],
         nodes: chain(tab.nodeId),
         docs: [],
         exams: [],

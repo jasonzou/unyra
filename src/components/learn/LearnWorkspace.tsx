@@ -205,6 +205,7 @@ import { requestReveal } from './explorer/reveal'
 import { focusAgentInput } from '../../lib/agentFocus'
 import { moveTabMark, resetTabMark } from '../../lib/tabMark'
 import { setChipOpener, type ChipPayload } from '../../lib/docChip'
+import { setWebLinkHandler } from '../../lib/externalLink'
 import { tabRefFromChip } from '../../learn/chipRef'
 import { CHIP_MIME, parseChipJson } from '../../lib/chipSyntax'
 import TabBar from './TabBar'
@@ -1745,6 +1746,12 @@ export default function LearnWorkspace({
     }
   }, [openWebTab])
 
+  // 应用内超链接与网页 chip 打开统一走应用内浏览器页签（openWebTab）
+  useEffect(() => {
+    setWebLinkHandler(openWebTab)
+    return () => setWebLinkHandler(null)
+  }, [openWebTab])
+
   /* ---------- 收藏（页签右键菜单 / 地址栏星标 / 侧栏收藏区，见 learn/favorites） ---------- */
 
   /** 已收藏的身份集合：三个入口的「收藏了没有」都查它 */
@@ -2973,6 +2980,10 @@ export default function LearnWorkspace({
         exam.openExam(row.id)
         return
       }
+      if (p.type === 'web' && p.url) {
+        openWebTab(p.url)
+        return
+      }
       const ref = tabRefFromChip(s, p)
       if (!ref) {
         onToast(t('这条引用对应的文档已经不在了'))
@@ -2980,7 +2991,7 @@ export default function LearnWorkspace({
       }
       openTab(ref)
     },
-    [getLatest, openTab, selectNode, exam, onToast],
+    [getLatest, openTab, openWebTab, selectNode, exam, onToast],
   )
 
   // chip 的「点击打开」全走这一份登记（消息列表、输入框都不认识 store，见 lib/docChip）

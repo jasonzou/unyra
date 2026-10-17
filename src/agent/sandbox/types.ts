@@ -115,6 +115,11 @@ export interface SandboxOptions {
     move: (nodeId: string, newParentId: string) => AgentToolResult
     /** 获取节点的完整物理路径索引（{ id, title, path, dir, doc, notesDir, outline, meta }） */
     paths?: (nodeId: string) => unknown
+    /** 批量/递归创建大纲树结构与节点 */
+    createTree?: (
+      parentId: string | undefined,
+      input: { tree?: unknown; [k: string]: unknown },
+    ) => AgentToolResult
     /** 划词注解：挂在节点上 */
     annotate?: (nodeId: string, input: { term: string; occurrence?: number; body: string }) => AgentToolResult
   }

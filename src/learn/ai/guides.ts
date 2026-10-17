@@ -20,7 +20,8 @@ export const RICH_CONTENT_GUIDE = `正文排版规范（重要）：教学文档
  */
 export const CHIP_GUIDE = `引用 chip 与交付清单：
 - 回复中引用具体文件/交付物一律使用 chip 语法 \`#[{…}]\`（学习者端渲染为可点击卡片）。
-- **必须通过 api.chip.build({ type, path?, name?, examId? }) 生成并原样填入回复，严禁手动拼接**。交付前可用 api.chip.check(text) 自查定位。
+- **必须通过 api.chip.build({ type, path?, name?, examId?, url?, title? }) 生成并原样填入回复，严禁手动拼接**。交付前可用 api.chip.check(text) 自查定位。
+- **文档参考资料引证规范（铁律）**：文档最后的参考与引证来源**必须使用网页类 chip（#[{"type":"web","url":"...","title":"..."}]）**，严禁使用普通 Markdown 超链接 [文字](url)。注意 chip 最大宽度受限，title 请精简（控制在 15~25 个汉字以内，如《MDN: Flex 布局指南》），详细说明写在 chip 后面的正文文本里。
 - 每一轮面向学习者的最终回复末尾，将本轮新增或修改过的文件/交付物用 chip 一行一个列出，附半句改动说明；未改动文件则不列。`
 
 /**

@@ -50,6 +50,7 @@ export const EXECUTE_GUIDE = `唯一的工具是 execute(description, body)：
 - api.node.title(path) 读标题；api.node.rename(path, 新标题) 改名。
 - api.node.update(path, { title, description, status })：改属性（status: 'mastered' 为已掌握）。
 - api.node.create({ parent, title, description })：新建子节点，**parent 必填**（标题/路径/#id）。
+- api.node.createTree({ parent?, tree })：批量/递归创建完整大纲树。tree 数组项支持 { title, description?, status?, content?, outline?, children? }，children 递归嵌套下级节点，可一步到位创建层级节点、写入大纲并批量生成教学讲义（完整式/规划式首选）。
 - api.node.move(path, 新父节点) 迁移父子层级；api.node.delete(path) 删除节点（学习目标本身不能删）。
 
 人机协作与辅助控制：

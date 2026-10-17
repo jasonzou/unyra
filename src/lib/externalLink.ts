@@ -23,6 +23,26 @@ export function isExternalHref(href: string): boolean {
   }
 }
 
+let webLinkHandler: ((url: string) => void) | null = null
+
+/** 注册应用内打开网页的处理器（通常是 LearnWorkspace 的 openWebTab） */
+export function setWebLinkHandler(fn: ((url: string) => void) | null): void {
+  webLinkHandler = fn
+}
+
+/**
+ * 打开网页链接：按用户规则，超链接与网页类 chip 打开的网站一律在应用内部通过浏览器 tab 打开；
+ * 仅在 mailto: 等特殊协议或无内部处理器时退回系统外部浏览器。
+ */
+export function openWebLink(href: string): void {
+  if (!isExternalHref(href)) return
+  if (webLinkHandler && (href.startsWith('http://') || href.startsWith('https://'))) {
+    webLinkHandler(href)
+    return
+  }
+  void openExternalLink(href)
+}
+
 /** 交给系统浏览器打开；被主进程拒了（协议不对/没有桥）返回 false */
 export async function openExternalLink(href: string): Promise<boolean> {
   if (!isExternalHref(href)) return false
