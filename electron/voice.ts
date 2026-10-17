@@ -78,8 +78,11 @@ const SOURCES: Array<{ name: string; base: string }> = [
   },
 ]
 
-const modelDir = (): string => path.join(app.getPath('userData'), MODEL_DIR)
+import { getUserDataDir } from './storage/userData'
+
+const modelDir = (): string => path.join(getUserDataDir(), MODEL_DIR)
 const filePath = (name: string): string => path.join(modelDir(), name)
+export { modelDir }
 
 /* ---------- 状态 ---------- */
 
@@ -464,3 +467,6 @@ export function registerVoiceIpc(): void {
     return true
   })
 }
+
+export { transcribe, statusOf, download, removeModel, detectGpu }
+

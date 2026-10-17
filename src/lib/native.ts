@@ -475,17 +475,29 @@ declare global {
  * 于是「浏览器里跑测试」这类少了桥的环境，只有在真的去调原生能力时才会拿到这句可操作的
  * 提示，import 一下这个模块不会抛。
  */
+import { createWebNativeBridge } from './nativeBridgeWeb'
+
+let webBridgeInstance: NativeBridge | null = null
+
 export const native = (): NativeBridge => {
-  const bridge = window.mojiNative
-  if (!bridge) {
-    throw new Error(
-      t('未检测到 Electron 运行环境：请用 npm run electron:dev 启动桌面应用，而不是直接在浏览器里打开。'),
-    )
+  if (typeof window !== 'undefined') {
+    if (window.mojiNative) return window.mojiNative
+    // 处于普通 Web 浏览器环境，自动初始化 Web 桥适配器
+    webBridgeInstance ??= createWebNativeBridge()
+    return webBridgeInstance
   }
-  return bridge
+  throw new Error(
+    t('未检测到原生或 Web 桥运行环境：请启动桌面客户端或本地 Web 服务。'),
+  )
 }
 
-export const isElectron = (): boolean => typeof window !== 'undefined' && !!window.mojiNative
+/** 是否运行在 Electron 原生客户端容器内 */
+export const isElectron = (): boolean =>
+  typeof window !== 'undefined' && !!window.mojiNative
+
+/** 是否运行在普通浏览器 (WebUI) 模式中 */
+export const isWeb = (): boolean =>
+  typeof window !== 'undefined' && !window.mojiNative
 
 /** 判定当前运行环境是否为 macOS（Electron 壳内以 platform 为准，浏览器以 userAgent 为准） */
 export const isMac = (): boolean => {

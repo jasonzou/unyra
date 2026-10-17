@@ -25,7 +25,7 @@ import {
   formatDuration,
 } from '../../learn/exam'
 import type { ExamWindowState } from '../../learn/useExamBridge'
-import { isMac } from '../../lib/native'
+import { isElectron, isMac } from '../../lib/native'
 import { t } from '../../i18n'
 
 /**
@@ -264,7 +264,7 @@ export default function ExamWindow() {
       <header
         className={
           'app-drag relative flex shrink-0 items-center justify-between border-b border-line bg-card/90 px-4 h-12 ' +
-          (isMac() ? 'pl-[76px]' : '')
+          (isElectron() && isMac() ? 'pl-[76px]' : '')
         }
       >
         {/* 左侧：标题与卷面属性 */}

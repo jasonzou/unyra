@@ -15,21 +15,44 @@
  * 事件量也大；只盯眼前展开的那几层，语义与开销都刚好。watcher 一律 persistent: false，
  * 不挡进程退出；目录被删 / 改名时 error 自拆，等渲染层下一次推清单时重建。
  */
-import { BrowserWindow } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 
 /** 正在盯的目录（绝对路径）→ watcher；一个目录一个，退出即拆 */
 const watchers = new Map<string, fs.FSWatcher>()
 
+/** 外部事件监听器（供 Web 服务端 WebSocket 广播） */
+const changeListeners = new Set<() => void>()
+
+/** 订阅工作区文件变更事件（供 Web 服务端 WebSocket 广播使用） */
+export function onWsChange(fn: () => void): () => void {
+  changeListeners.add(fn)
+  return () => changeListeners.delete(fn)
+}
+
 /** 抖动合并窗口：一次外部操作常触发好几条事件（Windows 上删一棵目录还带连拍） */
 const DEBOUNCE_MS = 180
 let pending: ReturnType<typeof setTimeout> | null = null
 
-/** 广播「工作区变过」：所有窗口都收（与 local:changed 同一条规矩） */
+/** 广播「工作区变过」：所有窗口与 Web 客户端都收 */
 function broadcastWsChanged(): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('ws:changed')
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const electron = require('electron')
+    if (electron?.BrowserWindow?.getAllWindows) {
+      for (const win of electron.BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('ws:changed')
+      }
+    }
+  } catch {
+    // not in electron
+  }
+  for (const listener of changeListeners) {
+    try {
+      listener()
+    } catch {
+      // 忽略单个监听器错误
+    }
   }
 }
 

@@ -122,7 +122,7 @@ export function Topbar({
       <div
         className={
           'app-drag no-print relative z-20 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-gradient-to-b from-card/90 to-paper/70 px-3 ' +
-          (isMac() ? 'pl-[76px]' : '')
+          (isElectron() && isMac() ? 'pl-[76px]' : '')
         }
       >
       <button
