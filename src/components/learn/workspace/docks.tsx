@@ -175,14 +175,14 @@ export function PomodoroDock({
       groups={groups}
       onFocusMinutes={setFocusMinutes}
       onGroups={setGroups}
-      onStart={() => onStart(focusMinutes, groups, monitors)}
+      onStart={() => onStart(focusMinutes, groups, isWeb() ? { screen: false, camera: false } : monitors)}
       onStop={onStop}
-      monitors={monitors}
+      monitors={isWeb() ? { screen: false, camera: false } : monitors}
       onMonitorToggle={toggleMonitor}
-      previews={previews}
-      guardStatus={guardStatus}
-      paused={status.paused}
-      strictHint={strictHint}
+      previews={isWeb() ? null : previews}
+      guardStatus={isWeb() ? null : guardStatus}
+      paused={isWeb() ? false : status.paused}
+      strictHint={isWeb() ? null : strictHint}
     />
   )
 }

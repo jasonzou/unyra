@@ -31,7 +31,7 @@ import {
   subscribeRevealRequest,
 } from './explorer/reveal'
 import { notifyWsChanged } from './explorer/wsChanges'
-import { native } from '../../lib/native'
+import { native, isWeb } from '../../lib/native'
 import SystemAudioWave from './SystemAudioWave'
 import { useSidebarWidth } from './explorer/useSidebarWidth'
 import { useTreeExpand } from './explorer/useTreeExpand'
@@ -364,9 +364,11 @@ function ExplorerSidebarComponent({
         {/* 系统音频柱形频谱：挂在侧栏底端当一台小电台（采集见 src/lib/audio/loopback）。
             满宽、不加上边框——树区滚到底已有留白，再画一条线就把这块小电台框死了；
             柱子从底边往上长，接不上系统音频时只剩一排底座，原因在悬停提示里 */}
-        <div className="px-2 py-2.5">
-          <SystemAudioWave />
-        </div>
+        {!isWeb() && (
+          <div className="px-2 py-2.5">
+            <SystemAudioWave />
+          </div>
+        )}
 
         {/*
           右边线上的宽度把手：命中区 8px（一像素的线抓不住），骑在那条 border-r 上。

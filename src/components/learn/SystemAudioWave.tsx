@@ -42,6 +42,7 @@ export default function SystemAudioWave() {
   const mouseRef = useRef<{ x: number; active: boolean }>({ x: -1, active: false })
 
   useEffect(() => {
+    if (isWeb()) return
     const canvas = ref.current
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx) return
@@ -398,6 +399,8 @@ export default function SystemAudioWave() {
       session?.stop()
     }
   }, [])
+
+  if (isWeb()) return null
 
   return (
     <div
