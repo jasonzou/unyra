@@ -65,6 +65,8 @@ describe('触发映射', () => {
     expect(promptModuleForApiName('sdoc.write')).toBe('sdoc')
     expect(promptModuleForApiName('browser.snapshot')).toBe('browser')
     expect(promptModuleForApiName('web.search')).toBe('web')
+    expect(promptModuleForApiName('web.fetch')).toBe('web')
+    expect(promptModuleForApiName('fetch')).toBe('web')
     expect(promptModuleForApiName('res.read')).toBe('res')
     expect(promptModuleForApiName('exam.create')).toBe('exam')
     expect(promptModuleForApiName('review.record')).toBe('review')

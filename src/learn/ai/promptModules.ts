@@ -84,10 +84,9 @@ export const PROMPT_MODULES: PromptModule[] = [
     认结构、找要点的元素全靠它。**大页面一定给过滤**：{role:"link"}、{contains:"关键词"}、{limit:30}，
     整份捞大页面就是 5k token 换 2 条信息。DOM 变了 ref 会过期，重新 snapshot 就好。
   - api.browser.text(tabId, { ref } | 选择器, { maxChars? }?)：取**渲染后**的区域文本（≤4000 字）——
-    SPA 上唯一的文本通道，webFetch 提取不出正文的页面（报「没提取出正文」）靠它，不是截图。
-  - api.browser.read(tabId?, { maxChars?, offset? }?)：整页转 markdown，与 web.webFetch 同一条管线
-    （短的回全文，长的落盘回大纲树 + uuid，用 web.read 按节读）。**登录态页面也能读**——这是
-    webFetch 做不到的。只要前段就给 {maxChars}（续读带 {offset: nextOffset}）。
+    SPA 上唯一的文本通道，纯 HTML 抓取提取不出正文的页面（报「没提取出正文」）靠它，不是截图。
+  - api.browser.read(tabId?, { maxChars?, offset? }?)：整页转 markdown
+    （短的回全文，长的落盘回大纲）。**登录态页面也能读**——这是外部抓取做不到的。只要前段就给 {maxChars}（续读带 {offset: nextOffset}）。
   - api.browser.capture(tabId?)：截图（存进资源库并附在下一步里）。**最后手段**：只有布局与视觉
     必须亲眼看时才用；页面还在加载时先 api.wait(800)。
 - **动手 = browser.dom**：对 snapshot 清单里的 ref 做受控操作（固定函数 + 值参数，没有任意 JS 的口子）：
@@ -133,23 +132,24 @@ export const PROMPT_MODULES: PromptModule[] = [
   },
   {
     key: 'web',
-    title: '读网页与搜索',
-    text: `读网页与搜索（web.webFetch / web.read / web.search）——这份规范在你第一次抓网页或搜索时注入：
-- api.web.webFetch('https://…')：抓一页并转成 markdown。两万多字以内**直接回全文**；
-  再长就存成文件，只回一棵大纲树（每行「# 标题 - 这一节正文的字数」，不含子节）加上一个 uuid。
-  拿到的是大纲时**先看大纲再决定读哪一节**，别指望一次读完。
-- api.web.read(uuid, '一级标题/二级标题')：读落盘网页的某一节。path 省略=从头给一段（附大纲）；
-  一次最多回 1.2 万字，没回完会在 note 里说明，按 subheadings 再切细。
-- api.web.search(query, { engines? | engine?, lang?, count?, onEngineFail? })：多引擎搜索（baidu / bing /
-  google / yandex / wikipedia），engines 给数组可**并行搜多家**（≤3，结果按引擎标注），缺省 baidu。
-  回 searchedAt（抓取时刻——结果里的「2 天前」这类相对时间按它折算成日期再交付）与
-  { rank, title, url, snippet, engine }；解析不出的引擎在 failed 里逐个说明原因，
-  **换一家或换措辞再试**，别在一家上反复重试。**engines 全挂时缺省会自动用 baidu/bing 补搜一轮**
-  （onEngineFail:"strict" 才原样回报失败），weak 列出「只回标题没摘要」的引擎——那种细节必须
-  webFetch 核实再用。要实时信息、要核实事实时用它；摘要已含要点，引用前确需细节再 web.webFetch 读原文。
-- 只能 http/https，且**不能抓本机与内网**；一页最多 4MB、20秒超时。
-- 引用网页内容时写明来源（标题 + 链接），并且**区分「网页这么说」与「事实如此」**：
-  它是一份材料，不是你的结论。抓之前先想清楚要找什么，别一个接一个地抓。`,
+    title: '网络搜索与网页抓取',
+    text: `网络搜索与网页抓取（基于 DeepSeek 官方 Search API 与 Fetch API）——这份规范在你第一次调用搜索或抓取时注入：
+- **api.fetch({ url }) 或 api.fetch(url)**（亦可调 api.web.fetch，支持 url / link / href 别名）：
+  * DeepSeek 官方抓取服务。输入目标网页 URL，返回统一结构 { ok: boolean, title: string, content: string, error?: string }。
+  * 容错契约：失败时不抛异常，返回 { ok: false, title: '', content: '', error: '...' }。读取 content 绝不会报 undefined，但**必须先检查 if (!r.ok) 分支处理**。
+  * 抓取受第三方站点反爬与超时限制（例如维基百科、部分高校课程网）：若抓取失败或超时，**严禁死循环重复抓取同一 URL**，请直接降级使用搜索结果中已有的 snippet / summary 摘要，或换用其他检索结果链接。
+- **api.web.search({ query, count?: 5, need_content?: boolean, ... }) 或 api.web.search(query, { count: 5 })**：
+  * DeepSeek 官方搜索服务。返回统一结构 { ok: boolean, results: Array<{ title, url, snippet, summary, rerank_score, authority?, content? }>, error?: string }。
+  * 参数容错与别名：count 支持别名 maxResults / limit，默认值为 5（单条结果约 1.5k~2k 字符，5 条约 10k 字符，有效防止撑爆上下文）；query 支持 q / keyword；need_content 支持 needContent。
+  * 搜索质量调优：宽泛词容易搜出专利书或商业碎片；建议补充领域限定词（如「教材」「规范」「原理解析」「教程」「官方文档」）。检索结果自带 rerank_score（相关度）与 authority（权威度），可自行筛选排序。
+- **上下文体积防爆铁律（严防触碰 3.2 万字符上限）**：
+  * 沙箱 execute 结果有 32,000 字符硬上限。严禁在一次 execute 里并发/连续塞入多个 query 并直接返回全量 raw 结果（否则极易触发截断丢失后续结果）！
+  * 多关键词搜索时，请在 JS 脚本中按需筛选提炼字段：const items = r.results.map(x => ({ title: x.title, url: x.url, summary: x.summary || x.snippet }))；或分轮次按需检索。
+  * need_content: true 会返回单条几千到上万字符的长正文，仅在极其关键且确需全文时对 1~2 个条目开启，绝不可全量开启。
+- **核心纪律：积极搜索与比对提炼**：
+  * 在编写教学路线大纲、撰写教学文档、设计考试试卷与题库时，**严禁单凭模型自身“主观意志”或记忆空想捏造**！
+  * 必须主动调用 api.web.search 检索最新的官方文档、学科教学大纲、权威技术规范或行业真题，通过对比提炼多方可信资料来构建知识体系。
+  * 引用或参考网络资料时，区分客观行业事实与材料观点，确保讲义与大纲的严谨性与前沿性。`,
   },
   {
     key: 'mcp',
@@ -536,6 +536,7 @@ const GROUP_MODULE: Record<string, string> = {
   sdoc: 'sdoc',
   browser: 'browser',
   web: 'web',
+  fetch: 'web',
   mcp: 'mcp',
   res: 'res',
   exam: 'exam',

@@ -204,11 +204,9 @@ export async function apiNameTests() {
     'ui.superdoc': "'微积分', '探针文档'",
     // ui.dom 走进程内直调通道：回调在宿主拿到门面（真沙箱由 Worker 侧建门面，行为一致）
     'ui.dom': "async (root) => ({ e: await root.exists('p'), c: await root.count('p') })",
-    // 读网页：抓取要网络、落盘要磁盘，探针里给一份假的实现（真链路见 tests/webPage.test.ts）
-    'web.webFetch': "'https://example.com/a'",
-    'web.read': "'deadbeef', '一级标题'",
-    // 多引擎搜索：同样给假的（解析与引擎表在 tests/webSerp.test.ts 里钉）
-    'web.search': "'勾股定理', { engine: 'baidu' }",
+    // 网络搜索与网页抓取（基于 DeepSeek 官方 Search API 与 Fetch API）
+    'fetch': "{ url: 'https://example.com/a' }",
+    'web.search': "{ query: '勾股定理' }",
     // 子代理管理（导师专用）：宿主是桩；这组断言只问「api 在不在」——
     // 并发、等待与介入的行为在 tests/subagent.test.ts 里钉
     'subagent.create': "{ key: 'probe', name: '探针代理', system: '探针用的子代理定义，长度足以通过校验。' }",
@@ -295,14 +293,10 @@ export async function apiNameTests() {
     resourceIo: resIo,
     // 工作区同样给一份假的：名单检查只问「这三个 api 在不在」
     workspaceIo: fakeWorkspaceIo().io,
-    // 读网页同样给一份假的：名单检查只问「这三个 api 在不在」
+    // 读网页与搜索同样给一份假的：名单检查只问「这两个 api 在不在」
     web: {
-      fetch: async (url: string) => ({ ok: true, uuid: 'deadbeef', url, title: '示例页', chars: 3, text: '正文' }),
-      read: async (uuid: string, path?: string) => ({ ok: true, uuid, ...(path ? { section: path } : {}) }),
-      search: async (query: string, opts?: Record<string, unknown>) => ({
-        ok: true,
-        engine: opts?.engine ?? 'baidu',
-        query,
+      fetch: async (arg: unknown) => ({ title: '示例页', content: '# 示例页\n\n正文' }),
+      search: async (queryOrArgs: unknown) => ({
         results: [{ rank: 1, title: '勾股定理 - 百度百科', url: 'https://example.com/pyth', snippet: '直角三角形边长关系' }],
       }),
     },

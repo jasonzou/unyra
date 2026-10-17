@@ -121,16 +121,13 @@ export const SANDBOX_API_CATALOG: ApiGroup[] = [
   },
   {
     key: 'web',
-    label: '读网页与搜索 · web.webFetch / web.read / web.search',
+    label: '网页抓取与搜索 · fetch / web.search',
     intro:
-      '把网页读成正文、用主流引擎搜索。**长的页面不会整篇塞给你**：超过两万多字就存成文件，只回一棵大纲树' +
-      '（每行「# 标题 - 这一节正文的字数」，不含子节），你按小节 web.read 去取。' +
-      '抓取只读、有体积（4MB）与时间（20 秒）上限，本机与内网地址一律拒绝。' +
-      '别连着抓十几个站点：先想清楚要哪一段，再动手。',
+      '基于 DeepSeek 官方搜索与抓取服务获取权威、最新互联网资料。抓取网页转成 Markdown，使用官方 Search API 获取多维度检索结果及内容提炼。' +
+      '编写教学大纲、讲义文档与试卷题库时，应当积极使用网络搜索比对提炼真实有效信息，避免受模型主观意志捏造内容。',
     items: [
-      { name: 'web.webFetch', signature: "web.webFetch('https://…')", summary: '抓一页并转成 markdown：短的回全文，长的存成文件并回大纲树（每节字数）+ uuid', availability: 'always' },
-      { name: 'web.read', signature: "web.read(uuid, '一级标题/二级标题')", summary: '读落盘网页的某一节（path 可省略：从头给一段 + 大纲）；一次最多回 1.2 万字，没回完会说明怎么继续', availability: 'always' },
-      { name: 'web.search', signature: "web.search(query, { engines? | engine?, lang?, count?, onEngineFail? }?)", summary: '多引擎搜索（baidu / bing / google / yandex / wikipedia）：engines 给数组并行搜多家（≤3）；回 searchedAt（抓取时刻，结果里的相对时间按它折算）+ results，解析不出的引擎在 failed 里说明；**engines 全挂缺省自动用 baidu/bing 补搜一轮**（onEngineFail:"strict" 关掉），weak 列出只回标题没摘要的引擎', availability: 'always' },
+      { name: 'fetch', signature: "fetch({ url: 'https://…' }) 或 fetch('https://…')", summary: 'DeepSeek 官方网页抓取（Fetch API，支持 link/href 别名）：将指定网页转为 Markdown，返回 { ok, title, content, error? }；失败时 content 恒为空字符串不抛异常，请检查 ok', availability: 'always' },
+      { name: 'web.search', signature: "web.search({ query: '…', count?: 5, ori_question?: '…', localization?: '…', need_content?: boolean })", summary: 'DeepSeek 官方网络搜索（Search API，count 支持 maxResults/limit 别名，默认 5 条防超限）：返回 { ok, results: [{ title, url, snippet, summary, rerank_score, authority?, content? }], error? }', availability: 'always' },
     ],
   },
   {

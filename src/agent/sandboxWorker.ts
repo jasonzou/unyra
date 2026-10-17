@@ -37,10 +37,9 @@ const API_NAMES = [
   'code.save',
   // 同上：判定「这段代码没有输出」，当场停止编译并标记那一块
   'code.silent',
-  // 读网页：抓取在主进程、正文提取在渲染层、落盘在当前用户目录（见 learn/webDocs）
-  'web.webFetch',
-  'web.read',
-  // 多引擎搜索（抓取走同一条主进程通道，解析在渲染层，见 learn/webSearch）
+  // 网络搜索与网页抓取（基于 DeepSeek 官方 Search API 与 Fetch API）
+  'fetch',
+  'web.fetch',
   'web.search',
   // 内置浏览器：网页页签的打开 / 管理 / 快照与阅读 / 受控 DOM 操作 / 截图（见 learn/web/browserOps）
   'browser.open',

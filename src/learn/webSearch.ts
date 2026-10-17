@@ -1,130 +1,397 @@
 /**
- * web.search 的宿主实现：多引擎搜索，把 SERP 解析成「标题 + 链接 + 摘要」的列表。
- *
- * 与 webDocs（web.webFetch / web.read）同一条分工：**字节由主进程取**（native().web.fetch，
- * 只读 GET、4MB / 20 秒上限、本机与内网一律拒绝——一条新口子都不开；403/429 会自动
- * 换一套浏览器指纹再试一次，见 electron/web），**解析在渲染层**（lib/web/serp，DOMParser）。
- * 结果不落盘：一条摘要几百字，直接进观察就够了，与 webFetch「长文落盘」是两种体量。
- *
- * 引擎全挂时的缺省策略是**自动降级**（onEngineFail:'fallback'）：用缺省引擎里还没试过的
- * 补搜一轮——不让「task 里没写能不能换引擎」卡死交付（导师实测反馈 2026-10-02）；
- * 'strict' 才原样回报失败。回执带 searchedAt（抓取时刻）：结果里的「2 天前」这类相对
- * 时间按它折算日期；weak 列出「只回标题没摘要」的引擎——那是解析质量差，不是这条没摘要。
+ * DeepSeek 官方网络搜索与网页抓取服务。
+ * 
+ * 官方文档规范: https://api-docs.deepseek.com/zh-cn/guides/search
+ * 
+ * 包含两个核心 API：
+ * 1. Search API: POST https://api.deepseek.com/v1/tools/search
+ *    - query: string (1~128 字符，必填；支持 q / keyword 别名)
+ *    - count?: number (1~50，默认 5；支持 maxResults / limit / pageSize 别名)
+ *    - ori_question?: string (用户原始问题；支持 oriQuestion 别名)
+ *    - localization?: string (IP 定位)
+ *    - need_content?: boolean (是否返回正文，默认 false；支持 needContent 别名)
+ *    返回 { ok: true, results: [{ title, url, snippet, summary, rerank_score, authority?, content? }] }
+ *    失败返回 { ok: false, results: [], error: string }
+ * 
+ * 2. Fetch API: POST https://api.deepseek.com/v1/tools/fetch
+ *    - url: string (必填，合法的 http/https 链接；支持 link / href 别名)
+ *    返回 { ok: true, title, content } (Markdown 格式正文)
+ *    失败返回 { ok: false, title: '', content: '', error: string }
  */
 
-import { native } from '../lib/native'
-import {
-  SEARCH_ENGINES, parseSerp, planFallback, serpUrl, weakEngines,
-  type SearchEngine, type SerpResult,
-} from '../lib/web/serp'
+import { httpFetch } from '../ai/http'
+import { resolveSearchApiKey } from '../ai/settings'
 
-/** 一次搜索最多回几条：再多观察通道就成了结果堆 */
-const RESULTS_MAX = 10
-/** 并行引擎数上限：三家的结果拼起来已经够一轮观察消化 */
-const ENGINES_MAX = 3
+export const DEEPSEEK_SEARCH_ENDPOINT = 'https://api.deepseek.com/v1/tools/search'
+export const DEEPSEEK_FETCH_ENDPOINT = 'https://api.deepseek.com/v1/tools/fetch'
 
-export interface WebSearchOptions {
-  engine?: unknown
-  /** 多引擎并行：一次调用同时搜几家（≤3），结果按引擎标注，省掉一轮轮的往返 */
-  engines?: unknown
-  lang?: unknown
-  count?: unknown
-  /** 引擎全挂后的策略：'fallback'（缺省）自动用缺省引擎补搜一轮；'strict' 原样回报失败 */
-  onEngineFail?: unknown
+/**
+ * 默认搜索返回条数。
+ * 实测每条结果约 1.5k~2.1k 字符；若使用默认 10 条，单次结果约 21k 字符，
+ * 极易触碰沙箱 3.2 万字符上限导致后续查询被截断丢弃。
+ * 默认设为 5 条（约 10k 字符），既保证足够的信息量与权威度，又留足上下文空间。
+ */
+export const DEFAULT_SEARCH_COUNT = 5
+
+export interface DeepSeekSearchParams {
+  query: string
+  count?: number
+  ori_question?: string
+  localization?: string
+  need_content?: boolean
+  // 兼容别名
+  maxResults?: number
+  max_results?: number
+  limit?: number
+  pageSize?: number
+  page_size?: number
+  q?: string
+  keyword?: string
+  needContent?: boolean
+  oriQuestion?: string
 }
 
-type SearchOutcome = { engine: SearchEngine; results: SerpResult[] } | { engine: SearchEngine; error: string }
+export interface DeepSeekSearchResultItem {
+  title: string
+  url: string
+  snippet: string
+  summary: string
+  rerank_score: number
+  authority?: number
+  content?: string
+  [key: string]: unknown
+}
 
-async function searchOne(engine: SearchEngine, query: string, lang: string | undefined, count: number): Promise<SearchOutcome> {
-  const url = serpUrl(engine, query, { ...(lang ? { lang } : {}) })
-  let page: Awaited<ReturnType<ReturnType<typeof native>['web']['fetch']>>
-  try {
-    page = await native().web.fetch(url)
-  } catch (err) {
-    return { engine, error: '搜索通道不可用：' + (err instanceof Error ? err.message : String(err)) }
+export interface DeepSeekSearchSuccess {
+  ok: true
+  results: DeepSeekSearchResultItem[]
+}
+
+export interface DeepSeekSearchFailure {
+  ok: false
+  results: DeepSeekSearchResultItem[]
+  error: string
+}
+
+export type DeepSeekSearchResponse = DeepSeekSearchSuccess | DeepSeekSearchFailure
+
+export interface DeepSeekFetchParams {
+  url: string
+  link?: string
+  href?: string
+}
+
+export interface DeepSeekFetchSuccess {
+  ok: true
+  title: string
+  content: string
+}
+
+export interface DeepSeekFetchFailure {
+  ok: false
+  title: string
+  content: string
+  error: string
+}
+
+export type DeepSeekFetchResponse = DeepSeekFetchSuccess | DeepSeekFetchFailure
+
+/**
+ * 参数归一化：支持 count / maxResults / limit / pageSize 别名与字符串数字解析，
+ * 并默认将 count 设为 5（防止单次搜索体积过大撑爆 execute 32k 上限）。
+ */
+export function normalizeSearchParams(
+  queryOrParams: unknown,
+  opts?: unknown,
+): {
+  query: string
+  count: number
+  ori_question?: string
+  localization?: string
+  need_content?: boolean
+} {
+  let rawQuery = ''
+  let rawCount: unknown
+  let rawOriQuestion: unknown
+  let rawLocalization: unknown
+  let rawNeedContent: unknown
+
+  if (typeof queryOrParams === 'object' && queryOrParams !== null) {
+    const obj = queryOrParams as Record<string, unknown>
+    rawQuery = String(obj.query ?? obj.q ?? obj.keyword ?? '')
+    rawCount =
+      obj.count ??
+      obj.maxResults ??
+      obj.max_results ??
+      obj.limit ??
+      obj.num ??
+      obj.pageSize ??
+      obj.page_size
+    rawOriQuestion = obj.ori_question ?? obj.oriQuestion
+    rawLocalization = obj.localization
+    rawNeedContent = obj.need_content ?? obj.needContent
+  } else {
+    rawQuery = String(queryOrParams ?? '')
+    if (typeof opts === 'object' && opts !== null) {
+      const optObj = opts as Record<string, unknown>
+      rawCount =
+        optObj.count ??
+        optObj.maxResults ??
+        optObj.max_results ??
+        optObj.limit ??
+        optObj.num ??
+        optObj.pageSize ??
+        optObj.page_size
+      rawOriQuestion = optObj.ori_question ?? optObj.oriQuestion
+      rawLocalization = optObj.localization
+      rawNeedContent = optObj.need_content ?? optObj.needContent
+    }
   }
-  if (!page.ok) return { engine, error: page.error }
-  const results = parseSerp(engine, page.text, { ...(lang ? { lang } : {}) }).slice(0, count)
-  if (!results.length) {
-    return { engine, error: '没有解析出结果（可能是验证码、需要浏览器的页面，或结果页改版了）' }
+
+  // 解析条数：默认 5 条
+  let count = DEFAULT_SEARCH_COUNT
+  if (typeof rawCount === 'number' && Number.isFinite(rawCount)) {
+    count = Math.min(50, Math.max(1, Math.floor(rawCount)))
+  } else if (typeof rawCount === 'string') {
+    const parsed = parseInt(rawCount.trim(), 10)
+    if (Number.isFinite(parsed) && parsed > 0) {
+      count = Math.min(50, Math.max(1, parsed))
+    }
   }
-  return { engine, results }
+
+  const query = rawQuery.trim().slice(0, 128)
+  const ori_question =
+    typeof rawOriQuestion === 'string' && rawOriQuestion.trim()
+      ? rawOriQuestion.trim()
+      : undefined
+  const localization =
+    typeof rawLocalization === 'string' && rawLocalization.trim()
+      ? rawLocalization.trim()
+      : undefined
+  const need_content =
+    typeof rawNeedContent === 'boolean' ? rawNeedContent : undefined
+
+  return {
+    query,
+    count,
+    ...(ori_question ? { ori_question } : {}),
+    ...(localization ? { localization } : {}),
+    ...(need_content !== undefined ? { need_content } : {}),
+  }
 }
 
 /**
- * api.web.search(query, { engine? | engines?, lang?, count?, onEngineFail? })
- *
- * 引擎解析不出结果（验证码、需要浏览器的页面、改版、网络不可达）不是静默吞掉：
- * 回执里逐引擎写明原因。engines 全挂时缺省自动降级补搜（strict 关掉）；
- * weak 标出「只回标题没摘要」的引擎，searchedAt 给相对时间一个折算锚点。
+ * URL 归一化：支持 url / link / href 等别名
  */
-export async function searchForAgent(rawQuery: string, rawOpts?: WebSearchOptions): Promise<unknown> {
-  const query = String(rawQuery ?? '').trim()
-  if (!query) {
-    return { error: 'web.search 需要搜索词，例如 web.search("梯度下降") 或 web.search("attention", { engines: ["baidu","bing"] })' }
+export function normalizeFetchUrl(urlOrParams: unknown): string {
+  if (typeof urlOrParams === 'string') {
+    return urlOrParams.trim()
   }
-  const opts = rawOpts ?? {}
-  const wanted = Array.isArray(opts.engines)
-    ? opts.engines.map((x) => String(x).trim().toLowerCase())
-    : [String(opts.engine ?? '').trim().toLowerCase()].filter(Boolean)
-  const engines = [...new Set(wanted.filter((e) => (SEARCH_ENGINES as string[]).includes(e)))].slice(
-    0,
-    ENGINES_MAX,
-  ) as SearchEngine[]
-  const list: SearchEngine[] = engines.length ? engines : ['baidu']
-  const lang = typeof opts.lang === 'string' ? opts.lang.trim() : undefined
-  const count = Math.min(RESULTS_MAX, Math.max(1, Number(opts.count) || RESULTS_MAX))
-  const strict = opts.onEngineFail === 'strict'
-
-  const run = async (targets: SearchEngine[]) => {
-    const settled = await Promise.all(targets.map((engine) => searchOne(engine, query, lang, count)))
-    return {
-      good: settled.filter((r): r is { engine: SearchEngine; results: SerpResult[] } => 'results' in r),
-      failed: settled.filter((r): r is { engine: SearchEngine; error: string } => 'error' in r),
-    }
+  if (typeof urlOrParams === 'object' && urlOrParams !== null) {
+    const obj = urlOrParams as Record<string, unknown>
+    return String(obj.url ?? obj.link ?? obj.href ?? '').trim()
   }
-
-  let { good, failed } = await run(list)
-  let fallback: SearchEngine[] = []
-  if (!good.length && !strict) {
-    // 引擎全挂：缺省自动降级——用缺省引擎里还没试过的补一轮
-    const retry = planFallback(list)
-    if (retry.length) {
-      const second = await run(retry)
-      fallback = retry
-      good = second.good
-      failed = [...failed, ...second.failed]
-    }
-  }
-  if (!good.length) {
-    return {
-      error:
-        '全部引擎都没搜到（' + failed.map((f) => f.engine + '：' + f.error).join('；') + '）。' +
-        (fallback.length ? '已自动用 ' + fallback.join('、') + ' 补过一轮，仍然全挂。' : '') +
-        '可选引擎：' + SEARCH_ENGINES.join(' / ') + '。换措辞或换引擎再试一次；连着失败就别恋战，把已知的部分先交付。',
-      query,
-    }
-  }
-  const weak = weakEngines(good)
-  const results = good.flatMap((g) => g.results.map((r, i) => ({ rank: i + 1, ...r, engine: g.engine })))
-  return {
-    ok: true,
-    engines: good.map((g) => g.engine),
-    query,
-    // 抓取时刻：结果里的「2 天前」这类相对时间按它折算成日期再交付
-    searchedAt: new Date().toISOString(),
-    results,
-    ...(failed.length ? { failed: failed.map((f) => ({ engine: f.engine, reason: f.error })) } : {}),
-    ...(weak.length ? { weak } : {}),
-    ...(fallback.length ? { fallback } : {}),
-    note:
-      '先用摘要判断价值，确需细节再 webFetch 读原文（结果只有 ' + results.length + ' 条，够挑了）。' +
-      'searchedAt 是抓取时刻，结果里的「2 天前」这类相对时间按它折算。' +
-      (weak.length
-        ? '（' + weak.join('、') + ' 只回了标题与链接、没有摘要——这是解析质量差不是没内容，细节必须 webFetch 核实再用。）'
-        : '') +
-      (fallback.length ? '（原引擎全挂，已自动用 ' + fallback.join('、') + ' 补搜；原失败记录在 failed。）' : '') +
-      (good.some((g) => g.engine === 'baidu') ? '百度的链接常是跳转链，直接交给 web.webFetch 就能跟到真页。' : '') +
-      (failed.length ? '（失败的引擎见 failed，别再对它们重试同一次搜索。）' : ''),
-  } as unknown
+  return ''
 }
+
+/**
+ * 直接调用 DeepSeek 官方搜索 API。
+ * 保证始终返回统一的 { ok, results, error? } 结构，results 恒定为数组。
+ */
+export async function callDeepSeekSearch(
+  params: DeepSeekSearchParams,
+  apiKey?: string,
+): Promise<DeepSeekSearchResponse> {
+  const key = (apiKey ?? resolveSearchApiKey()).trim()
+  if (!key) {
+    return {
+      ok: false,
+      results: [],
+      error:
+        '尚未配置 DeepSeek API Key。请在「设置 - 模型 - 网络搜索」中配置 DeepSeek API Key，或添加已配置的 DeepSeek 提供商。',
+    }
+  }
+
+  const normalized = normalizeSearchParams(params)
+  if (!normalized.query) {
+    return {
+      ok: false,
+      results: [],
+      error: '搜索关键词 query 不能为空（1~128 个字符）。',
+    }
+  }
+
+  const body: Record<string, unknown> = {
+    query: normalized.query,
+    count: normalized.count,
+  }
+  if (normalized.ori_question) body.ori_question = normalized.ori_question
+  if (normalized.localization) body.localization = normalized.localization
+  if (normalized.need_content !== undefined) body.need_content = normalized.need_content
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    controller.abort(new Error('DeepSeek 搜索请求超时（超过 25 秒）'))
+  }, 25000)
+
+  try {
+    const res = await httpFetch(DEEPSEEK_SEARCH_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+
+    const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+    if (!res.ok) {
+      const msg =
+        (json?.error as { message?: string })?.message ||
+        (typeof json?.message === 'string' ? json.message : '') ||
+        `HTTP ${res.status}: ${res.statusText || '请求异常'}`
+      return { ok: false, results: [], error: `DeepSeek 搜索服务调用失败：${msg}` }
+    }
+
+    if (json && typeof json.error === 'string') {
+      return { ok: false, results: [], error: `DeepSeek 搜索服务返回错误：${json.error}` }
+    }
+
+    const rawResults = (json?.results && Array.isArray(json.results)) ? json.results : []
+    return {
+      ok: true,
+      results: rawResults as DeepSeekSearchResultItem[],
+    }
+  } catch (err) {
+    clearTimeout(timer)
+    return {
+      ok: false,
+      results: [],
+      error:
+        'DeepSeek 搜索网络请求失败：' + (err instanceof Error ? err.message : String(err)),
+    }
+  }
+}
+
+/**
+ * 直接调用 DeepSeek 官方 Fetch 抓取 API。
+ * 保证始终返回统一的 { ok, title, content, error? } 结构，
+ * title 与 content 恒定为字符串（失败时为空字符串），防止 agent 访问 content.slice 崩溃。
+ */
+export async function callDeepSeekFetch(
+  params: DeepSeekFetchParams,
+  apiKey?: string,
+): Promise<DeepSeekFetchResponse> {
+  const key = (apiKey ?? resolveSearchApiKey()).trim()
+  if (!key) {
+    return {
+      ok: false,
+      title: '',
+      content: '',
+      error:
+        '尚未配置 DeepSeek API Key。请在「设置 - 模型 - 网络搜索」中配置 DeepSeek API Key，或添加已配置的 DeepSeek 提供商。',
+    }
+  }
+
+  const url = normalizeFetchUrl(params)
+  if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+    return {
+      ok: false,
+      title: '',
+      content: '',
+      error: 'fetch 需要合法的 http:// 或 https:// 网页地址。',
+    }
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    controller.abort(new Error('DeepSeek 抓取请求超时（超过 20 秒）'))
+  }, 20000)
+
+  try {
+    const res = await httpFetch(DEEPSEEK_FETCH_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({ url }),
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+
+    const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+    if (!res.ok) {
+      const msg =
+        (json?.error as { message?: string })?.message ||
+        (typeof json?.message === 'string' ? json.message : '') ||
+        `HTTP ${res.status}: ${res.statusText || '请求异常'}`
+      return { ok: false, title: '', content: '', error: `DeepSeek 抓取服务调用失败：${msg}` }
+    }
+
+    // DeepSeek 抓取服务在抓取特定外部站点失败时可能返回 200 伴随 { error: "failed to fetch URL" }
+    if (json && typeof json.error === 'string') {
+      return {
+        ok: false,
+        title: String(json.title ?? ''),
+        content: String(json.content ?? ''),
+        error: `DeepSeek 网页抓取失败：${json.error}`,
+      }
+    }
+
+    return {
+      ok: true,
+      title: String(json?.title ?? ''),
+      content: String(json?.content ?? ''),
+    }
+  } catch (err) {
+    clearTimeout(timer)
+    return {
+      ok: false,
+      title: '',
+      content: '',
+      error:
+        'DeepSeek 抓取网络请求失败：' + (err instanceof Error ? err.message : String(err)),
+    }
+  }
+}
+
+/**
+ * execute 沙箱中的 api.web.search 入口。
+ * 支持别名（count, maxResults, limit）与默认 count=5，返回结构保证 results 为数组。
+ */
+export async function searchForAgent(queryOrParams: unknown, opts?: unknown): Promise<unknown> {
+  const normalized = normalizeSearchParams(queryOrParams, opts)
+  if (!normalized.query) {
+    return {
+      ok: false,
+      results: [],
+      error:
+        'web.search 需要有效的 query 搜索词，例如 api.web.search({ query: "知识点" }) 或 api.web.search("知识点", { count: 5 })',
+    }
+  }
+
+  return await callDeepSeekSearch(normalized)
+}
+
+/**
+ * execute 沙箱中的 api.fetch 入口。
+ * 支持 url / link / href 等别名，保证返回 { ok, title, content, error? } 且 content 恒为字符串。
+ */
+export async function fetchForAgent(urlOrParams: unknown): Promise<unknown> {
+  const url = normalizeFetchUrl(urlOrParams)
+  if (!url) {
+    return {
+      ok: false,
+      title: '',
+      content: '',
+      error:
+        'fetch 需要有效的 url 参数，例如 api.fetch({ url: "https://..." }) 或 api.fetch("https://...")',
+    }
+  }
+
+  return await callDeepSeekFetch({ url })
+}
+

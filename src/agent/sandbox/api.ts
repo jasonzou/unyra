@@ -62,7 +62,12 @@ function markFailed(record: SandboxCall, value: unknown): void {
   if (!isFailedValue(value)) return
   record.ok = false
   const v = value as { content?: unknown; error?: unknown }
-  const text = typeof v.content === 'string' ? v.content : typeof v.error === 'string' ? v.error : ''
+  const text =
+    typeof v.error === 'string' && v.error.trim()
+      ? v.error
+      : typeof v.content === 'string' && v.content.trim()
+        ? v.content
+        : ''
   // 压成一行再截断：这句话要进结果顶部的清单，太长会把别的调用挤没
   if (text) record.message = text.replace(/\s+/g, ' ').trim().slice(0, 300)
 }
@@ -595,23 +600,58 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     wrapApi(api, 'chip.build', (args) => chipOps.build(asRecord(args[0])), log)
     wrapApi(api, 'chip.check', (args) => chipOps.check(asText(args[0])), log)
   }
-  // 读网页：抓取与落盘都在界面层（见 learn/webDocs），这里只是几个入口
+  // 网络搜索与网页抓取（基于 DeepSeek 官方 Search API 与 Fetch API）
   if (opts.web) {
     const web = opts.web
-    wrapApi(api, 'web.webFetch', (args) => {
+    const handleFetch = (args: unknown[]) => {
       const first = args[0]
-      const url = (typeof first === 'object' && first !== null ? asText((first as Record<string, unknown>).url) : asText(first)).trim()
-      if (!url) return { ok: false, error: 'web.webFetch 需要有效的 url 参数，例如 web.webFetch("https://...") 或 web.webFetch({ url: "https://..." })' }
-      return web.fetch(url)
-    }, log)
-    wrapApi(api, 'web.read', (args) => web.read(asText(args[0]).trim(), asText(args[1]).trim() || undefined), log)
-    // 多引擎搜索（见 learn/webSearch）：不注入 search 就没有这一条（子代理按 apiAllow 决定）
+      let url = ''
+      if (typeof first === 'string') {
+        url = first.trim()
+      } else if (first && typeof first === 'object') {
+        const obj = first as Record<string, unknown>
+        url = asText(obj.url ?? obj.link ?? obj.href).trim()
+      }
+      if (!url) {
+        return {
+          ok: false,
+          title: '',
+          content: '',
+          error:
+            'fetch 需要有效的 url 参数，例如 api.fetch({ url: "https://..." }) 或 api.fetch("https://...")',
+        }
+      }
+      return web.fetch(typeof first === 'object' && first !== null ? { ...first, url } : { url })
+    }
+    // 支持 api.fetch 与 api.web.fetch
+    wrapApi(api, 'fetch', handleFetch, log)
+    wrapApi(api, 'web.fetch', handleFetch, log)
+
+    // web.search（完全支持 DeepSeek Search API 参数）
     if (web.search) {
       const webSearch = web.search
-      wrapApi(api, 'web.search', (args) => {
-        const a = asRecord(args[1])
-        return webSearch(asText(args[0]).trim(), a)
-      }, log)
+      wrapApi(
+        api,
+        'web.search',
+        (args) => {
+          const first = args[0]
+          if (typeof first === 'object' && first !== null) {
+            return webSearch(first)
+          }
+          const query = asText(first).trim()
+          if (!query) {
+            return {
+              ok: false,
+              results: [],
+              error:
+                'web.search 需要有效的 query 搜索词，例如 api.web.search({ query: "知识点" }) 或 api.web.search("知识点", { count: 5 })',
+            }
+          }
+          const second = asRecord(args[1])
+          return webSearch({ query, ...second })
+        },
+        log,
+      )
     }
   }
 
@@ -1300,7 +1340,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
       node: 'api.node: list, read, paths, create, title, rename, update, annotate, delete, move（节点结构管理）',
       browser: 'api.browser: open, tabs, activate, close, snapshot, point, dom, read, capture, logs, logDetail, fetch, waitFor, record, text, scroll（内置网页浏览器）',
       mcp: 'api.mcp: list, discover, call（用户配置的外部 MCP 服务：先 list 看服务与工具，再 call 调用）',
-      web: 'api.web: webFetch, read, search（网页抓取与多引擎搜索）',
+      web: 'fetch, api.web.search（DeepSeek 官方网页抓取与网络搜索）',
       process: 'api.process: create, start, status, output, stop, list, get, delete（原生子进程管理）',
       skill: 'api.skill: list, read, run（专业技能库：发现与按需查阅规范，受控执行专属脚本）',
     }

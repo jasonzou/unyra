@@ -3,8 +3,21 @@
  */
 
 import { useState } from 'react'
-import { Plus, Settings2, SlidersHorizontal, Sparkles, Star, Trash2 } from 'lucide-react'
 import {
+  AlertCircle,
+  Check,
+  ExternalLink,
+  Globe,
+  KeyRound,
+  Plus,
+  Settings2,
+  SlidersHorizontal,
+  Sparkles,
+  Star,
+  Trash2,
+} from 'lucide-react'
+import {
+  findReferencedDeepSeekKey,
   isConfigured,
   labelOf,
   modelEntriesOf,
@@ -12,6 +25,7 @@ import {
   protocolOf,
   type AiSettings,
   type ProviderConfig,
+  type WebSearchSettings,
 } from '../../ai/settings'
 import { PROVIDERS, type ProviderPreset } from '../../ai/providers'
 import { REASONING_HINT, REASONING_LABEL, compatLabel, type ReasoningEffort } from '../../ai/types'
@@ -28,6 +42,7 @@ export function ProviderListPage({
   onEffort,
   onPickDefault,
   onDelete,
+  onUpdateSearch,
 }: {
   draft: AiSettings
   configured: ProviderConfig[]
@@ -37,6 +52,7 @@ export function ProviderListPage({
   onEffort: (e: ReasoningEffort) => void
   onPickDefault: (providerId: string, model: string) => void
   onDelete?: (id: string) => void
+  onUpdateSearch?: (search: WebSearchSettings) => void
 }) {
   const [creating, setCreating] = useState(false)
   const createdIds = new Set(draft.providers.map((p) => p.id))
@@ -47,9 +63,14 @@ export function ProviderListPage({
   const defaultProvider = configured.find((p) => p.id === defaultId)
   const defaultModel = defaultProvider ? draft.global.model || modelsOf(defaultProvider)[0] || '' : ''
 
+  const dsRef = findReferencedDeepSeekKey(draft)
+  const hasReferencedKey = !!dsRef
+  const customSearchKey = draft.search?.apiKey?.trim() ?? ''
+  const hasCustomKey = !!customSearchKey
+
   return (
     <>
-      <section>
+      <section id="settings-section-providers" className="scroll-mt-4">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[12.5px] font-medium text-ink-strong">
             {t('已添加的提供商')}
@@ -315,6 +336,121 @@ export function ProviderListPage({
         <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
           {REASONING_LABEL[draft.global.effort]}：{t(REASONING_HINT[draft.global.effort])}
         </p>
+      </section>
+
+      {/* 网络搜索配置 */}
+      <section id="settings-section-search" className="rounded-xl border border-line bg-card/60 p-4 scroll-mt-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Globe size={14} className="text-seal" />
+            <span className="text-[12.5px] font-medium text-ink-strong">{t('网络搜索配置')}</span>
+            <span className="text-[11px] text-ink-faint">
+              {t('为智能导师与 Agent 教学编排提供全网权威信息检索与正文抓取能力')}
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-line/80 bg-paper/60 p-3.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line/80 bg-card shadow-2xs">
+                <ProviderLogo id="deepseek" protocol="openai" size={22} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-medium text-ink-strong">
+                    {t('DeepSeek 官方搜索 (Search & Fetch)')}
+                  </span>
+                  <span className="rounded bg-line/60 px-1.5 py-0.5 text-[10px] text-ink-soft">
+                    {t('官方服务')}
+                  </span>
+                  {hasCustomKey ? (
+                    <span className="flex items-center gap-1 rounded bg-seal/10 px-1.5 py-0.5 text-[10.5px] font-medium text-seal-deep">
+                      <KeyRound size={10} />
+                      {t('已配置独立密钥')}
+                    </span>
+                  ) : hasReferencedKey ? (
+                    <span className="flex items-center gap-1 rounded bg-seal/10 px-1.5 py-0.5 text-[10.5px] font-medium text-seal-deep">
+                      <Check size={10} />
+                      {t('已自动复用提供商')}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 rounded bg-warn/15 px-1.5 py-0.5 text-[10.5px] font-medium text-warn-deep">
+                      <AlertCircle size={10} />
+                      {t('未配置密钥')}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-[11px] text-ink-faint">
+                  {t('目前网络搜索专精支持 DeepSeek 官方搜索与抓取服务，通过 API 自动提炼核心知识与多源对比。')}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 border-t border-line/60 pt-3 flex flex-col gap-2.5">
+            {hasReferencedKey ? (
+              <div className="rounded-lg border border-seal/30 bg-seal/[0.04] px-3 py-2 text-[11.5px] text-seal-deep flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Check size={14} className="shrink-0 text-seal" />
+                  <span>
+                    {t(
+                      '已自动复用已配置的 DeepSeek 提供商（{0}）的 API Key，无需额外配置。',
+                      labelOf(dsRef.provider),
+                    )}
+                  </span>
+                </div>
+                {hasCustomKey && (
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSearch?.({ provider: 'deepseek', apiKey: '' })}
+                    className="shrink-0 text-[11px] font-medium underline hover:text-seal-deep"
+                  >
+                    {t('清除自定义 Key（恢复自动引用）')}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-warn/30 bg-warn/[0.05] px-3 py-2 text-[11.5px] text-warn-deep flex items-center gap-2">
+                <AlertCircle size={14} className="shrink-0 text-warn" />
+                <span>
+                  {t('尚未检测到已配置的 DeepSeek 提供商。请在此填入 DeepSeek API Key，或在上方添加 DeepSeek 官方提供商。')}
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[11.5px] font-medium text-ink-soft">
+                  {hasReferencedKey ? t('覆盖默认 API Key（选填）') : t('DeepSeek API Key')}
+                </label>
+                <a
+                  href="https://platform.deepseek.com/api_keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 text-[11px] text-ink-faint hover:text-seal hover:underline"
+                >
+                  <span>{t('前往 DeepSeek 开放平台获取 Key')}</span>
+                  <ExternalLink size={10} />
+                </a>
+              </div>
+              <input
+                type="password"
+                value={draft.search?.apiKey ?? ''}
+                onChange={(e) => onUpdateSearch?.({ provider: 'deepseek', apiKey: e.target.value })}
+                placeholder={
+                  hasReferencedKey
+                    ? t('已自动复用提供商密钥（如需覆盖可在此填入独立的 DeepSeek API Key）')
+                    : 'sk-...'
+                }
+                className="w-full rounded-lg border border-line bg-card px-2.5 py-1.5 font-mono text-[12px] text-ink-strong outline-none transition focus:border-seal/60 placeholder:font-sans placeholder:text-ink-faint/70"
+              />
+              <p className="text-[10.5px] text-ink-faint">
+                {t('API Key 仅保存在本机，所有搜索与抓取请求由主进程直发 DeepSeek 官方服务。')}
+              </p>
+            </div>
+          </div>
+        </div>
       </section>
     </>
   )
