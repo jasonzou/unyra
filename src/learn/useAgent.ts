@@ -1321,14 +1321,36 @@ export function useAgent(opts: {
     ) => {
       let target = opts?.target ?? null
       if (!target) {
-        const nid = opts?.nodeId ?? nodeId
-        const node = nid ? nodeById(getLatest(), nid) : null
-        if (node) {
-          const conv =
-            conversationId && conversationById(getLatest(), conversationId)?.goalId === node.goalId
-              ? conversationId
-              : (latestConversation(getLatest(), node.goalId)?.id ?? null)
-          if (conv) target = { goalId: node.goalId, nodeId: node.id, conversationId: conv }
+        // 外部触发的工作流必须优先使用当前正在使用的活跃上下文（即当前用户正在交互的导师会话）
+        if (goalId && conversationId) {
+          const currentConv = conversationById(getLatest(), conversationId)
+          if (currentConv && currentConv.goalId === goalId) {
+            let nid = opts?.nodeId ?? nodeId
+            if (nid) {
+              const checkNode = nodeById(getLatest(), nid)
+              if (!checkNode || checkNode.goalId !== goalId) {
+                nid = nodeId ?? getLatest().goals.find((g) => g.id === goalId)?.rootNodeId ?? null
+              }
+            } else {
+              nid = nodeId ?? getLatest().goals.find((g) => g.id === goalId)?.rootNodeId ?? null
+            }
+            if (nid) {
+              target = { goalId, nodeId: nid, conversationId }
+            }
+          }
+        }
+
+        // 兜底回退：若当前没有活跃的导师上下文，按传入的 nodeId 解析归属
+        if (!target) {
+          const nid = opts?.nodeId ?? nodeId
+          const node = nid ? nodeById(getLatest(), nid) : null
+          if (node) {
+            const conv =
+              conversationId && conversationById(getLatest(), conversationId)?.goalId === node.goalId
+                ? conversationId
+                : (latestConversation(getLatest(), node.goalId)?.id ?? null)
+            if (conv) target = { goalId: node.goalId, nodeId: node.id, conversationId: conv }
+          }
         }
       }
       if (!target) return

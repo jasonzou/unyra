@@ -19,6 +19,7 @@ import { canOpenExternal } from '../link-core'
 import { mainWindow } from './mainWindow'
 import { t } from '../i18n'
 import { axNodesToElements, type AxRawNode } from '../../shared/axTree'
+import { detectSourceLanguage, isMyMemoryError, normalizeLangForMyMemory } from '../../shared/translation'
 import type {
   WebDomOpResult,
   WebFastTranslateResult,
@@ -1003,39 +1004,50 @@ export async function fastTranslateCore(text: string, targetLang = 'zh-CN'): Pro
   const clean = text.trim()
   if (!clean) return { ok: true, text: '' }
 
-  const googleUrl =
-    'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=' +
-    encodeURIComponent(targetLang) +
-    '&dt=t&q=' +
-    encodeURIComponent(clean)
-
-  // 1. 尝试 Google Translate 公开 RPC (海外/有代理时毫秒级直达)
-  try {
-    const dispatcher = await getTranslationDispatcher(googleUrl)
-    const res = await fetch(googleUrl, {
-      signal: AbortSignal.timeout(3000),
-      ...(dispatcher ? { dispatcher } : {}),
-    } as RequestInit)
-    if (res.ok) {
-      const data = (await res.json()) as unknown
-      if (Array.isArray(data) && Array.isArray(data[0])) {
-        const translated = data[0]
-          .map((item) => (Array.isArray(item) ? item[0] : ''))
-          .filter(Boolean)
-          .join('')
-          .trim()
-        if (translated && translated !== clean) {
-          return { ok: true, text: translated, source: 'google' }
+  // 1. 尝试 Google Translate 公开 RPC (先 translate.googleapis.com，次选 translate.google.com)
+  const googleHosts = ['translate.googleapis.com', 'translate.google.com']
+  for (const host of googleHosts) {
+    const googleUrl =
+      `https://${host}/translate_a/single?client=gtx&sl=auto&tl=` +
+      encodeURIComponent(targetLang) +
+      '&dt=t&q=' +
+      encodeURIComponent(clean)
+    try {
+      const dispatcher = await getTranslationDispatcher(googleUrl)
+      const res = await fetch(googleUrl, {
+        signal: AbortSignal.timeout(2500),
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit)
+      if (res.ok) {
+        const data = (await res.json()) as unknown
+        if (Array.isArray(data) && Array.isArray(data[0])) {
+          const translated = data[0]
+            .map((item) => (Array.isArray(item) ? item[0] : ''))
+            .filter(Boolean)
+            .join('')
+            .trim()
+          if (translated && translated !== clean) {
+            return { ok: true, text: translated, source: 'google' }
+          }
         }
       }
+    } catch {
+      // 超时或不可达，尝试下一主机或平滑降级
     }
-  } catch {
-    // 超时或不可达，平滑降级
   }
 
   // 2. 降级走 MyMemory 免费公共翻译接口（国内免代理直连）
+  // 注意：MyMemory 不支持 'auto' 源语言代码，必须显式传递识别到的语种代码，且需过滤错误提示
   try {
-    const langpair = 'auto|' + targetLang
+    const detectedSrc = detectSourceLanguage(clean, targetLang)
+    const normSrc = normalizeLangForMyMemory(detectedSrc)
+    const normTgt = normalizeLangForMyMemory(targetLang)
+
+    if (normSrc.toLowerCase() === normTgt.toLowerCase()) {
+      return { ok: true, text: clean, source: 'mymemory' }
+    }
+
+    const langpair = `${normSrc}|${normTgt}`
     const myMemoryUrl =
       'https://api.mymemory.translated.net/get?q=' +
       encodeURIComponent(clean) +
@@ -1047,11 +1059,14 @@ export async function fastTranslateCore(text: string, targetLang = 'zh-CN'): Pro
       ...(dispatcher ? { dispatcher } : {}),
     } as RequestInit)
     if (res.ok) {
-      const data = (await res.json()) as { responseData?: { translatedText?: string } }
+      const data = (await res.json()) as {
+        responseData?: { translatedText?: string }
+        responseStatus?: number | string
+      }
       const translated = data?.responseData?.translatedText?.trim()
       if (
         translated &&
-        !translated.toUpperCase().includes('MYMEMORY WARNING') &&
+        !isMyMemoryError(translated, data?.responseStatus) &&
         translated !== clean
       ) {
         return { ok: true, text: translated, source: 'mymemory' }

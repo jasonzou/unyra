@@ -993,7 +993,35 @@ export default function LearnWorkspace({
       if (s.agentActiveTab === key) return
       // 固定聊天页签不在 store 的页签列表里（界面合成置左），但它是合法的激活项
       if (key !== 'free' && !(s.agentTabs ?? []).some((t) => agentTabKey(t) === key)) return
-      set(withAgentTabs(s, s.agentTabs ?? [], key))
+
+      let next: LearnStore = s
+      if (key !== 'free') {
+        const targetTab = (s.agentTabs ?? []).find((t) => agentTabKey(t) === key)
+        if (targetTab && targetTab.kind === 'goal') {
+          const focusId =
+            goalFocusByGoal.get(targetTab.goalId) ??
+            s.goals.find((g) => g.id === targetTab.goalId)?.rootNodeId ??
+            s.activeNodeId
+          const convId =
+            targetTab.conversationId ?? latestConversation(s, targetTab.goalId)?.id ?? null
+          next = {
+            ...s,
+            activeGoalId: targetTab.goalId,
+            activeNodeId: focusId,
+            activeConversationId: convId,
+          }
+        } else if (targetTab && targetTab.kind === 'sub') {
+          const conv = conversationById(s, targetTab.conversationId)
+          if (conv) {
+            next = {
+              ...s,
+              activeGoalId: conv.goalId,
+              activeConversationId: targetTab.conversationId,
+            }
+          }
+        }
+      }
+      set(withAgentTabs(next, s.agentTabs ?? [], key))
     },
     [getLatest, set],
   )
@@ -2056,14 +2084,17 @@ export default function LearnWorkspace({
     const s = getLatest()
     const conv = conversationById(s, conversationId)
     if (!conv || conv.goalId !== tab.goalId) return
-    let next: LearnStore = { ...s }
-    if (s.activeConversationId === tab.conversationId) next = { ...next, activeConversationId: conversationId }
     const t0 = upsertAgentTab(
       s.agentTabs ?? [],
       s.agentActiveTab ?? null,
       { kind: 'goal', goalId: tab.goalId, conversationId },
-      false,
+      true,
     )
+    const next: LearnStore = {
+      ...s,
+      activeGoalId: tab.goalId,
+      activeConversationId: conversationId,
+    }
     set(withAgentTabs(next, t0.tabs, t0.active))
     setSidebarOpen(false)
   }
@@ -2073,14 +2104,17 @@ export default function LearnWorkspace({
     if (tab.kind !== 'goal') return
     const s = getLatest()
     const { store: withConv, conversation } = addConversation(s, tab.goalId)
-    let next: LearnStore = withConv
-    if (s.activeConversationId === tab.conversationId) next = { ...next, activeConversationId: conversation.id }
     const t0 = upsertAgentTab(
-      next.agentTabs ?? [],
-      next.agentActiveTab ?? null,
+      withConv.agentTabs ?? [],
+      withConv.agentActiveTab ?? null,
       { kind: 'goal', goalId: tab.goalId, conversationId: conversation.id },
-      false,
+      true,
     )
+    const next: LearnStore = {
+      ...withConv,
+      activeGoalId: tab.goalId,
+      activeConversationId: conversation.id,
+    }
     set(withAgentTabs(next, t0.tabs, t0.active))
   }
 

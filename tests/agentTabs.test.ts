@@ -238,4 +238,12 @@ describe('页签归属与目标绑定', () => {
   it('没有当前目标时一枚都不留：那一栏由界面说「打开一份文档，导师就来了」', () => {
     expect(visibleAgentTabs([goal('g1'), sub('c1', 's1')], null, goalOfConversation)).toEqual([])
   })
+
+  it('upsertAgentTab 支持激活目标级页签并保持会话指向', () => {
+    const tabs = [goal('g1', 'conv-1'), goal('g2', 'conv-2')]
+    // 切换到 g1 的另一个会话 conv-3 并激活
+    const updated = upsertAgentTab(tabs, 'ga:g2', goal('g1', 'conv-3'), true)
+    expect(updated.active).toBe('ga:g1')
+    expect(updated.tabs.find((t) => t.kind === 'goal' && t.goalId === 'g1')).toEqual(goal('g1', 'conv-3'))
+  })
 })
