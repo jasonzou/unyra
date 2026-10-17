@@ -47,6 +47,7 @@ import { useClock } from '../../../lib/clock'
 import { useReadingDay, useReadingPulse } from '../../../lib/readingPulse'
 import { t } from '../../../i18n'
 import { supportsImage } from '../../../ai/settings'
+import { isWeb } from '../../../lib/native'
 import {
   ensureStream,
   getStream,
@@ -60,6 +61,10 @@ import {
 const MONITORS_KEY = 'moji-focus-monitors'
 
 function loadMonitors(): FocusMonitors {
+  if (isWeb()) {
+    // Web 浏览器模式下不支持屏幕监控（无全局应用监控权限，且易引起标签页自捕获崩溃）
+    return { screen: false, camera: false }
+  }
   try {
     const raw = JSON.parse(localStorage.getItem(MONITORS_KEY) ?? '{}') as Partial<FocusMonitors>
     return { screen: raw.screen === true, camera: raw.camera === true }
@@ -110,6 +115,7 @@ export function PomodoroDock({
   /** 勾/去一路监控：当场起停媒体流（预览跟着亮/熄），起不来就退回未勾。
       先算好下一份再 set：updater 要保持纯净（起停流与落 localStorage 都是副作用） */
   const toggleMonitor = (kind: 'screen' | 'camera') => {
+    if (kind === 'screen' && isWeb()) return
     const next = { ...monitors, [kind]: !monitors[kind] }
     setMonitors(next)
     try {

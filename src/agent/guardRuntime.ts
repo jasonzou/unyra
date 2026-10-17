@@ -19,6 +19,7 @@ import { resolveGlobal } from '../ai/settings'
 import { streamChatWith } from '../ai/client'
 import type { ChatContentPart, ChatMessage } from '../ai/types'
 import { t } from '../i18n'
+import { isWeb } from '../lib/native'
 import {
   GUARD_ROUND_MS,
   MAX_HISTORY_ROUNDS,
@@ -156,11 +157,19 @@ function hiddenVideo(kind: keyof typeof streams): HTMLVideoElement {
 
 /** 确保某一路媒体流在跑（幂等）；失败回 null（无摄像头 / 被拒 / 被占用） */
 export async function ensureStream(kind: 'screen' | 'camera'): Promise<MediaStream | null> {
+  // Web 浏览器模式下不支持屏幕监控（无全局应用监控权限，且易引起标签页自捕获崩溃）
+  if (kind === 'screen' && isWeb()) return null
   if (streams[kind] && streams[kind]!.active) return streams[kind]
   try {
     const stream =
       kind === 'screen'
-        ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 }, audio: false })
+        ? await navigator.mediaDevices.getDisplayMedia({
+            video: { frameRate: 5 },
+            audio: false,
+            // @ts-expect-error selfBrowserSurface is standard Chromium 107+
+            selfBrowserSurface: 'exclude',
+            systemAudio: 'exclude',
+          })
         : await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 } }, audio: false })
     streams[kind] = stream
     // 用户在系统层停了共享（任务栏的屏幕共享按钮）：跟着熄掉，别抽黑帧

@@ -13,6 +13,7 @@ import {
   type PomodoroPhase,
 } from '../../learn/pomodoro'
 import { t } from '../../i18n'
+import { isWeb } from '../../lib/native'
 
 /**
  * 顶栏的番茄钟入口。
@@ -282,20 +283,21 @@ export default function PomodoroButton({
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <label
+                    title={isWeb() ? t('屏幕监控为桌面端专享（浏览器受沙箱限制无法跨应用监控全局桌面）') : undefined}
                     className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11.5px] transition-all ${
                       monitors.screen
                         ? 'border-seal/40 bg-seal/10 text-seal-deep font-medium'
                         : 'border-line/60 bg-card/40 text-ink-soft hover:bg-card hover:text-ink'
-                    } ${locked ? 'cursor-not-allowed opacity-60' : ''}`}
+                    } ${locked || isWeb() ? 'cursor-not-allowed opacity-50' : ''}`}
                   >
                     <input
                       type="checkbox"
                       checked={monitors.screen}
-                      disabled={locked}
+                      disabled={locked || isWeb()}
                       onChange={() => onMonitorToggle('screen')}
                       className="accent-[var(--color-seal)] rounded"
                     />
-                    <span>{t('监控屏幕')}</span>
+                    <span>{t('监控屏幕')}{isWeb() ? ` (${t('桌面端')})` : ''}</span>
                   </label>
                   <label
                     className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11.5px] transition-all ${
