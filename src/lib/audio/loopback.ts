@@ -15,6 +15,7 @@
  */
 import { t } from '../../i18n'
 import { describeTrack } from '../voice/mic'
+import { isWeb } from '../native'
 
 /** 分析窗大小：2048 采样 → 1024 个频点，分辨率 ≈ 21.5Hz @44.1kHz，画柱足够 */
 const FFT_SIZE = 2048
@@ -36,6 +37,9 @@ export interface LoopbackSession {
 }
 
 export async function startLoopback(opts?: { onEnded?: () => void }): Promise<LoopbackSession> {
+  if (isWeb()) {
+    throw new Error(t('Web 浏览器模式下不支持系统级音频回环采集'))
+  }
   if (!navigator.mediaDevices?.getDisplayMedia || !navigator.mediaDevices?.getUserMedia) {
     throw new Error(t('这个运行环境拿不到音频（navigator.mediaDevices 不可用）'))
   }

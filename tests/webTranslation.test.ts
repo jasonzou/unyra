@@ -21,6 +21,11 @@ import { fastTranslateCore, getTranslationDispatcher } from '../electron/app/web
 import { REASONING_EFFORTS, REASONING_HINT, REASONING_LABEL } from '../src/ai/types'
 import { resolveTargetLang, translateBatch, translateSingle } from '../src/learn/web/translator'
 import { setLocale } from '../src/i18n'
+import {
+  detectSourceLanguage,
+  isMyMemoryError,
+  normalizeLangForMyMemory,
+} from '../shared/translation'
 
 describe('网页双语/划词翻译及缓存系统单元测试', () => {
   beforeEach(() => {
@@ -146,6 +151,69 @@ describe('网页双语/划词翻译及缓存系统单元测试', () => {
         y: 100,
       })
       expect(fastScript).toContain('极速翻译')
+    })
+
+    it('buildExtractBlocksScript 与 buildInsertTranslationsScript 具备交互控件与超链接占位保护及点击透传，且彻底剔除脚本杂质', () => {
+      const extractScript = buildExtractBlocksScript('zh-CN')
+      // 包含独立交互控件与容器定义
+      expect(extractScript).toContain('STANDALONE_INTERACTIVE')
+      expect(extractScript).toContain('button')
+      expect(extractScript).toContain('nav a')
+      // 包含脚本/样式/模板等噪声剔除及 SML.load 过滤
+      expect(extractScript).toContain('script, style, noscript')
+      expect(extractScript).toContain('SML.load')
+      // 包含克隆占位标记提取
+      expect(extractScript).toContain('[a\' + i + \']')
+      expect(extractScript).toContain('[b\' + i + \']')
+
+      const insertScript = buildInsertTranslationsScript([
+        { id: 'ut-10', translation: '请查阅 [a0]快速上手指南[/a0] 或点击 [b0]开始使用[/b0]' },
+      ])
+      // 占位符解析正则
+      expect(insertScript).toContain('markerRegex')
+      // 原生/框架交互透传
+      expect(insertScript).toContain('origLink.click()')
+      expect(insertScript).toContain('origBtn.click()')
+      expect(insertScript).toContain('el.click()')
+      // 包含容错链接兜底托盘
+      expect(insertScript).toContain('unyra-trans-links-tray')
+      expect(insertScript).toContain('unyra-trans-link-chip')
+    })
+  })
+
+  describe('语言检测与 MyMemory 规范化及错误过滤 (shared/translation)', () => {
+    it('detectSourceLanguage 启发式准确识别日文、韩文、俄文、中文与英文', () => {
+      expect(detectSourceLanguage('こんにちは世界')).toBe('ja')
+      expect(detectSourceLanguage('안녕하세요')).toBe('ko')
+      expect(detectSourceLanguage('Привет мир')).toBe('ru')
+      // 目标语言是英文，源文本是中文时，识别为中文
+      expect(detectSourceLanguage('构建本地优先软件', 'en')).toBe('zh-CN')
+      // 目标语言是中文，源文本中英文混杂或纯英文，识别为英文
+      expect(detectSourceLanguage('Getting Started with React', 'zh-CN')).toBe('en')
+      // 欧洲重音语言特征
+      expect(detectSourceLanguage('Grüße aus Berlin')).toBe('de')
+      expect(detectSourceLanguage('Bonjour, très bien!')).toBe('fr')
+      expect(detectSourceLanguage('¿Cómo estás?')).toBe('es')
+    })
+
+    it('normalizeLangForMyMemory 将语言代码规范化为 MyMemory 认可的标准格式', () => {
+      expect(normalizeLangForMyMemory('zh')).toBe('zh-CN')
+      expect(normalizeLangForMyMemory('zh-CN')).toBe('zh-CN')
+      expect(normalizeLangForMyMemory('zh-hans')).toBe('zh-CN')
+      expect(normalizeLangForMyMemory('zh-TW')).toBe('zh-TW')
+      expect(normalizeLangForMyMemory('en-US')).toBe('en')
+      expect(normalizeLangForMyMemory('ja-JP')).toBe('ja')
+      expect(normalizeLangForMyMemory('ko')).toBe('ko')
+    })
+
+    it('isMyMemoryError 精准识别 AUTO 无效源语言错误、超额警告与非 200 状态码', () => {
+      const autoErr = "'AUTO' IS AN INVALID SOURCE LANGUAGE . EXAMPLE: LANGPAIR=EN|IT USING 2 LETTER ISO OR RFC3066 LIKE ZH-CN. ALMOST ALL LANGUAGES SUPPORTED BUT SOME MAY HAVE NO CONTENT"
+      expect(isMyMemoryError(autoErr)).toBe(true)
+      expect(isMyMemoryError('MYMEMORY WARNING: YOU USED ALL AVAILABLE FREE TRANSLATIONS')).toBe(true)
+      expect(isMyMemoryError('INVALID LANGUAGE PAIR')).toBe(true)
+      expect(isMyMemoryError('Normal translated sentence', 403)).toBe(true)
+      expect(isMyMemoryError('正常翻译译文', 200)).toBe(false)
+      expect(isMyMemoryError('', 200)).toBe(true)
     })
   })
 

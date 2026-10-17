@@ -174,3 +174,6 @@ function decodeBody(body: Uint8Array, contentType: string, kind: WebKind): strin
 export function registerWebIpc(): void {
   ipcMain.handle('web:fetch', (_e, url: unknown) => fetchPage(url))
 }
+
+export { fetchPage }
+

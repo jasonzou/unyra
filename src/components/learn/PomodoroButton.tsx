@@ -13,6 +13,7 @@ import {
   type PomodoroPhase,
 } from '../../learn/pomodoro'
 import { t } from '../../i18n'
+import { isWeb } from '../../lib/native'
 
 /**
  * 顶栏的番茄钟入口。
@@ -109,8 +110,8 @@ export default function PomodoroButton({
   const shownMinutes = running?.focusMinutes ?? focusMinutes
   const shownGroups = running?.groups ?? groups
   const restMinutes = Math.round(restMsOf(shownMinutes) / 60_000)
-  // 没在跑时勾选框常驻（要开严格专注得先勾）；跑起来之后只在这一场真开了时才显示
-  const showStrict = !locked || monitors.screen || monitors.camera
+  // 没在跑时勾选框常驻（要开严格专注得先勾）；跑起来之后只在这一场真开了时才显示；WebUI 模式下隐藏严格模式
+  const showStrict = !isWeb() && (!locked || monitors.screen || monitors.camera)
 
   return (
     // no-drag：本组件在顶栏的可拖拽区里。面板是浮层，它上面的每一寸都该响应指针，
@@ -286,7 +287,7 @@ export default function PomodoroButton({
                       monitors.screen
                         ? 'border-seal/40 bg-seal/10 text-seal-deep font-medium'
                         : 'border-line/60 bg-card/40 text-ink-soft hover:bg-card hover:text-ink'
-                    } ${locked ? 'cursor-not-allowed opacity-60' : ''}`}
+                    } ${locked ? 'cursor-not-allowed opacity-50' : ''}`}
                   >
                     <input
                       type="checkbox"
@@ -322,7 +323,7 @@ export default function PomodoroButton({
               </div>
             )}
             {/* 严格专注跑起来：守卫状态 */}
-            {guardStatus}
+            {!isWeb() && guardStatus}
 
             {/* --- 4. 开始 / 停止操作按钮 --- */}
             {running ? (
@@ -346,7 +347,7 @@ export default function PomodoroButton({
             {/* --- 5. 收尾提示 --- */}
             <div className="mt-2.5 border-t border-line/40 pt-2 text-[10px] leading-relaxed text-ink-faint">
               {t('中途停止不计入有效记录，跑完的组别将自动归档。')}
-              {monitors.screen || monitors.camera
+              {!isWeb() && (monitors.screen || monitors.camera)
                 ? t('离开屏幕时自动挂起计时。')
                 : running
                   ? t('后台切屏不会打断计时。')

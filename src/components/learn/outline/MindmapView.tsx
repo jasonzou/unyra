@@ -19,7 +19,7 @@
  *
  * 另外节点可自定义颜色（右键菜单），颜色存在节点上（KnowledgeNode.tint）。
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
   ExternalLink,
@@ -126,6 +126,10 @@ export interface MindmapViewProps {
   exams: ExamActions
   /** 焦点格里正开着的那份文档：tip 里对应的那一行要亮 */
   activeTab: TabRef | null
+  /** 外部指定的聚焦/选中节点目标（如 chip 路由） */
+  focusTarget?: { nodeId: string; nonce: number } | null
+  /** 外部聚焦已完成的回调 */
+  onFocusHandled?: () => void
 }
 
 /**
@@ -547,7 +551,14 @@ function cardSkin(opts: {
   }
 }
 
-export default function MindmapView({
+function sameMindmapView(prev: MindmapViewProps, next: MindmapViewProps): boolean {
+  if (prev.node !== next.node) return false
+  if (prev.store.nodes !== next.store.nodes || prev.store.edges !== next.store.edges || prev.store.exams !== next.store.exams) return false
+  if (prev.focusTarget !== next.focusTarget) return false
+  return true
+}
+
+export default memo(function MindmapView({
   store,
   node,
   onOpenNode,
@@ -557,6 +568,8 @@ export default function MindmapView({
   docs,
   exams,
   activeTab,
+  focusTarget,
+  onFocusHandled,
 }: MindmapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
@@ -789,15 +802,19 @@ export default function MindmapView({
     setSelectedId(`preview:${info.parentNodeId}`)
   }, [])
 
+  const pendingFocusParentIdRef = useRef<string | null>(null)
+
   const closePreview = useCallback(() => {
     if (!activePreview || isClosingPreview) return
+    const parentId = activePreview.parentNodeId
+    pendingFocusParentIdRef.current = parentId
     setIsClosingPreview(true)
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
     closeTimerRef.current = window.setTimeout(() => {
       setActivePreview(null)
       setIsClosingPreview(false)
       closeTimerRef.current = null
-      setSelectedId((prev) => (prev?.startsWith('preview:') ? activePreview.parentNodeId : prev))
+      setSelectedId(parentId)
     }, 200)
   }, [activePreview, isClosingPreview])
 
@@ -867,7 +884,7 @@ export default function MindmapView({
       totalHeight: Math.max(450, h),
       rawTree: tree,
     }
-  }, [store, node, collapsedIds, activePreview])
+  }, [store.nodes, node, collapsedIds, activePreview])
 
   // 折叠 / 展开单个节点
   const toggleCollapse = useCallback((id: string, e: React.MouseEvent) => {
@@ -1017,6 +1034,60 @@ export default function MindmapView({
     }
   }, [activePreview, nodeIndex, centerOnPreview])
 
+  // 预览节点关闭后，相机自动调整缩放和位置居中聚焦其父级节点
+  useEffect(() => {
+    if (!pendingFocusParentIdRef.current || activePreview) return
+    const parentId = pendingFocusParentIdRef.current
+    const target = nodeIndex.get(parentId)
+    if (target) {
+      centerOnNode(target)
+      pendingFocusParentIdRef.current = null
+    }
+  }, [nodes, nodeIndex, centerOnNode, activePreview])
+
+  // 外部传入 focusTarget 时（如子大纲 chip 路由），展开其所有祖先节点并自动选中居中
+  const lastHandledFocusNonceRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!focusTarget?.nodeId) return
+    if (lastHandledFocusNonceRef.current === focusTarget.nonce) return
+
+    const targetNodeId = focusTarget.nodeId
+    const parentMap = new Map<string, string>()
+    for (const edge of store.edges || []) {
+      parentMap.set(edge.to, edge.from)
+    }
+    const ancestors = new Set<string>()
+    let cur = targetNodeId
+    while (cur && parentMap.has(cur)) {
+      const p = parentMap.get(cur)!
+      ancestors.add(p)
+      cur = p
+    }
+    if (ancestors.size > 0) {
+      setCollapsedIds((prev) => {
+        let changed = false
+        const next = new Set(prev)
+        for (const a of ancestors) {
+          if (next.has(a)) {
+            next.delete(a)
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    }
+    const target = nodeIndex.get(targetNodeId)
+    if (target) {
+      lastHandledFocusNonceRef.current = focusTarget.nonce
+      setSelectedId(target.id)
+      requestAnimationFrame(() => {
+        const latest = nodeIndexRef.current.get(targetNodeId) ?? target
+        centerOnNode(latest)
+      })
+      onFocusHandled?.()
+    }
+  }, [focusTarget, nodeIndex, centerOnNode, store.edges, onFocusHandled])
+
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
   const nodeIndexRef = useRef(nodeIndex)
@@ -1041,7 +1112,11 @@ export default function MindmapView({
       const entry = entries[0]
       if (!entry) return
       const { width, height } = entry.contentRect
-      if (width <= 0 || height <= 0) return
+      if (width <= 0 || height <= 0) {
+        prevWidth = 0
+        prevHeight = 0
+        return
+      }
 
       // 若先前处于隐藏状态（尺寸 <= 0），仅记录新尺寸，不触发平移
       if (prevWidth <= 0 || prevHeight <= 0) {
@@ -1131,6 +1206,10 @@ export default function MindmapView({
   const onEdgeClick = useCallback(
     (edge: MindmapEdge): void => {
       if (dragMovedRef.current) return
+      if (edge.to.startsWith('preview:')) {
+        closePreview()
+        return
+      }
       const target = nodeIndex.get(edgeOtherEnd(edge, selectedId))
       if (!target) return
       // 走到这儿的两端必然不同（线不连自己），所以直接落位，不必再问「是不是已经选中」
@@ -1141,7 +1220,7 @@ export default function MindmapView({
         centerOnNode(target)
       }
     },
-    [selectedId, nodeIndex, centerOnNode, centerOnPreview],
+    [selectedId, nodeIndex, centerOnNode, centerOnPreview, closePreview],
   )
 
   // ---------- 右键改色菜单 ----------
@@ -1177,6 +1256,7 @@ export default function MindmapView({
     (e: React.MouseEvent<HTMLDivElement>) => {
       dragMovedRef.current = false
       const target = e.target as HTMLElement
+      if (target.closest('[data-preview-close]')) return
       const onCard = !!target.closest('[data-mm-card]')
       // 连线上的按下不算「点空白」：点线要跳到另一端，而那一头要靠当前选中是谁来判断，
       // 这里要是先把选中清掉，点线的语义就没了。
@@ -1687,6 +1767,50 @@ export default function MindmapView({
                 >
                   <title>{t('点这条线，跳到「{0}」', jumpTo?.title ?? '')}</title>
                 </path>
+                {/* 预览节点连线中点的快捷关闭并返回父节点按钮 */}
+                {isPreviewEdge && (
+                  <g
+                    data-preview-close=""
+                    transform={`translate(${(edge.x1 + edge.x2) / 2}, ${(edge.y1 + edge.y2) / 2})`}
+                    className="cursor-pointer group/close-edge"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      closePreview()
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closePreview()
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{
+                      pointerEvents: 'auto',
+                      opacity: isClosingPreview ? 0 : 1,
+                      transition: 'opacity 200ms ease, transform 300ms cubic-bezier(0.2, 0, 0, 1)',
+                    }}
+                  >
+                    <title>{t('关闭预览并返回父节点')}</title>
+                    {/* 透明扩大点击热区 */}
+                    <circle r={18} fill="transparent" style={{ pointerEvents: 'all' }} />
+                    <circle
+                      r={11}
+                      fill="var(--color-card, #ffffff)"
+                      stroke={pTheme ? pTheme.border : 'var(--color-seal)'}
+                      strokeWidth={1.5}
+                      className="shadow-sm transition-transform duration-150 group-hover/close-edge:scale-115"
+                      style={{
+                        filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.15))',
+                      }}
+                    />
+                    <path
+                      d="M -3.5 -3.5 L 3.5 3.5 M 3.5 -3.5 L -3.5 3.5"
+                      fill="none"
+                      stroke={pTheme ? pTheme.color : 'var(--color-seal)'}
+                      strokeWidth={1.75}
+                      strokeLinecap="round"
+                      className="transition-transform duration-150 group-hover/close-edge:scale-115"
+                    />
+                  </g>
+                )}
               </g>
             )
           })}
@@ -2109,7 +2233,7 @@ export default function MindmapView({
       </div>
     </div>
   )
-}
+}, sameMindmapView)
 
 /**
  * 大纲页面右下角帮助按钮：鼠标经过时弹出 tip 显示操作说明

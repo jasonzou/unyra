@@ -23,6 +23,9 @@ import { WorkspaceFlat, WorkspaceRow } from './WorkspaceRow'
 import type { ExamActions, MenuTarget, NodeDocActions, WsActions } from './types'
 import { chipJson, type ChipPayload } from '../../../lib/chipSyntax'
 import { nodeDocPath } from '../../../learn/files'
+import { listUserDir } from '../../../lib/storage'
+import { wsRelOf } from '../../../learn/workspace'
+import { subscribeWsChanged } from './wsChanges'
 import { t } from '../../../i18n'
 
 interface NodeRowProps {
@@ -136,6 +139,26 @@ function NodeRowComponent({
   /** 目标行的文字提示：说的是「切到它的页签组」，不再是「打开文档」 */
   const textHint = isRoot ? t('切到「{0}」的目标页签组（大纲与它的教学文档）', nodeTitle) : t('打开学习文档「{0}」', nodeTitle)
 
+  const wsBase = isRoot ? wsRelOf(store, node.id) : null
+  const [hasWsFiles, setHasWsFiles] = useState(false)
+  useEffect(() => {
+    if (!isRoot || !wsBase) {
+      setHasWsFiles(false)
+      return
+    }
+    let alive = true
+    const check = () => {
+      void listUserDir(wsBase).then((list) => {
+        if (alive) setHasWsFiles(list.length > 0)
+      })
+    }
+    check()
+    const off = subscribeWsChanged(check)
+    return () => {
+      alive = false
+      off()
+    }
+  }, [isRoot, wsBase])
 
   // 定位广播轮到这个节点：开出正在看的那份试卷的历次考试。
   useEffect(
@@ -187,17 +210,31 @@ function NodeRowComponent({
           tabIndex={0}
           data-reveal={`row:doc:teach:${node.id}`}
           /*
-           * 点节点行非文字区域 = 展开 / 收起子级（知识结构）。
-           * 点文字链接 = 独立打开教学文档。
+           * 点目标节点行 = 直接打开大纲。
+           * 点非目标节点行 = 展开 / 收起子级。
            */
-          onClick={() => onToggle(node.id)}
+          onClick={() => {
+            if (isRoot) {
+              if (onSelectGoal) onSelectGoal(node.id)
+              else docs.onOpenOutline(node.id)
+            } else {
+              onToggle(node.id)
+            }
+          }}
           draggable
           onDragStart={(e) => {
-            e.dataTransfer.setData('application/x-moji-chip', chipJson(teachChip()))
+            e.dataTransfer.setData('application/x-moji-chip', chipJson(isRoot ? outlineChip() : teachChip()))
             e.dataTransfer.effectAllowed = 'copy'
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') onToggle(node.id)
+            if (e.key === 'Enter') {
+              if (isRoot) {
+                if (onSelectGoal) onSelectGoal(node.id)
+                else docs.onOpenOutline(node.id)
+              } else {
+                onToggle(node.id)
+              }
+            }
           }}
           onContextMenu={(e) => {
             /*
@@ -211,24 +248,47 @@ function NodeRowComponent({
           className={'group flex cursor-pointer items-center gap-1 rounded-md py-1 pl-1.5 pr-1.5 transition ' +
             (active ? 'bg-line/60' : 'hover:bg-line/40')}
         >
-          <button
-            type="button"
-            title={open ? t('收起') : t('展开（文档、工作区与下级节点）')}
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggle(node.id)
-            }}
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-ink-faint transition hover:bg-line/70 hover:text-ink"
-          >
-            {/* 单箭头旋转：展开收起时它跟着转过去，与高度的动画同拍 */}
-            <ChevronRight
-              size={13}
-              className={
-                'transition-transform duration-200 ease-out motion-reduce:transition-none ' +
-                (open ? 'rotate-90' : '')
-              }
-            />
-          </button>
+          {isRoot ? (
+            hasWsFiles ? (
+              <button
+                type="button"
+                title={open ? t('收起') : t('展开工作区')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggle(node.id)
+                }}
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-ink-faint transition hover:bg-line/70 hover:text-ink"
+              >
+                <ChevronRight
+                  size={13}
+                  className={
+                    'transition-transform duration-200 ease-out motion-reduce:transition-none ' +
+                    (open ? 'rotate-90' : '')
+                  }
+                />
+              </button>
+            ) : (
+              <span className="w-4 shrink-0" />
+            )
+          ) : (
+            <button
+              type="button"
+              title={open ? t('收起') : t('展开（文档、工作区与下级节点）')}
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggle(node.id)
+              }}
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-ink-faint transition hover:bg-line/70 hover:text-ink"
+            >
+              <ChevronRight
+                size={13}
+                className={
+                  'transition-transform duration-200 ease-out motion-reduce:transition-none ' +
+                  (open ? 'rotate-90' : '')
+                }
+              />
+            </button>
+          )}
 
           {/*
             学习状态：标题前的一棵小分支（配色见 mastery 的 STATUS_META）。
@@ -273,37 +333,40 @@ function NodeRowComponent({
           </span>
 
           {/*
-            大纲按钮：右对齐的图标按钮，点击打开大纲，右键弹出大纲专属菜单
+            大纲按钮：右对齐的图标按钮，点击打开大纲，右键弹出大纲专属菜单。
+            目标行直接点击整行即可打开大纲，因此不再重复渲染该按钮。
           */}
-          <button
-            type="button"
-            data-reveal={`row:doc:outline:${node.id}`}
-            title={t('打开「{0}」的大纲页', nodeTitle)}
-            aria-label={t('大纲')}
-            onClick={(e) => {
-              e.stopPropagation()
-              docs.onOpenOutline(node.id)
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onOpenMenu(e.clientX, e.clientY, { kind: 'outline', node })
-            }}
-            draggable
-            onDragStart={(e) => {
-              e.stopPropagation()
-              e.dataTransfer.setData('application/x-moji-chip', chipJson(outlineChip()))
-              e.dataTransfer.effectAllowed = 'copy'
-            }}
-            className={
-              'flex h-5 w-5 shrink-0 items-center justify-center rounded transition ' +
-              (outlineActive
-                ? 'bg-seal/15 text-seal'
-                : 'text-ink-faint hover:bg-line/70 hover:text-seal')
-            }
-          >
-            <ListTree size={12} />
-          </button>
+          {!isRoot && (
+            <button
+              type="button"
+              data-reveal={`row:doc:outline:${node.id}`}
+              title={t('打开「{0}」的大纲页', nodeTitle)}
+              aria-label={t('大纲')}
+              onClick={(e) => {
+                e.stopPropagation()
+                docs.onOpenOutline(node.id)
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onOpenMenu(e.clientX, e.clientY, { kind: 'outline', node })
+              }}
+              draggable
+              onDragStart={(e) => {
+                e.stopPropagation()
+                e.dataTransfer.setData('application/x-moji-chip', chipJson(outlineChip()))
+                e.dataTransfer.effectAllowed = 'copy'
+              }}
+              className={
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded transition ' +
+                (outlineActive
+                  ? 'bg-seal/15 text-seal'
+                  : 'text-ink-faint hover:bg-line/70 hover:text-seal')
+              }
+            >
+              <ListTree size={12} />
+            </button>
+          )}
         </div>
       </div>
 

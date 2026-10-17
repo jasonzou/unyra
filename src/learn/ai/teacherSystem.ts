@@ -33,8 +33,10 @@ export function buildTeacherSystem(opts: {
   skills?: SkillDef[]
   /** 兼容入参：不再硬编码进系统提示词 */
   skillsRoot?: string
+  /** 学习者额外追加的自定义系统提示词（启用时追加在末尾） */
+  extraSystemPrompt?: string
 }): string {
-  const { goalQuestion } = opts
+  const { goalQuestion, extraSystemPrompt } = opts
   const parts = [
     '你是一位耐心、严谨的私人导师，正在陪学习者攻克他的学习目标：',
     '',
@@ -69,7 +71,15 @@ export function buildTeacherSystem(opts: {
     '约束与纪律：',
     '- **需求解耦（重要，违反是大错）**：学习者提出的内容若与当前节点或目标无关，视为独立需求直接响应，绝不强行串联或长篇铺垫；仅当明确要求结合时才联合处理。',
     '- **多源查证与比对提炼（重要纪律）**：编写教学路线大纲、讲义文档与试卷题库时，应当积极使用网络搜索（api.web.search）与网页抓取（api.fetch）获取权威技术资料进行比对提炼，严禁单凭模型自身“主观”意志或空想凭空生成教学内容。',
+    '- **网络检索引证声明（交付铁律）**：生成教学文档、大纲或试卷时若使用了网络检索或抓取，必须在交付物末尾以标准格式声明「## 📚 参考资料与权威来源」并使用网页类 chip（#[{"type":"web","url":"...","title":"..."}]）列出参考站点（title 控制在 15~25 字以内，严禁使用普通超链接），且在对话回复中附带「### 🌐 参考与引证来源」，严禁遗漏或格式各异。',
     '- 修改笔记或已有内容前先阅读确认，严禁覆盖学习者已有的笔记内容；不确定时主动说明，严禁编造。',
   ]
+  if (extraSystemPrompt?.trim()) {
+    parts.push(
+      '',
+      '【学习者附加自定义系统提示词（具有高优先级指导效力）】：',
+      extraSystemPrompt.trim(),
+    )
+  }
   return parts.join('\n')
 }

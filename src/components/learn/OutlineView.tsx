@@ -6,6 +6,7 @@
  * 顶部通栏已被移除，给导图画布最大的可视空间。
  */
 
+import { memo } from 'react'
 import type { KnowledgeNode, LearnStore, OutlineEntry, TabRef } from '../../learn/types'
 import type { ExamActions, NodeDocActions } from './explorer/types'
 import MindmapView from './outline/MindmapView'
@@ -28,9 +29,20 @@ export interface OutlineViewProps {
   exams: ExamActions
   /** 焦点格里正开着的那份文档（tip 里对应行要亮） */
   activeTab: TabRef | null
+  /** 外部指定的聚焦/选中节点目标（如 chip 路由） */
+  focusTarget?: { nodeId: string; nonce: number } | null
+  /** 外部聚焦已完成的回调 */
+  onFocusHandled?: () => void
 }
 
-export default function OutlineView({
+function sameOutlineView(prev: OutlineViewProps, next: OutlineViewProps): boolean {
+  if (prev.node !== next.node) return false
+  if (prev.store.nodes !== next.store.nodes || prev.store.edges !== next.store.edges || prev.store.exams !== next.store.exams) return false
+  if (prev.focusTarget !== next.focusTarget) return false
+  return true
+}
+
+export default memo(function OutlineView({
   store,
   node,
   onOpenNode,
@@ -40,6 +52,8 @@ export default function OutlineView({
   docs,
   exams,
   activeTab,
+  focusTarget,
+  onFocusHandled,
 }: OutlineViewProps) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-paper dark:bg-card/30">
@@ -54,8 +68,10 @@ export default function OutlineView({
           docs={docs}
           exams={exams}
           activeTab={activeTab}
+          focusTarget={focusTarget}
+          onFocusHandled={onFocusHandled}
         />
       </div>
     </div>
   )
-}
+}, sameOutlineView)

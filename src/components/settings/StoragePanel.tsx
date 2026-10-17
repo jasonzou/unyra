@@ -51,9 +51,23 @@ export function StoragePanel({ onRootChanged, onToast }: Props) {
   }
 
   const choose = async () => {
-    const picked = await pickRoot()
-    if (!picked.ok || !picked.root) return
-    await apply(picked.root)
+    try {
+      const picked = await pickRoot()
+      if (picked.ok && picked.root) {
+        await apply(picked.root)
+        return
+      }
+      if (picked.canceled) return
+      const manual = window.prompt(t('请输入新的存储目录绝对路径：'), info?.root || '')
+      if (manual && manual.trim()) {
+        await apply(manual.trim())
+      }
+    } catch {
+      const manual = window.prompt(t('请输入新的存储目录绝对路径：'), info?.root || '')
+      if (manual && manual.trim()) {
+        await apply(manual.trim())
+      }
+    }
   }
 
   const copyPath = () => {

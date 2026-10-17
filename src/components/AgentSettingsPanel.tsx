@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import TabButton from './TabButton'
 import {
   Brain,
   CheckCircle2,
+  Compass,
   Cpu,
   FolderCheck,
   GraduationCap,
@@ -22,6 +23,7 @@ import { REASONING_EFFORTS, REASONING_LABEL } from '../ai/types'
 import { BUILTIN_EFFORT, type WorkflowEffortSetting, type WorkflowRow, type WorkflowTier } from '../learn/workflows'
 import { getActiveSkills } from '../agent/skill/registry'
 import type { LearningGoal, MindStore } from '../learn/types'
+import { StrategyTab } from './agent-settings/StrategyTab'
 import { SkillsTab } from './agent-settings/SkillsTab'
 import { McpTab } from './agent-settings/McpTab'
 import { ToolsTab } from './agent-settings/ToolsTab'
@@ -75,12 +77,13 @@ interface Props {
   onToast?: (msg: string) => void
 }
 
-type TabKey = 'chat' | 'memory' | 'skills' | 'mcp' | 'tools' | 'permissions' | 'flow' | 'dev'
+type TabKey = 'chat' | 'strategy' | 'memory' | 'skills' | 'mcp' | 'tools' | 'permissions' | 'flow' | 'dev'
 
 const TAB_KEY = 'moji:agent-settings:tab'
 
 const TABS: Array<{ key: TabKey; label: string; icon: typeof Sparkles }> = [
   { key: 'chat', label: '对话与压缩', icon: Sparkles },
+  { key: 'strategy', label: '导师人格与策略', icon: Compass },
   { key: 'memory', label: '记忆管理', icon: Brain },
   { key: 'skills', label: '专业技能', icon: GraduationCap },
   { key: 'mcp', label: 'MCP 服务', icon: Cpu },
@@ -100,6 +103,7 @@ const savedTab = (): TabKey => {
     if (v === 'dev') return isDevUnlocked() ? 'dev' : 'chat'
     if (
       v === 'chat' ||
+      v === 'strategy' ||
       v === 'memory' ||
       v === 'skills' ||
       v === 'mcp' ||
@@ -143,7 +147,11 @@ export default function AgentSettingsPanel({
   /** 三击「超级导师设置」标题：开发者分页的隐藏入口 */
   const [devEntry, setDevEntry] = useState(false)
   const devVisible = devEntry || isDevUnlocked()
-  const [tab, setTab] = useState<TabKey>(() => (devVisible ? savedTab() : 'chat'))
+  const [tab, setTab] = useState<TabKey>(() => {
+    const s = savedTab()
+    if (s === 'dev' && !devVisible) return 'chat'
+    return s
+  })
 
   const baseTabs = flowRows ? TABS : TABS.filter((tb) => tb.key !== 'flow')
   const tabs = devVisible ? [...baseTabs, DEV_TAB] : baseTabs
@@ -152,6 +160,15 @@ export default function AgentSettingsPanel({
     setTab(key)
     rememberTab(key)
   }
+
+  useEffect(() => {
+    const onSwitch = (e: any) => {
+      const target = typeof e.detail === 'string' ? e.detail : e.detail?.tab
+      if (target) select(target as TabKey)
+    }
+    window.addEventListener('moji:switch-agent-settings-tab', onSwitch)
+    return () => window.removeEventListener('moji:switch-agent-settings-tab', onSwitch)
+  }, [])
 
   // 统计各模块的活跃徽标数
   const activeSkillsCount = getActiveSkills(settings.skills).length
@@ -246,36 +263,40 @@ export default function AgentSettingsPanel({
             <h2 className="text-[15px] font-bold text-ink-strong">
               {tab === 'dev'
                 ? t('开发者模式')
-                : tab === 'flow'
-                  ? t('工作流模板')
-                  : tab === 'skills'
-                    ? t('专业技能扩展 (Skills)')
-                    : tab === 'mcp'
-                      ? t('Model Context Protocol (MCP)')
-                      : tab === 'tools'
-                        ? t('工具与上下文管理')
-                        : tab === 'permissions'
-                          ? t('权限设置与安全沙箱')
-                          : tab === 'memory'
-                            ? t('Agent 长期记忆管理 (Mind)')
-                            : t('对话与上下文设置')}
+                : tab === 'strategy'
+                  ? t('导师人格与策略定制')
+                  : tab === 'flow'
+                    ? t('工作流模板')
+                    : tab === 'skills'
+                      ? t('专业技能扩展 (Skills)')
+                      : tab === 'mcp'
+                        ? t('Model Context Protocol (MCP)')
+                        : tab === 'tools'
+                          ? t('工具与上下文管理')
+                          : tab === 'permissions'
+                            ? t('权限设置与安全沙箱')
+                            : tab === 'memory'
+                              ? t('Agent 长期记忆管理 (Mind)')
+                              : t('对话与上下文设置')}
             </h2>
             <p className="text-[11.5px] text-ink-faint mt-0.5">
               {tab === 'dev'
                 ? t('底层系统与调试工具，普通学习过程无需开启')
-                : tab === 'flow'
-                  ? t('由导师代跑的任务模板；触发时指令以 user 消息进入上下文')
-                  : tab === 'skills'
-                    ? t('为导师装配特定的认知框架、启发策略与解题规范')
-                    : tab === 'mcp'
-                      ? t('连接开放协议服务，赋予导师操作真实世界系统与网络的能力')
-                      : tab === 'tools'
-                        ? t('原生系统进程监控、上下文健康度及沙箱能力目录')
-                        : tab === 'permissions'
-                          ? t('真实文件系统访问白名单授权与安全沙箱边界治理')
-                          : tab === 'memory'
-                            ? t('超级导师跨对话沉淀的认知、学习偏好与薄弱点记录')
-                            : t('只影响对话区里的超级导师自身，与全局 AI 设置保持独立')}
+                : tab === 'strategy'
+                  ? t('自定义导师的引导交流风格与教学文档结构排版策略')
+                  : tab === 'flow'
+                    ? t('由导师代跑的任务模板；触发时指令以 user 消息进入上下文')
+                    : tab === 'skills'
+                      ? t('为导师装配特定的认知框架、启发策略与解题规范')
+                      : tab === 'mcp'
+                        ? t('连接开放协议服务，赋予导师操作真实世界系统与网络的能力')
+                        : tab === 'tools'
+                          ? t('原生系统进程监控、上下文健康度及沙箱能力目录')
+                          : tab === 'permissions'
+                            ? t('真实文件系统访问白名单授权与安全沙箱边界治理')
+                            : tab === 'memory'
+                              ? t('超级导师跨对话沉淀的认知、学习偏好与薄弱点记录')
+                              : t('只影响对话区里的超级导师自身，与全局 AI 设置保持独立')}
             </p>
           </div>
 
@@ -289,6 +310,10 @@ export default function AgentSettingsPanel({
         <div className="flex-1 min-h-0 overflow-y-auto">
           {tab === 'chat' ? (
             <ChatTab settings={settings} hasKey={hasKey} model={model} onChange={onChange} />
+          ) : tab === 'strategy' ? (
+            <div className={pane(4)}>
+              <StrategyTab settings={settings} onChange={onChange} onToast={onToast} />
+            </div>
           ) : tab === 'memory' ? (
             <MemoryTab
               goals={goals}

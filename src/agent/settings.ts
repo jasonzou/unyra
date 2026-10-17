@@ -1,6 +1,6 @@
 import { readUserSettings, settingsRevision, settingsUid, writeUserSettings } from '../lib/userSettings'
-import { DEFAULT_PERSONA, personaOf, type PersonaId } from './persona'
-import { DEFAULT_DOC_FORMAT, docFormatOf, type DocFormatId } from './docFormat'
+import { DEFAULT_PERSONA, personaOf, type Persona, type PersonaId } from './persona'
+import { DEFAULT_DOC_FORMAT, docFormatOf, type DocFormat, type DocFormatId } from './docFormat'
 
 /**
  * 超级导师自己的设置（与全局设置分开）。
@@ -41,6 +41,8 @@ export interface AgentSettings {
    * （下一轮生效，见 useAgent 的 runTurn）——所以换人格不重发历史、不破前缀缓存。
    */
   persona: PersonaId
+  /** 用户自定义导师人格列表 */
+  customPersonas?: Persona[]
   /**
    * 文档格式策略（见 agent/docFormat）：教学文档「怎么排、用什么写」——
    * 混合（Markdown 为主，默认）/ 纯 Markdown / 纯 HTML。
@@ -50,6 +52,8 @@ export interface AgentSettings {
    * 「Markdown 为主」掰到各自的写法上——所以它必须和人格一样能补、能重补（压缩后）。
    */
   docFormat: DocFormatId
+  /** 用户自定义文档生成格式策略列表 */
+  customDocFormats?: DocFormat[]
   /**
    * 开发者向的开关（设置里的「开发者」分页，见 components/AgentSettingsPanel）。
    * 全部默认关闭：它们是调试工具，不是功能。
@@ -65,6 +69,12 @@ export interface AgentSettings {
    * 支持通过标准协议挂载外部工具与上下文服务。
    */
   mcp?: McpSettings
+  /**
+   * 额外系统提示词配置：
+   * 允许用户全局追加自定义系统提示词，默认不启用。
+   */
+  extraSystemPrompt?: string
+  extraSystemPromptEnabled?: boolean
   /**
    * 基础原生工具安全权限配置：
    * 目标数据目录默认完全放行；外部真实系统目录需在此白名单放行。
@@ -93,8 +103,12 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   compact: { auto: true, threshold: 0.7 },
   // 默认「标准导师」：不追求极致效率也不追求极致趣味，大多数情况下最自然的那一个
   persona: DEFAULT_PERSONA,
+  customPersonas: [],
   // 默认「混合（Markdown 为主）」：与系统提示词的正文排版规范一致
   docFormat: DEFAULT_DOC_FORMAT,
+  customDocFormats: [],
+  extraSystemPrompt: '',
+  extraSystemPromptEnabled: false,
   dev: { contextDebugger: false },
   skills: DEFAULT_SKILL_SETTINGS,
   mcp: DEFAULT_MCP_SETTINGS,
@@ -150,6 +164,24 @@ export function normalizeAgentSettings(raw: unknown): AgentSettings {
   const skills = (src.skills && typeof src.skills === 'object' ? src.skills : {}) as Partial<SkillSettings>
   const mcp = (src.mcp && typeof src.mcp === 'object' ? src.mcp : {}) as Partial<McpSettings>
   const permissions = (src.permissions && typeof src.permissions === 'object' ? src.permissions : {}) as Partial<AgentPermissionsSettings>
+  const customPersonas = Array.isArray(src.customPersonas)
+    ? src.customPersonas.filter(
+        (p): p is Persona =>
+          !!p &&
+          typeof p.id === 'string' &&
+          typeof p.label === 'string' &&
+          typeof p.instruction === 'string',
+      )
+    : []
+  const customDocFormats = Array.isArray(src.customDocFormats)
+    ? src.customDocFormats.filter(
+        (f): f is DocFormat =>
+          !!f &&
+          typeof f.id === 'string' &&
+          typeof f.label === 'string' &&
+          typeof f.instruction === 'string',
+      )
+    : []
 
   return {
     version: 1,
@@ -157,10 +189,14 @@ export function normalizeAgentSettings(raw: unknown): AgentSettings {
       auto: typeof compact.auto === 'boolean' ? compact.auto : DEFAULT_AGENT_SETTINGS.compact.auto,
       threshold: clamp(compact.threshold, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, DEFAULT_AGENT_SETTINGS.compact.threshold),
     },
-    // 认不出的人格（老设置文件、手改成了别的词）就按默认那个走：设置读不出来不该让对话哑掉
-    persona: personaOf(src.persona).id,
+    persona: personaOf(src.persona, customPersonas).id,
+    customPersonas,
     // 同理：认不出的格式（老设置文件里根本没有这一项）按默认的「混合」走
-    docFormat: docFormatOf(src.docFormat).id,
+    docFormat: docFormatOf(src.docFormat, customDocFormats).id,
+    customDocFormats,
+    extraSystemPrompt: typeof src.extraSystemPrompt === 'string' ? src.extraSystemPrompt : '',
+    extraSystemPromptEnabled:
+      typeof src.extraSystemPromptEnabled === 'boolean' ? src.extraSystemPromptEnabled : false,
     dev: {
       contextDebugger:
         typeof dev.contextDebugger === 'boolean' ? dev.contextDebugger : DEFAULT_AGENT_SETTINGS.dev.contextDebugger,

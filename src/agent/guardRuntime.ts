@@ -19,6 +19,7 @@ import { resolveGlobal } from '../ai/settings'
 import { streamChatWith } from '../ai/client'
 import type { ChatContentPart, ChatMessage } from '../ai/types'
 import { t } from '../i18n'
+import { isWeb } from '../lib/native'
 import {
   GUARD_ROUND_MS,
   MAX_HISTORY_ROUNDS,
@@ -104,12 +105,16 @@ let session: GuardSession | null = null
 let lastSession: GuardSession | null = null
 let snap: GuardSnapshot = { session: null, lastSession: null, streams: { screen: false, camera: false } }
 const listeners = new Set<() => void>()
+const webStreams: { screen: boolean; camera: boolean } = { screen: false, camera: false }
 
 function publish(): void {
   snap = {
     session: session ? { ...session, rounds: [...session.rounds] } : null,
     lastSession: lastSession ? { ...lastSession, rounds: [...lastSession.rounds] } : null,
-    streams: { screen: !!streams.screen, camera: !!streams.camera },
+    streams: {
+      screen: isWeb() ? webStreams.screen : !!streams.screen,
+      camera: isWeb() ? webStreams.camera : !!streams.camera,
+    },
   }
   for (const fn of listeners) fn()
 }
@@ -156,11 +161,23 @@ function hiddenVideo(kind: keyof typeof streams): HTMLVideoElement {
 
 /** 确保某一路媒体流在跑（幂等）；失败回 null（无摄像头 / 被拒 / 被占用） */
 export async function ensureStream(kind: 'screen' | 'camera'): Promise<MediaStream | null> {
+  if (isWeb()) {
+    webStreams[kind] = true
+    publish()
+    notifyStreams()
+    return true as unknown as MediaStream
+  }
   if (streams[kind] && streams[kind]!.active) return streams[kind]
   try {
     const stream =
       kind === 'screen'
-        ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 }, audio: false })
+        ? await navigator.mediaDevices.getDisplayMedia({
+            video: { frameRate: 5 },
+            audio: false,
+            // @ts-expect-error selfBrowserSurface is standard Chromium 107+
+            selfBrowserSurface: 'exclude',
+            systemAudio: 'exclude',
+          })
         : await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 } }, audio: false })
     streams[kind] = stream
     // 用户在系统层停了共享（任务栏的屏幕共享按钮）：跟着熄掉，别抽黑帧
@@ -182,6 +199,12 @@ export async function ensureStream(kind: 'screen' | 'camera'): Promise<MediaStre
 
 /** 停掉一路（会话结束 / 用户取消勾选）；没有就当停过了 */
 export function stopStream(kind: 'screen' | 'camera'): void {
+  if (isWeb()) {
+    webStreams[kind] = false
+    publish()
+    notifyStreams()
+    return
+  }
   streams[kind]?.getTracks().forEach((track) => track.stop())
   if (videos[kind]) videos[kind].srcObject = null
   streams[kind] = null
@@ -227,6 +250,22 @@ function captureFrame(kind: 'screen' | 'camera'): { mime: string; data: string }
   const url = canvas.toDataURL('image/jpeg', FRAME_QUALITY)
   const prefix = 'data:image/jpeg;base64,'
   return url.startsWith(prefix) ? { mime: 'image/jpeg', data: url.slice(prefix.length) } : null
+}
+
+async function captureFrameAsync(kind: 'screen' | 'camera'): Promise<{ mime: string; data: string } | null> {
+  if (isWeb()) {
+    try {
+      const endpoint = kind === 'screen' ? '/api/guard/captureScreen' : '/api/guard/captureCamera'
+      const res = await fetch(endpoint)
+      const json = (await res.json()) as { ok: boolean; mime?: string; data?: string }
+      if (json.ok && json.data) {
+        return { mime: json.mime || 'image/jpeg', data: json.data }
+      }
+    } catch {
+      return null
+    }
+  }
+  return captureFrame(kind)
 }
 
 /* ---------- 会话与轮次 ---------- */
@@ -373,11 +412,11 @@ async function runRound(): Promise<void> {
   try {
     const images: { mime: string; data: string }[] = []
     if (session.monitors.screen) {
-      const frame = captureFrame('screen')
+      const frame = await captureFrameAsync('screen')
       if (frame) images.push(frame)
     }
     if (session.monitors.camera) {
-      const frame = captureFrame('camera')
+      const frame = await captureFrameAsync('camera')
       if (frame) images.push(frame)
     }
     let focusedApp: string | undefined

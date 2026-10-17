@@ -387,6 +387,12 @@ export function closeTabs(
   } else {
     for (const t of tabs) if (t.id !== id) closing.add(t.id)
   }
+  // 规矩：tab 组中的大纲 tab 只能由自身关闭（自身关闭按钮/自身右键菜单），其他的关闭方式不会影响到大纲 tab
+  for (const t of tabs) {
+    if (t.ref.kind === 'outline' && ((mode !== 'self' && mode !== 'force') || t.id !== id)) {
+      closing.delete(t.id)
+    }
+  }
   const keep = tabs.filter((t) => !closing.has(t.id))
   if (active && keep.some((t) => t.id === active)) return { tabs: keep, active }
   const anchor = mode === 'all' ? 0 : idx

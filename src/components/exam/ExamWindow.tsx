@@ -25,6 +25,7 @@ import {
   formatDuration,
 } from '../../learn/exam'
 import type { ExamWindowState } from '../../learn/useExamBridge'
+import { isElectron, isMac } from '../../lib/native'
 import { t } from '../../i18n'
 
 /**
@@ -260,7 +261,12 @@ export default function ExamWindow() {
   return (
     <div className="flex h-full min-h-screen flex-col bg-paper text-ink select-none">
       {/* 紧凑顶栏 HUD */}
-      <header className="app-drag relative flex shrink-0 items-center justify-between border-b border-line bg-card/90 px-4 h-12">
+      <header
+        className={
+          'app-drag relative flex shrink-0 items-center justify-between border-b border-line bg-card/90 px-4 h-12 ' +
+          (isElectron() && isMac() ? 'pl-[76px]' : '')
+        }
+      >
         {/* 左侧：标题与卷面属性 */}
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-seal/10 text-seal">

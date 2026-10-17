@@ -26,6 +26,8 @@ import { draftOf, dropDraft, dropDrafts, putDraft, stageDraft } from '../../../l
 import {
   closeTabs,
   draftFileName,
+  isBlankTab,
+  makeBlankTab,
   tabTitle,
   tabNodeId,
   fileNameOf as localFileNameOf,
@@ -33,6 +35,7 @@ import {
 } from '../../../learn/tabs'
 import {
   PUBLIC_OWNER,
+  activateIn,
   allTabs,
   closeIn,
   dropTabs,
@@ -45,6 +48,7 @@ import {
   renameTabRef,
   servesGoal,
   unloadAnchoredGroups,
+  withDocs,
   withOwners,
 } from '../../../learn/groups'
 import { nodeById, updateDoc, writeNote } from '../../../learn/graph'
@@ -270,19 +274,6 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
       const docArea = goneIds.length > 0 ? withOwners(docArea1, dropTabs(docArea1.tabOwners, goneIds)) : docArea1
       const landing = focusedGroup(docArea)
       const nextRef = landing.tabs.find((t) => t.id === landing.active)?.ref ?? null
-      /*
-       * 落点跟随只跟**当前目标自己的页签**走（见 groups/goals 的 servesGoal）：
-       * 公共页签与空白页签不动当前节点——那说明用户从「某个知识点」切到了别处，
-       * 回来时该还在原来那个知识点上；别目标的页签更不能跟——跟过去就会把
-       * activeGoalId 翻走，整栏页签当场换成另一套，看起来像「这组页签被全部关掉了」。
-       * 正常路径落不到它们（可见候选耗尽时落的是空白页签，见 learn/tabs 的 closeTabs），
-       * 这道门禁留给一切仍会落到别目标页签的路径。
-       */
-      const nextNodeId = nextRef && servesGoal(nextRef, goalOfNode, s.activeGoalId) ? tabNodeId(nextRef) : null
-      // 落点也一样：新落到的页签属于别的节点时，节点与会话都得跟着它走（见 retargetNode）
-      const base = nextNodeId ? retargetNode(s, nextNodeId) : s
-      // 文档区与导师区的反向同步：关闭根大纲本身就代表该目标组离开活动区；
-      // 「全部关闭」则只移除那些在其它活动组也没有文档的目标。停靠场不算活动文档。
       const remainingGoals = new Set(
         allTabs(docArea)
           .map(goalOfTab)
@@ -292,9 +283,48 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
       for (const goalId of allClosedGoalIds) {
         if (!remainingGoals.has(goalId) && !goalsClosed.includes(goalId)) goalsClosed.push(goalId)
       }
+
+      /*
+       * 落点跟随：
+       * 1. 若当前目标本身被关闭了（组锚被卸载或名下所有页签均已退出活动区）：
+       *    - 若落点落在其它存活目标上，节点与会话切换到该存活目标；
+       *    - 若落点不属于任何目标但仍有其它存活目标，回退到其它存活目标的根节点；
+       *    - 若已无任何存活目标，主动清空 activeGoalId 与 activeNodeId，避免 Topbar / 资源管理器残留已关闭的目标高亮。
+       * 2. 当前目标未被关闭：保持原先门禁，只跟当前目标自己的页签走，不误跳别处。
+       */
+      const isCurrentGoalClosed = Boolean(
+        s.activeGoalId && (!remainingGoals.has(s.activeGoalId) || goalsClosed.includes(s.activeGoalId)),
+      )
+      let base: LearnStore = s
+      let nextDocArea = docArea
+      if (isCurrentGoalClosed) {
+        // tab组从tab栏卸载时，不要让tab组列表中其他的列表顶上，而是留下一个空白（只剩新页签）的tab栏
+        // 且清除 activeGoalId 与 activeNodeId，确保资源管理器与 Topbar 不残留选中状态
+        const g = groupOf(docArea, docArea.focus) ?? docArea.groups[0]
+        if (g) {
+          const existingBlank = g.tabs.find(isBlankTab)
+          if (existingBlank) {
+            nextDocArea = activateIn(docArea, g.id, existingBlank.id)
+          } else {
+            const blank = makeBlankTab()
+            nextDocArea = activateIn(
+              withDocs(docArea, {
+                groups: docArea.groups.map((grp) => (grp.id === g.id ? { ...grp, tabs: [...grp.tabs, blank] } : grp)),
+              }),
+              g.id,
+              blank.id,
+            )
+          }
+        }
+        base = { ...s, activeGoalId: null, activeNodeId: null }
+      } else {
+        const nextNodeId = nextRef && servesGoal(nextRef, goalOfNode, s.activeGoalId) ? tabNodeId(nextRef) : null
+        base = nextNodeId ? retargetNode(s, nextNodeId) : s
+      }
+
       const next = onGoalsClosed && goalsClosed.length > 0
-        ? onGoalsClosed({ ...base, docArea }, goalsClosed)
-        : { ...base, docArea }
+        ? onGoalsClosed({ ...base, docArea: nextDocArea }, goalsClosed)
+        : { ...base, docArea: nextDocArea }
       set(next)
     },
     [getLatest, onGoalsClosed, retargetNode, set],

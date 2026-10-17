@@ -199,11 +199,11 @@ export function formatJs(source: string): string {
 /* ---------- 结果 ---------- */
 
 export interface ToolResultView {
-  /** 头部的元信息（如"本次有 N 次调用没有生效"），界面上渲染成注释 */
+  /** 头部的元信息（如"本次有 N 次调用没有生效"），界面上渲染为 Markdown 说明 */
   lead: string
   /** 正文：返回值本身 */
   body: string
-  /** 尾部的元信息（本次调用统计、日志、附图说明），同样渲染成注释 */
+  /** 尾部的元信息（本次调用统计、日志、附图说明），界面上渲染为 Markdown 说明 */
   tail: string
   /** 正文的语言标记（json / text）；交给语法高亮那一层 */
   lang: string
@@ -245,7 +245,7 @@ function prettyBody(text: string): { body: string; lang: string } {
  *
  * 元信息为什么单独摘出来：它们不是"返回值"，而是**关于这次调用本身的说明**
  * （调了哪些 api、日志、哪几次没生效）。与返回值混在一段里，读的人分不清
- * 哪句是数据、哪句是旁白；摘出来在界面上渲染成注释（// …），一眼就分得开。
+ * 哪句是数据、哪句是旁白；摘出来在界面上解析渲染成说明，一眼就分得开。
  */
 export function toolResultView(raw: string): ToolResultView {
   const text = raw.replace(/\r\n?/g, '\n')

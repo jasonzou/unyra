@@ -32,6 +32,9 @@ export function createTray(): void {
   if (tray) return
   // 通知区按 16px 出图，先自己缩一次，比让系统缩更清楚
   const small = appIcon().resize({ width: 16, height: 16 })
+  if (process.platform === 'darwin') {
+    small.setTemplateImage(true)
+  }
   tray = new Tray(small.isEmpty() ? appIcon() : small)
   tray.setToolTip('归一 Unyra')
   rebuildTrayMenu()

@@ -74,6 +74,7 @@ export async function openExamWindow(payload: unknown): Promise<{ ok: boolean; r
   examCloseReason = 'closed'
   examInitialState = payload
 
+  const isMac = process.platform === 'darwin'
   const win = new BrowserWindow({
     width: 1180,
     height: 820,
@@ -84,9 +85,14 @@ export async function openExamWindow(payload: unknown): Promise<{ ok: boolean; r
     title: t('归一 Unyra · 考试'),
     icon: appIcon(),
     show: false,
-    // 无边框：应用是自绘标题栏那一套，考试界面自己带「退出」按钮（也是唯一的出口），
-    // 系统标题栏一来一回只会多出一个能绕开确认的关闭键
-    frame: false,
+    ...(isMac
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 14, y: 16 },
+        }
+      : {
+          frame: false,
+        }),
     webPreferences: {
       // 与主窗口同一个 preload：渲染层靠 ?examWindow=1 分辨自己是哪一侧
       preload: path.join(__dirname, 'preload.cjs'),

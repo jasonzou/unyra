@@ -24,6 +24,7 @@ import {
   buildToggleTranslationsScript,
   buildUnmarkTranslatingScript,
 } from '../../../learn/web/guestTranslate'
+import { openExternalLink } from '../../../lib/externalLink'
 import BlankWebPage from './BlankWebPage'
 
 /** web 页签：ref 一定是 web 分支（调用方按 kind 过滤过） */
@@ -702,7 +703,7 @@ function WebToolbar({
         aria-label={t('在系统浏览器打开')}
         disabled={!url}
         onClick={() => {
-          if (isElectron()) void native().shell.openExternal(url)
+          void openExternalLink(url)
         }}
         className={BTN}
       >

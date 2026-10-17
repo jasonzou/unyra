@@ -15,6 +15,7 @@ import type { AnnotationActions } from '../../../lib/annotation'
 import type { LocalImageResolver } from '../../../lib/docImages'
 import { copySelectionAsMarkdown } from '../../../lib/copySource'
 import { DocStatChip } from '../DocFloat'
+import ZenResizeHandles from '../workspace/ZenResizeHandles'
 import { t } from '../../../i18n'
 
 interface Props {
@@ -106,9 +107,10 @@ export const DocBody = memo(function DocBody({
         <span className="tabular-nums">{t('{0} 字', wordCount)}</span>
       </DocStatChip>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {/* 左侧留白给得多一点：标题定位栏就在旁边，正文（以及跳转高亮的底色）不贴过去 */}
         <div className="doc-measure relative flex min-h-full flex-col pt-6 pl-[32px] pr-[22px]">
+          <ZenResizeHandles />
           {/* 正文还没来时的占位：说明在等什么，而不是留一片白 */}
           {pending && !content.trim() && <DocPending />}
 

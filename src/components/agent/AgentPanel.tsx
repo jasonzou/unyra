@@ -174,6 +174,7 @@ interface Props {
   onOpenSub?: (sessionId: string) => void
   /** 点击文件附件时在标签页打开 */
   onOpenFile?: (pathOrRel: string, title?: string) => void
+  onOpenSettings?: () => void
 }
 
 export default function AgentPanel({
@@ -226,6 +227,7 @@ export default function AgentPanel({
   onOpenSub,
   active = true,
   onOpenFile,
+  onOpenSettings,
 }: Props) {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
   /** 点开看大图的附件。两种来源各一份状态：已进资源库的气泡图与还在内存里的待发送图 */
@@ -615,6 +617,7 @@ export default function AgentPanel({
                 onPickPersona={onPickPersona}
                 docFormat={docFormat}
                 onPickDocFormat={onPickDocFormat}
+                onOpenSettings={onOpenSettings || onOpenAgentSettings}
               />
             )
           }

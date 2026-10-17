@@ -47,6 +47,7 @@ import { useClock } from '../../../lib/clock'
 import { useReadingDay, useReadingPulse } from '../../../lib/readingPulse'
 import { t } from '../../../i18n'
 import { supportsImage } from '../../../ai/settings'
+import { isWeb } from '../../../lib/native'
 import {
   ensureStream,
   getStream,
@@ -174,14 +175,14 @@ export function PomodoroDock({
       groups={groups}
       onFocusMinutes={setFocusMinutes}
       onGroups={setGroups}
-      onStart={() => onStart(focusMinutes, groups, monitors)}
+      onStart={() => onStart(focusMinutes, groups, isWeb() ? { screen: false, camera: false } : monitors)}
       onStop={onStop}
-      monitors={monitors}
+      monitors={isWeb() ? { screen: false, camera: false } : monitors}
       onMonitorToggle={toggleMonitor}
-      previews={previews}
-      guardStatus={guardStatus}
-      paused={status.paused}
-      strictHint={strictHint}
+      previews={isWeb() ? null : previews}
+      guardStatus={isWeb() ? null : guardStatus}
+      paused={isWeb() ? false : status.paused}
+      strictHint={isWeb() ? null : strictHint}
     />
   )
 }
@@ -199,12 +200,41 @@ export function GuardPreviewTile({ kind }: { kind: 'screen' | 'camera' }) {
   // 流的来去由 toggle / 会话收尾触发：订阅它，来了就挂上、断了就熄灭
   useEffect(() => subscribeGuardStreams(() => setVersion((n) => n + 1)), [])
   useEffect(() => {
+    if (isWeb()) return
     const video = videoRef.current
     if (!video) return
     const stream = getStream(kind)
     if (video.srcObject !== stream) video.srcObject = stream
     if (stream) void video.play().catch(() => {})
   }, [version, kind])
+
+  useEffect(() => {
+    if (!isWeb()) return
+    const timer = window.setInterval(() => {
+      setVersion((v) => (v + 1) % 100000)
+    }, 2500)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  if (isWeb()) {
+    return (
+      <div className="relative aspect-video overflow-hidden rounded-md border border-line bg-black/80">
+        <img
+          src={`/api/guard/preview/${kind}?v=${version}`}
+          alt={kind}
+          className="h-full w-full object-contain"
+        />
+        <span className="absolute bottom-1 left-1.5 rounded bg-black/55 px-1 py-px text-[9.5px] text-white/90">
+          {kind === 'screen' ? t('屏幕') : t('摄像头')}
+        </span>
+        <span className="absolute top-1 right-1.5 flex items-center gap-1 rounded bg-black/55 px-1 py-px text-[9px] text-emerald-400">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          {t('实时')}
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="relative aspect-video overflow-hidden rounded-md border border-line bg-black/80">
       <video ref={videoRef} muted playsInline className="h-full w-full object-contain" />

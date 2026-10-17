@@ -21,8 +21,8 @@ import { t } from '../i18n'
  * 一条对话里只补一次，被压缩掉之后要能补回来。
  */
 
-/** 三种格式的 id。存进设置与消息里，改名会让老数据认不出来，所以取语义化的短词 */
-export type DocFormatId = 'hybrid' | 'markdown' | 'html'
+/** 格式 id。内置 hybrid | markdown | html，支持自定义扩展 */
+export type DocFormatId = string
 
 export interface DocFormat {
   id: DocFormatId
@@ -34,6 +34,8 @@ export interface DocFormat {
   desc: string
   /** 进入上下文的那一整段指令（自足：模型看不到别的解释） */
   instruction: string
+  /** 是否为用户自定义格式策略 */
+  isCustom?: boolean
 }
 
 /**
@@ -109,9 +111,15 @@ export const DOC_FORMATS: DocFormat[] = [
 /** 默认格式。老设置文件里没有这一项时按它走 */
 export const DEFAULT_DOC_FORMAT: DocFormatId = 'hybrid'
 
+/** 获取所有文档格式策略列表（内置 + 自定义） */
+export function allDocFormats(customDocFormats?: DocFormat[]): DocFormat[] {
+  return [...DOC_FORMATS, ...(customDocFormats ?? [])]
+}
+
 /** 认一个 id（手改过的设置文件、旧数据里可能是别的字符串）；认不出就给默认的那个 */
-export function docFormatOf(id: unknown): DocFormat {
-  return DOC_FORMATS.find((f) => f.id === id) ?? DOC_FORMATS[0]
+export function docFormatOf(id: unknown, customDocFormats?: DocFormat[]): DocFormat {
+  const all = allDocFormats(customDocFormats)
+  return all.find((f) => f.id === id) ?? DOC_FORMATS[0]
 }
 
 /**
@@ -131,8 +139,13 @@ export function needsDocFormatAnnounce(messages: ConversationMessage[], id: DocF
  * hidden + mark：与 personaMessage 同一个形状家族——用户看得见一条分界条
  * （知道导师换了写法），正文只在上下文里。id 由调用方给（宿主那一层才有 crypto.randomUUID）。
  */
-export function docFormatMessage(id: DocFormatId, at: number, uuid: string): ConversationMessage {
-  const format = docFormatOf(id)
+export function docFormatMessage(
+  id: DocFormatId,
+  at: number,
+  uuid: string,
+  customDocFormats?: DocFormat[],
+): ConversationMessage {
+  const format = docFormatOf(id, customDocFormats)
   return {
     id: uuid,
     role: 'user',

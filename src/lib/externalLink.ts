@@ -11,7 +11,7 @@
  * 这条边界不能只靠它自觉。这里只负责「看起来像不像外链」。
  */
 
-import { native } from './native'
+import { native, isWeb } from './native'
 
 /** 这个地址是不是「该出去」的链接（http / https / mailto） */
 export function isExternalHref(href: string): boolean {
@@ -21,6 +21,26 @@ export function isExternalHref(href: string): boolean {
   } catch {
     return false
   }
+}
+
+let webLinkHandler: ((url: string) => void) | null = null
+
+/** 注册应用内打开网页的处理器（通常是 LearnWorkspace 的 openWebTab） */
+export function setWebLinkHandler(fn: ((url: string) => void) | null): void {
+  webLinkHandler = fn
+}
+
+/**
+ * 打开网页链接：按用户规则，超链接与网页类 chip 打开的网站在 Electron 内部通过浏览器 tab 打开；
+ * 在 WebUI 模式下不支持内置浏览器，统一转为使用当前浏览器环境打开。
+ */
+export function openWebLink(href: string): void {
+  if (!isExternalHref(href)) return
+  if (!isWeb() && webLinkHandler && (href.startsWith('http://') || href.startsWith('https://'))) {
+    webLinkHandler(href)
+    return
+  }
+  void openExternalLink(href)
 }
 
 /** 交给系统浏览器打开；被主进程拒了（协议不对/没有桥）返回 false */

@@ -20,19 +20,25 @@
  * 其余逻辑——URL 怎么拼、头发什么、流怎么解析——完全不变。
  */
 
-import { isElectron, native } from '../lib/native'
+import { isElectron, isWeb, native } from '../lib/native'
 // 目标地址怎么捎带：与主进程共用同一份定义（唯一真值，改一处两边一起变）
 import { toProxyUrl } from '../../electron/proxy-core'
 
 /** preload 注入的原生桥；定义见 src/lib/native.ts（这里转出去，保持既有引用路径） */
-export { isElectron, native, type NativeBridge } from '../lib/native'
+export { isElectron, isMac, isWeb, native, type NativeBridge } from '../lib/native'
 
 /**
- * 把目标地址改写成经主进程转发的地址。
+ * 把目标地址改写成经主进程/本地微服务转发的地址。
  * 只改写 http/https；`llm-proxy:` 与 `data:` 等原样返回，避免二次包装。
  * 改写规则本身在 electron/proxy-core 的 toProxyUrl 里（纯函数，Node 探针钉得住）。
  */
 export function proxyUrl(target: string): string {
+  if (isWeb()) {
+    const electronProxy = toProxyUrl(target)
+    if (!electronProxy) return target
+    const prefix = typeof window !== 'undefined' && window.location.port === '5173' ? 'http://localhost:3800' : ''
+    return prefix + electronProxy.replace(/^llm-proxy:\/\/target/, '/api/proxy')
+  }
   return toProxyUrl(target) ?? target
 }
 
@@ -81,7 +87,7 @@ export async function syncProxyHosts(baseUrls: string[]): Promise<string[]> {
   // 去重后排序：同一个 host 出现两次时，主进程按「后者覆盖前者」处理（见 proxy-core），
   // 排序让「后者」是确定的，不会因为配置顺序变来变去
   knownOrigins = [...new Set(origins)].sort()
-  if (!isElectron()) return knownOrigins
+  if (!isElectron() && !isWeb()) return knownOrigins
   try {
     const accepted = await native().setProxyHosts(knownOrigins)
     return accepted

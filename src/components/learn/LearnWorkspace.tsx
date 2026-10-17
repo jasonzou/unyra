@@ -22,15 +22,16 @@
 
 import {
   Fragment,
-  startTransition,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentProps,
   type ReactNode,
 } from 'react'
+import { ExternalLink, Globe } from 'lucide-react'
 import type {
   DocKind,
   DocView,
@@ -89,10 +90,12 @@ import {
   visibleTabs,
   withGroup,
   withOwners,
+  withParked,
   type DocLayout,
   type TabOwners,
 } from '../../learn/groups'
-import { makeTab, newBlankKey, newDraftKey, newWebKey, tabKey, tabNodeId, tabTitle, tabTrail, fileNameOf as localFileNameOf } from '../../learn/tabs'
+import { makeBlankTab, makeTab, newBlankKey, newDraftKey, newWebKey, tabKey, tabNodeId, tabTitle, tabTrail, fileNameOf as localFileNameOf } from '../../learn/tabs'
+import { setZenActive } from '../../learn/zen'
 import { pickLocalFiles } from '../../lib/localFiles'
 import { addLocalFile } from '../../learn/localfiles'
 import { normalizeWebInput } from '../../learn/webUrl'
@@ -153,7 +156,7 @@ import ExportDialog from './ExportDialog'
 import FloatWindow from '../FloatWindow'
 import { usePresence } from '../../lib/presence'
 import ExamCopyView from './ExamCopyView'
-import OutlineView from './OutlineView'
+import { OutlinePane } from './workspace/OutlinePane'
 import { pruneImages } from '../../learn/images'
 import { dropDrafts } from '../../learn/drafts'
 import { queueOf, shouldEnqueue } from '../../learn/agentQueue'
@@ -166,7 +169,7 @@ import {
 } from '../../learn/static'
 import { nodePathOf } from '../../learn/paths'
 import { nodeDocPath } from '../../learn/files'
-import { createNodeDocImageResolver } from '../../lib/docImages'
+import { createNodeDocImageResolver, type LocalImageResolver } from '../../lib/docImages'
 import { revealLocalFile, revealPath, revealUserPath, userAbsPath, listUserDir, mkdirUserPath, moveUserPath, copyUserPath, writeUserText } from '../../lib/storage'
 import { wsAllocateName, wsNameOk, wsRefOfRel, wsRelOf, wsRelOfTab } from '../../learn/workspace'
 import { notifyWsChanged } from './explorer/wsChanges'
@@ -203,6 +206,7 @@ import { requestReveal } from './explorer/reveal'
 import { focusAgentInput } from '../../lib/agentFocus'
 import { moveTabMark, resetTabMark } from '../../lib/tabMark'
 import { setChipOpener, type ChipPayload } from '../../lib/docChip'
+import { openExternalLink, setWebLinkHandler } from '../../lib/externalLink'
 import { tabRefFromChip } from '../../learn/chipRef'
 import { CHIP_MIME, parseChipJson } from '../../lib/chipSyntax'
 import TabBar from './TabBar'
@@ -215,7 +219,7 @@ import { superDocsOf } from '../../learn/types'
 import { findMethod, runMethodEntry } from '../../learn/methods'
 import { learnSandboxOps } from '../../learn/useAgent'
 import { buildStandaloneApi } from '../../agent/tools'
-import { isElectron, native } from '../../lib/native'
+import { isElectron, isWeb, native } from '../../lib/native'
 import DocFloat from './DocFloat'
 import GuardView from './GuardView'
 import FocusReportView from './FocusReportView'
@@ -305,6 +309,7 @@ export default function LearnWorkspace({
    * - docs.layout / docs.groups：界面按它把几格摆出来（见下面的 renderLayout）。
    */
   const docs = store.docArea
+  const [outlineFocus, setOutlineFocus] = useState<{ nodeId: string; nonce: number } | null>(null)
   /** 全部页签，按**布局顺序**排——它仍是「页签是否已被打开过」的判据（见 openTab / 常驻名额） */
   const tabs = useMemo(() => allTabs(docs), [docs])
   const activeTab = useMemo(() => focusedTab(docs), [docs])
@@ -360,6 +365,7 @@ export default function LearnWorkspace({
   const agentSettings = useSyncExternalStore(subscribeAgentSettings, loadAgentSettings)
   const [creatingGoalBusy, setCreatingGoalBusy] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
   /*
    * 学习状态与试卷**都没有应用内的窗口**：两块都是文档区右上角悬浮组里的一块 tip
    * （鼠标经过即展开，见 components/learn/DocFloat），试卷的作答在独立的考试窗口里
@@ -427,12 +433,12 @@ export default function LearnWorkspace({
    */
   const hasTargetOutline = useMemo(
     () =>
-      tabs.some((t) => {
-        const ref = t.ref
-        if (ref.kind !== 'outline') return false
-        return store.goals.some((g) => g.rootNodeId === ref.nodeId)
-      }),
-    [store.goals, tabs],
+      activeGoal
+        ? tabs.some(
+            (t) => t.ref.kind === 'outline' && t.ref.nodeId === activeGoal.rootNodeId,
+          )
+        : false,
+    [activeGoal, tabs],
   )
   const topbarGoalQuestion = hasTargetOutline ? (activeGoal?.question ?? '') : ''
 
@@ -806,6 +812,25 @@ export default function LearnWorkspace({
     if (pure && !tabs.length) setPure(false)
   }, [pure, tabs.length, setPure])
 
+  /** 纯净阅读（Zen mode）：同步全局属性与宽度 CSS 变量 */
+  useEffect(() => {
+    setZenActive(pure)
+    if (pure) {
+      let initW = 860
+      try {
+        const saved = localStorage.getItem('moji:zen-width')
+        if (saved) {
+          const n = parseInt(saved, 10)
+          if (Number.isFinite(n) && n >= 480 && n <= 2400) initW = n
+        }
+      } catch {}
+      document.documentElement.style.setProperty('--zen-width', `${initW}px`)
+    }
+    return () => {
+      setZenActive(false)
+    }
+  }, [pure])
+
   // 现取一次设置：判断能否用 AI，并把当前提供商名字带进提示文案
   const aiSettings = loadAiSettings()
   const hasKey = hasApiKey(aiSettings)
@@ -876,15 +901,23 @@ export default function LearnWorkspace({
    * 现取目录（nodeDocPath 走 getLatest，永远是最新的存储树）。callback 身份稳定，
    * 各片的 resolver 只在页签文档变化时换新。
    */
+  const nodeImageResolverCache = useRef(new Map<string, LocalImageResolver>())
   const nodeImageResolver = useCallback(
-    (nodeId: string, kind: DocKind, note?: string) =>
-      createNodeDocImageResolver({
-        dirRel: () => {
-          const p = nodeDocPath(getLatest(), nodeId, { kind, note })
-          // 教学文档是「目录/节点.md」、笔记是「目录/节点.notes/名字.md」——文档所在目录就是往前一级
-          return p ? p.replace(/\/[^/]*$/, '') : null
-        },
-      }),
+    (nodeId: string, kind: DocKind, note?: string) => {
+      const key = `${nodeId}:${kind}:${note ?? ''}`
+      let res = nodeImageResolverCache.current.get(key)
+      if (!res) {
+        res = createNodeDocImageResolver({
+          dirRel: () => {
+            const p = nodeDocPath(getLatest(), nodeId, { kind, note })
+            // 教学文档是「目录/节点.md」、笔记是「目录/节点.notes/名字.md」——文档所在目录就是往前一级
+            return p ? p.replace(/\/[^/]*$/, '') : null
+          },
+        })
+        nodeImageResolverCache.current.set(key, res)
+      }
+      return res
+    },
     [getLatest],
   )
 
@@ -970,8 +1003,8 @@ export default function LearnWorkspace({
         return { opened: true }
       },
     },
-    // browser.*：依赖在 web 块里（openWebTab / webMeta 声明在 useAgent 之后），这里只给取法
-    browserDeps: () => browserDepsRef.current ?? undefined,
+    // browser.*：依赖在 web 块里（openWebTab / webMeta 声明在 useAgent 之后），WebUI 模式下不支持内置浏览器
+    browserDeps: () => (isWeb() ? undefined : (browserDepsRef.current ?? undefined)),
   })
 
   /* ---------- agent 栏页签（见 learn/agentTabs 与 AgentTabStrip） ---------- */
@@ -993,7 +1026,35 @@ export default function LearnWorkspace({
       if (s.agentActiveTab === key) return
       // 固定聊天页签不在 store 的页签列表里（界面合成置左），但它是合法的激活项
       if (key !== 'free' && !(s.agentTabs ?? []).some((t) => agentTabKey(t) === key)) return
-      set(withAgentTabs(s, s.agentTabs ?? [], key))
+
+      let next: LearnStore = s
+      if (key !== 'free') {
+        const targetTab = (s.agentTabs ?? []).find((t) => agentTabKey(t) === key)
+        if (targetTab && targetTab.kind === 'goal') {
+          const focusId =
+            goalFocusByGoal.get(targetTab.goalId) ??
+            s.goals.find((g) => g.id === targetTab.goalId)?.rootNodeId ??
+            s.activeNodeId
+          const convId =
+            targetTab.conversationId ?? latestConversation(s, targetTab.goalId)?.id ?? null
+          next = {
+            ...s,
+            activeGoalId: targetTab.goalId,
+            activeNodeId: focusId,
+            activeConversationId: convId,
+          }
+        } else if (targetTab && targetTab.kind === 'sub') {
+          const conv = conversationById(s, targetTab.conversationId)
+          if (conv) {
+            next = {
+              ...s,
+              activeGoalId: conv.goalId,
+              activeConversationId: targetTab.conversationId,
+            }
+          }
+        }
+      }
+      set(withAgentTabs(next, s.agentTabs ?? [], key))
     },
     [getLatest, set],
   )
@@ -1409,8 +1470,25 @@ export default function LearnWorkspace({
    * 「新开一份文档」理应开在他正在看的那一格；已经在别格开着的则切过去，不再开第二份。
    */
   const openTab = useCallback(
-    (ref: TabRef) => {
+    (targetRef: TabRef) => {
+      if (isWeb() && targetRef.kind === 'web') {
+        if (targetRef.url) {
+          void openExternalLink(targetRef.url)
+        }
+        return
+      }
       const s = getLatest()
+      let ref = targetRef
+      const initialNodeId = tabNodeId(ref)
+      const initialNode = initialNodeId ? nodeById(s, initialNodeId) : undefined
+      if (initialNodeId && !initialNode) return
+      if (ref.kind === 'outline' && initialNode) {
+        const goal = s.goals.find((g) => g.id === initialNode.goalId)
+        if (goal && ref.nodeId !== goal.rootNodeId) {
+          setOutlineFocus({ nodeId: ref.nodeId, nonce: Date.now() })
+          ref = { kind: 'outline', nodeId: goal.rootNodeId }
+        }
+      }
       const nodeId = tabNodeId(ref)
       const node = nodeId ? nodeById(s, nodeId) : undefined
       if (nodeId && !node) return
@@ -1481,7 +1559,7 @@ export default function LearnWorkspace({
    */
   const aliveGoalTabGroups = useMemo(() => {
     const owners = store.docArea.tabOwners
-    const all = allTabs(store.docArea)
+    const all = allStoredTabs(store.docArea)
     const goalOfNode = (nodeId: string) => nodeById(store, nodeId)?.goalId ?? null
     return store.goals
       .map((g) => ({
@@ -1586,13 +1664,12 @@ export default function LearnWorkspace({
       const tab = findTab(s.docArea, id)
       const group = groupIdOfTab(s.docArea, id)
       if (!tab || !group) return
+      const fromTab = focusedTab(s.docArea)
       const nodeId = tabNodeId(tab.ref)
       const base = nodeId ? retargetNode(s, nodeId) : s
-      const wasActive = focusedTab(s.docArea)?.id === id && s.docArea.focus === group
+      const wasActive = fromTab?.id === id && s.docArea.focus === group
       // activateIn 顺手把焦点挪到那一格：点别处的页签，接下来的动作（开文档、Ctrl+W）都该落在那一格
-      startTransition(() => {
-        set({ ...base, docArea: activateIn(base.docArea, group, id) })
-      })
+      set({ ...base, docArea: activateIn(base.docArea, group, id) })
       // 同一枚页签没有 activeTab 变化，单独唤醒侧栏完成重复定位。
       if (wasActive) requestReveal()
     },
@@ -1619,9 +1696,16 @@ export default function LearnWorkspace({
    */
   const openWebTab = useCallback(
     (url: string): string => {
+      const targetUrl = normalizeWebInput(url)
+      if (isWeb()) {
+        if (targetUrl) {
+          void openExternalLink(targetUrl)
+        }
+        return ''
+      }
       const s = getLatest()
       // ref 当场算好（页签身份就是 tabKey），开完直接回页签 id——browser.open 靠它指名
-      const ref: TabRef = { kind: 'web', url: normalizeWebInput(url), key: newWebKey() }
+      const ref: TabRef = { kind: 'web', url: targetUrl, key: newWebKey() }
       const opened = openInGroup(s.docArea, s.docArea.focus, ref, Date.now(), undefined, (id) => nodeById(s, id)?.goalId ?? null)
       // 网页页签不属于任何目标（公共）：登记成公共，切目标时它留栏上（见 groups/goals）
       set({ ...s, docArea: withOwners(opened, claimTab(opened.tabOwners, PUBLIC_OWNER, tabKey(ref))) })
@@ -1674,6 +1758,12 @@ export default function LearnWorkspace({
       offTab()
       offKey()
     }
+  }, [openWebTab])
+
+  // 应用内超链接与网页 chip 打开统一走应用内浏览器页签（openWebTab）
+  useEffect(() => {
+    setWebLinkHandler(openWebTab)
+    return () => setWebLinkHandler(null)
   }, [openWebTab])
 
   /* ---------- 收藏（页签右键菜单 / 地址栏星标 / 侧栏收藏区，见 learn/favorites） ---------- */
@@ -1813,6 +1903,56 @@ export default function LearnWorkspace({
       removed.active ?? 'free',
     )
   }, [])
+
+  /**
+   * 顶栏目标名菜单：清空某个目标的页签组缓存。
+   */
+  const dropGoalCache = useCallback(
+    (goalId: string) => {
+      const s = getLatest()
+      const goalOfNode = (nodeId: string) => nodeById(s, nodeId)?.goalId ?? null
+      // 1. 从停靠场里清理该目标缓存
+      const nextParked = { ...(s.docArea.parkedTabs ?? {}) }
+      delete nextParked[goalId]
+
+      // 2. 找到当前活动页签中属于该目标的页签并关闭
+      const all = allTabs(s.docArea)
+      const victims = goalTabsOf(s.docArea.tabOwners, all, goalOfNode, goalId)
+      let docArea = s.docArea
+      if (victims.length > 0) {
+        docArea = closeIds(docArea, victims.map((v) => v.id), { preserveActiveAsBlank: true })
+      }
+
+      // 3. 从归属表中移除该目标
+      const nextOwners = { ...(docArea.tabOwners ?? {}) }
+      delete nextOwners[goalId]
+      docArea = withOwners(withParked(docArea, Object.keys(nextParked).length > 0 ? nextParked : undefined), nextOwners)
+
+      // 4. 清理导师页签中属于该目标的页签
+      let nextStore = closeAgentTabsForGoals({ ...s, docArea }, [goalId])
+
+      // 5. 如果当前激活的目标就是它，清空激活目标与节点，文档区置空白
+      if (nextStore.activeGoalId === goalId) {
+        const fg = focusedGroup(docArea)
+        if (fg) {
+          const blank = makeBlankTab()
+          docArea = withGroup(docArea, fg.id, (g) => ({
+            ...g,
+            tabs: [blank],
+            active: blank.id,
+          }))
+        }
+        nextStore = {
+          ...nextStore,
+          docArea,
+          activeGoalId: null,
+          activeNodeId: null,
+        }
+      }
+      set(nextStore)
+    },
+    [getLatest, set, closeAgentTabsForGoals],
+  )
 
   /*
    * 保存 / 关页签 / 冲突流整体在 useDocSaveFlow（workspace）：
@@ -2056,14 +2196,17 @@ export default function LearnWorkspace({
     const s = getLatest()
     const conv = conversationById(s, conversationId)
     if (!conv || conv.goalId !== tab.goalId) return
-    let next: LearnStore = { ...s }
-    if (s.activeConversationId === tab.conversationId) next = { ...next, activeConversationId: conversationId }
     const t0 = upsertAgentTab(
       s.agentTabs ?? [],
       s.agentActiveTab ?? null,
       { kind: 'goal', goalId: tab.goalId, conversationId },
-      false,
+      true,
     )
+    const next: LearnStore = {
+      ...s,
+      activeGoalId: tab.goalId,
+      activeConversationId: conversationId,
+    }
     set(withAgentTabs(next, t0.tabs, t0.active))
     setSidebarOpen(false)
   }
@@ -2073,14 +2216,17 @@ export default function LearnWorkspace({
     if (tab.kind !== 'goal') return
     const s = getLatest()
     const { store: withConv, conversation } = addConversation(s, tab.goalId)
-    let next: LearnStore = withConv
-    if (s.activeConversationId === tab.conversationId) next = { ...next, activeConversationId: conversation.id }
     const t0 = upsertAgentTab(
-      next.agentTabs ?? [],
-      next.agentActiveTab ?? null,
+      withConv.agentTabs ?? [],
+      withConv.agentActiveTab ?? null,
       { kind: 'goal', goalId: tab.goalId, conversationId: conversation.id },
-      false,
+      true,
     )
+    const next: LearnStore = {
+      ...withConv,
+      activeGoalId: tab.goalId,
+      activeConversationId: conversation.id,
+    }
     set(withAgentTabs(next, t0.tabs, t0.active))
   }
 
@@ -2848,6 +2994,10 @@ export default function LearnWorkspace({
         exam.openExam(row.id)
         return
       }
+      if (p.type === 'web' && p.url) {
+        openWebTab(p.url)
+        return
+      }
       const ref = tabRefFromChip(s, p)
       if (!ref) {
         onToast(t('这条引用对应的文档已经不在了'))
@@ -2855,7 +3005,7 @@ export default function LearnWorkspace({
       }
       openTab(ref)
     },
-    [getLatest, openTab, selectNode, exam, onToast],
+    [getLatest, openTab, openWebTab, selectNode, exam, onToast],
   )
 
   // chip 的「点击打开」全走这一份登记（消息列表、输入框都不认识 store，见 lib/docChip）
@@ -3053,9 +3203,72 @@ export default function LearnWorkspace({
    * 只是不改写父文档的链接——大纲条目不是正文里的词，没有可替换的链接。
    * 建出来的节点 key 与条目一致（都来自标题），大纲页靠它对上号。
    */
-  const createOutlineChild = (parentNode: KnowledgeNode, entry: OutlineEntry) => {
-    openConcept(parentNode.id, entry.title, { hint: entry.summary, rewriteLink: false })
-  }
+  const createOutlineChild = useCallback(
+    (parentNode: KnowledgeNode, entry: OutlineEntry) => {
+      openConcept(parentNode.id, entry.title, { hint: entry.summary, rewriteLink: false })
+    },
+    [openConcept],
+  )
+
+  const handleOpenOutlineNode = useCallback(
+    (id: string) => {
+      openTab({ kind: 'teach', nodeId: id })
+    },
+    [openTab],
+  )
+
+  const handleGenerateOutline = useCallback(
+    (n: KnowledgeNode) => {
+      startOutline(n.id)
+    },
+    [startOutline],
+  )
+
+  const handleOutlineFocusHandled = useCallback(() => {
+    setOutlineFocus(null)
+  }, [])
+
+  const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
+  const getNoteActions = useCallback(
+    (node: KnowledgeNode, source: DocSource): ComponentProps<typeof DocPane>['note'] => {
+      const key = `${node.id}:${source.kind}:${source.note ?? ''}`
+      let actions = noteActionsCache.current.get(key)
+      if (!actions) {
+        actions = {
+          onLearnConcept: (term) => void openConcept(node.id, term),
+          resolveLocalImage: nodeImageResolver(node.id, source.kind, source.note),
+          onUnderstand: (term, occurrence, snippet) => understandConcept(node.id, term, occurrence, snippet),
+          onSaveAnnotation: (term, body, style, occurrence) =>
+            saveAnnotation(node.id, term, body, style, occurrence),
+          onDeleteAnnotation: (term) => deleteAnnotation(node.id, term),
+          onWarn: onToast,
+          onAsk: (payload) => askAboutSelection(node.id, payload),
+          onReading: (delta) => {
+            const alive = nodeById(getLatest(), delta.nodeId)
+            if (!alive) return
+            const goalId = alive.goalId
+            patchQuiet((s) => {
+              const mine = readingOfGoal(s.reading, goalId)
+              const next = applyReadingDelta(mine ?? emptyReading(), delta)
+              const reading = withGoalReading(s.reading, goalId, next)
+              const reading2 = { ...s, reading }
+              publishReadingDay(goalId, delta.day, readingDay(next, delta.day)?.activeMs ?? 0)
+              return reading2
+            })
+          },
+          readingKnownToday: () =>
+            readToday(
+              readingOfGoal(getLatest().reading, node.goalId),
+              node.id,
+              readingDocKey(source.kind, source.note),
+            ),
+        }
+        noteActionsCache.current.set(key, actions)
+      }
+      return actions
+    },
+    [openConcept, nodeImageResolver, understandConcept, saveAnnotation, deleteAnnotation, onToast, askAboutSelection, getLatest, patchQuiet],
+  )
 
   // 保存：Ctrl+S 交给快捷键模块（见 lib/shortcuts）——改键与冲突检测都归它管，
   // 写死在这里的话，用户在设置里改的那一条就成了一句空话。
@@ -3150,6 +3363,7 @@ export default function LearnWorkspace({
    */
   useShortcut('web.newTab', {
     down: () => {
+      if (isWeb()) return
       const s = getLatest()
       const group = focusedGroup(s.docArea)
       const active = group?.tabs.find((x) => x.id === group.active)
@@ -3290,8 +3504,18 @@ export default function LearnWorkspace({
    */
   const openChipInGroup = (groupId: string) => (p: ChipPayload) => {
     const s = getLatest()
-    const ref = tabRefFromChip(s, p)
-    if (!ref) return
+    const rawRef = tabRefFromChip(s, p)
+    if (!rawRef) return
+    let ref = rawRef
+    const initialNodeId = tabNodeId(ref)
+    const initialNode = initialNodeId ? nodeById(s, initialNodeId) : undefined
+    if (ref.kind === 'outline' && initialNode) {
+      const goal = s.goals.find((g) => g.id === initialNode.goalId)
+      if (goal && ref.nodeId !== goal.rootNodeId) {
+        setOutlineFocus({ nodeId: ref.nodeId, nonce: Date.now() })
+        ref = { kind: 'outline', nodeId: goal.rootNodeId }
+      }
+    }
     const nodeId = tabNodeId(ref)
     const base = nodeId ? retargetNode(s, nodeId) : s
     const goalOf = (id: string) => nodeById(base, id)?.goalId ?? null
@@ -3355,6 +3579,7 @@ export default function LearnWorkspace({
 
   const openWebInPlace = useCallback(
     (groupId: string, currentTabId: string) => {
+      if (isWeb()) return
       openInPlace(groupId, currentTabId, { kind: 'web', url: '', key: newWebKey() })
     },
     [openInPlace],
@@ -3420,11 +3645,14 @@ export default function LearnWorkspace({
 
   const renderGroup = (groupId: string) => {
     const g = paneInfo(store, docs, groupId, examTabTitle)
+    const dg = g
     const gTab = g.tab
     /** 这一格显示的页签 id；回调里用（TS 的收窄穿不进闭包，见下面几处 onChange） */
     const gTabId = gTab?.id ?? ''
     /** 记忆页签携带的目标 id：同上，闭包里用（goalId 缺省只在页签不是记忆页时发生） */
     const gMindGoalId = gTab?.ref.kind === 'mind' ? gTab.ref.goalId : ''
+    /** 网页页签携带的 URL：闭包里用（TS 的收窄穿不进闭包） */
+    const gWebUrl = gTab?.ref.kind === 'web' ? gTab.ref.url : ''
     const isFocused = groupId === docs.focus
     const gExam = examCopyOf(store, gTab)
     const panes = residentPanes.filter((p) => p.group === groupId)
@@ -3539,8 +3767,8 @@ export default function LearnWorkspace({
                 onDropChip={openChipInGroup(groupId)}
                 // 棱形只在焦点格的栏上跟着右键走（见 lib/tabMark）
                 focused={isFocused}
-                // 栏上空白处的右键菜单要开新网页页签（见 TabBar 的 BarMenu）
-                onOpenWebTab={() => openWebTab('')}
+                // 栏上空白处的右键菜单要开新网页页签（见 TabBar 的 BarMenu）；WebUI 模式下不提供
+                onOpenWebTab={isWeb() ? undefined : () => openWebTab('')}
                 // 「新页签」就长在最后一枚页签后面（原先在顶栏，见 TabBar 的 onNewTab）
                 onNewTab={() => openBlankTab()}
                 store={store}
@@ -3564,12 +3792,11 @@ export default function LearnWorkspace({
             e.stopPropagation()
           }}
         >
-          {/* 正文这一层：切页签的过场只加在它上面，右侧悬浮组不跟着晃。
-              data-doc-area：大纲栏据此判断「焦点在不在文档区里」（固定时 Tab 切换展开收起） */}
-          <div
-            ref={isFocused ? docBox : undefined}
-            {...boxProps}
-            onDragOver={(e) => {
+            <div
+              ref={isFocused ? docBox : undefined}
+              {...boxProps}
+              className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+              onDragOver={(e) => {
               // 整个正文区都是 chip 的落点：资源管理器 / 收藏里拖来的引用，拖到这里
               // 直接开成本格的页签（不必再瞄准上面那条窄页签栏）。系统文件拖入
               // （dataTransfer.files）走 window 级的监听，这里只认 chip。
@@ -3612,14 +3839,32 @@ export default function LearnWorkspace({
               if (el.closest('button, input, textarea, a, iframe, [contenteditable="true"], [role="button"]')) return
               toggleZen()
             }}
-            className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
           >
             {gTab?.ref.kind === 'web' ? (
               /*
                 网页页签：正文不归 React 画（guest 进程自己渲染），由下面挂着的
                 WebTabLayer 常驻层显示——这里只让出位置，别画任何东西。
+                WebUI 模式下不支持内置浏览器，展示在当前浏览器中打开的引导卡片。
               */
-              null
+              isWeb() ? (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-card p-6 text-center select-none">
+                  <Globe size={32} className="text-seal/70" />
+                  <div className="text-[14px] font-semibold text-ink-strong">{t('WebUI 模式不支持内置浏览器')}</div>
+                  <p className="max-w-md text-[12px] text-ink-faint">
+                    {gWebUrl ? t('该网页可在当前浏览器新标签页中打开访问。') : t('WebUI 模式下请直接在当前浏览器中浏览网页。')}
+                  </p>
+                  {gWebUrl && (
+                    <button
+                      type="button"
+                      onClick={() => void openExternalLink(gWebUrl)}
+                      className="flex items-center gap-1.5 rounded-lg bg-seal px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-seal-deep cursor-pointer"
+                    >
+                      <ExternalLink size={13} />
+                      {t('在当前浏览器打开')}
+                    </button>
+                  )}
+                </div>
+              ) : null
             ) : gTab?.ref.kind === 'blank' ? (
               /*
                 空白页签（底页）：显示无页签引导卡片（打开本地文件 / 浏览网络 / 新建目标），
@@ -3628,7 +3873,7 @@ export default function LearnWorkspace({
               <EmptyDoc
                 onNewFile={() => openNewFileInPlace(groupId, gTab.id)}
                 onPickLocal={() => void pickLocalInPlace(groupId, gTab.id)}
-                onOpenWeb={() => openWebInPlace(groupId, gTab.id)}
+                onOpenWeb={isWeb() ? undefined : () => openWebInPlace(groupId, gTab.id)}
                 onNewGoal={() => openNewGoalInPlace(groupId, gTab.id)}
                 // 收藏 / 最近打开两栏（原侧栏的「最近打开」区挪到这里，见 EmptyDoc）
                 favorites={store.favorites ?? []}
@@ -3709,7 +3954,7 @@ export default function LearnWorkspace({
                 没有 key：它不指向任何外部东西，也就没有「重挂重读」这回事。
               */
               <DraftDoc
-                draft={g.draft}
+                draft={dg.draft}
                 scale={docScale}
                 onDraft={(text) => stageNewFileDraft(gTabId, text)}
                 saving={docSaving}
@@ -3727,9 +3972,9 @@ export default function LearnWorkspace({
               <LocalDoc
                 key={gTab.ref.path + '#' + (localTicks[gTab.ref.path] ?? 0)}
                 path={gTab.ref.path}
-                view={g.view}
+                view={dg.view}
                 scale={docScale}
-                draft={g.draft}
+                draft={dg.draft}
                 savedText={localSaved?.path === gTab.ref.path ? localSaved.text : undefined}
                 onDraft={(text) => stageLocalDraft(gTabId, text)}
                 saving={docSaving}
@@ -3759,9 +4004,9 @@ export default function LearnWorkspace({
                   <LocalDoc
                     key={abs + '#' + (localTicks[abs] ?? 0)}
                     path={abs}
-                    view={g.view}
+                    view={dg.view}
                     scale={docScale}
-                    draft={g.draft}
+                    draft={dg.draft}
                     savedText={localSaved?.path === abs ? localSaved.text : undefined}
                     onDraft={(text) => stageLocalDraft(gTabId, text)}
                     saving={docSaving}
@@ -3804,20 +4049,20 @@ export default function LearnWorkspace({
                 切去其它页签时仅隐藏保活，切回时零延迟复原相机与状态。这里让出位置。
               */
               null
-            ) : gTab?.ref.kind === 'super' && g.node && g.superDoc ? (
+            ) : gTab?.ref.kind === 'super' && dg.node && dg.superDoc ? (
               /*
                 超级文档：一份完整的可交互 HTML。预览跑在沙箱化的 iframe 里
                 （见 SuperDocView），源码视图直接改 HTML——暂存与 Ctrl+S 与
                 其它文档同一套（保存写回 node.superdocs，见 saveDocNow）。
                 key 绑「节点 + 名字」：换一份就重挂，脚本从头执行、状态归零。
               */
-              g.view === 'source' ? (
+              dg.view === 'source' ? (
                 <SourceEditor
-                  key={g.node.id + ':super:' + gTab.ref.name}
-                  value={g.draft ?? g.superDoc.html}
+                  key={dg.node.id + ':super:' + gTab.ref.name}
+                  value={dg.draft ?? dg.superDoc.html}
                   onChange={(text) => editDocSource(gTabId, text)}
-                  state={docSaving ? 'saving' : g.draft === undefined ? 'saved' : 'dirty'}
-                  label={g.title}
+                  state={docSaving ? 'saving' : dg.draft === undefined ? 'saved' : 'dirty'}
+                  label={dg.title}
                   scale={docScale}
                   scrollTop={store.docScroll[gTabId + SRC_SCROLL_SUFFIX]}
                   onScrollTop={(top) => rememberScroll(gTabId + SRC_SCROLL_SUFFIX, top)}
@@ -3825,8 +4070,8 @@ export default function LearnWorkspace({
                 />
               ) : (
                 <SuperDocView
-                  key={g.node.id + ':super:' + gTab.ref.name}
-                  html={g.superDoc.html}
+                  key={dg.node.id + ':super:' + gTab.ref.name}
+                  html={dg.superDoc.html}
                   onMethodCall={runSuperMethod}
                   // 文档里的 moji:super 链接：BRIDGE 拦截后转回来，走上面注册的同一个处理器
                   onSuperLink={(href) => {
@@ -3835,19 +4080,19 @@ export default function LearnWorkspace({
                   }}
                 />
               )
-            ) : g.node && g.source ? (
-              g.view === 'source' ? (
+            ) : dg.node && dg.source ? (
+              dg.view === 'source' ? (
                 /*
                   源码视图：直接改 Markdown。改动先进**暂存区**（见 learn/drafts），
                   按 Ctrl+S 才写进文档——底栏上的「已保存 / 未保存」读的就是暂存区里
                   有没有这一份，而不是「store 落盘了没有」。
                 */
                 <SourceEditor
-                  key={g.title + ':' + g.source.kind + ':' + (g.source.note ?? '')}
-                  value={g.source.content}
+                  key={dg.title + ':' + dg.source.kind + ':' + (dg.source.note ?? '')}
+                  value={dg.source.content}
                   onChange={(text) => editDocSource(gTabId, text)}
-                  state={docSaving ? 'saving' : g.draft === undefined ? 'saved' : 'dirty'}
-                  label={g.title}
+                  state={docSaving ? 'saving' : dg.draft === undefined ? 'saved' : 'dirty'}
+                  label={dg.title}
                   scale={docScale}
                   ext=".md"
                   // 编辑位置与阅读位置各记各的：同一份文档在源码里改到一半、
@@ -3859,7 +4104,7 @@ export default function LearnWorkspace({
             ) : (
               <EmptyDoc
                 onPickLocal={() => void pickLocalInPlace(groupId, gTabId)}
-                onOpenWeb={() => openWebInPlace(groupId, gTabId)}
+                onOpenWeb={isWeb() ? undefined : () => openWebInPlace(groupId, gTabId)}
                 onNewGoal={() => openNewGoalInPlace(groupId, gTabId)}
                 favorites={store.favorites ?? []}
                 favoriteTitleOf={favoriteTitleOf}
@@ -3875,7 +4120,7 @@ export default function LearnWorkspace({
               两处渲染会各自建一份 DOM，那就白常驻了。
             */}
             {panes.map(({ tab, node, source }) => {
-              const paneActive = tab.id === gTab?.id && g.view === 'preview'
+              const paneActive = tab.id === gTab?.id && dg.view === 'preview'
               return (
                 <DocPane
                   key={tab.id}
@@ -3898,49 +4143,7 @@ export default function LearnWorkspace({
                   // 读到哪儿了：记在页签 id 上，重启回来接着读（见 lib/docScroll）
                   scrollTop={store.docScroll[tab.id]}
                   onScrollTop={(top) => rememberScroll(tab.id, top)}
-                  note={{
-                    onLearnConcept: (term) => void openConcept(node.id, term),
-                    // 文档目录旁的图片（相对路径引用）：按「这一份文档自己的目录」解析成 data URL
-                    // （见 lib/docImages——生产 CSP 不放行 file:，这是文档资源能显示的唯一通道）
-                    resolveLocalImage: nodeImageResolver(node.id, source.kind, source.note),
-                    onUnderstand: (term, occurrence, snippet) => understandConcept(node.id, term, occurrence, snippet),
-                    onSaveAnnotation: (term, body, style, occurrence) =>
-                      saveAnnotation(node.id, term, body, style, occurrence),
-                    onDeleteAnnotation: (term) => deleteAnnotation(node.id, term),
-                    onWarn: onToast,
-                    onAsk: (payload) => askAboutSelection(node.id, payload),
-                    /*
-                     * 节点已经删了：这一笔不再记。
-                     *
-                     * 删节点时会连它的阅读记录一起清掉（见 learn/reading 的 pruneReading），
-                     * 而这里是「删完那一刻采集器最后一次结算」——照记就当场长回一条空索引。
-                     */
-                    onReading: (delta) => {
-                      const alive = nodeById(getLatest(), delta.nodeId)
-                      if (!alive) return
-                      // 这一笔记到**这个节点所属目标**的那本账上（阅读账按目标分开，见 learn/reading）
-                      const goalId = alive.goalId
-                      // 阅读增量走 patchQuiet：它不参与渲染，别为它每秒重渲染整棵学习区
-                      patchQuiet((s) => {
-                        const mine = readingOfGoal(s.reading, goalId)
-                        const next = applyReadingDelta(mine ?? emptyReading(), delta)
-                        const reading = withGoalReading(s.reading, goalId, next)
-                        const reading2 = { ...s, reading }
-                        // 顺手把「这个目标今天已落盘多少」发布出去：顶栏那两个数字读不到 ref
-                        // （patchQuiet 不重渲染），不发布的话它们只能等到别的动作触发一次 set 才跳
-                        // （见 lib/readingPulse）
-                        publishReadingDay(goalId, delta.day, readingDay(next, delta.day)?.activeMs ?? 0)
-                        return reading2
-                      })
-                    },
-                    // 今天已经读过这份文档就直接算；没读过要先过「动过 + 20 秒」的门槛
-                    readingKnownToday: () =>
-                      readToday(
-                        readingOfGoal(getLatest().reading, node.goalId),
-                        node.id,
-                        readingDocKey(source.kind, source.note),
-                      ),
-                  }}
+                  note={getNoteActions(node, source)}
                 />
               )
             })}
@@ -3954,24 +4157,22 @@ export default function LearnWorkspace({
               if (!oNode) return null
               const isActive = gTab?.id === tab.id
               return (
-                <div
+                <OutlinePane
                   key={tab.id}
-                  data-outline-pane={isActive ? 'active' : 'idle'}
-                  className={isActive ? 'relative flex min-h-0 flex-1 flex-col' : 'hidden'}
-                  {...(!isActive ? { hidden: true } : {})}
-                >
-                  <OutlineView
-                    store={store}
-                    node={oNode}
-                    onOpenNode={(id) => openTab({ kind: 'teach', nodeId: id })}
-                    onCreateChild={createOutlineChild}
-                    onGenerate={(n) => startOutline(n.id)}
-                    onSetTint={setNodeTint}
-                    docs={explorerDocs}
-                    exams={explorerExams}
-                    activeTab={gTab?.ref ?? null}
-                  />
-                </div>
+                  tabId={tab.id}
+                  active={isActive}
+                  store={store}
+                  node={oNode}
+                  onOpenNode={handleOpenOutlineNode}
+                  onCreateChild={createOutlineChild}
+                  onGenerate={handleGenerateOutline}
+                  onSetTint={setNodeTint}
+                  docs={explorerDocs}
+                  exams={explorerExams}
+                  activeTab={gTab?.ref ?? null}
+                  focusTarget={outlineFocus}
+                  onFocusHandled={handleOutlineFocusHandled}
+                />
               )
             })}
           </div>
@@ -3980,7 +4181,7 @@ export default function LearnWorkspace({
             网页层（见 components/learn/web/WebTabLayer）：常挂在格子里、切去文档时
             整层藏起来（guest 进程照跑）。z-10 盖过正文，又在拖放高亮（z-30）之下。
           */}
-          {gWebTabs.length > 0 && (
+          {!isWeb() && gWebTabs.length > 0 && (
             <WebTabLayer
               tabs={gWebTabs}
               activeId={gTab?.ref.kind === 'web' ? gTab.id : null}
@@ -4035,15 +4236,15 @@ export default function LearnWorkspace({
                * key 绑「格 + 节点」：换节点时重挂，各块 tip 的展开状态自然回到收起；
                * 拖页签分割之后新格里的悬浮组也是新的一份，不会继承旧格展开着的那块。
                */
-              key={groupId + ':' + (g.node?.id ?? gTab.id)}
-              view={g.view}
-              previewable={g.previewable}
+              key={groupId + ':' + (dg.node?.id ?? gTab.id)}
+              view={dg.view}
+              previewable={dg.previewable}
               previewHint={
-                g.emptyNote ? t('这份笔记还是空的：先在源码视图里写点东西，才有得预览') : undefined
+                dg.emptyNote ? t('这份笔记还是空的：先在源码视图里写点东西，才有得预览') : undefined
               }
               onSwitchView={(v) => setTabView(gTabId, v)}
               showBackToDoc={gTab.ref.kind === 'note' || gTab.ref.kind === 'super'}
-              onBackToDoc={() => g.node && openTab({ kind: 'teach', nodeId: g.node.id })}
+              onBackToDoc={() => dg.node && openTab({ kind: 'teach', nodeId: dg.node.id })}
               // 纯净阅读那颗：它与 F11 / Esc 是同一个动作（见 toggleZen）。
               // 每一格的悬浮组都画一颗，而状态是**全局一个**——点哪一格都是同一件事
               pure={pure}
@@ -4174,7 +4375,7 @@ export default function LearnWorkspace({
       liveExamId: exam.live?.examId ?? null,
       grading,
     }),
-    [exam, selectNode, onToast, requestGrading, grading],
+    [exam.openExam, exam.reveal, exam.live, selectNode, onToast, requestGrading, grading],
   )
 
   /**
@@ -4295,6 +4496,7 @@ export default function LearnWorkspace({
             // 目标名点开的下拉菜单：存活的 tab 组（点一行切过去，见 switchGoalGroup）
             tabGroups={aliveGoalTabGroups}
             onSwitchGoalGroup={switchGoalGroup}
+            onDropGoalCache={dropGoalCache}
             store={store}
             user={user}
             onOpenSidebar={() => setSidebarOpen(true)}
@@ -4372,6 +4574,7 @@ export default function LearnWorkspace({
                           vision={vision}
                           onNotice={onToast}
                           onOpenAgentSettings={() => openTab({ kind: 'agentSettings' })}
+                          onOpenSettings={() => openTab({ kind: 'agentSettings' })}
                           onOpenMinds={() => {
                             if (props.goalId) openTab({ kind: 'mind', goalId: props.goalId })
                           }}

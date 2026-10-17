@@ -319,6 +319,92 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     }
   }
 
+  /**
+   * 递归/批量构建大纲树结构（为规划式与完整式目标创建提供高能支撑）。
+   */
+  const createTree = (
+    explicitParentId: string | undefined,
+    input: { tree?: unknown; [k: string]: unknown },
+  ): AgentToolResult => {
+    const rawTree = Array.isArray(input.tree) ? input.tree : Array.isArray(input) ? input : []
+    if (!rawTree.length) {
+      return { ok: false, content: 'tree 数组为空，请传入树状结构节点定义' }
+    }
+    const s = store0()
+    const fallbackParentId = explicitParentId || deps.nodeId() || s.goals.find((g) => g.id === deps.goalId())?.rootNodeId || ''
+    if (!fallbackParentId || !nodeById(s, fallbackParentId)) {
+      return { ok: false, content: '未找到有效的父节点（parent 参数或当前目标根节点无效）' }
+    }
+
+    let currentStore = s
+    let createdCount = 0
+    let docCount = 0
+    let outlineCount = 0
+    const createdTitles: string[] = []
+
+    const processItem = (parentId: string, item: unknown): boolean => {
+      if (!item || typeof item !== 'object') return false
+      const nodeInput = item as Record<string, unknown>
+      const rawTitle = String(nodeInput.title ?? '').trim()
+      if (!rawTitle || rawTitle.includes('/') || rawTitle.includes('\\')) return false
+
+      let targetNodeId: string
+      const existing = currentStore.nodes.find((n) => n.goalId === deps.goalId() && n.title === rawTitle)
+      if (existing) {
+        targetNodeId = existing.id
+        if (typeof nodeInput.description === 'string' && nodeInput.description.trim()) {
+          currentStore = updateNode(currentStore, targetNodeId, { description: nodeInput.description.trim() })
+        }
+      } else {
+        const r = createNodeUnder(currentStore, parentId, {
+          title: rawTitle,
+          description: typeof nodeInput.description === 'string' ? nodeInput.description.trim() : undefined,
+        })
+        currentStore = r.store
+        targetNodeId = r.node.id
+        createdCount++
+        createdTitles.push(rawTitle)
+      }
+
+      if (nodeInput.status === 'learning' || nodeInput.status === 'mastered') {
+        currentStore = updateNode(currentStore, targetNodeId, { status: nodeInput.status as MasteryStatus })
+      }
+
+      if (typeof nodeInput.content === 'string' && nodeInput.content.trim()) {
+        currentStore = updateDoc(currentStore, targetNodeId, nodeInput.content.trim())
+        docCount++
+      }
+
+      if (nodeInput.outline && typeof nodeInput.outline === 'object') {
+        const out = nodeInput.outline as { intro?: string; children?: Array<{ title: string; summary?: string }> }
+        const rOut = writeOutline(currentStore, targetNodeId, out, Date.now())
+        if (rOut.ok) {
+          currentStore = rOut.store
+          outlineCount++
+        }
+      }
+
+      if (Array.isArray(nodeInput.children) && nodeInput.children.length > 0) {
+        for (const child of nodeInput.children) {
+          processItem(targetNodeId, child)
+        }
+      }
+      return true
+    }
+
+    for (const item of rawTree) {
+      processItem(fallbackParentId, item)
+    }
+
+    deps.set(currentStore)
+    return {
+      ok: true,
+      content:
+        `大纲树构建完成：成功创建 ${createdCount} 个新节点（${createdTitles.slice(0, 8).join('、')}${createdTitles.length > 8 ? '等' : ''}），` +
+        `写入 ${outlineCount} 份大纲，完成 ${docCount} 篇教学讲义生成。全部已同步至大纲树与知识库。`,
+    }
+  }
+
   /** 迁移节点到另一个节点之下（层级变了，大纲与侧栏跟着新父线走） */
   const moveNodeRef = (nodeId: string, newParentId: string): AgentToolResult => {
     const s = store0()
@@ -595,6 +681,7 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
       list: nodeInventory,
       read: nodeDetail,
       create: createNode,
+      createTree,
       update: updateNodeRef,
       remove: removeNode,
       move: moveNodeRef,

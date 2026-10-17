@@ -615,21 +615,10 @@ export function Composer(props: ComposerProps) {
               <span className="shrink-0">· {t('子会话只读')}</span>
             </span>
           )}
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            {/*
-              这里原先有一颗「添加图片」的按钮，现在**没有它**了：附件统一从
-              左下角「更多 → 文件」进——那个入口不设扩展名过滤，图片本来就是它的一部分。
-              两颗按钮做同一件事，只会让人猜「图片走哪条、文件走哪条」。
-              贴图这条路照旧：拖进来、Ctrl+V 都行，本来就是习惯动作，不必有按钮。
-            */}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
             {subAgentSlot}
-            {!subMode && strategySlot}
             {!subMode && <ModelPicker onChanged={onModelChanged} />}
-            {/*
-              语音输入：发送键左边那颗话筒（见 MicButton 与 lib/voice）。
-              只有插件开着时才画——它是「设置 → 插件」里的一项功能。
-              识别结果插到光标处：认得 chip、也不吃掉用户已经写好的字。
-            */}
+            {!subMode && strategySlot}
             {!subMode && (
               <MicButton
                 onText={(text) => {
@@ -657,7 +646,7 @@ export function Composer(props: ComposerProps) {
                 title={t('排进等待队列（当前回答结束后自动发送）')}
                 onClick={submit}
                 disabled={slash.active}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-seal/60 bg-seal/5 text-seal-deep shadow-none transition hover:border-seal hover:bg-seal/15 disabled:pointer-events-none disabled:opacity-35"
+                className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-seal/60 bg-seal/5 text-seal-deep shadow-none transition hover:border-seal hover:bg-seal/15 disabled:pointer-events-none disabled:opacity-35"
               >
                 <ArrowUp size={15} />
               </button>
@@ -667,7 +656,7 @@ export function Composer(props: ComposerProps) {
                 type="button"
                 title={t('停止')}
                 onClick={onStop}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-paper text-ink-soft shadow-sm transition hover:border-seal/50 hover:text-seal"
+                className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-paper text-ink-soft shadow-sm transition hover:border-seal/50 hover:text-seal"
               >
                 <Square size={13} />
               </button>
@@ -681,7 +670,7 @@ export function Composer(props: ComposerProps) {
                  * 已经被拦下，这颗按钮是同一道闸的鼠标侧）。
                  */
                 disabled={!!subMode || slash.active || !hasDraft}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-paper shadow-sm transition hover:bg-ink-strong disabled:pointer-events-none disabled:opacity-35"
+                className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-paper shadow-sm transition hover:bg-ink-strong disabled:pointer-events-none disabled:opacity-35"
               >
                 <ArrowUp size={15} />
               </button>

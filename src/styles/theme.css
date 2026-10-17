@@ -616,6 +616,10 @@
   --scrim: rgba(0, 0, 0, 0.6);
 }
 
+html {
+  overflow: hidden;
+}
+
 html,
 body,
 #root {

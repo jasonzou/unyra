@@ -9,8 +9,11 @@
  * 为绕开这条规则再拆一个文件属于「为了拆而拆」（见 docs/refactor-plan.md 第 2 节第 3 条）。
  */
 
+import { useMemo } from 'react'
 import type { AgentPart } from '../../../agent/types'
 import { executeArgs, formatJs } from '../../../lib/toolView'
+import MarkdownView from '../../MarkdownView'
+import { renderNote } from '../../../lib/markdown'
 
 /**
  * 工具卡片的参数：execute 显示那段 JS 源码，其余（改造前留下的老工具名）仍是参数 JSON。
@@ -37,17 +40,15 @@ export function paramOf(part: Extract<AgentPart, { type: 'tool' }>): { text: str
 }
 
 /**
- * 结果里那些"关于这次调用"的话（调了哪些 api、日志、哪几次没生效）渲染成注释。
+ * 结果里那些"关于这次调用"的说明（调了哪些 api、日志、哪几次没生效等）。
  *
- * 它们不是返回值，是旁白。与返回值混在一段里，读的人分不清哪句是数据、哪句是说明；
- * 排成 // 开头的一行行（颜色取自代码主题的注释色），一眼就分得开。
+ * 采用 Markdown 解析渲染，不再使用双斜杠模仿注释，支持加粗、列表等格式优雅呈现。
  */
 export function MetaLines({ text, className = '' }: { text: string; className?: string }) {
+  const html = useMemo(() => renderNote(text), [text])
   return (
-    <div className={'whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed ' + className}>
-      {text.split('\n').map((line, i) => (
-        <div key={i} className="tok-comment">{'// ' + line}</div>
-      ))}
+    <div className={'break-words text-[12px] leading-relaxed text-ink-soft ' + className}>
+      <MarkdownView html={html} className="moji-agent-md" />
     </div>
   )
 }

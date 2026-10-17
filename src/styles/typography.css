@@ -28,6 +28,13 @@
   margin-inline: auto;
 }
 
+/* 纯净阅读模式下内容宽度可拖拽调节，并在满宽溢出滚动容器内居中 */
+:root[data-zen='true'] .doc-measure {
+  width: var(--zen-width, 860px) !important;
+  max-width: 100% !important;
+  margin-inline: auto !important;
+}
+
 /* ---------- 预览排版 ---------- */
 
 .note-preview {

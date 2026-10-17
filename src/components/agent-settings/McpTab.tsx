@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AlertCircle,
   CheckCircle2,
@@ -40,6 +41,7 @@ export function McpTab({ settings, onChange }: McpTabProps) {
   const [isCreating, setIsCreating] = useState(false)
   const [deletingServer, setDeletingServer] = useState<McpServerConfig | null>(null)
   const [showPresets, setShowPresets] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
 
   /**
    * 停掉主进程里 stdio 服务的本地会话：进程是主进程起的，禁用 / 删除 / 关总开关时
@@ -168,10 +170,17 @@ export function McpTab({ settings, onChange }: McpTabProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
+            <div>
               <button
                 type="button"
-                onClick={() => setShowPresets((v) => !v)}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  setMenuPos({
+                    top: rect.bottom + 6,
+                    left: Math.max(8, rect.right - 260),
+                  })
+                  setShowPresets((v) => !v)
+                }}
                 className="flex items-center gap-1.5 rounded-xl border border-line bg-paper-deep px-3 py-1.5 text-[12px] font-medium text-ink-strong transition hover:bg-line/60"
               >
                 <Sparkles size={13} className="text-seal" />
@@ -179,13 +188,16 @@ export function McpTab({ settings, onChange }: McpTabProps) {
                 <ChevronDown size={12} className="text-ink-faint" />
               </button>
 
-              {showPresets && (
+              {showPresets && menuPos && createPortal(
                 <>
                   <div
-                    className="fixed inset-0 z-40"
+                    className="fixed inset-0 z-[9998]"
                     onClick={() => setShowPresets(false)}
                   />
-                  <div className="absolute right-0 top-full z-50 mt-1.5 w-[260px] rounded-xl border border-line-strong bg-card p-1.5 shadow-xl">
+                  <div
+                    style={{ top: menuPos.top, left: menuPos.left }}
+                    className="fixed z-[9999] w-[260px] rounded-xl border border-line-strong bg-card p-1.5 shadow-xl animate-in fade-in zoom-in-95 duration-100"
+                  >
                     <div className="px-2 py-1 text-[11px] font-medium text-ink-faint">{t('官方与常用预设')}</div>
                     {MCP_PRESETS.map((p) => (
                       <button
@@ -199,7 +211,8 @@ export function McpTab({ settings, onChange }: McpTabProps) {
                       </button>
                     ))}
                   </div>
-                </>
+                </>,
+                document.body,
               )}
             </div>
 

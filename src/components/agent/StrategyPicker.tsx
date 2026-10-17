@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Blend, Check, ChevronRight, Drama, FileCode2, FileText, SlidersHorizontal } from 'lucide-react'
-import { PERSONAS, personaOf, type PersonaId } from '../../agent/persona'
-import { DOC_FORMATS, docFormatOf, type DocFormatId } from '../../agent/docFormat'
+import { Blend, Check, ChevronRight, Drama, FileCode2, FileText, Settings, SlidersHorizontal } from 'lucide-react'
+import { allPersonas, personaOf, type PersonaId } from '../../agent/persona'
+import { allDocFormats, docFormatOf, type DocFormatId } from '../../agent/docFormat'
+import { loadAgentSettings } from '../../agent/settings'
 import { useHoverMenu } from '../../lib/hoverMenu'
 import { t } from '../../i18n'
 
@@ -40,12 +41,13 @@ interface Props {
   onPickPersona: (id: PersonaId) => void
   docFormat: DocFormatId
   onPickDocFormat: (id: DocFormatId) => void
+  onOpenSettings?: () => void
 }
 
-/** 三种格式在菜单里的图标（人格沿用 Drama：面具——「现在跟谁在说话」） */
-const FORMAT_ICON = { hybrid: Blend, markdown: FileText, html: FileCode2 } as const
+/** 格式在菜单里的图标（人格沿用 Drama：面具） */
+const FORMAT_ICON: Record<string, any> = { hybrid: Blend, markdown: FileText, html: FileCode2 }
 
-export default function StrategyPicker({ persona, onPickPersona, docFormat, onPickDocFormat }: Props) {
+export default function StrategyPicker({ persona, onPickPersona, docFormat, onPickDocFormat, onOpenSettings }: Props) {
   // 与 ModelPicker / 原 PersonaPicker 同款：外点 / Esc 监听挂在 document 上，按钮自己管开合
   const { open, setOpen, mounted, wrapProps, panelProps } = useHoverMenu({
     exitMs: PANEL_EXIT_MS,
@@ -62,8 +64,11 @@ export default function StrategyPicker({ persona, onPickPersona, docFormat, onPi
   const leaveTimer = useRef<number | null>(null)
   const [pos, setPos] = useState<{ right: number; bottom: number } | null>(null)
 
-  const currentPersona = personaOf(persona)
-  const currentFormat = docFormatOf(docFormat)
+  const agentSettings = loadAgentSettings()
+  const currentPersona = personaOf(persona, agentSettings.customPersonas)
+  const currentFormat = docFormatOf(docFormat, agentSettings.customDocFormats)
+  const personaList = allPersonas(agentSettings.customPersonas)
+  const formatList = allDocFormats(agentSettings.customDocFormats)
 
   useLayoutEffect(() => {
     if (!mounted || !wrapProps.ref.current) return
@@ -138,6 +143,26 @@ export default function StrategyPicker({ persona, onPickPersona, docFormat, onPi
             <ChevronRight size={13} className="shrink-0 text-ink-faint" />
           </button>
           <div className="my-1 border-t border-line" />
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                try {
+                  localStorage.setItem('moji:agent-settings:tab', 'strategy')
+                  window.dispatchEvent(new CustomEvent('moji:switch-agent-settings-tab', { detail: 'strategy' }))
+                } catch {
+                  // ignore
+                }
+                onOpenSettings()
+              }}
+              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px] text-seal transition hover:bg-line/50"
+            >
+              <Settings size={13} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{t('自定义人格与文档策略…')}</span>
+              <ChevronRight size={12} className="shrink-0 text-ink-faint" />
+            </button>
+          )}
           <p className="px-2.5 pb-2 pt-1 text-[10.5px] leading-relaxed text-ink-faint">
             {t('人格与格式都以一条隐藏指令进入上下文：切换从下一轮开始生效，不改系统提示词、不重发历史。')}
           </p>
@@ -149,7 +174,7 @@ export default function StrategyPicker({ persona, onPickPersona, docFormat, onPi
       return (
         <>
           <div className="px-2.5 pb-1 pt-2 text-[10.5px] tracking-wide text-ink-faint">{t('导师人格')}</div>
-          {PERSONAS.map((p) => {
+          {personaList.map((p) => {
             const on = p.id === currentPersona.id
             return (
               <button
@@ -179,9 +204,9 @@ export default function StrategyPicker({ persona, onPickPersona, docFormat, onPi
     return (
       <>
         <div className="px-2.5 pb-1 pt-2 text-[10.5px] tracking-wide text-ink-faint">{t('文档格式')}</div>
-        {DOC_FORMATS.map((f) => {
+        {formatList.map((f) => {
           const on = f.id === currentFormat.id
-          const Icon = FORMAT_ICON[f.id]
+          const Icon = FORMAT_ICON[f.id] || FileText
           return (
             <button
               key={f.id}
@@ -221,8 +246,8 @@ export default function StrategyPicker({ persona, onPickPersona, docFormat, onPi
           setLeaving(null)
         }}
         className={
-          'flex h-8 shrink-0 items-center justify-center rounded-lg px-2.5 transition ' +
-          (open ? 'bg-line/60 text-ink' : 'text-ink-soft hover:text-ink')
+          'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition ' +
+          (open ? 'bg-line/60 text-ink' : 'text-ink-soft hover:text-ink hover:bg-line/40')
         }
       >
         {/* 滑杆（SlidersHorizontal）：写作策略的隐喻——「这一篇怎么教、怎么写」的两个开关 */}

@@ -1,5 +1,5 @@
 import { listDir, readText, revealPath, storageInfo, storageAbsPath, writeText, removePath } from '../../lib/storage'
-import { isElectron } from '../../lib/native'
+import { isElectron, isWeb } from '../../lib/native'
 import { BUILTIN_SKILLS } from './builtins'
 import { getLoadedSkills, setLoadedSkills, subscribeSkills } from './registry'
 import type { SkillCategory, SkillDef, SkillScriptDef } from './types'
@@ -190,7 +190,7 @@ let isInitialized = false
  * 若数据根目录下的 skills/ 缺少内置技能，自动将内置技能释放为独立的物理子目录与 SKILL.md。
  */
 export async function ensureSkillsDirAndBuiltins(): Promise<void> {
-  if (!isElectron()) return
+  if (!isElectron() && !isWeb()) return
 
   for (const builtin of BUILTIN_SKILLS) {
     try {
@@ -211,7 +211,7 @@ export async function ensureSkillsDirAndBuiltins(): Promise<void> {
  * 遍历 {root}/skills/*\/SKILL.md
  */
 export async function loadSkillsFromDisk(): Promise<SkillDef[]> {
-  if (!isElectron()) {
+  if (!isElectron() && !isWeb()) {
     return getLoadedSkills()
   }
 
@@ -302,7 +302,7 @@ export async function saveSkillToDisk(skill: SkillDef): Promise<boolean> {
     updatedAt: Date.now(),
   }
 
-  if (!isElectron()) {
+  if (!isElectron() && !isWeb()) {
     const current = [...getLoadedSkills()]
     const idx = current.findIndex((s) => s.id === safeId)
     if (idx >= 0) {
@@ -355,7 +355,7 @@ export async function deleteSkillFromDisk(skillId: string): Promise<boolean> {
   const safeId = sanitizeSkillId(skillId)
   if (!safeId) return false
 
-  if (!isElectron()) {
+  if (!isElectron() && !isWeb()) {
     const next = getLoadedSkills().filter((s) => s.id !== safeId)
     setLoadedSkills(next)
     return true

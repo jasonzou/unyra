@@ -72,7 +72,7 @@ const listeners = new Set<() => void>()
 /** 登记一次「这一片现在在眼前」。值没变就不通知，避免白渲染 */
 export function touchRecent(id: string, cap: number = RESIDENT_MAX): void {
   const next = markActive(recent, id, cap)
-  if (next.length === recent.length && next.every((v, i) => v === recent[i])) return
+  if (next.length === recent.length && next.every((v, i) => v === next[i])) return
   recent = next
   snapshot = next
   for (const listener of listeners) listener()

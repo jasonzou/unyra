@@ -30,6 +30,8 @@ export interface VoiceState {
   level: number
   /** 出错时的一句话；空串表示没有话说 */
   message: string
+  /** 实时识别到的文字预览 */
+  interimText: string
 }
 
 /**
@@ -40,14 +42,18 @@ const MAX_SECONDS = 120
 /** 比这还短的录音直接丢掉：多半是误触，解出来只会是幻觉 */
 const MIN_SECONDS = 0.4
 
-let state: VoiceState = { phase: 'idle', seconds: 0, level: 0, message: '' }
+let state: VoiceState = { phase: 'idle', seconds: 0, level: 0, message: '', interimText: '' }
 const listeners = new Set<() => void>()
 /** 识别完把文本交给谁（见 setVoiceSink）；没人接就留在 state.message 里 */
 let sink: ((text: string) => void) | null = null
+/** 实时流式识别把中间文本交给谁 */
+let interimSink: ((text: string) => void) | null = null
 let mic: MicSession | null = null
 let timer: number | null = null
 /** 递增令牌：取消 / 重新开始之后，旧的那一趟回来时认得出自己已经过期 */
 let token = 0
+let transcribing = false
+let lastSampleCount = 0
 
 export const voiceState = (): VoiceState => state
 export const isVoiceRecording = (): boolean => state.phase === 'recording'
@@ -78,6 +84,11 @@ export function setVoiceSink(fn: ((text: string) => void) | null): void {
   sink = fn
 }
 
+/** 记下「实时识别中间文字交给谁」；传 null 注销 */
+export function setVoiceInterimSink(fn: ((text: string) => void) | null): void {
+  interimSink = fn
+}
+
 /**
  * 开始录。已经在下一次了就什么也不做（连按两下不该开出两路麦克风）。
  *
@@ -90,13 +101,13 @@ export async function startRecording(): Promise<void> {
   const status = await modelStatus().catch(() => null)
   if (id !== token) return
   if (!status?.exists) {
-    emit({ phase: 'error', message: t('还没下载语音模型：到「设置 → 插件 → 语音输入」里下载') })
+    emit({ phase: 'error', message: t('还没下载语音模型：到「设置 → 插件 → 语音输入」里下载'), interimText: '' })
     return
   }
   try {
     mic = await startMic()
   } catch (err) {
-    emit({ phase: 'error', message: err instanceof Error ? err.message : t('打不开麦克风') })
+    emit({ phase: 'error', message: err instanceof Error ? err.message : t('打不开麦克风'), interimText: '' })
     return
   }
   if (id !== token) {
@@ -104,12 +115,48 @@ export async function startRecording(): Promise<void> {
     mic = null
     return
   }
-  emit({ phase: 'recording', seconds: 0, level: 0, message: '' })
-  timer = window.setInterval(() => {
-    if (!mic) return
+  transcribing = false
+  lastSampleCount = 0
+  emit({ phase: 'recording', seconds: 0, level: 0, message: '', interimText: '' })
+  timer = window.setInterval(async () => {
+    if (!mic || state.phase !== 'recording') return
     const seconds = mic.seconds()
-    emit({ seconds, level: mic.level() })
-    if (seconds >= MAX_SECONDS) void stopRecording()
+    const level = mic.level()
+    emit({ seconds, level })
+    if (seconds >= MAX_SECONDS) {
+      void stopRecording()
+      return
+    }
+
+    // 实时识别输入：说话过程中每隔约 300ms 采样并异步转写，提供流式实时识别效果
+    if (!transcribing && seconds >= 0.4 && typeof native().voice?.transcribe === 'function') {
+      const curSamples = mic.samples()
+      if (curSamples - lastSampleCount >= SAMPLE_RATE * 0.3) {
+        transcribing = true
+        const capturedId = id
+        try {
+          const samples = mic.read()
+          const res = await native().voice.transcribe({
+            samples,
+            sampleRate: SAMPLE_RATE,
+            language: loadVoiceSettings().language,
+            gpu: voiceGpu(),
+          })
+          if (capturedId === token && state.phase === 'recording') {
+            if (res.ok && res.text) {
+              const text = res.text.trim()
+              emit({ interimText: text })
+              if (interimSink) interimSink(text)
+            }
+            lastSampleCount = curSamples
+          }
+        } catch {
+          // 过程中的异常不打断录音，留待下一轮或最终识别
+        } finally {
+          transcribing = false
+        }
+      }
+    }
   }, 120)
 }
 
@@ -124,7 +171,7 @@ export async function stopRecording(): Promise<void> {
   session.stop()
 
   if (seconds < MIN_SECONDS) {
-    emit({ phase: 'idle', seconds: 0, level: 0, message: '' })
+    emit({ phase: 'idle', seconds: 0, level: 0, message: '', interimText: '' })
     return
   }
 
@@ -139,21 +186,21 @@ export async function stopRecording(): Promise<void> {
     })
     if (id !== token) return
     if (!res.ok) {
-      emit({ phase: 'error', message: res.error ?? t('识别失败') })
+      emit({ phase: 'error', message: res.error ?? t('识别失败'), interimText: '' })
       return
     }
     const text = (res.text ?? '').trim()
-    emit({ phase: 'idle', seconds: 0, level: 0, message: '' })
+    emit({ phase: 'idle', seconds: 0, level: 0, message: '', interimText: '' })
     if (!text) {
       // 认出来是空的：说一句「没听清」，别让按钮悄悄弹回去（那看起来像没反应）
-      emit({ phase: 'error', message: t('这一段没有听清（{0} 秒），再说一次试试', seconds.toFixed(1)) })
+      emit({ phase: 'error', message: t('这一段没有听清（{0} 秒），再说一次试试', seconds.toFixed(1)), interimText: '' })
       return
     }
     if (sink) sink(text)
-    else emit({ phase: 'error', message: text })
+    else emit({ phase: 'error', message: text, interimText: '' })
   } catch (err) {
     if (id !== token) return
-    emit({ phase: 'error', message: err instanceof Error ? err.message : t('识别失败') })
+    emit({ phase: 'error', message: err instanceof Error ? err.message : t('识别失败'), interimText: '' })
   }
 }
 
@@ -163,10 +210,10 @@ export function cancelRecording(): void {
   clearTimer()
   mic?.stop()
   mic = null
-  emit({ phase: 'idle', seconds: 0, level: 0, message: '' })
+  emit({ phase: 'idle', seconds: 0, level: 0, message: '', interimText: '' })
 }
 
 /** 把错误那一行收掉（用户看到了、或者又按了一次开始） */
 export function clearVoiceMessage(): void {
-  if (state.phase === 'error') emit({ phase: 'idle', seconds: 0, level: 0, message: '' })
+  if (state.phase === 'error') emit({ phase: 'idle', seconds: 0, level: 0, message: '', interimText: '' })
 }

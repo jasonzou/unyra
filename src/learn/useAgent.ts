@@ -26,15 +26,16 @@ import { ensureActivityListeners, userIdleMs } from '../lib/userActivity'
 import { recordContext } from '../agent/contextFilter'
 import { assertPrefixStable, resetPrefixGate } from '../agent/prefixGate'
 import { globalContextWindow, hasApiKey, loadAiSettings, resolveGlobal } from '../ai/settings'
-import type { ChatMessage, ReasoningEffort } from '../ai/types'
-import { streamChatWith } from '../ai/client'
-import { appendFreeMessage, freeConversationById, mutateFreeConversation } from './freeChat'
+import type { ReasoningEffort } from '../ai/types'
+import { appendFreeMessage, freeConversationById, mutateFreeConversation, FREE_GOAL_ID } from './freeChat'
 import { loadAgentSettings } from '../agent/settings'
 import { makeMcpOps } from '../agent/mcp/ops'
 import { makePermissionOps } from '../agent/permissions'
 import { getActiveSkills, getSkillsDigest, needsSkillsAnnounce, skillsAnnounceMessage } from '../agent/skill/registry'
 import type { LearnStore } from './types'
-import { buildTeacherSystem } from './ai'
+import { buildFreeChatSystem, buildTeacherSystem } from './ai'
+import { fetchForAgent, searchForAgent } from './webSearch'
+import type { SandboxOptions } from '../agent/sandbox/types'
 import { MIN_ACTIVE_MESSAGES, activeMessages, applyCompaction, shouldCompact } from './compact'
 import { needsPersonaAnnounce, personaMessage } from '../agent/persona'
 import { needsDocFormatAnnounce, docFormatMessage, docFormatAllowsModule } from '../agent/docFormat'
@@ -435,7 +436,7 @@ export function useAgent(opts: {
       const agentSettings = loadAgentSettings()
       const personaId = agentSettings.persona
       const announcer = needsPersonaAnnounce(conv.messages, personaId)
-        ? [personaMessage(personaId, Date.now(), crypto.randomUUID())]
+        ? [personaMessage(personaId, Date.now(), crypto.randomUUID(), agentSettings.customPersonas)]
         : []
 
       /*
@@ -444,7 +445,7 @@ export function useAgent(opts: {
        * 被压缩掉（retired）之后自动补回来。
        */
       const formatAnnouncer = needsDocFormatAnnounce(conv.messages, agentSettings.docFormat)
-        ? [docFormatMessage(agentSettings.docFormat, Date.now(), crypto.randomUUID())]
+        ? [docFormatMessage(agentSettings.docFormat, Date.now(), crypto.randomUUID(), agentSettings.customDocFormats)]
         : []
 
       // 动态技能清单注入：不在系统提示词中硬编码，而在消息流中按需注入与变更更新（保持前缀缓存稳定）
@@ -790,6 +791,10 @@ export function useAgent(opts: {
           system: buildTeacherSystem({
             goalQuestion: getLatest().goals.find((g) => g.id === target.goalId)?.question ?? '',
             // 画像**不在这里传**：导师要贴合这个人时自己 api.userInfo.get() 取（见 ai 的说明）
+            extraSystemPrompt:
+              agentSettings.extraSystemPromptEnabled && agentSettings.extraSystemPrompt?.trim()
+                ? agentSettings.extraSystemPrompt.trim()
+                : undefined,
           }),
           /**
            * 历史里的图片要先读回内存：落盘的只有一条引用（见 agent/types 的 MessageImage），
@@ -1150,74 +1155,127 @@ export function useAgent(opts: {
           })
           const stored = freeConversationById(conversationId)
           if (!stored) return
-          // 历史就是纯文本一问一答：不经过 toChatHistory（那里还原的是导师轮的工具调用/模块/压缩）
-          const messages: ChatMessage[] = stored.messages
-            .filter((m) => m.role === 'user' || m.role === 'assistant')
-            .map((m) => ({
-              role: m.role as 'user' | 'assistant',
-              content: m.parts.filter((p) => p.type === 'text').map((p) => p.text).join(''),
-            }))
-            .filter((m) => m.content.trim())
           const settings = loadAiSettings()
+          const agentSettings = loadAgentSettings()
           const global = resolveGlobal(settings)
           const window = globalContextWindow(settings)
           const assistantId = crypto.randomUUID()
           const convKey = conversationId
-          const think: AgentPart & { type: 'thinking'; text: string } = { type: 'thinking', text: '' }
-          const answer: AgentPart & { type: 'text'; text: string } = { type: 'text', text: '' }
           const parts: AgentPart[] = []
-          const syncParts = () => {
-            const next = [
-              ...(think.text ? [think] : []),
-              ...(answer.text ? [answer] : []),
-            ]
-            parts.length = 0
-            parts.push(...next)
-            setStreaming((prev2) => ({
-              ...prev2,
-              [convKey]: { conversationId: convKey, messageId: assistantId, parts: [...parts] },
-            }))
-          }
           setStreaming((prev2) => ({ ...prev2, [convKey]: { conversationId: convKey, messageId: assistantId, parts: [] } }))
           setRunning((prev2) => (prev2[convKey] ? prev2 : { ...prev2, [convKey]: true }))
           const ctrl = new AbortController()
           abortMapRef.current.set(convKey, ctrl)
+
+          // 聊天沙箱只提供 web API 组（api.web.search 与 api.fetch），其他均不提供
+          const dummyDocOps = {
+            read: () => '',
+            write: () => false,
+            readMetadata: () => null,
+            writeMetadata: () => false,
+          }
+          const dummyNodeOps = {
+            title: () => '',
+            create: () => '',
+            update: () => false,
+            delete: () => false,
+            list: () => [],
+            read: () => null,
+          }
+          const freeSandbox: SandboxOptions = {
+            nodeId: () => null,
+            resolveNode: () => ({ ok: false, message: '自由聊天不挂在知识节点上' }),
+            resolveDoc: () => ({ ok: false, message: '自由聊天不挂在教学文档上' }),
+            docOps: dummyDocOps as unknown as SandboxOptions['docOps'],
+            nodeOps: dummyNodeOps as unknown as SandboxOptions['nodeOps'],
+            web: {
+              fetch: fetchForAgent,
+              search: searchForAgent,
+            },
+            apiAllow: ['web', 'fetch'],
+            apiBrief:
+              'DeepSeek 官方搜索与抓取服务：\n' +
+              'api.web.search({ query, count?: 5, ori_question?, need_content? })：网络搜索并获取多维度权威检索结果；\n' +
+              "api.fetch({ url: 'https://...' }) 或 api.fetch('https://...')：抓取网页正文并转为 Markdown 格式；\n" +
+              'api.web.fetch({ url })：抓取网页正文（api.fetch 别名）。',
+            signal: ctrl.signal,
+          }
+          const tools = [createExecuteTool(freeSandbox)]
+
+          const tally = { turns: 0, context: 0, total: 0, output: 0, read: 0, miss: 0, tps: 0, estimated: false }
+
           try {
-            const result = await streamChatWith(global.provider, global.model, {
-              messages,
+            await runAgent({
+              provider: global.provider,
+              model: global.model,
               reasoningEffort: global.effort,
+              system: buildFreeChatSystem({
+                extraSystemPrompt:
+                  agentSettings.extraSystemPromptEnabled && agentSettings.extraSystemPrompt?.trim()
+                    ? agentSettings.extraSystemPrompt.trim()
+                    : undefined,
+              }),
+              messages: toChatHistory(stored.messages),
+              tools,
+              ctx: { nodeId: '', goalId: FREE_GOAL_ID },
               signal: ctrl.signal,
-              purpose: 'chat',
-              onDelta: (d) => {
-                if (d.reasoning) think.text += d.reasoning
-                if (d.content) answer.text += d.content
-                syncParts()
+              onEvent: (e) => {
+                if (e.type === 'usage') {
+                  tally.turns++
+                  tally.context = e.usage.input
+                  tally.total += e.usage.input
+                  tally.output += e.usage.output
+                  tally.read += e.usage.cacheRead
+                  tally.miss += Math.max(0, e.usage.input - e.usage.cacheRead)
+                  tally.estimated = tally.estimated || e.usage.estimated === true
+                  if (e.usage.tps) {
+                    tally.tps = e.usage.tps
+                    setTps((prev) => ({ ...prev, [convKey]: e.usage.tps as number }))
+                  }
+                  setLiveUsage((prev) => ({
+                    ...prev,
+                    [convKey]: {
+                      contextTokens: tally.context,
+                      contextWindow: window,
+                      totalTokens: tally.total,
+                      outputTokens: tally.output,
+                      cacheReadTokens: tally.read,
+                      cacheMissTokens: tally.miss,
+                      estimated: tally.estimated,
+                      ...(tally.tps ? { tps: tally.tps } : {}),
+                    },
+                  }))
+                } else if (e.type === 'pace') {
+                  setTps((prev) => ({ ...prev, [convKey]: e.tps }))
+                }
+                applyEvent(parts, e)
+                setStreaming((prev2) => ({
+                  ...prev2,
+                  [convKey]: { conversationId: convKey, messageId: assistantId, parts: [...parts] },
+                }))
               },
             })
-            const usage = result.usage
-            const finalParts: AgentPart[] = [
-              ...(think.text ? [{ type: 'thinking' as const, text: think.text }] : []),
-              ...(answer.text ? [{ type: 'text' as const, text: answer.text }] : []),
-            ]
+
             const cur = freeConversationById(convKey)
-            if (cur && finalParts.length) {
+            if (cur && parts.length) {
               mutateFreeConversation(convKey, (c) =>
                 upsertAssistantInFlight(
                   c,
                   {
                     id: assistantId,
                     role: 'assistant',
-                    parts: finalParts,
-                    ...(usage
+                    parts: [...parts],
+                    ...(tally.turns
                       ? {
                           usage: {
-                            contextTokens: usage.input,
+                            contextTokens: tally.context,
                             contextWindow: window,
-                            totalTokens: usage.input,
-                            outputTokens: usage.output,
-                            cacheReadTokens: usage.cacheRead,
-                            cacheMissTokens: Math.max(0, usage.input - usage.cacheRead),
-                            estimated: usage.estimated === true,
+                            totalTokens: tally.total,
+                            outputTokens: tally.output,
+                            cacheReadTokens: tally.read,
+                            cacheMissTokens: tally.miss,
+                            estimated: tally.estimated,
+                            ...(tally.tps ? { tps: tally.tps } : {}),
                           },
                         }
                       : {}),
@@ -1321,14 +1379,36 @@ export function useAgent(opts: {
     ) => {
       let target = opts?.target ?? null
       if (!target) {
-        const nid = opts?.nodeId ?? nodeId
-        const node = nid ? nodeById(getLatest(), nid) : null
-        if (node) {
-          const conv =
-            conversationId && conversationById(getLatest(), conversationId)?.goalId === node.goalId
-              ? conversationId
-              : (latestConversation(getLatest(), node.goalId)?.id ?? null)
-          if (conv) target = { goalId: node.goalId, nodeId: node.id, conversationId: conv }
+        // 外部触发的工作流必须优先使用当前正在使用的活跃上下文（即当前用户正在交互的导师会话）
+        if (goalId && conversationId) {
+          const currentConv = conversationById(getLatest(), conversationId)
+          if (currentConv && currentConv.goalId === goalId) {
+            let nid = opts?.nodeId ?? nodeId
+            if (nid) {
+              const checkNode = nodeById(getLatest(), nid)
+              if (!checkNode || checkNode.goalId !== goalId) {
+                nid = nodeId ?? getLatest().goals.find((g) => g.id === goalId)?.rootNodeId ?? null
+              }
+            } else {
+              nid = nodeId ?? getLatest().goals.find((g) => g.id === goalId)?.rootNodeId ?? null
+            }
+            if (nid) {
+              target = { goalId, nodeId: nid, conversationId }
+            }
+          }
+        }
+
+        // 兜底回退：若当前没有活跃的导师上下文，按传入的 nodeId 解析归属
+        if (!target) {
+          const nid = opts?.nodeId ?? nodeId
+          const node = nid ? nodeById(getLatest(), nid) : null
+          if (node) {
+            const conv =
+              conversationId && conversationById(getLatest(), conversationId)?.goalId === node.goalId
+                ? conversationId
+                : (latestConversation(getLatest(), node.goalId)?.id ?? null)
+            if (conv) target = { goalId: node.goalId, nodeId: node.id, conversationId: conv }
+          }
         }
       }
       if (!target) return

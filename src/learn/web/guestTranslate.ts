@@ -3,14 +3,16 @@
  * 纯字符串代码模板，由宿主调用 webview.executeJavaScript 执行。
  */
 
-/** 提取网页中符合条件的未翻译段落块 */
+/** 提取网页中符合条件的未翻译段落块（智能保护内联超链接与按钮，支持独立交互控件） */
 export function buildExtractBlocksScript(targetLang = 'zh-CN'): string {
   const safeLang = JSON.stringify(targetLang || 'zh-CN')
   return `(() => {
     try {
       const targetLang = ${safeLang}.toLowerCase();
-      const BLOCKS = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, dt, dd, figcaption';
-      const IGNORED = 'pre, code, kbd, samp, svg, math, .katex, .MathJax, input, textarea, select, button, [contenteditable], [translate="no"], .notranslate, #unyra-selection-trans-card, .unyra-trans-block';
+      const CONTAINER_BLOCKS = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, dt, dd, figcaption, summary';
+      const STANDALONE_INTERACTIVE = 'nav a, header a, footer a, aside a, button';
+      const BLOCKS = CONTAINER_BLOCKS + ', ' + STANDALONE_INTERACTIVE;
+      const IGNORED = 'script, style, noscript, template, iframe, object, embed, pre, code, kbd, samp, svg, math, .katex, .MathJax, input, textarea, select, [contenteditable], [translate="no"], .notranslate, #unyra-selection-trans-card, .unyra-trans-block';
       
       const elements = Array.from(document.querySelectorAll(BLOCKS));
       const candidates = [];
@@ -22,8 +24,52 @@ export function buildExtractBlocksScript(targetLang = 'zh-CN'): string {
         if (el.getAttribute('data-unyra-translating') === 'true') continue;
         if (el.offsetParent === null) continue;
 
-        const text = el.innerText ? el.innerText.trim() : '';
-        if (text.length < 3 || text.length > 5000) continue;
+        const tag = el.tagName.toLowerCase();
+        // 若独立链接或按钮已经处于段落等容器块内，则跳过（由外层容器通过占位符整体翻译与交互挂载）
+        if ((tag === 'a' || tag === 'button') && el.closest(CONTAINER_BLOCKS)) continue;
+        // 避免父子容器嵌套重复提取（如 li 内套 p 时只翻 p）
+        if (el.matches(CONTAINER_BLOCKS) && el.querySelector(CONTAINER_BLOCKS)) continue;
+
+        // 克隆节点并剔除脚本、样式、预格式化代码等非文本节点，杜绝如 Reddit SML.load 等内部脚本泄露
+        const clone = el.cloneNode(true);
+        const noiseNodes = Array.from(clone.querySelectorAll('script, style, noscript, template, iframe, object, embed, svg, math, pre, code'));
+        for (const n of noiseNodes) {
+          n.remove();
+        }
+
+        // 若块内包含有效的内联超链接或按钮，构造带占位符的克隆文本，实现精准语境保护
+        const activeLinks = Array.from(el.querySelectorAll('a[href]')).filter((a) => {
+          return !a.closest(IGNORED) && (a.innerText || a.textContent || '').trim().length > 0;
+        });
+        const activeButtons = Array.from(el.querySelectorAll('button')).filter((b) => {
+          return !b.closest(IGNORED) && (b.innerText || b.textContent || '').trim().length > 0;
+        });
+
+        if (activeLinks.length > 0 || activeButtons.length > 0) {
+          const cloneLinks = Array.from(clone.querySelectorAll('a[href]')).filter((a) => {
+            return (a.innerText || a.textContent || '').trim().length > 0;
+          });
+          cloneLinks.forEach((a, i) => {
+            const inner = (a.innerText || a.textContent || '').trim();
+            a.replaceWith(document.createTextNode('[a' + i + ']' + inner + '[/a' + i + ']'));
+          });
+          const cloneButtons = Array.from(clone.querySelectorAll('button')).filter((b) => {
+            return (b.innerText || b.textContent || '').trim().length > 0;
+          });
+          cloneButtons.forEach((b, i) => {
+            const inner = (b.innerText || b.textContent || '').trim();
+            b.replaceWith(document.createTextNode('[b' + i + ']' + inner + '[/b' + i + ']'));
+          });
+        }
+
+        let text = clone.innerText ? clone.innerText.trim() : (clone.textContent ? clone.textContent.trim() : '');
+        // 清理残存的脚本模式匹配（如内联即时执行函数、Shreddit 模块加载调用等）
+        text = text
+          .replace(/\\(\\s*\\(\\s*\\)\\s*=>\\s*\\{[\\s\\S]*?\\}\\s*\\)\\s*\\(\\s*\\);?/g, '')
+          .replace(/SML\\.load\\([\\s\\S]*?\\);?/g, '')
+          .trim();
+
+        if (text.length < 2 || text.length > 5000) continue;
 
         // 根据目标语言智能过滤：如果原文已经属于目标语言，则跳过
         if (targetLang.startsWith('zh')) {
@@ -39,9 +85,6 @@ export function buildExtractBlocksScript(targetLang = 'zh-CN'): string {
           const nonAsciiCount = nonAsciiMatches ? nonAsciiMatches.length : 0;
           if (nonAsciiCount / text.length < 0.15 && /[a-zA-Z]{2,}/.test(text)) continue;
         }
-
-        // 避免父子嵌套块重复提取（如 li 内套 p 时只翻 p）
-        if (el.querySelector(BLOCKS)) continue;
 
         let uid = el.getAttribute('data-unyra-id');
         if (!uid) {
@@ -62,7 +105,7 @@ export function buildExtractBlocksScript(targetLang = 'zh-CN'): string {
   })()`
 }
 
-/** 注入段落译文 */
+/** 注入段落译文（还原内联超链接/按钮交互能力，支持点击事件透传与兜底芯片） */
 export function buildInsertTranslationsScript(items: Array<{ id: string; translation: string }>): string {
   const json = JSON.stringify(items)
   return `(() => {
@@ -91,6 +134,7 @@ export function buildInsertTranslationsScript(items: Array<{ id: string; transla
         transEl.setAttribute('data-unyra-for', item.id);
         transEl.setAttribute('data-unyra-trans', 'true');
         transEl.classList.add('unyra-trans-block');
+        transEl.classList.add('notranslate');
 
         // 若原元素是 li 列表项，去除重复项目符号/序号，保持为原生 li 紧随排版
         if (el.tagName.toLowerCase() === 'li') {
@@ -103,7 +147,120 @@ export function buildInsertTranslationsScript(items: Array<{ id: string; transla
         transEl.style.opacity = '0.88';
         transEl.style.transition = 'opacity 0.2s ease';
 
-        transEl.textContent = item.translation;
+        const tag = el.tagName.toLowerCase();
+        const isSelfLink = tag === 'a';
+        const isSelfButton = tag === 'button';
+
+        // 独立控件处理：若原节点本身就是 <a> 或 <button>，继承目标与属性并透传原生/框架点击事件
+        if (isSelfLink) {
+          const origHref = el.getAttribute('href');
+          if (origHref) transEl.setAttribute('href', origHref);
+          const origTarget = el.getAttribute('target');
+          if (origTarget) transEl.setAttribute('target', origTarget);
+          transEl.style.cursor = 'pointer';
+          transEl.addEventListener('click', (e) => {
+            e.preventDefault();
+            el.click();
+          });
+        } else if (isSelfButton) {
+          transEl.style.cursor = 'pointer';
+          transEl.addEventListener('click', (e) => {
+            e.preventDefault();
+            el.click();
+          });
+        }
+
+        // 检索原元素中的活动超链接与按钮
+        const childLinks = Array.from(el.querySelectorAll('a[href]')).filter((a) => {
+          return (a.innerText || a.textContent || '').trim().length > 0;
+        });
+        const childButtons = Array.from(el.querySelectorAll('button')).filter((b) => {
+          return (b.innerText || b.textContent || '').trim().length > 0;
+        });
+        const hasInteractive = childLinks.length > 0 || childButtons.length > 0;
+
+        if (!hasInteractive) {
+          transEl.textContent = item.translation;
+        } else {
+          // 解析占位符：支持 [a0]...[/a0] / [b0]...[/b0] 以及 <a0>...</a0> / <b0>...</b0>
+          const markerRegex = /\\[([ab])(\\d+)\\]([\\s\\S]*?)\\[\\/\\1\\2\\]|<([ab])(\\d+)>([\\s\\S]*?)<\\/\\4\\5>/gi;
+          let lastIdx = 0;
+          let match;
+          let markerCount = 0;
+
+          while ((match = markerRegex.exec(item.translation)) !== null) {
+            markerCount++;
+            if (match.index > lastIdx) {
+              transEl.appendChild(document.createTextNode(item.translation.slice(lastIdx, match.index)));
+            }
+            lastIdx = markerRegex.lastIndex;
+
+            const tagType = (match[1] || match[4] || '').toLowerCase();
+            const tagIdx = parseInt(match[2] || match[5], 10);
+            const tagText = match[3] || match[6] || '';
+
+            if (tagType === 'a' && tagIdx < childLinks.length) {
+              const origLink = childLinks[tagIdx];
+              const newLink = origLink.cloneNode(false);
+              newLink.removeAttribute('id');
+              newLink.removeAttribute('data-unyra-id');
+              newLink.textContent = tagText;
+              const href = origLink.getAttribute('href');
+              if (href) newLink.setAttribute('href', href);
+              const target = origLink.getAttribute('target');
+              if (target) newLink.setAttribute('target', target);
+              newLink.style.cursor = 'pointer';
+              newLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                origLink.click();
+              });
+              transEl.appendChild(newLink);
+            } else if (tagType === 'b' && tagIdx < childButtons.length) {
+              const origBtn = childButtons[tagIdx];
+              const newBtn = origBtn.cloneNode(false);
+              newBtn.removeAttribute('id');
+              newBtn.removeAttribute('data-unyra-id');
+              newBtn.textContent = tagText;
+              newBtn.style.cursor = 'pointer';
+              newBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                origBtn.click();
+              });
+              transEl.appendChild(newBtn);
+            } else {
+              transEl.appendChild(document.createTextNode(tagText));
+            }
+          }
+
+          if (lastIdx < item.translation.length) {
+            transEl.appendChild(document.createTextNode(item.translation.slice(lastIdx)));
+          }
+
+          // 容错兜底：若机翻引擎删除了标签占位符（markerCount === 0），以交互链接芯片形式追加在段末，绝不遗漏链接
+          if (markerCount === 0 && childLinks.length > 0) {
+            const tray = document.createElement('span');
+            tray.className = 'unyra-trans-links-tray';
+            tray.style.cssText = 'display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:6px;vertical-align:baseline;font-size:0.9em;';
+            for (const origLink of childLinks) {
+              const chip = origLink.cloneNode(false);
+              chip.className = 'unyra-trans-link-chip';
+              chip.removeAttribute('id');
+              chip.removeAttribute('data-unyra-id');
+              const href = origLink.getAttribute('href');
+              if (href) chip.setAttribute('href', href);
+              const target = origLink.getAttribute('target');
+              if (target) chip.setAttribute('target', target);
+              chip.textContent = '🔗 ' + (origLink.innerText || origLink.textContent || 'Link').trim();
+              chip.style.cssText = 'color:#6366f1;text-decoration:underline;cursor:pointer;opacity:0.9;';
+              chip.addEventListener('click', (e) => {
+                e.preventDefault();
+                origLink.click();
+              });
+              tray.appendChild(chip);
+            }
+            transEl.appendChild(tray);
+          }
+        }
 
         if (el.nextSibling) {
           el.parentNode.insertBefore(transEl, el.nextSibling);

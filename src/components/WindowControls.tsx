@@ -11,14 +11,14 @@
 
 import { useEffect, useState } from 'react'
 import { Minus, Square, Copy, X } from 'lucide-react'
-import { isElectron, native } from '../ai/http'
+import { isElectron, isMac, native } from '../ai/http'
 import { t } from '../i18n'
 
 export default function WindowControls() {
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
-    if (!isElectron()) return
+    if (!isElectron() || isMac()) return
     const w = native().window
     let alive = true
     void w.isMaximized().then((v) => {
@@ -32,7 +32,7 @@ export default function WindowControls() {
     }
   }, [])
 
-  if (!isElectron()) return null
+  if (!isElectron() || isMac()) return null
   const w = native().window
 
   const btn =

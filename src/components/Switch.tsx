@@ -13,9 +13,43 @@ interface Props {
   hint?: string
   /** 关掉的时候也显示（例如「当前不支持」），点了不生效 */
   disabled?: boolean
+  /** 极简无边框模式：无外层边框、圆角和背景色 */
+  bare?: boolean
 }
 
-export default function Switch({ on, onChange, label, hint, disabled }: Props) {
+export default function Switch({ on, onChange, label, hint, disabled, bare }: Props) {
+  const isBare = bare || (!label && !hint)
+
+  if (isBare) {
+    return (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        disabled={disabled}
+        onClick={() => onChange(!on)}
+        className={
+          'inline-flex items-center border-0 rounded-none bg-transparent p-0 transition cursor-pointer ' +
+          (disabled ? 'pointer-events-none opacity-50' : '')
+        }
+      >
+        <span
+          className={
+            'relative h-[18px] w-8 shrink-0 rounded-full transition ' +
+            (on ? 'bg-seal' : 'bg-line-strong/60')
+          }
+        >
+          <span
+            className={
+              'absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow-sm transition-all ' +
+              (on ? 'left-[16px]' : 'left-[2px]')
+            }
+          />
+        </span>
+      </button>
+    )
+  }
+
   return (
     <button
       type="button"

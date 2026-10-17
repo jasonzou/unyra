@@ -243,10 +243,13 @@ export function escapeHtml(s: string): string {
  */
 export function buildChipHtml(p: ChipPayload): string {
   const label = escapeHtml(chipLabel(p))
+  const hoverText = p.type === 'web'
+    ? (p.title && p.url ? `${p.title} (${p.url})` : p.title || p.url || label)
+    : (p.title || label)
   return (
     '<span class="moji-chip" data-moji-doc-chip="1" data-chip="' + escapeHtml(chipJson(p)) +
     '" data-token="' + escapeHtml(chipToken(p)) +
-    '" contenteditable="false" title="' + escapeHtml(chipToken(p)) + '">' +
+    '" contenteditable="false" title="' + escapeHtml(hoverText) + '">' +
     chipSvg(p.type) + '<span class="moji-chip-label">' + label + '</span></span>&nbsp;'
   )
 }

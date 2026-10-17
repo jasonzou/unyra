@@ -103,7 +103,7 @@ export function useDocOutline({ bodyRef, scrollRef, html }: Omit<OutlineOpts, 'r
       if (!raf) raf = requestAnimationFrame(measure)
     }
     box.addEventListener('scroll', onScroll, { passive: true })
-    measure()
+    raf = requestAnimationFrame(measure)
     return () => {
       box.removeEventListener('scroll', onScroll)
       if (raf) cancelAnimationFrame(raf)

@@ -15,6 +15,11 @@ import {
   setCachedTranslation,
   type TranslationEngine,
 } from './translationCache'
+import {
+  detectSourceLanguage,
+  isMyMemoryError,
+  normalizeLangForMyMemory,
+} from '../../../shared/translation'
 
 export type { TranslationEngine }
 
@@ -283,15 +288,25 @@ async function translateViaFast(text: string, targetLang: string): Promise<strin
     }
   }
 
-  // 纯浏览器端回退调用
+  // 纯浏览器端回退调用：MyMemory 不支持 auto，需检测源语言并过滤错误响应
   try {
-    const langpair = 'auto|' + targetLang
+    const srcLang = detectSourceLanguage(text, targetLang)
+    const normSrc = normalizeLangForMyMemory(srcLang)
+    const normTgt = normalizeLangForMyMemory(targetLang)
+    if (normSrc.toLowerCase() === normTgt.toLowerCase()) {
+      return text
+    }
+
+    const langpair = `${normSrc}|${normTgt}`
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(langpair)}`
     const res = await fetch(url)
     if (res.ok) {
-      const data = (await res.json()) as { responseData?: { translatedText?: string } }
+      const data = (await res.json()) as {
+        responseData?: { translatedText?: string }
+        responseStatus?: number | string
+      }
       const tr = data?.responseData?.translatedText?.trim()
-      if (tr && !tr.toUpperCase().includes('MYMEMORY WARNING') && tr !== text.trim()) {
+      if (tr && !isMyMemoryError(tr, data?.responseStatus) && tr !== text.trim()) {
         return tr
       }
     }
@@ -312,8 +327,12 @@ async function translateViaAi(text: string, targetLang: string): Promise<string>
   }
 
   const langLabel = getTargetLangLabel(targetLang)
+  const hasPlaceholders = /\[[ab]\d+\]/.test(text)
+  const placeholderInstruction = hasPlaceholders
+    ? '若文本中包含形如 [a0]...[/a0] 或 [b0]...[/b0] 的标签占位符，必须在译文中完整保留这些标签并包裹在对应译文词句两端，切勿删除或翻译标签名称。\n'
+    : ''
   const prompt = `你是一个专业严谨的翻译引擎。请将以下内容翻译为${langLabel}。
-要求：准确、地道、通顺，保持专业术语和代码标记不变，禁止输出任何思考过程、思维链、前后缀或多余解释，只输出译文本身：\n\n${text}`
+要求：准确、地道、通顺，保持专业术语和代码标记不变，${placeholderInstruction}禁止输出任何思考过程、思维链、前后缀或多余解释，只输出译文本身：\n\n${text}`
 
   const resolved = resolveDraft(provider)
   const result = await chatCompleteWith(resolved, model, {
@@ -340,8 +359,12 @@ async function translateChunkWithAi(
 
   const langLabel = getTargetLangLabel(targetLang)
   const paragraphsText = chunk.map((c, idx) => `[${idx + 1}] ${c.text}`).join('\n\n')
+  const hasPlaceholders = chunk.some((c) => /\[[ab]\d+\]/.test(c.text))
+  const placeholderInstruction = hasPlaceholders
+    ? '若段落中包含形如 [a0]...[/a0] 或 [b0]...[/b0] 的标签占位符，必须在译文中完整保留这些标签并包裹在对应译文词句两端，切勿删除或翻译标签名称。\n'
+    : ''
   const prompt = `你是一个高质量翻译引擎。请将以下按序号给出的 ${chunk.length} 个段落逐段翻译为${langLabel}。
-要求：保持专业术语、代码标记与原意，严禁输出任何思考过程、思维链或解释说明，严格输出为包含 translations 字符串数组的 JSON 对象，格式如：
+要求：保持专业术语、代码标记与原意，${placeholderInstruction}严禁输出任何思考过程、思维链或解释说明，严格输出为包含 translations 字符串数组的 JSON 对象，格式如：
 {"translations": ["第1段译文", "第2段译文"]}
 
 待翻段落：

@@ -33,16 +33,16 @@ files:
   - package.json
   - '!node_modules/**/*'
   - 'node_modules/sherpa-onnx-node/**/*'
-  - 'node_modules/sherpa-onnx-win-x64/**/*'
+  - 'node_modules/sherpa-onnx-*/**/*'
   # 源码映射不进包：发布构建本来就不生成，这里再兜一道（免得哪天手工构建时漏进去）
   - '!**/*.map'
 
 asar: true # 资源打进单文件包；Electron 对 fs / nativeImage 的读取是 asar 透明的
-# 原生模块（.node/.dll）必须解到 asar 外面：操作系统加载 DLL 走的是文件系统，
+# 原生模块（.node/.dll/.dylib）必须解到 asar 外面：操作系统加载动态链接库走的是文件系统，
 # 认不出 asar 里的虚拟路径
 asarUnpack:
   - 'node_modules/sherpa-onnx-node/**/*'
-  - 'node_modules/sherpa-onnx-win-x64/**/*'
+  - 'node_modules/sherpa-onnx-*/**/*'
 
 win:
   target:
@@ -63,6 +63,36 @@ nsis:
   # 这个目录由 electron/main.ts 用 setPath 钉死（不走 app.getName()），所以上面改 productName
   # 只是换个显示名，数据一个字节都不会挪窝。
   deleteAppDataOnUninstall: false
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.education
+  icon: build/icon.png # 由 public/logo.svg 生成，electron-builder 会自动转成多尺寸 icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  extendInfo:
+    NSMicrophoneUsageDescription: "归一 Unyra 需要麦克风权限以提供实时语音识别与输入功能"
+    NSScreenCaptureDescription: "专注守卫模式需要屏幕捕获权限以检测分心窗口"
+
+dmg:
+  title: "${productName} ${version}"
+  artifactName: "Unyra-${version}-Mac-${arch}.${ext}"
+  contents:
+    - x: 130
+      y: 220
+      type: file
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
 
 # 更新分发：安装包与版本元数据（latest.yml）传到开源仓库（本仓库）的 Releases；
 # electron-updater 的 GitHub provider 匿名去 releases 里取 latest.yml 与安装包，

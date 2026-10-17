@@ -4,6 +4,7 @@ import type { DocView } from '../../learn/types'
 import { extOf, fileNameOf, isMediaFile, isPreviewable } from '../../learn/tabs'
 import { readLocalFile, readLocalMediaFile } from '../../lib/localFiles'
 import { renderNoteGfm } from '../../lib/markdown'
+import { maskChipTokens, restoreChipTokens } from '../../lib/chipSyntax'
 import { countVisibleWords, countVisibleWordsFromHtml } from '../../lib/wordCount'
 import { createLocalDocImageResolver } from '../../lib/docImages'
 import { copySelectionAsMarkdown } from '../../lib/copySource'
@@ -12,6 +13,7 @@ import type { OutlineHandle } from '../../lib/outline'
 import MarkdownView from '../MarkdownView'
 import SourceEditor, { type SaveState } from './SourceEditor'
 import { DocStatChip } from './DocFloat'
+import ZenResizeHandles from './workspace/ZenResizeHandles'
 import { useDocOutline } from './note/useDocView'
 import { t } from '../../i18n'
 
@@ -216,7 +218,11 @@ export default function LocalDoc({
   // 预览也读暂存区那一份：改了正文切到预览却还是旧的，是最容易让人以为「没生效」的一种。
   // 外部 md 走 GFM 严格语义（软换行不折行）：徽章这类「一行一个」的写法在预览里
   // 要像 GitHub 那样并排流开，而不是被 <br> 摞成一列（见 lib/markdown 的 renderNoteGfm）
-  const html = useMemo(() => (previewable && path.toLowerCase().endsWith('.md') ? renderNoteGfm(text) : ''), [text, previewable, path])
+  const html = useMemo(() => {
+    if (!previewable || !path.toLowerCase().endsWith('.md')) return ''
+    const { masked, tokens } = maskChipTokens(text)
+    return restoreChipTokens(renderNoteGfm(masked), tokens)
+  }, [text, previewable, path])
   const isHtml = /\.html?$/i.test(path)
   /**
    * 文档旁边的图片（相对路径引用，如 `![图](hero.png)`）：按这份外部文件**自己的目录**
@@ -352,14 +358,15 @@ export default function LocalDoc({
         <span className="tabular-nums">{t('{0} 字', wordCount)}</span>
       </DocStatChip>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {/* 复制同样走源文：预览里选的这一段，进剪贴板的该是它 Markdown 的样子（见 lib/copySource） */}
         <div
           ref={bodyRef}
-          className="note-preview moji-node-note doc-measure px-7 py-6"
+          className="note-preview moji-node-note doc-measure relative px-7 py-6"
           style={{ '--doc-scale': scale } as CSSProperties}
           onCopy={(e) => copySelectionAsMarkdown(e, e.currentTarget, text)}
         >
+          <ZenResizeHandles />
           <MarkdownView html={html} resolveLocalImage={resolveLocalImage} />
         </div>
       </div>

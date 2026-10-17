@@ -1,4 +1,3 @@
-import { BrowserWindow } from 'electron'
 import { execFile } from 'node:child_process'
 
 /**
@@ -12,9 +11,15 @@ import { execFile } from 'node:child_process'
  *    - 超时或失败则安全回退，绝不卡死。
  */
 export async function getFocusedAppName(): Promise<string> {
-  const focusedWin = BrowserWindow.getFocusedWindow()
-  if (focusedWin && !focusedWin.isDestroyed()) {
-    return 'Unyra (当前学习应用)'
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const electron = require('electron')
+    const focusedWin = electron?.BrowserWindow?.getFocusedWindow?.()
+    if (focusedWin && !focusedWin.isDestroyed?.()) {
+      return 'Unyra (当前学习应用)'
+    }
+  } catch {
+    // not running in electron or no window
   }
 
   if (process.platform === 'win32') {
