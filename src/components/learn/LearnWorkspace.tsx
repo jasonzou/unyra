@@ -23,7 +23,6 @@
 import {
   Fragment,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -154,7 +153,7 @@ import ExportDialog from './ExportDialog'
 import FloatWindow from '../FloatWindow'
 import { usePresence } from '../../lib/presence'
 import ExamCopyView from './ExamCopyView'
-import OutlineView from './OutlineView'
+import { OutlinePane } from './workspace/OutlinePane'
 import { pruneImages } from '../../learn/images'
 import { dropDrafts } from '../../learn/drafts'
 import { queueOf, shouldEnqueue } from '../../learn/agentQueue'
@@ -306,7 +305,6 @@ export default function LearnWorkspace({
    * - docs.layout / docs.groups：界面按它把几格摆出来（见下面的 renderLayout）。
    */
   const docs = store.docArea
-  const deferredDocs = useDeferredValue(docs)
   const [outlineFocus, setOutlineFocus] = useState<{ nodeId: string; nonce: number } | null>(null)
   /** 全部页签，按**布局顺序**排——它仍是「页签是否已被打开过」的判据（见 openTab / 常驻名额） */
   const tabs = useMemo(() => allTabs(docs), [docs])
@@ -3232,9 +3230,30 @@ export default function LearnWorkspace({
    * 只是不改写父文档的链接——大纲条目不是正文里的词，没有可替换的链接。
    * 建出来的节点 key 与条目一致（都来自标题），大纲页靠它对上号。
    */
-  const createOutlineChild = (parentNode: KnowledgeNode, entry: OutlineEntry) => {
-    openConcept(parentNode.id, entry.title, { hint: entry.summary, rewriteLink: false })
-  }
+  const createOutlineChild = useCallback(
+    (parentNode: KnowledgeNode, entry: OutlineEntry) => {
+      openConcept(parentNode.id, entry.title, { hint: entry.summary, rewriteLink: false })
+    },
+    [openConcept],
+  )
+
+  const handleOpenOutlineNode = useCallback(
+    (id: string) => {
+      openTab({ kind: 'teach', nodeId: id })
+    },
+    [openTab],
+  )
+
+  const handleGenerateOutline = useCallback(
+    (n: KnowledgeNode) => {
+      startOutline(n.id)
+    },
+    [startOutline],
+  )
+
+  const handleOutlineFocusHandled = useCallback(() => {
+    setOutlineFocus(null)
+  }, [])
 
   // 保存：Ctrl+S 交给快捷键模块（见 lib/shortcuts）——改键与冲突检测都归它管，
   // 写死在这里的话，用户在设置里改的那一条就成了一句空话。
@@ -3609,8 +3628,8 @@ export default function LearnWorkspace({
 
   const renderGroup = (groupId: string) => {
     const g = paneInfo(store, docs, groupId, examTabTitle)
-    const dg = paneInfo(store, deferredDocs, groupId, examTabTitle)
-    const gTab = dg.tab
+    const dg = g
+    const gTab = g.tab
     /** 这一格显示的页签 id；回调里用（TS 的收窄穿不进闭包，见下面几处 onChange） */
     const gTabId = gTab?.id ?? ''
     /** 记忆页签携带的目标 id：同上，闭包里用（goalId 缺省只在页签不是记忆页时发生） */
@@ -4166,26 +4185,22 @@ export default function LearnWorkspace({
               if (!oNode) return null
               const isActive = gTab?.id === tab.id
               return (
-                <div
+                <OutlinePane
                   key={tab.id}
-                  data-outline-pane={isActive ? 'active' : 'idle'}
-                  className={isActive ? 'relative flex min-h-0 flex-1 flex-col' : 'hidden'}
-                  {...(!isActive ? { hidden: true } : {})}
-                >
-                  <OutlineView
-                    store={store}
-                    node={oNode}
-                    onOpenNode={(id) => openTab({ kind: 'teach', nodeId: id })}
-                    onCreateChild={createOutlineChild}
-                    onGenerate={(n) => startOutline(n.id)}
-                    onSetTint={setNodeTint}
-                    docs={explorerDocs}
-                    exams={explorerExams}
-                    activeTab={gTab?.ref ?? null}
-                    focusTarget={outlineFocus}
-                    onFocusHandled={() => setOutlineFocus(null)}
-                  />
-                </div>
+                  tabId={tab.id}
+                  active={isActive}
+                  store={store}
+                  node={oNode}
+                  onOpenNode={handleOpenOutlineNode}
+                  onCreateChild={createOutlineChild}
+                  onGenerate={handleGenerateOutline}
+                  onSetTint={setNodeTint}
+                  docs={explorerDocs}
+                  exams={explorerExams}
+                  activeTab={gTab?.ref ?? null}
+                  focusTarget={outlineFocus}
+                  onFocusHandled={handleOutlineFocusHandled}
+                />
               )
             })}
           </div>
