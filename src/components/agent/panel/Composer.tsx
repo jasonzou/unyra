@@ -615,7 +615,7 @@ export function Composer(props: ComposerProps) {
               <span className="shrink-0">· {t('子会话只读')}</span>
             </span>
           )}
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
             {subAgentSlot}
             {!subMode && <ModelPicker onChanged={onModelChanged} />}
             {!subMode && strategySlot}
@@ -627,8 +627,6 @@ export function Composer(props: ComposerProps) {
                 }}
               />
             )}
-          </div>
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {/*
               发送键那两个分支的规矩：
 
@@ -648,7 +646,7 @@ export function Composer(props: ComposerProps) {
                 title={t('排进等待队列（当前回答结束后自动发送）')}
                 onClick={submit}
                 disabled={slash.active}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-seal/60 bg-seal/5 text-seal-deep shadow-none transition hover:border-seal hover:bg-seal/15 disabled:pointer-events-none disabled:opacity-35"
+                className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-seal/60 bg-seal/5 text-seal-deep shadow-none transition hover:border-seal hover:bg-seal/15 disabled:pointer-events-none disabled:opacity-35"
               >
                 <ArrowUp size={15} />
               </button>
@@ -658,7 +656,7 @@ export function Composer(props: ComposerProps) {
                 type="button"
                 title={t('停止')}
                 onClick={onStop}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-paper text-ink-soft shadow-sm transition hover:border-seal/50 hover:text-seal"
+                className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-paper text-ink-soft shadow-sm transition hover:border-seal/50 hover:text-seal"
               >
                 <Square size={13} />
               </button>
@@ -672,7 +670,7 @@ export function Composer(props: ComposerProps) {
                  * 已经被拦下，这颗按钮是同一道闸的鼠标侧）。
                  */
                 disabled={!!subMode || slash.active || !hasDraft}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-paper shadow-sm transition hover:bg-ink-strong disabled:pointer-events-none disabled:opacity-35"
+                className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-paper shadow-sm transition hover:bg-ink-strong disabled:pointer-events-none disabled:opacity-35"
               >
                 <ArrowUp size={15} />
               </button>

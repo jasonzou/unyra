@@ -287,7 +287,7 @@ export default function ModelPicker({ onChanged }: Props) {
           setLeaving(null)
         }}
         title={t('切换提供商与模型')}
-        className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-lg px-2 text-[11.5px] text-ink-soft transition hover:text-ink"
+        className="flex h-8 max-w-[240px] items-center gap-1.5 rounded-lg pl-2 pr-1 text-[11.5px] text-ink-soft transition hover:text-ink"
       >
         <ProviderLogo
           id={provider?.id}

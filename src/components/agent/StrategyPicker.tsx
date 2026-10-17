@@ -246,8 +246,8 @@ export default function StrategyPicker({ persona, onPickPersona, docFormat, onPi
           setLeaving(null)
         }}
         className={
-          'flex h-8 shrink-0 items-center justify-center rounded-lg px-2.5 transition ' +
-          (open ? 'bg-line/60 text-ink' : 'text-ink-soft hover:text-ink')
+          'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition ' +
+          (open ? 'bg-line/60 text-ink' : 'text-ink-soft hover:text-ink hover:bg-line/40')
         }
       >
         {/* 滑杆（SlidersHorizontal）：写作策略的隐喻——「这一篇怎么教、怎么写」的两个开关 */}

@@ -229,7 +229,7 @@ export default function MicButton({ onText }: Props) {
           void startRecording()
         }}
         className={
-          'relative flex h-8 w-8 items-center justify-center rounded-lg transition ' +
+          'relative flex h-7 w-7 items-center justify-center rounded-md transition ' +
           (recording
             ? 'bg-seal/15 text-seal ring-2 ring-seal/40 shadow-sm'
             : working
