@@ -17,7 +17,7 @@ import { useClock } from '../../../lib/clock'
 import { nodeById, pathToRoot } from '../../../learn/graph'
 import { plainSnippet } from '../../../learn/text'
 import { pendingFromFile, pendingFromRead } from '../../../learn/attachments'
-import { isElectron, native } from '../../../lib/native'
+import { isElectron, isMac, native } from '../../../lib/native'
 import { NO_AUTOFILL } from '../../../lib/autofill'
 import { useClampToViewport, useDismissOn } from '../../../lib/useDismiss'
 import {
@@ -119,7 +119,12 @@ export function Topbar({
       取 20 是留出层次：正文浮层（z-30）在它上面，移动端抽屉与其遮罩（z-30/40）、
         各类弹窗（z-50/60）也在它上面。
       */}
-      <div className="app-drag no-print relative z-20 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-gradient-to-b from-card/90 to-paper/70 px-3">
+      <div
+        className={
+          'app-drag no-print relative z-20 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-gradient-to-b from-card/90 to-paper/70 px-3 ' +
+          (isMac() ? 'pl-[76px]' : '')
+        }
+      >
       <button
         type="button"
         title={t('打开知识节点')}

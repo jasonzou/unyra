@@ -27,6 +27,7 @@
     "lint": "oxlint",
     "start": "electron .",
     "release:win": "node scripts/release.mjs",
+    "release:mac": "npm run build && electron-builder --mac",
     "release:publish": "node scripts/release.mjs --publish",
     "release:verify": "node scripts/verify-release.mjs",
     "serve:updates": "node scripts/serve-updates.mjs",

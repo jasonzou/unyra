@@ -376,7 +376,9 @@ async function recognizerFor(language: string, gpu: boolean): Promise<InstanceTy
       tokens: filePath(MODEL_TOKENS),
       // 2 线程：一段 5 秒的话在这台机器上约 0.2 秒，再多线程收益很小、还会跟界面抢核
       numThreads: 2,
-      provider: gpu ? 'directml' : 'cpu',
+      provider: gpu
+        ? (process.platform === 'darwin' ? 'coreml' : (process.platform === 'win32' ? 'directml' : 'cpu'))
+        : 'cpu',
       debug: false,
     },
   })
@@ -393,7 +395,20 @@ async function transcribe(req: VoiceTranscribeRequest): Promise<VoiceTranscribeR
   const capped = samples.length > rate * MAX_SECONDS ? samples.subarray(0, rate * MAX_SECONDS) : samples
   const language = LANGUAGES.has(req.language) ? req.language : 'auto'
   try {
-    const rec = await recognizerFor(language, req.gpu === true)
+    let rec: InstanceType<Sherpa['OfflineRecognizer']>
+    let actualGpu = req.gpu === true
+    try {
+      rec = await recognizerFor(language, actualGpu)
+    } catch (gpuErr) {
+      if (actualGpu) {
+        // GPU 初始化失败（如 macOS 不含 CoreML 或驱动不支持），自动降级到 CPU
+        console.warn('[voice] GPU provider failed, falling back to CPU:', gpuErr)
+        actualGpu = false
+        rec = await recognizerFor(language, false)
+      } else {
+        throw gpuErr
+      }
+    }
     const stream = rec.createStream()
     ;(stream as { acceptWaveform: (o: { sampleRate: number; samples: Float32Array }) => void }).acceptWaveform({
       sampleRate: rate,
@@ -401,7 +416,7 @@ async function transcribe(req: VoiceTranscribeRequest): Promise<VoiceTranscribeR
     })
     rec.decode(stream)
     const text = (rec.getResult(stream).text ?? '').trim()
-    return { ok: true, text, backend: req.gpu ? 'gpu' : 'cpu', ms: Date.now() - started }
+    return { ok: true, text, backend: actualGpu ? 'gpu' : 'cpu', ms: Date.now() - started }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     // 建识别器失败最常见的原因是模型文件坏了：说清「重新下载一次」比抛一句 onnx 报错有用
@@ -416,6 +431,9 @@ async function transcribe(req: VoiceTranscribeRequest): Promise<VoiceTranscribeR
 let gpuInfo: Promise<{ hasGpu: boolean; name: string }> | null = null
 
 async function detectGpu(): Promise<{ hasGpu: boolean; name: string }> {
+  if (process.platform === 'darwin') {
+    return { hasGpu: true, name: 'Apple Silicon / Metal GPU' }
+  }
   try {
     const info = (await app.getGPUInfo('basic')) as { gpuDevice?: Array<{ deviceString?: string; vendorId?: number }> }
     const device = info.gpuDevice?.find((d) => (d.vendorId ?? 0) !== 0x1414) // 1414 = Microsoft 基本显示适配器

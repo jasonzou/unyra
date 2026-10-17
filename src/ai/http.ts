@@ -25,7 +25,7 @@ import { isElectron, native } from '../lib/native'
 import { toProxyUrl } from '../../electron/proxy-core'
 
 /** preload 注入的原生桥；定义见 src/lib/native.ts（这里转出去，保持既有引用路径） */
-export { isElectron, native, type NativeBridge } from '../lib/native'
+export { isElectron, isMac, native, type NativeBridge } from '../lib/native'
 
 /**
  * 把目标地址改写成经主进程转发的地址。

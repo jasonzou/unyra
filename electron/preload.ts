@@ -90,6 +90,8 @@ export type StorageImageResult = { ok: true; dataUrl: string | null } | StorageF
 const api = {
   /** 是否运行在 Electron 壳里。渲染层的 http 层据此选择直连还是走主进程 */
   isElectron: true as const,
+  /** 当前宿主操作系统平台（'win32' | 'darwin' | 'linux'） */
+  platform: process.platform as 'win32' | 'darwin' | 'linux',
 
   /**
    * 界面语言（zh / en）。语言状态的拥有者是渲染层：挂载时与每次切换都推一份过来，

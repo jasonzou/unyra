@@ -68,6 +68,7 @@ export type StorageList = { ok: true; entries: StorageEntry[] } | StorageFail
 
 export interface NativeBridge {
   isElectron: true
+  platform: 'win32' | 'darwin' | 'linux'
   /** 同步代理白名单；每一项是 `协议//host`（见 ai/http 的 originOfBaseUrl）。
    *  主进程据此收紧 llm-proxy 白名单——不做开放代理。 */
   setProxyHosts(hosts: string[]): Promise<string[]>
@@ -485,3 +486,11 @@ export const native = (): NativeBridge => {
 }
 
 export const isElectron = (): boolean => typeof window !== 'undefined' && !!window.mojiNative
+
+/** 判定当前运行环境是否为 macOS（Electron 壳内以 platform 为准，浏览器以 userAgent 为准） */
+export const isMac = (): boolean => {
+  if (isElectron()) {
+    return window.mojiNative?.platform === 'darwin'
+  }
+  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
+}

@@ -26,13 +26,14 @@ import { attachCloseGuard } from './tray'
  * 纯属浪费，还可能让系统的「正在共享」提示多挂一份。
  */
 function attachLoopbackAudio(): void {
+  const supportsLoopback = process.platform === 'win32'
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     void desktopCapturer
       .getSources({ types: ['screen'] })
       .then((sources) =>
         callback({
           video: sources[0],
-          ...(request.audioRequested ? { audio: 'loopback' as const } : {}),
+          ...(request.audioRequested && supportsLoopback ? { audio: 'loopback' as const } : {}),
         }),
       )
   })
@@ -40,6 +41,7 @@ function attachLoopbackAudio(): void {
 
 export async function createWindow(): Promise<void> {
   const state = await loadWindowState()
+  const isMac = process.platform === 'darwin'
 
   const win = new BrowserWindow({
     x: state.x,
@@ -55,7 +57,14 @@ export async function createWindow(): Promise<void> {
     // 这是壳上唯一一处 logo；不设的话显示的是 Electron 默认那个原子图标
     icon: appIcon(),
     show: false,
-    frame: false,
+    ...(isMac
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 14, y: 16 },
+        }
+      : {
+          frame: false,
+        }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
