@@ -39,9 +39,6 @@ function sameOutlineView(prev: OutlineViewProps, next: OutlineViewProps): boolea
   if (prev.node !== next.node) return false
   if (prev.store.nodes !== next.store.nodes || prev.store.edges !== next.store.edges || prev.store.exams !== next.store.exams) return false
   if (prev.focusTarget !== next.focusTarget) return false
-  if (prev.docs !== next.docs || prev.exams !== next.exams) return false
-  if (prev.onOpenNode !== next.onOpenNode || prev.onCreateChild !== next.onCreateChild) return false
-  if (prev.onGenerate !== next.onGenerate || prev.onSetTint !== next.onSetTint) return false
   return true
 }
 

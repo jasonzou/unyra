@@ -15,7 +15,7 @@
  * 2. 交卷之后由**这里**触发判分+讲解那套工作流：判分要读刚交上来的卷子，
  *    而「什么时候算交卷」只有这里知道。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { native } from '../lib/native'
 import type { Exam, ExamAnswer, ExamAttempt, ExamKind, ExamLevel, ExamQuestion } from './exam'
 import { examTotalPoints } from './exam'
@@ -302,5 +302,5 @@ export function useExamBridge(opts: {
     }
   }, [])
 
-  return { openExam, reveal, live }
+  return useMemo(() => ({ openExam, reveal, live }), [openExam, reveal, live])
 }

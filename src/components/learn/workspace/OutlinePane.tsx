@@ -44,7 +44,6 @@ function sameOutlinePane(prev: OutlinePaneProps, next: OutlinePaneProps): boolea
   if (prev.focusTarget !== next.focusTarget) return false
   if (prev.node !== next.node) return false
   if (prev.store.nodes !== next.store.nodes || prev.store.edges !== next.store.edges) return false
-  if (prev.docs !== next.docs || prev.exams !== next.exams) return false
   return true
 }
 

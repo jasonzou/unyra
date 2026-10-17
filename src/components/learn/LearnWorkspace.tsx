@@ -4420,7 +4420,7 @@ export default function LearnWorkspace({
       liveExamId: exam.live?.examId ?? null,
       grading,
     }),
-    [exam, selectNode, onToast, requestGrading, grading],
+    [exam.openExam, exam.reveal, exam.live, selectNode, onToast, requestGrading, grading],
   )
 
   /**
