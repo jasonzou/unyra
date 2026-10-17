@@ -31,6 +31,7 @@ import {
   type ComponentProps,
   type ReactNode,
 } from 'react'
+import { ExternalLink, Globe } from 'lucide-react'
 import type {
   DocKind,
   DocView,
@@ -205,7 +206,7 @@ import { requestReveal } from './explorer/reveal'
 import { focusAgentInput } from '../../lib/agentFocus'
 import { moveTabMark, resetTabMark } from '../../lib/tabMark'
 import { setChipOpener, type ChipPayload } from '../../lib/docChip'
-import { setWebLinkHandler } from '../../lib/externalLink'
+import { openExternalLink, setWebLinkHandler } from '../../lib/externalLink'
 import { tabRefFromChip } from '../../learn/chipRef'
 import { CHIP_MIME, parseChipJson } from '../../lib/chipSyntax'
 import TabBar from './TabBar'
@@ -218,7 +219,7 @@ import { superDocsOf } from '../../learn/types'
 import { findMethod, runMethodEntry } from '../../learn/methods'
 import { learnSandboxOps } from '../../learn/useAgent'
 import { buildStandaloneApi } from '../../agent/tools'
-import { isElectron, native } from '../../lib/native'
+import { isElectron, isWeb, native } from '../../lib/native'
 import DocFloat from './DocFloat'
 import GuardView from './GuardView'
 import FocusReportView from './FocusReportView'
@@ -1002,8 +1003,8 @@ export default function LearnWorkspace({
         return { opened: true }
       },
     },
-    // browser.*：依赖在 web 块里（openWebTab / webMeta 声明在 useAgent 之后），这里只给取法
-    browserDeps: () => browserDepsRef.current ?? undefined,
+    // browser.*：依赖在 web 块里（openWebTab / webMeta 声明在 useAgent 之后），WebUI 模式下不支持内置浏览器
+    browserDeps: () => (isWeb() ? undefined : (browserDepsRef.current ?? undefined)),
   })
 
   /* ---------- agent 栏页签（见 learn/agentTabs 与 AgentTabStrip） ---------- */
@@ -1470,6 +1471,12 @@ export default function LearnWorkspace({
    */
   const openTab = useCallback(
     (targetRef: TabRef) => {
+      if (isWeb() && targetRef.kind === 'web') {
+        if (targetRef.url) {
+          void openExternalLink(targetRef.url)
+        }
+        return
+      }
       const s = getLatest()
       let ref = targetRef
       const initialNodeId = tabNodeId(ref)
@@ -1689,9 +1696,16 @@ export default function LearnWorkspace({
    */
   const openWebTab = useCallback(
     (url: string): string => {
+      const targetUrl = normalizeWebInput(url)
+      if (isWeb()) {
+        if (targetUrl) {
+          void openExternalLink(targetUrl)
+        }
+        return ''
+      }
       const s = getLatest()
       // ref 当场算好（页签身份就是 tabKey），开完直接回页签 id——browser.open 靠它指名
-      const ref: TabRef = { kind: 'web', url: normalizeWebInput(url), key: newWebKey() }
+      const ref: TabRef = { kind: 'web', url: targetUrl, key: newWebKey() }
       const opened = openInGroup(s.docArea, s.docArea.focus, ref, Date.now(), undefined, (id) => nodeById(s, id)?.goalId ?? null)
       // 网页页签不属于任何目标（公共）：登记成公共，切目标时它留栏上（见 groups/goals）
       set({ ...s, docArea: withOwners(opened, claimTab(opened.tabOwners, PUBLIC_OWNER, tabKey(ref))) })
@@ -3349,6 +3363,7 @@ export default function LearnWorkspace({
    */
   useShortcut('web.newTab', {
     down: () => {
+      if (isWeb()) return
       const s = getLatest()
       const group = focusedGroup(s.docArea)
       const active = group?.tabs.find((x) => x.id === group.active)
@@ -3564,6 +3579,7 @@ export default function LearnWorkspace({
 
   const openWebInPlace = useCallback(
     (groupId: string, currentTabId: string) => {
+      if (isWeb()) return
       openInPlace(groupId, currentTabId, { kind: 'web', url: '', key: newWebKey() })
     },
     [openInPlace],
@@ -3635,6 +3651,8 @@ export default function LearnWorkspace({
     const gTabId = gTab?.id ?? ''
     /** 记忆页签携带的目标 id：同上，闭包里用（goalId 缺省只在页签不是记忆页时发生） */
     const gMindGoalId = gTab?.ref.kind === 'mind' ? gTab.ref.goalId : ''
+    /** 网页页签携带的 URL：闭包里用（TS 的收窄穿不进闭包） */
+    const gWebUrl = gTab?.ref.kind === 'web' ? gTab.ref.url : ''
     const isFocused = groupId === docs.focus
     const gExam = examCopyOf(store, gTab)
     const panes = residentPanes.filter((p) => p.group === groupId)
@@ -3749,8 +3767,8 @@ export default function LearnWorkspace({
                 onDropChip={openChipInGroup(groupId)}
                 // 棱形只在焦点格的栏上跟着右键走（见 lib/tabMark）
                 focused={isFocused}
-                // 栏上空白处的右键菜单要开新网页页签（见 TabBar 的 BarMenu）
-                onOpenWebTab={() => openWebTab('')}
+                // 栏上空白处的右键菜单要开新网页页签（见 TabBar 的 BarMenu）；WebUI 模式下不提供
+                onOpenWebTab={isWeb() ? undefined : () => openWebTab('')}
                 // 「新页签」就长在最后一枚页签后面（原先在顶栏，见 TabBar 的 onNewTab）
                 onNewTab={() => openBlankTab()}
                 store={store}
@@ -3826,8 +3844,27 @@ export default function LearnWorkspace({
               /*
                 网页页签：正文不归 React 画（guest 进程自己渲染），由下面挂着的
                 WebTabLayer 常驻层显示——这里只让出位置，别画任何东西。
+                WebUI 模式下不支持内置浏览器，展示在当前浏览器中打开的引导卡片。
               */
-              null
+              isWeb() ? (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-card p-6 text-center select-none">
+                  <Globe size={32} className="text-seal/70" />
+                  <div className="text-[14px] font-semibold text-ink-strong">{t('WebUI 模式不支持内置浏览器')}</div>
+                  <p className="max-w-md text-[12px] text-ink-faint">
+                    {gWebUrl ? t('该网页可在当前浏览器新标签页中打开访问。') : t('WebUI 模式下请直接在当前浏览器中浏览网页。')}
+                  </p>
+                  {gWebUrl && (
+                    <button
+                      type="button"
+                      onClick={() => void openExternalLink(gWebUrl)}
+                      className="flex items-center gap-1.5 rounded-lg bg-seal px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-seal-deep cursor-pointer"
+                    >
+                      <ExternalLink size={13} />
+                      {t('在当前浏览器打开')}
+                    </button>
+                  )}
+                </div>
+              ) : null
             ) : gTab?.ref.kind === 'blank' ? (
               /*
                 空白页签（底页）：显示无页签引导卡片（打开本地文件 / 浏览网络 / 新建目标），
@@ -3836,7 +3873,7 @@ export default function LearnWorkspace({
               <EmptyDoc
                 onNewFile={() => openNewFileInPlace(groupId, gTab.id)}
                 onPickLocal={() => void pickLocalInPlace(groupId, gTab.id)}
-                onOpenWeb={() => openWebInPlace(groupId, gTab.id)}
+                onOpenWeb={isWeb() ? undefined : () => openWebInPlace(groupId, gTab.id)}
                 onNewGoal={() => openNewGoalInPlace(groupId, gTab.id)}
                 // 收藏 / 最近打开两栏（原侧栏的「最近打开」区挪到这里，见 EmptyDoc）
                 favorites={store.favorites ?? []}
@@ -4067,7 +4104,7 @@ export default function LearnWorkspace({
             ) : (
               <EmptyDoc
                 onPickLocal={() => void pickLocalInPlace(groupId, gTabId)}
-                onOpenWeb={() => openWebInPlace(groupId, gTabId)}
+                onOpenWeb={isWeb() ? undefined : () => openWebInPlace(groupId, gTabId)}
                 onNewGoal={() => openNewGoalInPlace(groupId, gTabId)}
                 favorites={store.favorites ?? []}
                 favoriteTitleOf={favoriteTitleOf}
@@ -4144,7 +4181,7 @@ export default function LearnWorkspace({
             网页层（见 components/learn/web/WebTabLayer）：常挂在格子里、切去文档时
             整层藏起来（guest 进程照跑）。z-10 盖过正文，又在拖放高亮（z-30）之下。
           */}
-          {gWebTabs.length > 0 && (
+          {!isWeb() && gWebTabs.length > 0 && (
             <WebTabLayer
               tabs={gWebTabs}
               activeId={gTab?.ref.kind === 'web' ? gTab.id : null}
