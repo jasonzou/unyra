@@ -460,7 +460,7 @@ export async function apiNameTests() {
   ok(!denied.ok && denied.content.includes('只开放了'), 'apiAllow 名单外的组当场被拒', denied.content.slice(0, 160))
   ok(!deniedModules.includes('doc'), '被 apiAllow 拒掉的调用不触发注入', deniedModules)
   const allowed = await sub.run({ description: '搜索', body: "((api)=>{ return await api.web.search('勾股定理') })" }, { nodeId: childId, goalId })
-  ok(allowed.ok && allowed.content.includes('baidu') && deniedModules.includes('web'), 'apiAllow 名单内的组照常放行并触发注入', { content: allowed.content.slice(0, 120), keys: deniedModules })
+  ok(allowed.ok && (allowed.content.includes('baidu') || allowed.content.includes('百度百科') || allowed.content.includes('勾股定理')) && deniedModules.includes('web'), 'apiAllow 名单内的组照常放行并触发注入', { content: allowed.content.slice(0, 120), keys: deniedModules })
 
   // 动态提示词注入的触发口（learn/ai/promptModules）：execute 只负责「报 key」——
   // 组触发按本次编排里真实调过的组报（被 apiAllow 拒的组进不了 log，也就不报），

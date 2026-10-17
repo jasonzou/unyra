@@ -39,7 +39,6 @@ const API_NAMES = [
   'code.silent',
   // 网络搜索与网页抓取（基于 DeepSeek 官方 Search API 与 Fetch API）
   'fetch',
-  'web.fetch',
   'web.search',
   // 内置浏览器：网页页签的打开 / 管理 / 快照与阅读 / 受控 DOM 操作 / 截图（见 learn/web/browserOps）
   'browser.open',
