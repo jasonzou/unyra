@@ -13,7 +13,7 @@ export const mcpRouter = new Hono()
 function getCtx(): McpStdioCtx {
   return {
     cwd: currentRoot(),
-    clientVersion: '0.6.4-web',
+    clientVersion: '0.6.5-web',
   }
 }
 

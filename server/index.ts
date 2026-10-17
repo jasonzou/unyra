@@ -42,7 +42,7 @@ app.route('/api/audio', audioRouter)
 app.get('/api/health', (c) => {
   return c.json({
     status: 'ok',
-    version: '0.6.4-web',
+    version: '0.6.5-web',
     mode: 'web-server',
     userDataDir: getUserDataDir(),
   })
