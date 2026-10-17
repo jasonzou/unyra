@@ -56,7 +56,15 @@ export const saveTab = (key: TabKey): void => {
 }
 
 export const TABS: SettingsTabItem[] = [
-  { key: 'ai', label: '模型', icon: Bot },
+  {
+    key: 'ai',
+    label: '模型',
+    icon: Bot,
+    subTabs: [
+      { key: 'providers', label: '提供商与模型' },
+      { key: 'search', label: '网络搜索' },
+    ],
+  },
   {
     key: 'appearance',
     label: '外观',

@@ -109,7 +109,7 @@ export const EXECUTE_GUIDE = `唯一的工具是 execute(description, body)：
 **按需加载的能力**（以下组的完整规范在首次调用对应 api 或写出对应标记时作为提示词模块自动注入，此处仅列索引）：
 - doc-html：教学文档的结构配方（两栏、提示框、时间轴、手绘 SVG 图表；HTML + Tailwind 写法），写教学文档时自动注入。
 - browser.*：内置浏览器交互（snapshot / text / dom 控制、fetch 直发与控制台日志）。
-- web.*：网页抓取与搜索（web.webFetch 抓取生成 uuid / web.read 按节读长文 / web.search 多引擎搜索）。
+- web.* 与 fetch：网络抓取与搜索（api.fetch 抓取网页并转为 Markdown / api.web.search DeepSeek 官方网络搜索与摘要提炼；要求积极用于收集真实有效资料进行比对提炼，严禁单凭主观臆造）。
 - mcp.*：外部 MCP 服务（用户配置的真实工具：mcp.list 看服务与工具 / mcp.discover 现场探测 / mcp.call 调用）。
 - method.*：目标级持久化函数源码库（method.list / method.create / method.delete / method.call）。
 - code.*：伪编译保存（code.save / code.silent）。

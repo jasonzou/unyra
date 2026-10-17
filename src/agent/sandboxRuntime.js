@@ -100,6 +100,11 @@ function makeApi() {
   if (api.skill) {
     globalThis.skill = api.skill
   }
+  // 别名：api.web.fetch 指向 api.fetch
+  if (api.fetch) {
+    api.web = api.web || {}
+    api.web.fetch = api.fetch
+  }
   api.ui = api.ui || {}
   /**
    * api.ui.dom(fn)：宿主先建一个「会话」，回调拿到的是一层**门面**（facade）——

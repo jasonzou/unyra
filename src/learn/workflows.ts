@@ -70,12 +70,12 @@ export interface WorkflowRow extends WorkflowEntry {
  */
 const TEACH_NODE_INSTRUCTION = [
   '这个节点刚被创建，标题、描述、文档多半还是占位或空的。你要为它创建教学文档，但**不许直接开写**——先摸底再动笔。严格按下面的顺序：',
-  '第一步｜整理前置知识：结合节点标题、上级节点的文档（api.node.read / api.files.read 只读需要的部分）与你的学科判断，列出学会这个主题**绕不开的前置知识点**（一般 3~6 条：太少说明没拆开，太多说明没抓住主干）。',
+  '第一步｜整理前置知识与多源检索：结合节点标题、上级节点的文档（api.node.read / api.files.read 只读需要的部分）与你的学科判断，列出学会这个主题**绕不开的前置知识点**（一般 3~6 条：太少说明没拆开，太多说明没抓住主干）。**必须积极使用网络搜索（api.web.search）与网页抓取（api.fetch）**检索当前主题的权威讲义、官方文档或前沿实践进行比对提炼，收集真实权威的技术与事实依据，避免凭模型自身主观意志捏造教学内容。',
   '第二步｜摸底提问：用 api.ask 出一张表单，每条前置知识一道单选题「这个我已经掌握 / 会一点 / 完全不会」。表单会压在输入框上方，用户答完你才会继续——不要自问自答，也不要跳过这一步。（响铃提醒已由系统在你这一轮开始前做好，不必再调 tiktok。）',
   '第三步｜想清楚再动笔：按摸底结果定详略——「完全不会」的前置要先补讲，「会一点」的点到为止，「已掌握」的直接用；再想好文档结构：先讲什么、后讲什么、在哪衔接补讲的内容。',
   '第四步｜生成：',
   '1. 标题是用户选中的原词、不够准确的先 api.node.rename；描述空着就 api.node.update(path, { description }) 写 150~300 字。',
-  '2. 按第三步的构思 api.files.write 教学文档（写入对应 docs/.../节点名.md）：循序渐进、先直觉与例子再定义与推导，对摸底暴露的盲点**正面讲解**。**排版以当前「文档格式」策略为准（Markdown 与 HTML 各占多少照它来），结构配方见「文档排版与图表」提示词模块**：至少落下两三处结构性元素（提示框 / 两栏 / 步骤 / 图表），不要交一篇只有标题与段落的纯文本。',
+  '2. 按第三步的构思并结合网络搜索比对提炼出的权威资料 api.files.write 教学文档（写入对应 docs/.../节点名.md）：循序渐进、先直觉与例子再定义与推导，对摸底暴露的盲点**正面讲解**。**排版以当前「文档格式」策略为准（Markdown 与 HTML 各占多少照它来），结构配方见「文档排版与图表」提示词模块**：至少落下两三处结构性元素（提示框 / 两栏 / 步骤 / 图表），不要交一篇只有标题与段落的纯文本。',
   '3. 大纲：这个节点下面还会展开子层级的（教学路线里确实分阶段），用 api.files.write("docs/.../节点名.outline.json", JSON.stringify({ intro, children }, null, 2)) 把**直接子层级**列进大纲' +
     '（children 每项 { title, summary }，一层为止——「爷爷知道儿子的存在，但不知道孙子的存在」，' +
     '孙辈的大纲由那些子目标自己的 outline 负责）；确定是叶子知识点的就不调它，大纲保持空白即可。',
@@ -92,14 +92,15 @@ const TEACH_NODE_INSTRUCTION = [
 const GOAL_OUTLINE_INSTRUCTION =
   '这是用户刚新建的学习目标。用户的提问与参考资料附件在会话首条消息中，当前根节点的标题还是用户原话的临时形态。' +
   '若用户在首条消息或当前指令中附带了参考资料、文件或大纲图片，必须仔细研读这些附件内容，优先依据附件中的知识脉络与核心要求来规划目标与大纲。\n' +
+  '**重要纪律：多源检索与比对提炼**：规划目标大纲与教学路线时，**必须多使用网络搜索（api.web.search）与网页抓取（api.fetch）**检索该技术/学科领域的权威教学大纲、高校培养方案、标准路线图与最新行业规范，获取有价值的信息进行交叉比对提炼，严防受到模型自身“主观意志”空想臆造教学路线。\n' +
   '请按顺序做四件事：\n' +
-  '1. 用 api.node.rename(path, 新标题) 给这个目标起一个准确的标题（结合用户提问与附件内容，起一个短而具体的主题名，它会长成数据目录名，' +
+  '1. 用 api.node.rename(path, 新标题) 给这个目标起一个准确的标题（结合用户提问、网络检索提炼与附件内容，起一个短而具体的主题名，它会长成数据目录名，' +
   '别把「请问」「怎么理解」这类问句成分带进去）。\n' +
-  '2. 用 api.node.update(path, { description }) 写一段 150~300 字的目标描述：结合参考资料阐明要解决什么问题、学完应具备什么能力、边界在哪。\n' +
+  '2. 用 api.node.update(path, { description }) 写一段 150~300 字的目标描述：结合权威参考资料与检索提炼阐明要解决什么问题、学完应具备什么能力、边界在哪。\n' +
   '3. 用 api.files.write 给教学文档写一篇「目标与边界」总述（写入根节点的 docs/.../目标名.md；排版以当前「文档格式」策略为准、配方见「文档排版与图表」模块——总述本身也该有成型的结构，不止标题与段落）：这个目标是什么、整体路线怎么走、' +
   '建议从哪个阶段开始（几百字即可）。**不要把整份大纲写进教学文档**，也不要堆学习链接——' +
   '路线的呈现是大纲页的事，那里会带着每个阶段的学习情况。\n' +
-  '4. 用 api.files.write 写根节点的大纲文件（docs/.../目标名.outline.json）：intro 一两段（结合参考资料说明按什么路线分阶段、为什么这么分），' +
+  '4. 用 api.files.write 写根节点的大纲文件（docs/.../目标名.outline.json）：intro 一两段（结合参考资料与网络检索说明按什么路线分阶段、为什么这么分），' +
   'children 列出**直接子层级**的阶段目标，每项 { title, summary }——summary 两三句，' +
   '说清它学什么、为什么排在这个位置。\n' +
   '**深度规矩（硬性）**：大纲只写直接子层级，一层为止——「爷爷知道儿子的存在，但不知道孙子的存在」；' +
@@ -115,7 +116,7 @@ const GOAL_OUTLINE_INSTRUCTION =
 const OUTLINE_INSTRUCTION = [
   '请为当前知识点**规划或重写它这一层的大纲**（写入 docs/.../节点名.outline.json，整份覆盖）。严格按顺序：',
   '第一步｜先看现状：api.files.read("docs/.../节点名.outline.json") 看已有大纲（有就整份重写，不要追加），api.node.read() 看标题、描述与现有下级节点，api.files.read(docPath, { maxBytes: 2000 }) 扫一眼教学文档的开头与标题结构（不要整篇读）。',
-  '第二步｜规划直接子层级：这一层往下拆成哪几个**阶段目标**（一般 3~8 个，每个都能独立成篇、有明确的「学完会什么」）。已经有下级节点的，计划要与它们对齐——同一个人同一层不该有两套说法。',
+  '第二步｜多源检索与直接子层级规划：**多使用网络搜索（api.web.search）与抓取（api.fetch）**获取该知识分支的权威分类目录与行业标准脉络进行比对提炼，避免凭借主观臆造。这一层往下拆成哪几个**阶段目标**（一般 3~8 个，每个都能独立成篇、有明确的「学完会什么」）。已经有下级节点的，计划要与它们对齐——同一个人同一层不该有两套说法。',
   '第三步｜api.files.write("docs/.../节点名.outline.json", JSON.stringify({ intro, children }, null, 2))：intro 一两段（这一层按什么路线走、为什么这么分）；children 每项 { title, summary }，summary 两三句——学什么、为什么排在这个位置。key 由标题自动生成，不要自己编。',
   '深度规矩（硬性）：只写**直接子层级**，一层为止——「爷爷知道儿子的存在，但不知道孙子的存在」。孙辈的大纲由那些子目标自己的 outline 负责；children 里不要出现「1.1.1」这类两层以下的东西，summary 里也不要替孙辈规划。',
   '写完用 api.ui.point() 把这份文档在文档区打开，让用户在大纲页里看这一层的路线。',
@@ -149,7 +150,7 @@ const EXAM_INSTRUCTION = [
   '第一步｜摸底：先调 const p = await api.node.paths() 获取当前知识点的物理路径（含 dir, examsDir, doc, id 等），用 api.files.read(p.doc) 读教学文档与笔记，api.node.list() 看有哪些下级节点，试卷必须包含对核心知识的考察。',
   '第二步｜问一次：用 api.ask 出一张表单，两道题——① 试卷类型（单选：随堂小测 / 小考 / 大考，选项里写清各自的题量规模）；② 难度（单选：简易 / 中等 / 难 / 极难）。最多再加一道「有没有特别想考的章节」。**不要多问**：响铃已由系统在你这一轮开始前做好，不必再调 tiktok。',
   '第三步｜定时限：除随堂小测（不限时，minutes: 0）外，按题量与难度认真估一个 minutes（分钟）。下限是题目数 × 2——要写过程、要计算的题多留时间；宁可宽一点，也别让用户做不完。',
-  '第四步｜出题与落盘：生成试卷唯一 ID（examId，如 ex_xxxx），构造完整符合 Schema 的试卷 JSON 对象（含 id: examId, nodeId: p.id, goalId: p.goalId, title, kind, level, minutes, createdAt: Date.now(), questions, attempts: []），用 api.files.write(`${p.dir}/exams/${examId}.json`, JSON.stringify(exam, null, 2)) 保存到对应节点下的 exams/ 目录中。文件名强制为 `${examId}.json`，attempts 必须传空数组 []。',
+  '第四步｜检索查证与出题落盘：**积极使用网络搜索（api.web.search）**检索该知识点的权威考试真题、标准题型、规范公式与参考题解进行比对提炼，严禁单凭模型自身主观意志编造生硬题目或错误答案。生成试卷唯一 ID（examId，如 ex_xxxx），构造完整符合 Schema 的试卷 JSON 对象（含 id: examId, nodeId: p.id, goalId: p.goalId, title, kind, level, minutes, createdAt: Date.now(), questions, attempts: []），用 api.files.write(`${p.dir}/exams/${examId}.json`, JSON.stringify(exam, null, 2)) 保存到对应节点下的 exams/ 目录中。文件名强制为 `${examId}.json`，attempts 必须传空数组 []。',
   '每道题写成 { id, type, stem, image, options, answer, rubric, points }：' +
     'type 取 \'single\'（单选）| \'multiple\'（多选）| \'truefalse\'（对错）| \'fill\'（填空）| \'short\'（简答）；' +
     'stem 是题干；options 写成 [{ id: \'A\', text: \'选项文字\' }, { id: \'B\', text: \'…\' }]（对错题为 true/false 两项）；' +
@@ -276,7 +277,7 @@ const BROWSER_USE_INSTRUCTION = [
   '你要替用户操作**内置浏览器**（文档区那种地球图标页签）完成任务。这一轮只用 api.browser.* 与 api.wait：',
   '**看 = snapshot（元素清单）/ read（整页 markdown）/ capture（截图，最后手段），',
   '动手 = browser.dom（对 ref 做受控 DOM 操作）**——没有执行任意页面 JS 的通道，',
-  '也不要用 web.webFetch 凑合（那是另一个抓取器，看不到登录态）。',
+  '也不要用 api.fetch 外部抓取凑合（那是另一个抓取器，看不到登录态）。',
   '',
   '流程：',
   '1. **开工第一步必先 api.browser.tabs() 清点存活页签，这一步不可跳过**：目标网址已经',
@@ -284,8 +285,7 @@ const BROWSER_USE_INSTRUCTION = [
   '   页签越开越多，后面收拾它们全是额外动作。没有合适的才 open（纯关键词会当搜索词）。',
   '   后续操作按 tabId 指名；省略 tabId 指焦点格正看着的那个。',
   '2. **看**：先 api.browser.snapshot(tabId?) 拿「带 ref 的可交互元素清单」，认结构、找要点的元素全靠它；',
-  '   要整页文字就 api.browser.read(tabId?)（转 markdown，与 webFetch 同管线：短的回全文、长的落盘回',
-  '   大纲+uuid，登录态页面也能读），用 web.read(uuid, "节") 按节读。**截图（capture）是最后手段**，',
+  '   要整页文字就 api.browser.read(tabId?)（转 markdown：短的回全文、长的落盘回大纲，登录态页面也能读）。**截图（capture）是最后手段**，',
   '   只有布局与视觉必须亲眼看时才用；页面还在加载时先 api.wait(800)。',
   '3. **动手**：api.browser.dom(tabId?, ref, op, arg?)——对 snapshot 清单里的 ref 做受控操作：',
   '   "click" 点它 / "fill" 填文字（触发 input/change，React 输入框也认）/ "focus" 聚焦 /',

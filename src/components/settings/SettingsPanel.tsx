@@ -83,12 +83,17 @@ export default function SettingsPanel({ onRootChanged, onToast }: Props) {
 
   const handleSubTabClick = (subKey: string) => {
     setActiveSubTab(subKey)
+    if (tab === 'ai' && page.view === 'config') {
+      setPage({ view: 'list' })
+    }
     highlightNonceRef.current += 1
     setHighlightSubTab({ key: subKey, nonce: highlightNonceRef.current })
-    const el = document.getElementById(`settings-section-${subKey}`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
+    setTimeout(() => {
+      const el = document.getElementById(`settings-section-${subKey}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 50)
   }
   const [draft, setDraft] = useState<AiSettings>(initial)
   const [page, setPage] = useState<Page>({ view: 'list' })
@@ -365,6 +370,7 @@ export default function SettingsPanel({ onRootChanged, onToast }: Props) {
                     updateDraft((d) => ({ ...d, global: { ...d.global, providerId, model } }), true)
                   }
                   onDelete={removeProvider}
+                  onUpdateSearch={(search) => updateDraft((d) => ({ ...d, search }), true)}
                 />
               ) : (
                 <ProviderConfigPage

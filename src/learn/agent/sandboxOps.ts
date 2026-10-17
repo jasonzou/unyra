@@ -12,8 +12,7 @@ import type { LearnStore } from '../types'
 import { loadImageByRel } from '../static'
 import { readUserText, removeUserPath, userPath, writeUserText } from '../../lib/storage'
 import { native } from '../../lib/native'
-import { fetchForAgent, readForAgent } from '../webDocs'
-import { searchForAgent } from '../webSearch'
+import { fetchForAgent, searchForAgent } from '../webSearch'
 import { tmpEntriesOf, withTmpEntries } from '../../lib/tmpStore'
 import { activeProfile, activeUser, updateUser } from '../../user/store'
 import { patchFromAnswers } from '../../user/fields'
@@ -117,11 +116,9 @@ export function learnSandboxOps(deps: {
       },
     },
     /**
-     * 读网页：抓取走主进程（渲染层的 fetch 受同源策略约束），正文提取在渲染层，
-     * 落盘在当前用户的 users/<uid>/web/ 下（见 learn/webDocs）；search 是多引擎
-     * 搜索（同样主进程取字节、渲染层解析，见 learn/webSearch）。
+     * 网络搜索与网页抓取：基于 DeepSeek 官方 Search API 与 Fetch API。
      */
-    web: { fetch: fetchForAgent, read: readForAgent, search: searchForAgent },
+    web: { fetch: fetchForAgent, search: searchForAgent },
     // 临时变量按「此刻的当前节点」存取：agent 轮次里是这一轮的节点，超级文档桥里是界面当前节点
     tmp: () => {
       const nid = deps.nodeId() ?? ''

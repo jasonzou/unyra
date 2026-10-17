@@ -133,11 +133,20 @@ export interface GlobalSelection {
   effort: ReasoningEffort
 }
 
+/** 网络搜索设置：目前仅支持 DeepSeek 官方搜索服务 */
+export interface WebSearchSettings {
+  /** 搜索引擎服务商，目前仅支持 deepseek */
+  provider: 'deepseek'
+  /** 自定义 API Key。若留空或未填写，则自动复用已配置的 DeepSeek 提供商的 Key */
+  apiKey?: string
+}
+
 export interface AiSettings {
   /** 存储格式版本：1 / 2（历史格式）/ 3（当前） */
   version?: number
   providers: ProviderConfig[]
   global: GlobalSelection
+  search?: WebSearchSettings
 }
 
 /** 当前存储格式版本 */
@@ -521,6 +530,7 @@ function migrateV1(raw: Record<string, unknown>): AiSettings | null {
       normalizeConfig({ id: DEFAULT_PROVIDER_ID, apiKey, models: [chatModel] }, DEFAULT_PROVIDER_ID, true),
     ],
     global: { providerId: DEFAULT_PROVIDER_ID, model: '', effort: DEFAULT_REASONING_EFFORT },
+    search: { provider: 'deepseek' },
   }
 }
 
@@ -556,10 +566,18 @@ function normalize(parsed: unknown): AiSettings {
   const wantedModel = str(g.model).trim()
   const model = provider && modelsOf(provider).includes(wantedModel) ? wantedModel : ''
 
+  const rawSearch = (raw.search && typeof raw.search === 'object' ? raw.search : {}) as Record<string, unknown>
+  const searchApiKey = typeof rawSearch.apiKey === 'string' ? rawSearch.apiKey.trim() : undefined
+  const search: WebSearchSettings = {
+    provider: 'deepseek',
+    ...(searchApiKey ? { apiKey: searchApiKey } : {}),
+  }
+
   return {
     version: VERSION,
     providers,
     global: { providerId, model, effort: asReasoningEffort(g.effort) },
+    search,
   }
 }
 
@@ -793,5 +811,42 @@ export function allProviderBaseUrls(settings: AiSettings = loadAiSettings()): st
     const url = baseUrlOf(cfg)
     if (url) urls.add(url)
   }
+  urls.add('https://api.deepseek.com')
   return [...urls]
 }
+
+/* ---------- 网络搜索配置助手 ---------- */
+
+/**
+ * 寻找已配置的 DeepSeek 提供商（用于网络搜索自动复用 API Key）
+ */
+export function findReferencedDeepSeekKey(settings: AiSettings = loadAiSettings()): {
+  provider: ProviderConfig
+  apiKey: string
+} | null {
+  for (const p of settings.providers) {
+    const isDs =
+      p.id === 'deepseek' ||
+      p.id === DEFAULT_PROVIDER_ID ||
+      baseUrlOf(p).toLowerCase().includes('api.deepseek.com') ||
+      labelOf(p).toLowerCase().includes('deepseek')
+    const key = p.apiKey?.trim() ?? ''
+    if (isDs && key) {
+      return { provider: p, apiKey: key }
+    }
+  }
+  return null
+}
+
+/**
+ * 解析当前可用的网络搜索 API Key：
+ * 优先使用网络搜索中显式配置的自定义 apiKey，
+ * 其次自动复用已配置的 DeepSeek 提供商的 apiKey。
+ */
+export function resolveSearchApiKey(settings: AiSettings = loadAiSettings()): string {
+  const customKey = settings.search?.apiKey?.trim()
+  if (customKey) return customKey
+  const ref = findReferencedDeepSeekKey(settings)
+  return ref ? ref.apiKey : ''
+}
+
