@@ -75,25 +75,30 @@ export const DocPane = memo(function DocPane({
   // memo（samePane）挡住了无关重渲染：界面语言变化要自己订阅才跟得上
   useLocale()
   if (active) {
-    console.log(`[TabSwitch] 📄 DocPane rendered active=true for tabId="${tabId}", title="${node.title}"`)
+    const t0 = (window as any).__tabSwitchT0
+    const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
+    console.log(`[TabSwitch] ${prefix}📄 DocPane rendered active=true for tabId="${tabId}", title="${node.title}"`)
   }
   // 登记「这一片在用」：常驻名额按它排（见 learn/resident）。
   // 写在 effect 里是因为它是外部状态，不是渲染结果；只有真的显示出来时才记。
   useEffect(() => {
     if (active) {
-      console.log(`[TabSwitch] 🕒 DocPane useEffect (touchRecent for tabId="${tabId}")`)
+      const t0 = (window as any).__tabSwitchT0
+      const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
+      console.log(`[TabSwitch] ${prefix}🕒 DocPane useEffect (touchRecent for tabId="${tabId}")`)
       touchRecent(tabId)
     }
   }, [active, tabId])
 
   return (
     /*
-      隐藏用 hidden 属性（display:none）：它彻底移出排版树，不参与样式重算、排版与绘制。
+      隐藏用 hidden 属性与 hidden 类（display:none）：它彻底移出排版树，不参与样式重算、排版与绘制。
       拖动两栏分割线改宽度时，未激活的常驻正文完全不参与每帧的几何重排，保证拖拽 60fps 丝滑跟手。
     */
     <div
       data-doc-pane={active ? 'active' : 'idle'}
-      {...(active ? { className: 'print-flat relative flex min-h-0 flex-1 flex-col' } : { hidden: true })}
+      className={active ? 'print-flat relative flex min-h-0 flex-1 flex-col' : 'hidden'}
+      {...(!active ? { hidden: true } : {})}
     >
       <NodeNote
         // key 绑「节点 + 文档」：两者任一变化都卸载重挂，注解窗口、选中菜单等

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnnotationStyle, DocKind, KnowledgeNode } from '../../learn/types'
 import type { LocalImageResolver } from '../../lib/docImages'
 import { canAnnotate } from '../../lib/annotation'
@@ -109,7 +109,7 @@ interface Props {
  * 因此不存在「点击後回落源码」这回事，也没有任何编辑入口。仍支持选中文字：
  * 学习（建下级节点）、了解（AI 释义）、注解（自己写批注）、询问（提问）。
  */
-export default function NodeNote({
+export default memo(function NodeNote({
   node,
   doc,
   pending = false,
@@ -366,4 +366,4 @@ export default function NodeNote({
 
     </div>
   )
-}
+})

@@ -28,6 +28,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentProps,
   type ReactNode,
 } from 'react'
 import type {
@@ -166,7 +167,7 @@ import {
 } from '../../learn/static'
 import { nodePathOf } from '../../learn/paths'
 import { nodeDocPath } from '../../learn/files'
-import { createNodeDocImageResolver } from '../../lib/docImages'
+import { createNodeDocImageResolver, type LocalImageResolver } from '../../lib/docImages'
 import { revealLocalFile, revealPath, revealUserPath, userAbsPath, listUserDir, mkdirUserPath, moveUserPath, copyUserPath, writeUserText } from '../../lib/storage'
 import { wsAllocateName, wsNameOk, wsRefOfRel, wsRelOf, wsRelOfTab } from '../../learn/workspace'
 import { notifyWsChanged } from './explorer/wsChanges'
@@ -950,15 +951,23 @@ export default function LearnWorkspace({
    * 现取目录（nodeDocPath 走 getLatest，永远是最新的存储树）。callback 身份稳定，
    * 各片的 resolver 只在页签文档变化时换新。
    */
+  const nodeImageResolverCache = useRef(new Map<string, LocalImageResolver>())
   const nodeImageResolver = useCallback(
-    (nodeId: string, kind: DocKind, note?: string) =>
-      createNodeDocImageResolver({
-        dirRel: () => {
-          const p = nodeDocPath(getLatest(), nodeId, { kind, note })
-          // 教学文档是「目录/节点.md」、笔记是「目录/节点.notes/名字.md」——文档所在目录就是往前一级
-          return p ? p.replace(/\/[^/]*$/, '') : null
-        },
-      }),
+    (nodeId: string, kind: DocKind, note?: string) => {
+      const key = `${nodeId}:${kind}:${note ?? ''}`
+      let res = nodeImageResolverCache.current.get(key)
+      if (!res) {
+        res = createNodeDocImageResolver({
+          dirRel: () => {
+            const p = nodeDocPath(getLatest(), nodeId, { kind, note })
+            // 教学文档是「目录/节点.md」、笔记是「目录/节点.notes/名字.md」——文档所在目录就是往前一级
+            return p ? p.replace(/\/[^/]*$/, '') : null
+          },
+        })
+        nodeImageResolverCache.current.set(key, res)
+      }
+      return res
+    },
     [getLatest],
   )
 
@@ -1696,6 +1705,7 @@ export default function LearnWorkspace({
   const activateTab = useCallback(
     (id: string) => {
       const t0 = performance.now()
+      ;(window as any).__tabSwitchT0 = t0
       const s = getLatest()
       const tab = findTab(s.docArea, id)
       const group = groupIdOfTab(s.docArea, id)
@@ -3255,6 +3265,48 @@ export default function LearnWorkspace({
     setOutlineFocus(null)
   }, [])
 
+  const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
+  const getNoteActions = useCallback(
+    (node: KnowledgeNode, source: DocSource): ComponentProps<typeof DocPane>['note'] => {
+      const key = `${node.id}:${source.kind}:${source.note ?? ''}`
+      let actions = noteActionsCache.current.get(key)
+      if (!actions) {
+        actions = {
+          onLearnConcept: (term) => void openConcept(node.id, term),
+          resolveLocalImage: nodeImageResolver(node.id, source.kind, source.note),
+          onUnderstand: (term, occurrence, snippet) => understandConcept(node.id, term, occurrence, snippet),
+          onSaveAnnotation: (term, body, style, occurrence) =>
+            saveAnnotation(node.id, term, body, style, occurrence),
+          onDeleteAnnotation: (term) => deleteAnnotation(node.id, term),
+          onWarn: onToast,
+          onAsk: (payload) => askAboutSelection(node.id, payload),
+          onReading: (delta) => {
+            const alive = nodeById(getLatest(), delta.nodeId)
+            if (!alive) return
+            const goalId = alive.goalId
+            patchQuiet((s) => {
+              const mine = readingOfGoal(s.reading, goalId)
+              const next = applyReadingDelta(mine ?? emptyReading(), delta)
+              const reading = withGoalReading(s.reading, goalId, next)
+              const reading2 = { ...s, reading }
+              publishReadingDay(goalId, delta.day, readingDay(next, delta.day)?.activeMs ?? 0)
+              return reading2
+            })
+          },
+          readingKnownToday: () =>
+            readToday(
+              readingOfGoal(getLatest().reading, node.goalId),
+              node.id,
+              readingDocKey(source.kind, source.note),
+            ),
+        }
+        noteActionsCache.current.set(key, actions)
+      }
+      return actions
+    },
+    [openConcept, nodeImageResolver, understandConcept, saveAnnotation, deleteAnnotation, onToast, askAboutSelection, getLatest, patchQuiet],
+  )
+
   // 保存：Ctrl+S 交给快捷键模块（见 lib/shortcuts）——改键与冲突检测都归它管，
   // 写死在这里的话，用户在设置里改的那一条就成了一句空话。
   // 保存的是**当前这份文档**：暂存区里的改动写进文档并落盘（见 saveDocNow）
@@ -4129,49 +4181,7 @@ export default function LearnWorkspace({
                   // 读到哪儿了：记在页签 id 上，重启回来接着读（见 lib/docScroll）
                   scrollTop={store.docScroll[tab.id]}
                   onScrollTop={(top) => rememberScroll(tab.id, top)}
-                  note={{
-                    onLearnConcept: (term) => void openConcept(node.id, term),
-                    // 文档目录旁的图片（相对路径引用）：按「这一份文档自己的目录」解析成 data URL
-                    // （见 lib/docImages——生产 CSP 不放行 file:，这是文档资源能显示的唯一通道）
-                    resolveLocalImage: nodeImageResolver(node.id, source.kind, source.note),
-                    onUnderstand: (term, occurrence, snippet) => understandConcept(node.id, term, occurrence, snippet),
-                    onSaveAnnotation: (term, body, style, occurrence) =>
-                      saveAnnotation(node.id, term, body, style, occurrence),
-                    onDeleteAnnotation: (term) => deleteAnnotation(node.id, term),
-                    onWarn: onToast,
-                    onAsk: (payload) => askAboutSelection(node.id, payload),
-                    /*
-                     * 节点已经删了：这一笔不再记。
-                     *
-                     * 删节点时会连它的阅读记录一起清掉（见 learn/reading 的 pruneReading），
-                     * 而这里是「删完那一刻采集器最后一次结算」——照记就当场长回一条空索引。
-                     */
-                    onReading: (delta) => {
-                      const alive = nodeById(getLatest(), delta.nodeId)
-                      if (!alive) return
-                      // 这一笔记到**这个节点所属目标**的那本账上（阅读账按目标分开，见 learn/reading）
-                      const goalId = alive.goalId
-                      // 阅读增量走 patchQuiet：它不参与渲染，别为它每秒重渲染整棵学习区
-                      patchQuiet((s) => {
-                        const mine = readingOfGoal(s.reading, goalId)
-                        const next = applyReadingDelta(mine ?? emptyReading(), delta)
-                        const reading = withGoalReading(s.reading, goalId, next)
-                        const reading2 = { ...s, reading }
-                        // 顺手把「这个目标今天已落盘多少」发布出去：顶栏那两个数字读不到 ref
-                        // （patchQuiet 不重渲染），不发布的话它们只能等到别的动作触发一次 set 才跳
-                        // （见 lib/readingPulse）
-                        publishReadingDay(goalId, delta.day, readingDay(next, delta.day)?.activeMs ?? 0)
-                        return reading2
-                      })
-                    },
-                    // 今天已经读过这份文档就直接算；没读过要先过「动过 + 20 秒」的门槛
-                    readingKnownToday: () =>
-                      readToday(
-                        readingOfGoal(getLatest().reading, node.goalId),
-                        node.id,
-                        readingDocKey(source.kind, source.note),
-                      ),
-                  }}
+                  note={getNoteActions(node, source)}
                 />
               )
             })}
