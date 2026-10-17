@@ -156,6 +156,25 @@ export function Topbar({
               <ChevronDown size={12} className="shrink-0 text-ink-faint" />
             </button>
           </>
+        ) : tabGroups.length > 0 ? (
+          <button
+            type="button"
+            title={t('选择页签组')}
+            aria-haspopup="menu"
+            aria-expanded={!!goalMenu}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setGoalMenu((cur) => (cur ? null : { x: r.left, y: r.bottom + 4 }))
+            }}
+            className={
+              'flex min-w-0 items-center gap-1.5 rounded-lg border border-seal/60 bg-seal/10 px-2 py-0.5 text-[12px] font-medium text-seal transition hover:bg-seal/15 animate-pulse shadow-sm shadow-seal/20 ' +
+              (goalMenu ? 'ring-2 ring-seal/40' : '')
+            }
+          >
+            <Bullseye size={13} className="shrink-0 text-seal" />
+            <span>{t('请选择页签组')}</span>
+            <ChevronDown size={12} className="shrink-0 text-seal" />
+          </button>
         ) : (
           <span className="text-[13px] font-medium tracking-wide text-ink-soft">{t('归一')}</span>
         )}

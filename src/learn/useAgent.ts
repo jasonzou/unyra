@@ -790,6 +790,10 @@ export function useAgent(opts: {
           system: buildTeacherSystem({
             goalQuestion: getLatest().goals.find((g) => g.id === target.goalId)?.question ?? '',
             // 画像**不在这里传**：导师要贴合这个人时自己 api.userInfo.get() 取（见 ai 的说明）
+            extraSystemPrompt:
+              agentSettings.extraSystemPromptEnabled && agentSettings.extraSystemPrompt?.trim()
+                ? agentSettings.extraSystemPrompt.trim()
+                : undefined,
           }),
           /**
            * 历史里的图片要先读回内存：落盘的只有一条引用（见 agent/types 的 MessageImage），

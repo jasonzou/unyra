@@ -825,10 +825,22 @@ export default function LearnWorkspace({
     startX: number
     startWidth: number
   } | null>(null)
+  const zenHudValRef = useRef<HTMLSpanElement | null>(null)
+  const currentDragWRef = useRef<number>(zenWidth)
+
+  useEffect(() => {
+    if (pure) {
+      document.documentElement.setAttribute('data-zen', 'true')
+      document.documentElement.style.setProperty('--zen-width', `${zenWidth}px`)
+    } else {
+      document.documentElement.removeAttribute('data-zen')
+    }
+  }, [pure, zenWidth])
 
   const onZenResizeStart = (e: React.PointerEvent, side: 'left' | 'right') => {
     e.preventDefault()
     e.stopPropagation()
+    currentDragWRef.current = zenWidth
     setZenDragging({
       side,
       startX: e.clientX,
@@ -844,17 +856,18 @@ export default function LearnWorkspace({
       const mult = zenDragging.side === 'right' ? 2 : -2
       const maxW = Math.max(480, window.innerWidth - 32)
       const nextW = Math.min(maxW, Math.max(480, Math.round(zenDragging.startWidth + delta * mult)))
-      setZenWidth(nextW)
+      currentDragWRef.current = nextW
+      document.documentElement.style.setProperty('--zen-width', `${nextW}px`)
+      if (zenHudValRef.current) {
+        zenHudValRef.current.textContent = `${nextW}px`
+      }
     }
 
-    const onPointerUp = (e: PointerEvent) => {
-      const delta = e.clientX - zenDragging.startX
-      const mult = zenDragging.side === 'right' ? 2 : -2
-      const maxW = Math.max(480, window.innerWidth - 32)
-      const nextW = Math.min(maxW, Math.max(480, Math.round(zenDragging.startWidth + delta * mult)))
-      setZenWidth(nextW)
+    const onPointerUp = () => {
+      const finalW = currentDragWRef.current
+      setZenWidth(finalW)
       try {
-        localStorage.setItem('moji:zen-width', String(nextW))
+        localStorage.setItem('moji:zen-width', String(finalW))
       } catch {}
       setZenDragging(null)
     }
@@ -1684,15 +1697,25 @@ export default function LearnWorkspace({
    */
   const activateTab = useCallback(
     (id: string) => {
+      const t0 = performance.now()
       const s = getLatest()
       const tab = findTab(s.docArea, id)
       const group = groupIdOfTab(s.docArea, id)
       if (!tab || !group) return
+      const fromTab = focusedTab(s.docArea)
+      console.log(`[TabSwitch] 0.0ms: 🖱️ Tab clicked -> id="${id}" (kind="${tab.ref.kind}", from="${fromTab?.id ?? 'none'}")`)
       const nodeId = tabNodeId(tab.ref)
       const base = nodeId ? retargetNode(s, nodeId) : s
-      const wasActive = focusedTab(s.docArea)?.id === id && s.docArea.focus === group
+      const wasActive = fromTab?.id === id && s.docArea.focus === group
       // activateIn 顺手把焦点挪到那一格：点别处的页签，接下来的动作（开文档、Ctrl+W）都该落在那一格
       set({ ...base, docArea: activateIn(base.docArea, group, id) })
+      console.log(`[TabSwitch] ${(performance.now() - t0).toFixed(1)}ms: 📦 Store state dispatched`)
+      requestAnimationFrame(() => {
+        console.log(`[TabSwitch] ${(performance.now() - t0).toFixed(1)}ms: 🎨 Frame 1 committed (DOM updated)`)
+        requestAnimationFrame(() => {
+          console.log(`[TabSwitch] ${(performance.now() - t0).toFixed(1)}ms: 🚀 Frame 2 painted (visual complete)`)
+        })
+      })
       // 同一枚页签没有 activeTab 变化，单独唤醒侧栏完成重复定位。
       if (wasActive) requestReveal()
     },
@@ -3731,35 +3754,15 @@ export default function LearnWorkspace({
             e.stopPropagation()
           }}
         >
-          {/* 纯净阅读模式下：可拖拽调整宽度的居中容器 */}
-          <div
-            className={'flex h-full min-h-0 flex-1 flex-col' + (pure ? ' relative mx-auto' : '')}
-            style={pure ? { width: `${zenWidth}px`, maxWidth: '100%' } : undefined}
-          >
-            {/* 纯净阅读拖拽边框与手柄（两边都可拖拽，镜像对称缩放） */}
-            {pure && (
-              <>
-                <div
-                  onPointerDown={(e) => onZenResizeStart(e, 'left')}
-                  className="group/zen-l absolute -left-2 top-0 bottom-0 z-30 w-4 cursor-ew-resize select-none flex items-center justify-center"
-                  title={t('拖拽调整阅读宽度（镜像对称）')}
-                >
-                  <div className="h-full w-0 border-l border-dashed border-line-strong transition-colors group-hover/zen-l:border-seal" />
-                </div>
-                <div
-                  onPointerDown={(e) => onZenResizeStart(e, 'right')}
-                  className="group/zen-r absolute -right-2 top-0 bottom-0 z-30 w-4 cursor-ew-resize select-none flex items-center justify-center"
-                  title={t('拖拽调整阅读宽度（镜像对称）')}
-                >
-                  <div className="h-full w-0 border-r border-dashed border-line-strong transition-colors group-hover/zen-r:border-seal" />
-                </div>
-              </>
-            )}
-
             <div
               ref={isFocused ? docBox : undefined}
-            {...boxProps}
-            onDragOver={(e) => {
+              {...boxProps}
+              style={pure ? { width: 'var(--zen-width, 860px)', maxWidth: '100%' } : undefined}
+              className={
+                'flex h-full min-h-0 flex-col overflow-hidden ' +
+                (pure ? 'relative mx-auto flex-none' : 'flex-1')
+              }
+              onDragOver={(e) => {
               // 整个正文区都是 chip 的落点：资源管理器 / 收藏里拖来的引用，拖到这里
               // 直接开成本格的页签（不必再瞄准上面那条窄页签栏）。系统文件拖入
               // （dataTransfer.files）走 window 级的监听，这里只认 chip。
@@ -3802,8 +3805,27 @@ export default function LearnWorkspace({
               if (el.closest('button, input, textarea, a, iframe, [contenteditable="true"], [role="button"]')) return
               toggleZen()
             }}
-            className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
           >
+            {/* 纯净阅读拖拽边框与手柄（两边都可拖拽，镜像对称缩放） */}
+            {pure && (
+              <>
+                <div
+                  onPointerDown={(e) => onZenResizeStart(e, 'left')}
+                  className="group/zen-l absolute -left-2 top-0 bottom-0 z-30 w-4 cursor-ew-resize select-none flex items-center justify-center"
+                  title={t('拖拽调整阅读宽度（镜像对称）')}
+                >
+                  <div className="h-full w-0 border-l border-dashed border-line-strong transition-colors group-hover/zen-l:border-seal" />
+                </div>
+                <div
+                  onPointerDown={(e) => onZenResizeStart(e, 'right')}
+                  className="group/zen-r absolute -right-2 top-0 bottom-0 z-30 w-4 cursor-ew-resize select-none flex items-center justify-center"
+                  title={t('拖拽调整阅读宽度（镜像对称）')}
+                >
+                  <div className="h-full w-0 border-r border-dashed border-line-strong transition-colors group-hover/zen-r:border-seal" />
+                </div>
+              </>
+            )}
+
             {gTab?.ref.kind === 'web' ? (
               /*
                 网页页签：正文不归 React 画（guest 进程自己渲染），由下面挂着的
@@ -4167,7 +4189,6 @@ export default function LearnWorkspace({
               )
             })}
           </div>
-        </div>
 
           {/*
             网页层（见 components/learn/web/WebTabLayer）：常挂在格子里、切去文档时
@@ -4797,7 +4818,7 @@ export default function LearnWorkspace({
           <div className="fixed inset-0 z-[99] cursor-ew-resize select-none" />
           <div className="pointer-events-none fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 rounded-lg border border-line-strong bg-card/95 px-3 py-1.5 shadow-[0_8px_24px_rgba(31,27,23,0.18)] text-[12px] tabular-nums text-ink-strong backdrop-blur-xs">
             <span className="text-ink-faint">{t('纯净阅读宽度')}</span>
-            <span className="font-semibold text-seal">{zenWidth}px</span>
+            <span ref={zenHudValRef} className="font-semibold text-seal">{zenWidth}px</span>
           </div>
         </>
       )}

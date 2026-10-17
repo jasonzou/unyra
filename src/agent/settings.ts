@@ -70,6 +70,12 @@ export interface AgentSettings {
    */
   mcp?: McpSettings
   /**
+   * 额外系统提示词配置：
+   * 允许用户全局追加自定义系统提示词，默认不启用。
+   */
+  extraSystemPrompt?: string
+  extraSystemPromptEnabled?: boolean
+  /**
    * 基础原生工具安全权限配置：
    * 目标数据目录默认完全放行；外部真实系统目录需在此白名单放行。
    */
@@ -101,6 +107,8 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   // 默认「混合（Markdown 为主）」：与系统提示词的正文排版规范一致
   docFormat: DEFAULT_DOC_FORMAT,
   customDocFormats: [],
+  extraSystemPrompt: '',
+  extraSystemPromptEnabled: false,
   dev: { contextDebugger: false },
   skills: DEFAULT_SKILL_SETTINGS,
   mcp: DEFAULT_MCP_SETTINGS,
@@ -186,6 +194,9 @@ export function normalizeAgentSettings(raw: unknown): AgentSettings {
     // 同理：认不出的格式（老设置文件里根本没有这一项）按默认的「混合」走
     docFormat: docFormatOf(src.docFormat, customDocFormats).id,
     customDocFormats,
+    extraSystemPrompt: typeof src.extraSystemPrompt === 'string' ? src.extraSystemPrompt : '',
+    extraSystemPromptEnabled:
+      typeof src.extraSystemPromptEnabled === 'boolean' ? src.extraSystemPromptEnabled : false,
     dev: {
       contextDebugger:
         typeof dev.contextDebugger === 'boolean' ? dev.contextDebugger : DEFAULT_AGENT_SETTINGS.dev.contextDebugger,

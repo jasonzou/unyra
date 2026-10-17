@@ -2,10 +2,13 @@ import { useState } from 'react'
 import {
   Check,
   Compass,
+  Copy,
   Drama,
   Edit2,
+  Eye,
   FileText,
   Plus,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react'
@@ -24,6 +27,7 @@ import {
   type DocFormat,
   type DocFormatId,
 } from '../../agent/docFormat'
+import Switch from '../Switch'
 import { pane } from '../Pane'
 import { t } from '../../i18n'
 
@@ -43,6 +47,45 @@ export function StrategyTab({ settings, onChange, onToast = () => {} }: Strategy
   const [editingPersona, setEditingPersona] = useState<Partial<Persona> | null>(null)
   // 正在编辑/新建的文档格式策略
   const [editingFormat, setEditingFormat] = useState<Partial<DocFormat> | null>(null)
+  // 查看内置/自定义提示词详情弹窗
+  const [viewingPrompt, setViewingPrompt] = useState<{
+    title: string
+    kind: 'persona' | 'format'
+    isBuiltin: boolean
+    instruction: string
+    item: Persona | DocFormat
+  } | null>(null)
+  const [copiedPrompt, setCopiedPrompt] = useState(false)
+
+  const handleCopyPrompt = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedPrompt(true)
+    onToast(t('提示词已复制到剪贴板'))
+    setTimeout(() => setCopiedPrompt(false), 2000)
+  }
+
+  const handleCreateFromTemplate = () => {
+    if (!viewingPrompt) return
+    if (viewingPrompt.kind === 'persona') {
+      const p = viewingPrompt.item as Persona
+      setEditingPersona({
+        label: `${t(p.label)} (${t('副本')})`,
+        short: p.short,
+        role: p.role,
+        tagline: p.tagline,
+        instruction: p.instruction,
+      })
+    } else {
+      const f = viewingPrompt.item as DocFormat
+      setEditingFormat({
+        label: `${t(f.label)} (${t('副本')})`,
+        short: f.short,
+        desc: f.desc,
+        instruction: f.instruction,
+      })
+    }
+    setViewingPrompt(null)
+  }
 
   // 切换当前激活的人格
   const handleSelectPersona = (id: PersonaId) => {
@@ -241,30 +284,50 @@ export function StrategyTab({ settings, onChange, onToast = () => {} }: Strategy
                   </div>
                 </div>
 
-                {/* 自定义人格的操作按钮 */}
-                {!isBuiltin && (
-                  <div
-                    className="mt-3 flex items-center justify-end gap-1.5 pt-2 border-t border-line/60"
-                    onClick={(e) => e.stopPropagation()}
+                {/* 人格操作栏：内置与自定义均支持查看提示词与对比 */}
+                <div
+                  className="mt-3 flex items-center justify-between gap-1.5 pt-2 border-t border-line/60"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCopiedPrompt(false)
+                      setViewingPrompt({
+                        title: `${t(p.label)} · ${t('导师人格提示词')}`,
+                        kind: 'persona',
+                        isBuiltin,
+                        instruction: p.instruction,
+                        item: p,
+                      })
+                    }}
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-soft transition hover:bg-line/70 hover:text-ink"
                   >
-                    <button
-                      type="button"
-                      title={t('编辑')}
-                      onClick={() => setEditingPersona(p)}
-                      className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-line hover:text-ink"
-                    >
-                      <Edit2 size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      title={t('删除')}
-                      onClick={() => handleDeletePersona(p.id)}
-                      className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-warn/10 hover:text-warn-deep"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                )}
+                    <Eye size={12} />
+                    <span>{t('查看提示词')}</span>
+                  </button>
+
+                  {!isBuiltin && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        title={t('编辑')}
+                        onClick={() => setEditingPersona(p)}
+                        className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-line hover:text-ink"
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        title={t('删除')}
+                        onClick={() => handleDeletePersona(p.id)}
+                        className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-warn/10 hover:text-warn-deep"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )
           })}
@@ -324,33 +387,110 @@ export function StrategyTab({ settings, onChange, onToast = () => {} }: Strategy
                   </div>
                 </div>
 
-                {/* 自定义格式策略的操作按钮 */}
-                {!isBuiltin && (
-                  <div
-                    className="mt-3 flex items-center justify-end gap-1.5 pt-2 border-t border-line/60"
-                    onClick={(e) => e.stopPropagation()}
+                {/* 格式策略操作栏：内置与自定义均支持查看提示词与对比 */}
+                <div
+                  className="mt-3 flex items-center justify-between gap-1.5 pt-2 border-t border-line/60"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCopiedPrompt(false)
+                      setViewingPrompt({
+                        title: `${t(f.label)} · ${t('文档生成策略提示词')}`,
+                        kind: 'format',
+                        isBuiltin,
+                        instruction: f.instruction,
+                        item: f,
+                      })
+                    }}
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-soft transition hover:bg-line/70 hover:text-ink"
                   >
-                    <button
-                      type="button"
-                      title={t('编辑')}
-                      onClick={() => setEditingFormat(f)}
-                      className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-line hover:text-ink"
-                    >
-                      <Edit2 size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      title={t('删除')}
-                      onClick={() => handleDeleteDocFormat(f.id)}
-                      className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-warn/10 hover:text-warn-deep"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                )}
+                    <Eye size={12} />
+                    <span>{t('查看提示词')}</span>
+                  </button>
+
+                  {!isBuiltin && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        title={t('编辑')}
+                        onClick={() => setEditingFormat(f)}
+                        className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-line hover:text-ink"
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        title={t('删除')}
+                        onClick={() => handleDeleteDocFormat(f.id)}
+                        className="flex h-6 w-6 items-center justify-center rounded text-ink-soft transition hover:bg-warn/10 hover:text-warn-deep"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )
           })}
+        </div>
+      </section>
+
+      {/* 额外系统提示词配置 */}
+      <section className="space-y-3 pt-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles size={15} className="text-seal" />
+            <h4 className="text-[13px] font-medium text-ink-strong">{t('额外系统提示词')}</h4>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11.5px] text-ink-faint">
+              {settings.extraSystemPromptEnabled ? t('已启用') : t('已停用')}
+            </span>
+            <Switch
+              on={!!settings.extraSystemPromptEnabled}
+              onChange={(enabled) => onChange({ ...settings, extraSystemPromptEnabled: enabled })}
+              label=""
+              bare
+            />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-line bg-card/60 p-3.5 space-y-2.5">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-[11px] leading-relaxed text-ink-faint">
+              {t('允许向超级导师全局追加自定义的系统提示词（追加于系统提示词末尾，具有最高指导效力）。默认不启用，需开启上方开关后生效。')}
+            </p>
+            {settings.extraSystemPromptEnabled && (
+              <span className="shrink-0 rounded bg-seal/10 px-1.5 py-0.5 text-[10.5px] font-medium text-seal">
+                {t('生效中')}
+              </span>
+            )}
+          </div>
+
+          <div className="relative">
+            <textarea
+              rows={4}
+              value={settings.extraSystemPrompt || ''}
+              onChange={(e) => onChange({ ...settings, extraSystemPrompt: e.target.value })}
+              placeholder={
+                settings.extraSystemPromptEnabled
+                  ? t('在此输入额外的全局系统提示词，例如：回答风格偏好、特定领域规则、强制遵循的格式要求等…')
+                  : t('（开关未启用）开启上方开关后，在此输入的提示词将自动追加至导师系统提示词末尾…')
+              }
+              className={
+                'w-full resize-y rounded-lg border p-2.5 text-[12px] font-mono leading-relaxed transition outline-none ' +
+                (settings.extraSystemPromptEnabled
+                  ? 'border-line-strong bg-paper text-ink focus:border-seal focus:ring-1 focus:ring-seal'
+                  : 'border-line bg-line/20 text-ink-faint')
+              }
+            />
+            <div className="mt-1 flex items-center justify-between text-[10.5px] text-ink-faint">
+              <span>{t('将作为【学习者附加自定义系统提示词】注入运行时')}</span>
+              <span>{(settings.extraSystemPrompt || '').length} {t('字')}</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -528,6 +668,68 @@ export function StrategyTab({ settings, onChange, onToast = () => {} }: Strategy
               >
                 {t('保存策略')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 提示词查看与对比弹窗 */}
+      {viewingPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[85vh] w-full max-w-xl flex-col rounded-2xl border border-line-strong bg-card p-5 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <div className="flex items-center gap-2">
+                <h3 className="text-[14px] font-semibold text-ink-strong">
+                  {viewingPrompt.title}
+                </h3>
+                <span className="rounded bg-line/60 px-1.5 py-0.5 text-[10px] text-ink-faint">
+                  {viewingPrompt.isBuiltin ? t('内置') : t('自定义')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingPrompt(null)}
+                className="rounded p-1 text-ink-soft transition hover:bg-line hover:text-ink"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="my-4 min-h-0 flex-1 overflow-y-auto">
+              <pre className="whitespace-pre-wrap select-text rounded-xl border border-line bg-paper-deep/70 p-3.5 font-mono text-[11.5px] leading-relaxed text-ink">
+                {viewingPrompt.instruction}
+              </pre>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-3 border-t border-line">
+              <button
+                type="button"
+                onClick={() => handleCopyPrompt(viewingPrompt.instruction)}
+                className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink transition hover:bg-line/60"
+              >
+                {copiedPrompt ? <Check size={13} className="text-seal" /> : <Copy size={13} />}
+                <span>{copiedPrompt ? t('已复制') : t('复制提示词')}</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                {viewingPrompt.isBuiltin && (
+                  <button
+                    type="button"
+                    onClick={handleCreateFromTemplate}
+                    className="flex items-center gap-1.5 rounded-lg border border-seal/60 bg-seal/10 px-3 py-1.5 text-[12px] font-medium text-seal transition hover:bg-seal/15"
+                  >
+                    <Plus size={13} />
+                    <span>{t('基于此模板新建')}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setViewingPrompt(null)}
+                  className="rounded-lg bg-line/80 px-4 py-1.5 text-[12px] font-medium text-ink transition hover:bg-line"
+                >
+                  {t('关闭')}
+                </button>
+              </div>
             </div>
           </div>
         </div>

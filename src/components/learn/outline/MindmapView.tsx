@@ -1195,6 +1195,10 @@ export default function MindmapView({
   const onEdgeClick = useCallback(
     (edge: MindmapEdge): void => {
       if (dragMovedRef.current) return
+      if (edge.to.startsWith('preview:')) {
+        closePreview()
+        return
+      }
       const target = nodeIndex.get(edgeOtherEnd(edge, selectedId))
       if (!target) return
       // 走到这儿的两端必然不同（线不连自己），所以直接落位，不必再问「是不是已经选中」
@@ -1205,7 +1209,7 @@ export default function MindmapView({
         centerOnNode(target)
       }
     },
-    [selectedId, nodeIndex, centerOnNode, centerOnPreview],
+    [selectedId, nodeIndex, centerOnNode, centerOnPreview, closePreview],
   )
 
   // ---------- 右键改色菜单 ----------
@@ -1241,6 +1245,7 @@ export default function MindmapView({
     (e: React.MouseEvent<HTMLDivElement>) => {
       dragMovedRef.current = false
       const target = e.target as HTMLElement
+      if (target.closest('[data-preview-close]')) return
       const onCard = !!target.closest('[data-mm-card]')
       // 连线上的按下不算「点空白」：点线要跳到另一端，而那一头要靠当前选中是谁来判断，
       // 这里要是先把选中清掉，点线的语义就没了。
@@ -1754,19 +1759,27 @@ export default function MindmapView({
                 {/* 预览节点连线中点的快捷关闭并返回父节点按钮 */}
                 {isPreviewEdge && (
                   <g
+                    data-preview-close=""
                     transform={`translate(${(edge.x1 + edge.x2) / 2}, ${(edge.y1 + edge.y2) / 2})`}
                     className="cursor-pointer group/close-edge"
                     onClick={(e) => {
                       e.stopPropagation()
                       closePreview()
                     }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      closePreview()
+                    }}
                     onPointerDown={(e) => e.stopPropagation()}
                     style={{
+                      pointerEvents: 'auto',
                       opacity: isClosingPreview ? 0 : 1,
                       transition: 'opacity 200ms ease, transform 300ms cubic-bezier(0.2, 0, 0, 1)',
                     }}
                   >
                     <title>{t('关闭预览并返回父节点')}</title>
+                    {/* 透明扩大点击热区 */}
+                    <circle r={18} fill="transparent" style={{ pointerEvents: 'all' }} />
                     <circle
                       r={11}
                       fill="var(--color-card, #ffffff)"
