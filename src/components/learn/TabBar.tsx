@@ -1306,8 +1306,8 @@ export default function TabBar({
         createPortal(
           <BarMenu
             menu={barMenu}
-            canCloseAll={tabs.length > 0}
-            count={paneTotal ?? tabs.length}
+            canCloseAll={tabs.some((t) => t.ref.kind !== 'outline')}
+            count={tabs.filter((t) => t.ref.kind !== 'outline').length}
             onOpenWebTab={() => {
               onOpenWebTab()
               setBarMenu(null)
@@ -1425,7 +1425,7 @@ function TabMenu({
   menu,
   label,
   tabs,
-  paneTotal,
+  paneTotal: _paneTotal,
   favorited,
   onToggleFavorite,
   onClose,
@@ -1446,7 +1446,7 @@ function TabMenu({
   store?: LearnStore
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
-  const otherCount = Math.max(0, tabs.length - 1)
+  const otherCount = tabs.filter((x) => x.id !== menu.id && x.ref.kind !== 'outline').length
   const targetTab = useMemo(() => tabs.find((t) => t.id === menu.id) ?? null, [tabs, menu.id])
   const targetBaseNodeId = targetTab ? tabNodeId(targetTab.ref) : null
 
@@ -1454,46 +1454,48 @@ function TabMenu({
     return buildDirectedDistanceMaps(store?.edges, targetBaseNodeId)
   }, [store?.edges, targetBaseNodeId])
 
-  // 1. 关闭无关联：与 targetTab 无拓扑/同节点关联的其它页签
+  // 1. 关闭无关联：与 targetTab 无拓扑/同节点关联的其它页签（不含大纲）
   const unrelatedIds = useMemo(() => {
     if (!targetTab) return []
     return tabs
       .filter((t) => {
-        if (t.id === targetTab.id) return false
+        if (t.id === targetTab.id || t.ref.kind === 'outline') return false
         const rel = computeTabRelationWithMaps(t, targetTab, ancestorDistMap, descendantDistMap)
         return rel.kind === 'none'
       })
       .map((t) => t.id)
   }, [tabs, targetTab, ancestorDistMap, descendantDistMap])
 
-  // 2. 关闭子级：拓扑上的下位知识点页签
+  // 2. 关闭子级：拓扑上的下位知识点页签（不含大纲）
   const childrenIds = useMemo(() => {
     if (!targetTab) return []
     return tabs
       .filter((t) => {
+        if (t.ref.kind === 'outline') return false
         const rel = computeTabRelationWithMaps(t, targetTab, ancestorDistMap, descendantDistMap)
         return rel.kind === 'child'
       })
       .map((t) => t.id)
   }, [tabs, targetTab, ancestorDistMap, descendantDistMap])
 
-  // 3. 关闭父级：拓扑上的上位知识点页签
+  // 3. 关闭父级：拓扑上的上位知识点页签（不含大纲）
   const parentsIds = useMemo(() => {
     if (!targetTab) return []
     return tabs
       .filter((t) => {
+        if (t.ref.kind === 'outline') return false
         const rel = computeTabRelationWithMaps(t, targetTab, ancestorDistMap, descendantDistMap)
         return rel.kind === 'parent'
       })
       .map((t) => t.id)
   }, [tabs, targetTab, ancestorDistMap, descendantDistMap])
 
-  // 4. 关闭非文档：不是 teach/note/super/local 的非纯文档类页签（web、系统设置等）
-  // 当总页签数只剩1个且为非文档时，该动作与关闭当前项完全一致，无需展示
+  // 4. 关闭非文档：不是 teach/note/super/local 的非纯文档类页签（web、系统设置等，不含大纲）
   const nonDocIds = useMemo(() => {
-    if (tabs.length <= 1) return []
-    return tabs.filter((t) => !isDocumentTab(t.ref)).map((t) => t.id)
-  }, [tabs])
+    const nonDocs = tabs.filter((t) => !isDocumentTab(t.ref) && t.ref.kind !== 'outline')
+    if (nonDocs.length <= 1 && nonDocs.some((t) => t.id === targetTab?.id)) return []
+    return nonDocs.map((t) => t.id)
+  }, [tabs, targetTab])
 
   const hasRelationClose =
     unrelatedIds.length > 0 ||
@@ -1552,15 +1554,12 @@ function TabMenu({
         {t(TAB_CLOSE_LABEL.self)}
       </button>
 
-      {/* 关闭其他：有其他页签时才显示。
-          显式按**栏上这份列表**给 id：物理格里还躺着别的目标藏起来的页签（切目标不关页签），
-          不给 id 时 closeTabs 会按物理顺序把它们一起关掉——菜单明明写着还有几项，
-          用户却会平白丢掉看不见的那些。别的目标名下的页签归它们自己的组管。 */}
+      {/* 关闭其他：有其他页签时才显示（排除大纲）。 */}
       {otherCount > 0 && (
         <button
           type="button"
           role="menuitem"
-          onClick={() => onPick('others', tabs.filter((x) => x.id !== menu.id).map((x) => x.id))}
+          onClick={() => onPick('others', tabs.filter((x) => x.id !== menu.id && x.ref.kind !== 'outline').map((x) => x.id))}
           className={ROW}
         >
           <span className={ICON}>
@@ -1634,20 +1633,14 @@ function TabMenu({
         </>
       )}
 
-      {/* 全部关闭：只在页签数大于1时渲染（仅剩1个时与关闭无区别）。
-          它的口径是**整格**（物理上把别的目标藏起来的页签也一起关，关完这一格干干净净），
-          所以计数与提示都按 paneTotal 说——栏上只画得到过滤后的那几张，按它报数就是在撒谎。 */}
-      {tabs.length > 1 && (
+      {/* 全部关闭：只在存在可关项时渲染（排除大纲）。 */}
+      {tabs.filter((t) => t.ref.kind !== 'outline').length > (targetTab?.ref.kind === 'outline' ? 0 : 1) && (
         <>
           <span aria-hidden="true" className="my-1 block h-px bg-line" />
           <button
             type="button"
             role="menuitem"
-            title={
-              paneTotal !== undefined && paneTotal > tabs.length
-                ? t('这一格里的页签全部关掉（含当前这一个与其他目标藏着的页签）')
-                : t('这一格里的页签全部关掉（含当前这一个）')
-            }
+            title={t('这一格里的页签全部关掉（不影响大纲）')}
             onClick={() => onPick('all')}
             className={ROW + ' text-seal-deep hover:bg-seal/10'}
           >
@@ -1655,7 +1648,7 @@ function TabMenu({
               <OctagonX size={13} />
             </span>
             {t(TAB_CLOSE_LABEL.all)}
-            <span className={COUNT}>{paneTotal ?? tabs.length}</span>
+            <span className={COUNT}>{tabs.filter((t) => t.ref.kind !== 'outline').length}</span>
           </button>
         </>
       )}

@@ -22,8 +22,8 @@
 
 import {
   Fragment,
-  startTransition,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -305,6 +305,8 @@ export default function LearnWorkspace({
    * - docs.layout / docs.groups：界面按它把几格摆出来（见下面的 renderLayout）。
    */
   const docs = store.docArea
+  const deferredDocs = useDeferredValue(docs)
+  const [outlineFocus, setOutlineFocus] = useState<{ nodeId: string; nonce: number } | null>(null)
   /** 全部页签，按**布局顺序**排——它仍是「页签是否已被打开过」的判据（见 openTab / 常驻名额） */
   const tabs = useMemo(() => allTabs(docs), [docs])
   const activeTab = useMemo(() => focusedTab(docs), [docs])
@@ -427,12 +429,12 @@ export default function LearnWorkspace({
    */
   const hasTargetOutline = useMemo(
     () =>
-      tabs.some((t) => {
-        const ref = t.ref
-        if (ref.kind !== 'outline') return false
-        return store.goals.some((g) => g.rootNodeId === ref.nodeId)
-      }),
-    [store.goals, tabs],
+      activeGoal
+        ? tabs.some(
+            (t) => t.ref.kind === 'outline' && t.ref.nodeId === activeGoal.rootNodeId,
+          )
+        : false,
+    [activeGoal, tabs],
   )
   const topbarGoalQuestion = hasTargetOutline ? (activeGoal?.question ?? '') : ''
 
@@ -1437,8 +1439,19 @@ export default function LearnWorkspace({
    * 「新开一份文档」理应开在他正在看的那一格；已经在别格开着的则切过去，不再开第二份。
    */
   const openTab = useCallback(
-    (ref: TabRef) => {
+    (targetRef: TabRef) => {
       const s = getLatest()
+      let ref = targetRef
+      const initialNodeId = tabNodeId(ref)
+      const initialNode = initialNodeId ? nodeById(s, initialNodeId) : undefined
+      if (initialNodeId && !initialNode) return
+      if (ref.kind === 'outline' && initialNode) {
+        const goal = s.goals.find((g) => g.id === initialNode.goalId)
+        if (goal && ref.nodeId !== goal.rootNodeId) {
+          setOutlineFocus({ nodeId: ref.nodeId, nonce: Date.now() })
+          ref = { kind: 'outline', nodeId: goal.rootNodeId }
+        }
+      }
       const nodeId = tabNodeId(ref)
       const node = nodeId ? nodeById(s, nodeId) : undefined
       if (nodeId && !node) return
@@ -1618,9 +1631,7 @@ export default function LearnWorkspace({
       const base = nodeId ? retargetNode(s, nodeId) : s
       const wasActive = focusedTab(s.docArea)?.id === id && s.docArea.focus === group
       // activateIn 顺手把焦点挪到那一格：点别处的页签，接下来的动作（开文档、Ctrl+W）都该落在那一格
-      startTransition(() => {
-        set({ ...base, docArea: activateIn(base.docArea, group, id) })
-      })
+      set({ ...base, docArea: activateIn(base.docArea, group, id) })
       // 同一枚页签没有 activeTab 变化，单独唤醒侧栏完成重复定位。
       if (wasActive) requestReveal()
     },
@@ -3324,8 +3335,18 @@ export default function LearnWorkspace({
    */
   const openChipInGroup = (groupId: string) => (p: ChipPayload) => {
     const s = getLatest()
-    const ref = tabRefFromChip(s, p)
-    if (!ref) return
+    const rawRef = tabRefFromChip(s, p)
+    if (!rawRef) return
+    let ref = rawRef
+    const initialNodeId = tabNodeId(ref)
+    const initialNode = initialNodeId ? nodeById(s, initialNodeId) : undefined
+    if (ref.kind === 'outline' && initialNode) {
+      const goal = s.goals.find((g) => g.id === initialNode.goalId)
+      if (goal && ref.nodeId !== goal.rootNodeId) {
+        setOutlineFocus({ nodeId: ref.nodeId, nonce: Date.now() })
+        ref = { kind: 'outline', nodeId: goal.rootNodeId }
+      }
+    }
     const nodeId = tabNodeId(ref)
     const base = nodeId ? retargetNode(s, nodeId) : s
     const goalOf = (id: string) => nodeById(base, id)?.goalId ?? null
@@ -3454,7 +3475,8 @@ export default function LearnWorkspace({
 
   const renderGroup = (groupId: string) => {
     const g = paneInfo(store, docs, groupId, examTabTitle)
-    const gTab = g.tab
+    const dg = paneInfo(store, deferredDocs, groupId, examTabTitle)
+    const gTab = dg.tab
     /** 这一格显示的页签 id；回调里用（TS 的收窄穿不进闭包，见下面几处 onChange） */
     const gTabId = gTab?.id ?? ''
     /** 记忆页签携带的目标 id：同上，闭包里用（goalId 缺省只在页签不是记忆页时发生） */
@@ -3743,7 +3765,7 @@ export default function LearnWorkspace({
                 没有 key：它不指向任何外部东西，也就没有「重挂重读」这回事。
               */
               <DraftDoc
-                draft={g.draft}
+                draft={dg.draft}
                 scale={docScale}
                 onDraft={(text) => stageNewFileDraft(gTabId, text)}
                 saving={docSaving}
@@ -3761,9 +3783,9 @@ export default function LearnWorkspace({
               <LocalDoc
                 key={gTab.ref.path + '#' + (localTicks[gTab.ref.path] ?? 0)}
                 path={gTab.ref.path}
-                view={g.view}
+                view={dg.view}
                 scale={docScale}
-                draft={g.draft}
+                draft={dg.draft}
                 savedText={localSaved?.path === gTab.ref.path ? localSaved.text : undefined}
                 onDraft={(text) => stageLocalDraft(gTabId, text)}
                 saving={docSaving}
@@ -3793,9 +3815,9 @@ export default function LearnWorkspace({
                   <LocalDoc
                     key={abs + '#' + (localTicks[abs] ?? 0)}
                     path={abs}
-                    view={g.view}
+                    view={dg.view}
                     scale={docScale}
-                    draft={g.draft}
+                    draft={dg.draft}
                     savedText={localSaved?.path === abs ? localSaved.text : undefined}
                     onDraft={(text) => stageLocalDraft(gTabId, text)}
                     saving={docSaving}
@@ -3838,20 +3860,20 @@ export default function LearnWorkspace({
                 切去其它页签时仅隐藏保活，切回时零延迟复原相机与状态。这里让出位置。
               */
               null
-            ) : gTab?.ref.kind === 'super' && g.node && g.superDoc ? (
+            ) : gTab?.ref.kind === 'super' && dg.node && dg.superDoc ? (
               /*
                 超级文档：一份完整的可交互 HTML。预览跑在沙箱化的 iframe 里
                 （见 SuperDocView），源码视图直接改 HTML——暂存与 Ctrl+S 与
                 其它文档同一套（保存写回 node.superdocs，见 saveDocNow）。
                 key 绑「节点 + 名字」：换一份就重挂，脚本从头执行、状态归零。
               */
-              g.view === 'source' ? (
+              dg.view === 'source' ? (
                 <SourceEditor
-                  key={g.node.id + ':super:' + gTab.ref.name}
-                  value={g.draft ?? g.superDoc.html}
+                  key={dg.node.id + ':super:' + gTab.ref.name}
+                  value={dg.draft ?? dg.superDoc.html}
                   onChange={(text) => editDocSource(gTabId, text)}
-                  state={docSaving ? 'saving' : g.draft === undefined ? 'saved' : 'dirty'}
-                  label={g.title}
+                  state={docSaving ? 'saving' : dg.draft === undefined ? 'saved' : 'dirty'}
+                  label={dg.title}
                   scale={docScale}
                   scrollTop={store.docScroll[gTabId + SRC_SCROLL_SUFFIX]}
                   onScrollTop={(top) => rememberScroll(gTabId + SRC_SCROLL_SUFFIX, top)}
@@ -3859,8 +3881,8 @@ export default function LearnWorkspace({
                 />
               ) : (
                 <SuperDocView
-                  key={g.node.id + ':super:' + gTab.ref.name}
-                  html={g.superDoc.html}
+                  key={dg.node.id + ':super:' + gTab.ref.name}
+                  html={dg.superDoc.html}
                   onMethodCall={runSuperMethod}
                   // 文档里的 moji:super 链接：BRIDGE 拦截后转回来，走上面注册的同一个处理器
                   onSuperLink={(href) => {
@@ -3869,19 +3891,19 @@ export default function LearnWorkspace({
                   }}
                 />
               )
-            ) : g.node && g.source ? (
-              g.view === 'source' ? (
+            ) : dg.node && dg.source ? (
+              dg.view === 'source' ? (
                 /*
                   源码视图：直接改 Markdown。改动先进**暂存区**（见 learn/drafts），
                   按 Ctrl+S 才写进文档——底栏上的「已保存 / 未保存」读的就是暂存区里
                   有没有这一份，而不是「store 落盘了没有」。
                 */
                 <SourceEditor
-                  key={g.title + ':' + g.source.kind + ':' + (g.source.note ?? '')}
-                  value={g.source.content}
+                  key={dg.title + ':' + dg.source.kind + ':' + (dg.source.note ?? '')}
+                  value={dg.source.content}
                   onChange={(text) => editDocSource(gTabId, text)}
-                  state={docSaving ? 'saving' : g.draft === undefined ? 'saved' : 'dirty'}
-                  label={g.title}
+                  state={docSaving ? 'saving' : dg.draft === undefined ? 'saved' : 'dirty'}
+                  label={dg.title}
                   scale={docScale}
                   ext=".md"
                   // 编辑位置与阅读位置各记各的：同一份文档在源码里改到一半、
@@ -3909,7 +3931,7 @@ export default function LearnWorkspace({
               两处渲染会各自建一份 DOM，那就白常驻了。
             */}
             {panes.map(({ tab, node, source }) => {
-              const paneActive = tab.id === gTab?.id && g.view === 'preview'
+              const paneActive = tab.id === gTab?.id && dg.view === 'preview'
               return (
                 <DocPane
                   key={tab.id}
@@ -4004,6 +4026,7 @@ export default function LearnWorkspace({
                     docs={explorerDocs}
                     exams={explorerExams}
                     activeTab={gTab?.ref ?? null}
+                    focusTarget={outlineFocus}
                   />
                 </div>
               )
@@ -4069,15 +4092,15 @@ export default function LearnWorkspace({
                * key 绑「格 + 节点」：换节点时重挂，各块 tip 的展开状态自然回到收起；
                * 拖页签分割之后新格里的悬浮组也是新的一份，不会继承旧格展开着的那块。
                */
-              key={groupId + ':' + (g.node?.id ?? gTab.id)}
-              view={g.view}
-              previewable={g.previewable}
+              key={groupId + ':' + (dg.node?.id ?? gTab.id)}
+              view={dg.view}
+              previewable={dg.previewable}
               previewHint={
-                g.emptyNote ? t('这份笔记还是空的：先在源码视图里写点东西，才有得预览') : undefined
+                dg.emptyNote ? t('这份笔记还是空的：先在源码视图里写点东西，才有得预览') : undefined
               }
               onSwitchView={(v) => setTabView(gTabId, v)}
               showBackToDoc={gTab.ref.kind === 'note' || gTab.ref.kind === 'super'}
-              onBackToDoc={() => g.node && openTab({ kind: 'teach', nodeId: g.node.id })}
+              onBackToDoc={() => dg.node && openTab({ kind: 'teach', nodeId: dg.node.id })}
               // 纯净阅读那颗：它与 F11 / Esc 是同一个动作（见 toggleZen）。
               // 每一格的悬浮组都画一颗，而状态是**全局一个**——点哪一格都是同一件事
               pure={pure}

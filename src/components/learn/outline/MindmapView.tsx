@@ -126,6 +126,8 @@ export interface MindmapViewProps {
   exams: ExamActions
   /** 焦点格里正开着的那份文档：tip 里对应的那一行要亮 */
   activeTab: TabRef | null
+  /** 外部指定的聚焦/选中节点目标（如 chip 路由） */
+  focusTarget?: { nodeId: string; nonce: number } | null
 }
 
 /**
@@ -557,6 +559,7 @@ export default function MindmapView({
   docs,
   exams,
   activeTab,
+  focusTarget,
 }: MindmapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
@@ -789,15 +792,19 @@ export default function MindmapView({
     setSelectedId(`preview:${info.parentNodeId}`)
   }, [])
 
+  const pendingFocusParentIdRef = useRef<string | null>(null)
+
   const closePreview = useCallback(() => {
     if (!activePreview || isClosingPreview) return
+    const parentId = activePreview.parentNodeId
+    pendingFocusParentIdRef.current = parentId
     setIsClosingPreview(true)
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
     closeTimerRef.current = window.setTimeout(() => {
       setActivePreview(null)
       setIsClosingPreview(false)
       closeTimerRef.current = null
-      setSelectedId((prev) => (prev?.startsWith('preview:') ? activePreview.parentNodeId : prev))
+      setSelectedId(parentId)
     }, 200)
   }, [activePreview, isClosingPreview])
 
@@ -1016,6 +1023,51 @@ export default function MindmapView({
       centerOnPreview(target)
     }
   }, [activePreview, nodeIndex, centerOnPreview])
+
+  // 预览节点关闭后，相机自动调整缩放和位置居中聚焦其父级节点
+  useEffect(() => {
+    if (!pendingFocusParentIdRef.current || activePreview) return
+    const parentId = pendingFocusParentIdRef.current
+    const target = nodeIndex.get(parentId)
+    if (target) {
+      centerOnNode(target)
+      pendingFocusParentIdRef.current = null
+    }
+  }, [nodes, nodeIndex, centerOnNode, activePreview])
+
+  // 外部传入 focusTarget 时（如子大纲 chip 路由），展开其所有祖先节点并自动选中居中
+  useEffect(() => {
+    if (!focusTarget?.nodeId) return
+    const targetNodeId = focusTarget.nodeId
+    const parentMap = new Map<string, string>()
+    for (const edge of store.edges || []) {
+      parentMap.set(edge.to, edge.from)
+    }
+    const ancestors = new Set<string>()
+    let cur = targetNodeId
+    while (cur && parentMap.has(cur)) {
+      const p = parentMap.get(cur)!
+      ancestors.add(p)
+      cur = p
+    }
+    if (ancestors.size > 0) {
+      setCollapsedIds((prev) => {
+        let changed = false
+        const next = new Set(prev)
+        for (const a of ancestors) {
+          if (next.has(a)) {
+            next.delete(a)
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    }
+    const target = nodeIndex.get(targetNodeId)
+    if (target) {
+      selectNode(target)
+    }
+  }, [focusTarget?.nonce, nodeIndex, selectNode, store.edges])
 
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
@@ -1687,6 +1739,42 @@ export default function MindmapView({
                 >
                   <title>{t('点这条线，跳到「{0}」', jumpTo?.title ?? '')}</title>
                 </path>
+                {/* 预览节点连线中点的快捷关闭并返回父节点按钮 */}
+                {isPreviewEdge && (
+                  <g
+                    transform={`translate(${(edge.x1 + edge.x2) / 2}, ${(edge.y1 + edge.y2) / 2})`}
+                    className="cursor-pointer group/close-edge"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      closePreview()
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{
+                      opacity: isClosingPreview ? 0 : 1,
+                      transition: 'opacity 200ms ease, transform 300ms cubic-bezier(0.2, 0, 0, 1)',
+                    }}
+                  >
+                    <title>{t('关闭预览并返回父节点')}</title>
+                    <circle
+                      r={11}
+                      fill="var(--color-card, #ffffff)"
+                      stroke={pTheme ? pTheme.border : 'var(--color-seal)'}
+                      strokeWidth={1.5}
+                      className="shadow-sm transition-transform duration-150 group-hover/close-edge:scale-115"
+                      style={{
+                        filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.15))',
+                      }}
+                    />
+                    <path
+                      d="M -3.5 -3.5 L 3.5 3.5 M 3.5 -3.5 L -3.5 3.5"
+                      fill="none"
+                      stroke={pTheme ? pTheme.color : 'var(--color-seal)'}
+                      strokeWidth={1.75}
+                      strokeLinecap="round"
+                      className="transition-transform duration-150 group-hover/close-edge:scale-115"
+                    />
+                  </g>
+                )}
               </g>
             )
           })}
