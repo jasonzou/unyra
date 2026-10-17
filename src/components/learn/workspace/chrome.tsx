@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, Check, ChevronDown, Compass, Contact, FilePlus, FolderOpen, Globe, History, Loader2, Menu, Paperclip, Sparkles, Star, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Compass, FilePlus, FolderOpen, Globe, History, Loader2, Menu, Paperclip, Sparkles, Star, X } from 'lucide-react'
 import type { PendingFile } from '../../../agent/types'
 import type { FavoriteItem, FavoriteRef, KnowledgeNode, LearnStore } from '../../../learn/types'
 import { favoriteKey } from '../../../learn/favorites'
@@ -60,7 +60,7 @@ export function Topbar({
   onOpenUsage,
   onOpenUpdate,
   onOpenNotice,
-  onToast,
+  onToast: _onToast,
   pomodoro,
   checkin,
   review,
@@ -262,14 +262,7 @@ export function Topbar({
             位置让给公告）。按钮自己订阅公告状态、自己画那颗未读红点（见
             components/notice/NoticeButton）——顶栏这一层保持纯展示。 */}
         <NoticeButton onOpen={onOpenNotice} />
-        <button
-          type="button"
-          title={t('联系方式')}
-          onClick={() => onToast(t('「联系方式」还是空的：之后放反馈与作者的入口'))}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-all hover:bg-line/60 hover:text-ink"
-        >
-          <Contact size={15} />
-        </button>
+
 
         <WindowControls />
       </div>

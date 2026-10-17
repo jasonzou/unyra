@@ -88,23 +88,55 @@ export default function SystemAudioWave() {
       canvas.setAttribute('title', text)
     }
 
-    const start = (): void => {
-      if (isWeb()) {
-        setTip(t('电台律动 · 呼吸待机'))
-        return
+    const createWebLoopbackSession = async (): Promise<LoopbackSession> => {
+      let active = true
+      let lastData = new Uint8Array(64)
+      const poll = async () => {
+        while (active && !disposed) {
+          try {
+            const res = await fetch('/api/audio/spectrum?bins=64')
+            const json = (await res.json()) as { ok: boolean; data?: number[] }
+            if (json.ok && Array.isArray(json.data)) {
+              lastData = new Uint8Array(json.data)
+            }
+          } catch {
+            // ignore network jitter
+          }
+          await new Promise((r) => window.setTimeout(r, 120))
+        }
       }
+      void poll()
+
+      return {
+        spectrum(into) {
+          if (!active) return false
+          into.set(lastData.subarray(0, Math.min(into.length, lastData.length)))
+          return true
+        },
+        bins: () => 64,
+        sampleRate: () => 44100,
+        via: () => '微服务后端 (/api/audio/spectrum)',
+        stop: () => {
+          active = false
+        },
+      }
+    }
+
+    const start = (): void => {
       void (async () => {
         try {
-          const s = await startLoopback({
-            onEnded: () => {
-              if (disposed) return
-              session?.stop()
-              session = null
-              setTip(t('输出设备变了，重新接系统音频'))
-              window.clearTimeout(retryTimer)
-              retryTimer = window.setTimeout(start, 800)
-            },
-          })
+          const s = isWeb()
+            ? await createWebLoopbackSession()
+            : await startLoopback({
+                onEnded: () => {
+                  if (disposed) return
+                  session?.stop()
+                  session = null
+                  setTip(t('输出设备变了，重新接系统音频'))
+                  window.clearTimeout(retryTimer)
+                  retryTimer = window.setTimeout(start, 800)
+                },
+              })
           if (disposed) {
             s.stop()
             return
@@ -113,7 +145,7 @@ export default function SystemAudioWave() {
           freq = new Uint8Array(s.bins())
           realloc(barCount(Math.max(1, width)))
           attempts = 0
-          setTip(t('正在监听系统音频'))
+          setTip(isWeb() ? t('正在监听服务端音频律动') : t('正在监听系统音频'))
         } catch (err) {
           if (disposed) return
           session = null

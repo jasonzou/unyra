@@ -21,6 +21,7 @@ import {
 import {
   currentRoot,
   defaultRoot,
+  pickRoot,
   setRoot,
 } from '../../electron/storage/settings'
 import { flushSync } from '../../electron/storage/flush'
@@ -34,6 +35,11 @@ storageRouter.get('/info', (c) => {
     defaultRoot: defaultRoot(),
     isDefault: currentRoot() === defaultRoot(),
   })
+})
+
+storageRouter.post('/pickRoot', async (c) => {
+  const res = await pickRoot()
+  return c.json(res)
 })
 
 storageRouter.post('/setRoot', async (c) => {

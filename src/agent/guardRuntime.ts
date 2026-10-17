@@ -105,12 +105,16 @@ let session: GuardSession | null = null
 let lastSession: GuardSession | null = null
 let snap: GuardSnapshot = { session: null, lastSession: null, streams: { screen: false, camera: false } }
 const listeners = new Set<() => void>()
+const webStreams: { screen: boolean; camera: boolean } = { screen: false, camera: false }
 
 function publish(): void {
   snap = {
     session: session ? { ...session, rounds: [...session.rounds] } : null,
     lastSession: lastSession ? { ...lastSession, rounds: [...lastSession.rounds] } : null,
-    streams: { screen: !!streams.screen, camera: !!streams.camera },
+    streams: {
+      screen: isWeb() ? webStreams.screen : !!streams.screen,
+      camera: isWeb() ? webStreams.camera : !!streams.camera,
+    },
   }
   for (const fn of listeners) fn()
 }
@@ -157,8 +161,12 @@ function hiddenVideo(kind: keyof typeof streams): HTMLVideoElement {
 
 /** 确保某一路媒体流在跑（幂等）；失败回 null（无摄像头 / 被拒 / 被占用） */
 export async function ensureStream(kind: 'screen' | 'camera'): Promise<MediaStream | null> {
-  // Web 浏览器模式下不支持屏幕监控（无全局应用监控权限，且易引起标签页自捕获崩溃）
-  if (kind === 'screen' && isWeb()) return null
+  if (isWeb()) {
+    webStreams[kind] = true
+    publish()
+    notifyStreams()
+    return true as unknown as MediaStream
+  }
   if (streams[kind] && streams[kind]!.active) return streams[kind]
   try {
     const stream =
@@ -191,6 +199,12 @@ export async function ensureStream(kind: 'screen' | 'camera'): Promise<MediaStre
 
 /** 停掉一路（会话结束 / 用户取消勾选）；没有就当停过了 */
 export function stopStream(kind: 'screen' | 'camera'): void {
+  if (isWeb()) {
+    webStreams[kind] = false
+    publish()
+    notifyStreams()
+    return
+  }
   streams[kind]?.getTracks().forEach((track) => track.stop())
   if (videos[kind]) videos[kind].srcObject = null
   streams[kind] = null
@@ -236,6 +250,22 @@ function captureFrame(kind: 'screen' | 'camera'): { mime: string; data: string }
   const url = canvas.toDataURL('image/jpeg', FRAME_QUALITY)
   const prefix = 'data:image/jpeg;base64,'
   return url.startsWith(prefix) ? { mime: 'image/jpeg', data: url.slice(prefix.length) } : null
+}
+
+async function captureFrameAsync(kind: 'screen' | 'camera'): Promise<{ mime: string; data: string } | null> {
+  if (isWeb()) {
+    try {
+      const endpoint = kind === 'screen' ? '/api/guard/captureScreen' : '/api/guard/captureCamera'
+      const res = await fetch(endpoint)
+      const json = (await res.json()) as { ok: boolean; mime?: string; data?: string }
+      if (json.ok && json.data) {
+        return { mime: json.mime || 'image/jpeg', data: json.data }
+      }
+    } catch {
+      return null
+    }
+  }
+  return captureFrame(kind)
 }
 
 /* ---------- 会话与轮次 ---------- */
@@ -382,11 +412,11 @@ async function runRound(): Promise<void> {
   try {
     const images: { mime: string; data: string }[] = []
     if (session.monitors.screen) {
-      const frame = captureFrame('screen')
+      const frame = await captureFrameAsync('screen')
       if (frame) images.push(frame)
     }
     if (session.monitors.camera) {
-      const frame = captureFrame('camera')
+      const frame = await captureFrameAsync('camera')
       if (frame) images.push(frame)
     }
     let focusedApp: string | undefined

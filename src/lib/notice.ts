@@ -24,7 +24,7 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import { isElectron, native, type NoticeSettings, type WebFetchResult } from './native'
+import { native, type NoticeSettings, type WebFetchResult } from './native'
 import { NOTICE_TIMEOUT_MS, noticeUrlForRequest } from './noticeConfig'
 import { t } from '../i18n'
 
@@ -277,7 +277,7 @@ const TIMED_OUT = Symbol('notice-timeout')
  * 不抛异常、不打断界面。
  */
 export async function fetchNotice(): Promise<NoticeFetchResult> {
-  if (!isElectron()) return { ok: false, reason: 'no-bridge' }
+  if (typeof window === 'undefined') return { ok: false, reason: 'no-bridge' }
   const url = noticeUrlForRequest()
   if (!url) return { ok: false, reason: 'not-configured' }
 
@@ -385,7 +385,6 @@ export function noticeSnapshot(): NoticeSnapshot {
 
 /** 读一次本机状态并装进快照。**幂等**：启动流程里调一次就够 */
 export async function loadNoticeStore(): Promise<NoticeStore> {
-  if (!isElectron()) return store
   try {
     store = normalizeStore(await native().notice.get())
   } catch (err) {
@@ -407,11 +406,6 @@ function normalizeStore(raw: NoticeStore | null | undefined): NoticeStore {
 
 /** 落盘本机状态（按字段合并，主进程侧语义见 setNoticeSettings） */
 async function persistStore(patch: Partial<NoticeStore>): Promise<void> {
-  if (!isElectron()) {
-    store = normalizeStore({ ...store, ...patch })
-    publish()
-    return
-  }
   try {
     store = normalizeStore(await native().notice.set(patch))
   } catch (err) {

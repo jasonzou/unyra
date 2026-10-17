@@ -11,6 +11,9 @@ import { proxyRouter } from './routes/proxy'
 import { baseRouter } from './routes/base'
 import { mcpRouter } from './routes/mcp'
 import { webRouter } from './routes/web'
+import { noticeRouter } from './routes/notice'
+import { guardRouter } from './routes/guard'
+import { audioRouter } from './routes/audio'
 import { getUserDataDir } from '../electron/storage/userData'
 
 const app = new Hono()
@@ -31,6 +34,9 @@ app.route('/api/proxy', proxyRouter)
 app.route('/api/base', baseRouter)
 app.route('/api/mcp', mcpRouter)
 app.route('/api/web', webRouter)
+app.route('/api/notice', noticeRouter)
+app.route('/api/guard', guardRouter)
+app.route('/api/audio', audioRouter)
 
 // 系统与健康检查接口
 app.get('/api/health', (c) => {

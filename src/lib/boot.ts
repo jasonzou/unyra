@@ -31,7 +31,6 @@ import './voice/plugin'
 import { refreshVoiceGpuDefault } from './voice/settings'
 import { loadSkillsFromDisk } from '../agent/skill/fs'
 import { startupMark } from './startupTrace'
-import { isWeb } from './native'
 import { vfsBus } from '../vfs'
 import type { User } from '../user/types'
 
@@ -75,11 +74,6 @@ export async function enterUserScope(uid: string | null): Promise<void> {
 /** 完整启动：用户 → 会话 → 该用户的数据 */
 export async function bootApp(): Promise<BootResult> {
   startupMark('r:boot-entry')
-  if (isWeb()) {
-    try {
-      localStorage.removeItem('moji-focus-monitors')
-    } catch {}
-  }
   // 界面语言跟机器走（global.yaml）：先于一切渲染应用——登录页也得用上它
   await loadUiLocale()
   // 插件要在第一帧之前装好：renderNote 一旦跑过，没人认领的语法就只能当代码块显示了

@@ -376,22 +376,68 @@ export function setNoticeSettings(patch: Partial<NoticeSettings>): NoticeSetting
 
 /* ---------- 选择目录 ---------- */
 
+async function pickDirectoryNativeOS(defaultPath?: string): Promise<{ ok: boolean; canceled?: boolean; root?: string; error?: string }> {
+  const { execFile } = await import('node:child_process')
+  if (process.platform === 'win32') {
+    return new Promise((resolve) => {
+      const script = `
+Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = '选择用户数据存储位置'
+$d.ShowNewFolderButton = $true
+${defaultPath ? `$d.SelectedPath = '${defaultPath.replace(/'/g, "''")}'` : ''}
+if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  Write-Output $d.SelectedPath
+}
+`
+      execFile('powershell.exe', ['-NoProfile', '-STA', '-Command', script], { timeout: 120000 }, (err, stdout) => {
+        if (err) {
+          resolve({ ok: false, error: err.message })
+        } else {
+          const picked = stdout.trim()
+          if (!picked) resolve({ ok: false, canceled: true })
+          else resolve({ ok: true, root: picked })
+        }
+      })
+    })
+  } else if (process.platform === 'darwin') {
+    return new Promise((resolve) => {
+      const script = 'POSIX path of (choose folder with prompt "选择用户数据存储位置")'
+      execFile('osascript', ['-e', script], { timeout: 120000 }, (err, stdout) => {
+        if (err) {
+          resolve({ ok: false, canceled: true })
+        } else {
+          const picked = stdout.trim()
+          if (!picked) resolve({ ok: false, canceled: true })
+          else resolve({ ok: true, root: picked })
+        }
+      })
+    })
+  }
+  return { ok: false, error: t('当前服务端环境不支持调用系统原生目录弹窗') }
+}
+
 export async function pickRoot(): Promise<{ ok: boolean; canceled?: boolean; root?: string; error?: string }> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const electron = require('electron')
-    if (!electron?.dialog?.showOpenDialog) {
-      return { ok: false, error: t('当前 Web 服务端环境不支持调用系统原生目录弹窗') }
+    if (electron?.dialog?.showOpenDialog) {
+      const win = electron.BrowserWindow?.getFocusedWindow?.() ?? electron.BrowserWindow?.getAllWindows?.()[0] ?? undefined
+      const { canceled, filePaths } = await electron.dialog.showOpenDialog(win!, {
+        title: t('选择用户数据存储位置'),
+        defaultPath: currentRoot(),
+        properties: ['openDirectory', 'createDirectory'],
+      })
+      const picked = filePaths?.[0]
+      if (canceled || !picked) return { ok: false, canceled: true }
+      return { ok: true, root: picked }
     }
-    const win = electron.BrowserWindow?.getFocusedWindow?.() ?? electron.BrowserWindow?.getAllWindows?.()[0] ?? undefined
-    const { canceled, filePaths } = await electron.dialog.showOpenDialog(win!, {
-      title: t('选择用户数据存储位置'),
-      defaultPath: currentRoot(),
-      properties: ['openDirectory', 'createDirectory'],
-    })
-    const picked = filePaths?.[0]
-    if (canceled || !picked) return { ok: false, canceled: true }
-    return { ok: true, root: picked }
+  } catch {
+    // not in electron
+  }
+
+  try {
+    return await pickDirectoryNativeOS(currentRoot())
   } catch (err) {
     return { ok: false, error: errText(err) }
   }

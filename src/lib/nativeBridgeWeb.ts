@@ -142,7 +142,7 @@ export function createWebNativeBridge(): NativeBridge {
     storage: {
       info: () => apiFetch<StorageInfo>('/api/storage/info'),
       setRoot: (dir?: string) => apiFetch<StorageRootResult>('/api/storage/setRoot', { method: 'POST', body: JSON.stringify({ dir }) }),
-      pickRoot: () => Promise.resolve({ ok: false, error: 'WebUI 模式请在设置页中直接填写本机路径' }),
+      pickRoot: () => apiFetch<{ ok: boolean; canceled?: boolean; root?: string; error?: string }>('/api/storage/pickRoot', { method: 'POST' }),
       list: (rel: string) => apiFetch('/api/storage/list', { method: 'POST', body: JSON.stringify({ rel }) }),
       read: (rel: string) => apiFetch('/api/storage/read', { method: 'POST', body: JSON.stringify({ rel }) }),
       write: (rel: string, content: string) => apiFetch<StorageOk | StorageFail>('/api/storage/write', { method: 'POST', body: JSON.stringify({ rel, content }) }),
@@ -248,7 +248,14 @@ export function createWebNativeBridge(): NativeBridge {
         return { ok: true }
       },
       flashTop: () => {},
-      getFocusedApp: () => Promise.resolve('Unyra (Web 模式)'),
+      getFocusedApp: async () => {
+        try {
+          const res = await apiFetch<{ ok: boolean; app: string }>('/api/guard/focusedApp')
+          return res.app || 'Unyra'
+        } catch {
+          return 'Unyra (Web 模式)'
+        }
+      },
     },
 
     examHost: {
@@ -268,22 +275,9 @@ export function createWebNativeBridge(): NativeBridge {
     },
 
     notice: {
-      get: async () => {
-        try {
-          const raw = localStorage.getItem('unyra_notice_settings')
-          if (raw) return JSON.parse(raw)
-        } catch {}
-        return { autoShow: true, shownVersion: '', readIds: [] }
-      },
-      set: async (patch: Partial<NoticeSettings>) => {
-        try {
-          const cur = JSON.parse(localStorage.getItem('unyra_notice_settings') || '{"autoShow":true,"shownVersion":"","readIds":[]}')
-          const updated = { ...cur, ...patch }
-          localStorage.setItem('unyra_notice_settings', JSON.stringify(updated))
-          return updated
-        } catch {}
-        return { autoShow: true, shownVersion: '', readIds: [] }
-      },
+      get: () => apiFetch<NoticeSettings>('/api/notice/get'),
+      set: (patch: Partial<NoticeSettings>) =>
+        apiFetch<NoticeSettings>('/api/notice/set', { method: 'POST', body: JSON.stringify(patch) }),
     },
 
     shell: {

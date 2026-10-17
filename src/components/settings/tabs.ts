@@ -15,6 +15,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { isDevUnlocked } from '../../lib/devMode'
+import { isWeb } from '../../lib/native'
 
 export type TabKey = 'ai' | 'appearance' | 'input' | 'window' | 'storage' | 'migration' | 'plugins' | 'update' | 'about' | 'dev'
 
@@ -40,7 +41,10 @@ export const loadSavedTab = (): TabKey => {
   try {
     const v = localStorage.getItem(TAB_STORAGE_KEY)
     if (v === 'dev') return isDevUnlocked() ? 'dev' : 'ai'
-    const keys: TabKey[] = ['ai', 'appearance', 'input', 'window', 'storage', 'migration', 'plugins', 'update', 'about']
+    if (isWeb() && (v === 'window' || v === 'update')) return 'ai'
+    const keys: TabKey[] = isWeb()
+      ? ['ai', 'appearance', 'input', 'storage', 'migration', 'plugins', 'about']
+      : ['ai', 'appearance', 'input', 'window', 'storage', 'migration', 'plugins', 'update', 'about']
     return keys.includes(v as TabKey) ? (v as TabKey) : 'ai'
   } catch {
     return 'ai'
@@ -55,7 +59,7 @@ export const saveTab = (key: TabKey): void => {
   }
 }
 
-export const TABS: SettingsTabItem[] = [
+const ALL_TABS: SettingsTabItem[] = [
   {
     key: 'ai',
     label: '模型',
@@ -94,6 +98,11 @@ export const TABS: SettingsTabItem[] = [
   // 版本号与「这份副本是谁的」都在这儿：出问题时用户能报出准确版本
   { key: 'about', label: '关于', icon: Info },
 ]
+
+export const TABS: SettingsTabItem[] = isWeb()
+  ? ALL_TABS.filter((t) => t.key !== 'window' && t.key !== 'update')
+  : ALL_TABS
+
 
 /**
  * 「开发者」分页不常驻：解锁过（凭据在 localStorage 里）或这次对标题三击过，

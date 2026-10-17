@@ -61,10 +61,6 @@ import {
 const MONITORS_KEY = 'moji-focus-monitors'
 
 function loadMonitors(): FocusMonitors {
-  if (isWeb()) {
-    // Web 浏览器模式下不支持屏幕监控（无全局应用监控权限，且易引起标签页自捕获崩溃）
-    return { screen: false, camera: false }
-  }
   try {
     const raw = JSON.parse(localStorage.getItem(MONITORS_KEY) ?? '{}') as Partial<FocusMonitors>
     return { screen: raw.screen === true, camera: raw.camera === true }
@@ -115,7 +111,6 @@ export function PomodoroDock({
   /** 勾/去一路监控：当场起停媒体流（预览跟着亮/熄），起不来就退回未勾。
       先算好下一份再 set：updater 要保持纯净（起停流与落 localStorage 都是副作用） */
   const toggleMonitor = (kind: 'screen' | 'camera') => {
-    if (kind === 'screen' && isWeb()) return
     const next = { ...monitors, [kind]: !monitors[kind] }
     setMonitors(next)
     try {
@@ -205,12 +200,35 @@ export function GuardPreviewTile({ kind }: { kind: 'screen' | 'camera' }) {
   // 流的来去由 toggle / 会话收尾触发：订阅它，来了就挂上、断了就熄灭
   useEffect(() => subscribeGuardStreams(() => setVersion((n) => n + 1)), [])
   useEffect(() => {
+    if (isWeb()) return
     const video = videoRef.current
     if (!video) return
     const stream = getStream(kind)
     if (video.srcObject !== stream) video.srcObject = stream
     if (stream) void video.play().catch(() => {})
   }, [version, kind])
+
+  if (isWeb()) {
+    return (
+      <div className="relative aspect-video overflow-hidden rounded-md border border-line bg-black/80">
+        <img
+          src={`/api/guard/preview/${kind}?v=${version}`}
+          alt={kind}
+          className="h-full w-full object-contain"
+          onError={(e) => {
+            ;(e.target as HTMLElement).style.opacity = '0'
+          }}
+          onLoad={(e) => {
+            ;(e.target as HTMLElement).style.opacity = '1'
+          }}
+        />
+        <span className="absolute bottom-1 left-1.5 rounded bg-black/55 px-1 py-px text-[9.5px] text-white/90">
+          {kind === 'screen' ? t('屏幕') : t('摄像头')}
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="relative aspect-video overflow-hidden rounded-md border border-line bg-black/80">
       <video ref={videoRef} muted playsInline className="h-full w-full object-contain" />
