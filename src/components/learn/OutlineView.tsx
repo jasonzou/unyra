@@ -6,6 +6,7 @@
  * 顶部通栏已被移除，给导图画布最大的可视空间。
  */
 
+import { memo } from 'react'
 import type { KnowledgeNode, LearnStore, OutlineEntry, TabRef } from '../../learn/types'
 import type { ExamActions, NodeDocActions } from './explorer/types'
 import MindmapView from './outline/MindmapView'
@@ -34,7 +35,17 @@ export interface OutlineViewProps {
   onFocusHandled?: () => void
 }
 
-export default function OutlineView({
+function sameOutlineView(prev: OutlineViewProps, next: OutlineViewProps): boolean {
+  if (prev.node !== next.node) return false
+  if (prev.store.nodes !== next.store.nodes || prev.store.edges !== next.store.edges || prev.store.exams !== next.store.exams) return false
+  if (prev.focusTarget !== next.focusTarget) return false
+  if (prev.docs !== next.docs || prev.exams !== next.exams) return false
+  if (prev.onOpenNode !== next.onOpenNode || prev.onCreateChild !== next.onCreateChild) return false
+  if (prev.onGenerate !== next.onGenerate || prev.onSetTint !== next.onSetTint) return false
+  return true
+}
+
+export default memo(function OutlineView({
   store,
   node,
   onOpenNode,
@@ -47,6 +58,10 @@ export default function OutlineView({
   focusTarget,
   onFocusHandled,
 }: OutlineViewProps) {
+  const t0 = (window as any).__tabSwitchT0
+  const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
+  console.log(`[TabSwitch] ${prefix}👁️ OutlineView rendered for node="${node.title}"`)
+
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-paper dark:bg-card/30">
       <div className="relative min-h-0 flex-1">
@@ -66,4 +81,4 @@ export default function OutlineView({
       </div>
     </div>
   )
-}
+}, sameOutlineView)

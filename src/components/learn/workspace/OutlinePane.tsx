@@ -9,9 +9,8 @@
  * 当 active 变为 true 时才解除冻结并渲染最新状态。
  */
 
-import { memo } from 'react'
+import { memo, useEffect } from 'react'
 import type { KnowledgeNode, LearnStore, OutlineEntry, TabRef } from '../../../learn/types'
-import { tabKey } from '../../../learn/tabs'
 import type { ExamActions, NodeDocActions } from '../explorer/types'
 import OutlineView from '../OutlineView'
 
@@ -46,9 +45,6 @@ function sameOutlinePane(prev: OutlinePaneProps, next: OutlinePaneProps): boolea
   if (prev.node !== next.node) return false
   if (prev.store.nodes !== next.store.nodes || prev.store.edges !== next.store.edges) return false
   if (prev.docs !== next.docs || prev.exams !== next.exams) return false
-  const prevTabKey = prev.activeTab ? tabKey(prev.activeTab) : null
-  const nextTabKey = next.activeTab ? tabKey(next.activeTab) : null
-  if (prevTabKey !== nextTabKey) return false
   return true
 }
 
@@ -67,6 +63,20 @@ export const OutlinePane = memo(function OutlinePane({
   focusTarget,
   onFocusHandled,
 }: OutlinePaneProps) {
+  if (active) {
+    const t0 = (window as any).__tabSwitchT0
+    const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
+    console.log(`[TabSwitch] ${prefix}🗺️ OutlinePane rendered active=true for tabId="${_tabId}", title="${node.title}"`)
+  }
+
+  useEffect(() => {
+    if (active) {
+      const t0 = (window as any).__tabSwitchT0
+      const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
+      console.log(`[TabSwitch] ${prefix}🕒 OutlinePane useEffect (active=true for tabId="${_tabId}")`)
+    }
+  }, [active, _tabId])
+
   return (
     <div
       data-outline-pane={active ? 'active' : 'idle'}

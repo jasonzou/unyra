@@ -19,7 +19,7 @@
  *
  * 另外节点可自定义颜色（右键菜单），颜色存在节点上（KnowledgeNode.tint）。
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
   ExternalLink,
@@ -551,7 +551,17 @@ function cardSkin(opts: {
   }
 }
 
-export default function MindmapView({
+function sameMindmapView(prev: MindmapViewProps, next: MindmapViewProps): boolean {
+  if (prev.node !== next.node) return false
+  if (prev.store.nodes !== next.store.nodes || prev.store.edges !== next.store.edges || prev.store.exams !== next.store.exams) return false
+  if (prev.focusTarget !== next.focusTarget) return false
+  if (prev.docs !== next.docs || prev.exams !== next.exams) return false
+  if (prev.onOpenNode !== next.onOpenNode || prev.onCreateChild !== next.onCreateChild) return false
+  if (prev.onGenerate !== next.onGenerate || prev.onSetTint !== next.onSetTint) return false
+  return true
+}
+
+export default memo(function MindmapView({
   store,
   node,
   onOpenNode,
@@ -564,6 +574,10 @@ export default function MindmapView({
   focusTarget,
   onFocusHandled,
 }: MindmapViewProps) {
+  const t0 = (window as any).__tabSwitchT0
+  const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
+  console.log(`[TabSwitch] ${prefix}🧠 MindmapView rendered for node="${node.title}"`)
+
   const containerRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
   const isSpacePressedRef = useRef(false)
@@ -833,6 +847,7 @@ export default function MindmapView({
 
   // 构建思维导图并计算几何布局
   const { nodes, edges, totalWidth, totalHeight, rawTree } = useMemo(() => {
+    const tStart = performance.now()
     const tree = buildMindmapTree(store, node, activePreview)
     computeSubtreeHeights(tree, collapsedIds)
     assignCoordinates(tree, 0, 0, collapsedIds)
@@ -870,6 +885,11 @@ export default function MindmapView({
     const w = (Number.isFinite(maxX) ? maxX : 200) - (Number.isFinite(minX) ? minX : 0) + PADDING * 2
     const h = (Number.isFinite(maxY) ? maxY : 100) - (Number.isFinite(minY) ? minY : 0) + PADDING * 2
 
+    const elapsed = (performance.now() - tStart).toFixed(1)
+    const t0 = (window as any).__tabSwitchT0
+    const prefix = typeof t0 === 'number' ? `${(performance.now() - t0).toFixed(1)}ms: ` : ''
+    console.log(`[TabSwitch] ${prefix}🌲 Mindmap tree layout computed in ${elapsed}ms (nodes: ${flatNodes.length}, edges: ${flatEdges.length})`)
+
     return {
       nodes: flatNodes,
       edges: flatEdges,
@@ -877,7 +897,7 @@ export default function MindmapView({
       totalHeight: Math.max(450, h),
       rawTree: tree,
     }
-  }, [store, node, collapsedIds, activePreview])
+  }, [store.nodes, node, collapsedIds, activePreview])
 
   // 折叠 / 展开单个节点
   const toggleCollapse = useCallback((id: string, e: React.MouseEvent) => {
@@ -1105,7 +1125,11 @@ export default function MindmapView({
       const entry = entries[0]
       if (!entry) return
       const { width, height } = entry.contentRect
-      if (width <= 0 || height <= 0) return
+      if (width <= 0 || height <= 0) {
+        prevWidth = 0
+        prevHeight = 0
+        return
+      }
 
       // 若先前处于隐藏状态（尺寸 <= 0），仅记录新尺寸，不触发平移
       if (prevWidth <= 0 || prevHeight <= 0) {
@@ -2222,7 +2246,7 @@ export default function MindmapView({
       </div>
     </div>
   )
-}
+}, sameMindmapView)
 
 /**
  * 大纲页面右下角帮助按钮：鼠标经过时弹出 tip 显示操作说明

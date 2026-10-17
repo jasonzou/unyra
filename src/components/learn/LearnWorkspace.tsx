@@ -362,6 +362,13 @@ export default function LearnWorkspace({
   const agentSettings = useSyncExternalStore(subscribeAgentSettings, loadAgentSettings)
   const [creatingGoalBusy, setCreatingGoalBusy] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  const lastSwitchLogRef = useRef<number>(0)
+  const t0Switch = (window as any).__tabSwitchT0
+  if (typeof t0Switch === 'number' && t0Switch !== lastSwitchLogRef.current && performance.now() - t0Switch < 1000) {
+    lastSwitchLogRef.current = t0Switch
+    console.log(`[TabSwitch] ${(performance.now() - t0Switch).toFixed(1)}ms: 🏢 LearnWorkspace rendered`)
+  }
   /*
    * 学习状态与试卷**都没有应用内的窗口**：两块都是文档区右上角悬浮组里的一块 tip
    * （鼠标经过即展开，见 components/learn/DocFloat），试卷的作答在独立的考试窗口里
