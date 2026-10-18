@@ -34,6 +34,11 @@ export interface LearnState {
   /** 收藏分组的登记表（空组也要能存在；见 learn/favorites 的分组段） */
   favGroups?: string[]
   /**
+   * 随笔窗口拖到哪儿、多大（见 learn/types 的 EssayDockRect）。
+   * 与 docScroll 同一类：这台机器上的界面动作，不跟着别人的备份走。
+   */
+  essayDock?: unknown
+  /**
    * 全局工作流（跨目标、跟着用户走；目标级的在各自目录的 workflow.json）。
    * efforts 是每条工作流的思考档位配置（键 = id，内置与登记通吃）——同样全局一份，
    * 档位是「设置」不是学习数据，不随目标文件走。
@@ -44,7 +49,7 @@ export interface LearnState {
    * 所以这里漏一个字段就等于「写下去了、读不回来」——曾经真漏过。
    *
    * 阅读记录与打卡曾经也在这儿，现在它们按目标落在各自目录（`{目标}/reading.json`、
-   * `checkin.json`，见 learn/reading 的 ReadingBook）。旧的那两个字段**不再读**：
+   * 见 learn/reading 的 ReadingBook）。旧的那两个字段**不再读**：
    * 改口径不迁移数据，从前那份用户级的账直接丢掉（见 parseDocs 里的说明）。
    */
   pomodoro?: unknown
@@ -100,6 +105,8 @@ export function buildState(store: LearnStore): Record<string, unknown> {
      */
     ...(store.agentTabs?.length ? { agentTabs: store.agentTabs } : {}),
     ...(store.agentActiveTab ? { agentActiveTab: store.agentActiveTab } : {}),
+    // 随笔窗口的位置与大小：拖过一次才写（没拖过就是默认值，不占字段）
+    ...(store.essayDock ? { essayDock: store.essayDock } : {}),
   }
 }
 

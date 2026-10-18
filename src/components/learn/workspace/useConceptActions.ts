@@ -15,6 +15,7 @@ import {
   createChildNode,
   nodeById,
   removeAnnotation,
+  resolveDisplayedConversation,
   updateDoc,
   updateNode,
 } from '../../../learn/graph'
@@ -123,7 +124,7 @@ export function useConceptActions(deps: ConceptActionsDeps) {
    * 「了解」：不建节点，只在这个词旁边挂一条两三句的注解。
    *
    * 交付物由**内置工作流「了解」**跑出来（见 learn/workflows 的 EXPLAIN_INSTRUCTION）：
-   * 从前这里是一次性就地调用（generateShortAnnotation → 直接写注解），现在与开讲 / 回忆 /
+   * 从前这里是一次性就地调用（generateShortAnnotation → 直接写注解），现在与开讲 /
    * 出卷同一条路——导师在对话里写解释，再由它自己调 api.doc.annotate 划到正文上。
    * 换过来的好处**在上下文**：导师已经知道这个目标讲过什么、他哪里卡过，
    * 写出来的释义与对话是连贯的；一次性那条路每次都是一段陌生的文档 + 一个陌生的词。
@@ -223,7 +224,13 @@ export function useConceptActions(deps: ConceptActionsDeps) {
         `【选段位置】我在${docName}里选中了一段渲染后的内容，但没能把它映射回 Markdown 源文` +
         `（可能跨了代码块等结构）。请先用 api.doc.readRange 读一读${docName}再回答我的疑问。`
     }
-    agent.send(question, { context, quote })
+    const s = getLatest()
+    const convId = resolveDisplayedConversation(s, node.goalId)
+    agent.send(question, {
+      context,
+      quote,
+      ...(convId ? { target: { goalId: node.goalId, nodeId: node.id, conversationId: convId } } : {}),
+    })
     onToast(t('已就选段提问，回复见右侧对话框'))
   }
 

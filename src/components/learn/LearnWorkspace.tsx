@@ -35,6 +35,9 @@ import { ExternalLink, Globe } from 'lucide-react'
 import type {
   DocKind,
   DocView,
+  EssayCommit,
+  EssayDockRect,
+  EssayEntry,
   FavoriteRef,
   KnowledgeNode,
   LearnStore,
@@ -109,6 +112,7 @@ import {
   ensureConversation,
   goalSubtreeIds,
   latestConversation,
+  resolveDisplayedConversation,
   nodeById,
   nodeStructure,
   normalizeKey,
@@ -230,6 +234,18 @@ import { formatClock, pomodoroStatus } from '../../learn/pomodoro'
 import LocalDoc from './LocalDoc'
 import DraftDoc from './DraftDoc'
 import SourceEditor from './SourceEditor'
+import EssayDock from './essay/EssayDock'
+import { createEssay, deleteEssay, updateEssay } from '../../learn/essays'
+import {
+  changesSummary,
+  commitFeed,
+  commitsOf,
+  createEssayCommit,
+  diffNoteChanges,
+  noteFingerprint,
+  updateEssayCommit,
+} from '../../learn/essayCommits'
+import { useDoubleShift } from '../../lib/useDoubleShift'
 import type { DocSource } from './NodeNote'
 import ConfirmDialog from '../ConfirmDialog'
 import { AgentTabPane } from './workspace/AgentTabPane'
@@ -239,6 +255,7 @@ import AgentTabStrip from '../agent/AgentTabStrip'
 import ContextDebugger from '../agent/ContextDebugger'
 import { resetPrefixGate } from '../../agent/prefixGate'
 import { docAreaElement, locateNeedle, scrollToDoc, visibleDocBody } from '../../lib/docDom'
+import { localRevealKey, nodeRevealKey, requestSourceReveal } from '../../lib/docReveal'
 import { publishReadingDay } from '../../lib/readingPulse'
 import { readRecentTabs, residentIds } from '../../learn/resident'
 import type { UiPointRequest } from '../../agent/tools'
@@ -251,7 +268,7 @@ import { ZONE_BOX } from './workspace/drag'
 import { examDeleteWarn } from './workspace/labels'
 import { conceptKeysOf, emptyNote, examCopyOf, paneInfo, paneOf } from './workspace/panes'
 import { DocPane } from './workspace/DocPane'
-import { CheckinDock, PomodoroDock, ReadingDock, ReviewDock } from './workspace/docks'
+import { PomodoroDock, ReadingDock } from './workspace/docks'
 import { EmptyDoc, GoalInput, Topbar } from './workspace/chrome'
 import { useSideColumns } from './workspace/useSideColumns'
 import SplitRow from './workspace/SplitRow'
@@ -276,6 +293,14 @@ import { t } from '../../i18n'
  * 不持久化，重启后回落各目标的总节点；写入只发生在 retargetNode（事件路径）。
  */
 const goalFocusByGoal = new Map<string, string>()
+
+/**
+ * 没有随笔时的空数组：**同一个常量**。
+ * 每次渲染现造一个 `[]` 会让 EssayDock 的 props 每次都变（它没有 memo，但列表要重排一遍）。
+ */
+const EMPTY_ESSAYS: EssayEntry[] = []
+/** 没有提交记录时的空数组：理由同上（同一个常量，避免每次渲染都换引用） */
+const EMPTY_COMMITS: EssayCommit[] = []
 
 /**
  * 一枚页签当前归哪个目标（按页签 **id** 反查）。
@@ -542,12 +567,12 @@ export default function LearnWorkspace({
       }
     }
     const goal = store.goals.find((g) => g.id === activeAgentTab.goalId) ?? null
-    // 页签里记的会话丢了（被删过会话）就回落到该目标最近的一段
+    // 页签里记的会话丢了（被删过会话）就回落到该目标当前显示或最近的一段
     const convId =
       activeAgentTab.conversationId &&
       conversationById(store, activeAgentTab.conversationId)?.goalId === activeAgentTab.goalId
         ? activeAgentTab.conversationId
-        : (latestConversation(store, activeAgentTab.goalId)?.id ?? null)
+        : (resolveDisplayedConversation(store, activeAgentTab.goalId) ?? null)
     const focusId = goalFocusByGoal.get(activeAgentTab.goalId) ?? goal?.rootNodeId ?? null
     return {
       tab: activeAgentTab,
@@ -1036,7 +1061,7 @@ export default function LearnWorkspace({
             s.goals.find((g) => g.id === targetTab.goalId)?.rootNodeId ??
             s.activeNodeId
           const convId =
-            targetTab.conversationId ?? latestConversation(s, targetTab.goalId)?.id ?? null
+            targetTab.conversationId ?? resolveDisplayedConversation(s, targetTab.goalId) ?? null
           next = {
             ...s,
             activeGoalId: targetTab.goalId,
@@ -1080,7 +1105,7 @@ export default function LearnWorkspace({
         ref.kind === 'goal'
           ? ref.conversationId && conversationById(s, ref.conversationId)?.goalId === ref.goalId
             ? ref.conversationId
-            : (latestConversation(s, ref.goalId)?.id ?? null)
+            : (resolveDisplayedConversation(s, ref.goalId) ?? null)
           : null
       const hasDocTabs =
         ref.kind === 'goal'
@@ -1220,7 +1245,7 @@ export default function LearnWorkspace({
         const convId =
           ref.conversationId && conversationById(store, ref.conversationId)?.goalId === ref.goalId
             ? ref.conversationId
-            : (latestConversation(store, ref.goalId)?.id ?? null)
+            : (resolveDisplayedConversation(store, ref.goalId) ?? null)
         return !!(convId && agent.runningByConversation[convId])
       }
       const conv = conversationById(store, ref.conversationId)
@@ -1248,7 +1273,7 @@ export default function LearnWorkspace({
         t.kind === 'goal' &&
         t.conversationId &&
         conversationById(s, t.conversationId)?.goalId !== t.goalId
-          ? { ...t, conversationId: latestConversation(s, t.goalId)?.id ?? null }
+          ? { ...t, conversationId: resolveDisplayedConversation(s, t.goalId) ?? null }
           : t,
       )
     const active =
@@ -1411,7 +1436,7 @@ export default function LearnWorkspace({
       const convId = s.activeConversationId &&
         s.conversations.some((c) => c.id === s.activeConversationId && c.goalId === node.goalId)
         ? s.activeConversationId
-        : (latestConversation(s, node.goalId)?.id ?? null)
+        : (resolveDisplayedConversation(s, node.goalId) ?? null)
       const tabbed0 = upsertAgentTab(s.agentTabs ?? [], s.agentActiveTab ?? null, { kind: 'goal', goalId: node.goalId, conversationId: convId }, true)
       const tabbed = withAgentTabs(s, tabbed0.tabs, tabbed0.active)
       const conv = tabbed.activeConversationId
@@ -2138,6 +2163,178 @@ export default function LearnWorkspace({
     [patchQuiet],
   )
 
+  /* ---------- 随笔（见 learn/essays 与 components/learn/essay） ---------- */
+
+  /**
+   * 随笔窗口开着没有。窗口本身在 EssayDock 里，开合只由这里的一个布尔值决定——
+   * 这样「双击 Shift」（见下面的 useDoubleShift）与按钮点开走的是同一条路。
+   */
+  const [essayOpen, setEssayOpen] = useState(false)
+  /** 随笔跟着**眼前这份文档的目标**走：目标级的东西，切到别的目标就不该还开着 */
+  const essayGoalId = docNode?.goalId ?? null
+  const essayList = (essayGoalId ? store.essays?.[essayGoalId] : null) ?? EMPTY_ESSAYS
+
+  /*
+   * 三条写入。都用 getLatest() 现取最新快照再算：输入是去抖的，
+   * 上一次写入可能刚被别的动作（删一条、切目标）改过。
+   */
+  const essayCreate = useCallback(
+    (goalId: string, text: string): string | null => {
+      const created = createEssay(getLatest(), goalId, text, Date.now())
+      if (!created) return null
+      set(created.store)
+      return created.entry.id
+    },
+    [getLatest, set],
+  )
+  const essayUpdate = useCallback(
+    (goalId: string, id: string, text: string) => {
+      set(updateEssay(getLatest(), goalId, id, text, Date.now()))
+    },
+    [getLatest, set],
+  )
+  const essayDelete = useCallback(
+    (goalId: string, id: string) => {
+      set(deleteEssay(getLatest(), goalId, id))
+    },
+    [getLatest, set],
+  )
+  /** 窗口几何：纯界面状态，安静写盘就够（窗口自己已经摆好了，不必为它重渲染整棵学习区） */
+  const essayGeometry = useCallback(
+    (rect: EssayDockRect) => {
+      patchQuiet((s) => ({ ...s, essayDock: rect }))
+    },
+    [patchQuiet],
+  )
+
+  /* ---------- 随笔提交（见 learn/essayCommits） ---------- */
+
+  /** 这个目标的提交记录（新的在前）；没有就是同一个空数组 */
+  const essayCommits = (essayGoalId ? store.essayCommits?.[essayGoalId] : null) ?? EMPTY_COMMITS
+
+  /**
+   * 跑一次「随笔整理」。
+   *
+   * 为什么先拍笔记指纹再触发：整理是 Agent 在沙箱里异步写笔记，**不能等它回来说
+   * 「我改了哪几份」**——它记错 / 漏报的时候，提交记录就成了假的。宿主在触发前把所有
+   * 笔记的正文拍一份快照，跑完再拍一份，两份一对比，改了什么就是什么。
+   */
+  const organizeEssayCommit = useCallback(
+    (goalId: string, commit: EssayCommit) => {
+      const s = getLatest()
+      const goal = s.goals.find((g) => g.id === goalId)
+      if (!goal) return
+      if (!hasKey) {
+        set(
+          updateEssayCommit(getLatest(), goalId, commit.id, {
+            status: 'error',
+            error: t('还没配置 AI：快照已经保存，配好 API Key 后可以重试整理'),
+          }),
+        )
+        return
+      }
+      const before = noteFingerprint(s, goalId)
+      let convId = resolveDisplayedConversation(s, goalId)
+      if (!convId) {
+        const { store: nextStore, conversation } = addConversation(s, goalId)
+        set(nextStore)
+        convId = conversation.id
+      }
+      const run = agent.runWorkflow('essay-commit', {
+        target: { goalId, nodeId: goal.rootNodeId, conversationId: convId },
+        // 增量材料：之前的整理记录 + 本次新增全文 + 本次修改的差异（见 commitFeed）
+        params: { message: commit.message, feed: commitFeed(commitsOf(s, goalId), commit) },
+      })
+      if (!run) {
+        set(
+          updateEssayCommit(getLatest(), goalId, commit.id, {
+            status: 'error',
+            error: t('没能启动整理：目标或会话已经不在'),
+          }),
+        )
+        return
+      }
+      void run
+        .then(() => {
+          // 整理完成：对比前后两份指纹，把真正动过的笔记记到这次提交上
+          const after = getLatest()
+          const changes = diffNoteChanges(before, noteFingerprint(after, goalId))
+          set(updateEssayCommit(getLatest(), goalId, commit.id, { status: 'done', changes }))
+          onToast(t('随笔整理完成：{0}', changesSummary(changes)))
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err)
+          // 中途失败也可能已经写了几份笔记：照样对比一次，别把已经发生的事藏起来
+          const partial = diffNoteChanges(before, noteFingerprint(getLatest(), goalId))
+          set(
+            updateEssayCommit(getLatest(), goalId, commit.id, {
+              status: 'error',
+              error: message,
+              changes: partial,
+            }),
+          )
+          onToast(t('随笔整理失败：{0}', message))
+        })
+    },
+    [agent, getLatest, set, hasKey, onToast],
+  )
+
+  /** 提交这一批随笔：封快照 → 立刻返回 id（界面据此打开详情）→ 后台开始整理 */
+  const essayCommit = useCallback(
+    (message: string): string | null => {
+      const goalId = essayGoalId
+      if (!goalId) return null
+      const created = createEssayCommit(getLatest(), goalId, message, Date.now())
+      if (!created) {
+        onToast(t('没有新的随笔可以提交'))
+        return null
+      }
+      set(created.store)
+      organizeEssayCommit(goalId, created.commit)
+      return created.commit.id
+    },
+    [essayGoalId, getLatest, set, organizeEssayCommit, onToast],
+  )
+
+  /** 重试一次失败的整理（快照还在，重跑就行，不必重新提交） */
+  const essayCommitRetry = useCallback(
+    (id: string) => {
+      const goalId = essayGoalId
+      if (!goalId) return
+      const commit = commitsOf(getLatest(), goalId).find((c) => c.id === id)
+      if (!commit) return
+      set(updateEssayCommit(getLatest(), goalId, id, { status: 'running', changes: [], error: undefined }))
+      organizeEssayCommit(goalId, commit)
+    },
+    [essayGoalId, getLatest, set, organizeEssayCommit],
+  )
+
+  /** 从提交详情里点开一份被整理过的笔记：按普通笔记页签打开 */
+  const essayOpenNote = useCallback(
+    (nodeId: string, noteName: string) => {
+      openTab({ kind: 'note', nodeId, note: noteName })
+    },
+    [openTab],
+  )
+
+  // 双击 Shift：唤出 / 收起随笔窗口（没有目标时什么也不做——随笔是目标级的）
+  useDoubleShift(() => {
+    if (!essayGoalId) return
+    setEssayOpen((v) => !v)
+  })
+
+  /*
+   * 换目标就把窗口收起来：随笔是目标级的东西，切到另一门课还挂着上一个目标的窗口
+   * （而且刚重挂成空白的）只会让人以为刚才写的东西没了。
+   * 上一份的收尾由 EssayDock 的 key 变化触发卸载时做（见下面的 key）。
+   */
+  const lastEssayGoal = useRef<string | null>(null)
+  useEffect(() => {
+    if (lastEssayGoal.current === essayGoalId) return
+    lastEssayGoal.current = essayGoalId
+    setEssayOpen(false)
+  }, [essayGoalId])
+
   /*
    * 资源管理器的撤回（Ctrl+Z）：删除类动作先捕获再动手，栈与键盘监听都在 useExplorerUndo。
    */
@@ -2315,7 +2512,9 @@ export default function LearnWorkspace({
         status: 'learning',
         origin: 'user',
         goalId,
-        // 大纲与教学文档创建时同时成形（与 addNode 的脚手架同一口径；根节点是手工建的，这里补上）
+        // 大纲与教学文档创建时同时成形（与 addNode 的脚手架同一口径；根节点是手工建的，这里补上）。
+        // 建不建树由导师在「学习大纲」工作流里判断（见 learn/workflows），这一层不做取舍：
+        // 脚手架先备好，判成任务型时它保持空白即可。
         outline: { ...emptyOutline(), updatedAt: now },
         createdAt: now,
         updatedAt: now,
@@ -2371,9 +2570,10 @@ export default function LearnWorkspace({
         { kind: 'goal', goalId, conversationId: conversation.id },
         true,
       )
-      // 新目标当场把**大纲页**开成页签：导师这一轮的交付物就是它（「学习大纲」工作流往里写），
+      // 新目标当场把**大纲页**开成页签：学习型这一轮的交付物就是它（「学习大纲」工作流往里写），
       // 用户点完「开始学习」就该看见路线逐条长出来，教学文档从大纲页里点进去；
-      // 同时自动关闭目标创建页签（ref.kind === 'newGoal'）
+      // 判成任务型时导师会 api.ui.point() 把根节点文档切到前面（指令里要求先打开再写）。
+      // 两种情况都要把目标创建页签（ref.kind === 'newGoal'）自动关掉。
       const rootRef: TabRef & { kind: 'outline' } = { kind: 'outline', nodeId: rootNode.id }
       const newGoalTabIds = allTabs(latest.docArea).filter((t) => t.ref.kind === 'newGoal').map((t) => t.id)
       const docAreaAfterClose = newGoalTabIds.length > 0 ? closeIds(latest.docArea, newGoalTabIds) : latest.docArea
@@ -2680,15 +2880,10 @@ export default function LearnWorkspace({
   const openReportTab = useCallback((reportId: string) => openTab({ kind: 'report', reportId }), [openTab])
 
   const {
-    startCheckin,
-    startReview,
-    backfillReviewPlan,
     newExam,
     requestGrading,
     setSelfReport,
     clearMistake,
-    startRecall,
-    startProbe,
     startSuperLab,
     startBrowserUse,
     startOutline,
@@ -2740,7 +2935,6 @@ export default function LearnWorkspace({
       const stream = convId ? agent.streams[convId] : undefined
       const nope = () => {}
       return {
-        nodeTitle: '',
         conversation: conv ?? null,
         conversations: freeChats,
         streaming: stream?.parts ?? null,
@@ -2776,9 +2970,7 @@ export default function LearnWorkspace({
         liveUsage: (convId ? agent.liveUsageByConv[convId] : null) ?? null,
         compacting: false,
         onCompact: nope,
-        onRecall: nope,
         onSuperLab: nope,
-        onCheckin: nope,
         onBrowserUse: nope,
         onExam: nope,
         sub: { sessions: [], defs: [], running: false, live: [] },
@@ -2806,7 +2998,7 @@ export default function LearnWorkspace({
       : tab.conversationId &&
           conversationById(store, tab.conversationId)?.goalId === tab.goalId
         ? tab.conversationId
-        : (latestConversation(store, tab.goalId)?.id ?? null)
+        : (resolveDisplayedConversation(store, tab.goalId) ?? null)
     const nodeId = goalId
       ? (goalFocusByGoal.get(goalId) ?? store.goals.find((g) => g.id === goalId)?.rootNodeId ?? null)
       : null
@@ -2819,7 +3011,6 @@ export default function LearnWorkspace({
     return {
       // 页签属于哪个目标（子代理经会话反查）：「记忆」入口按它开对应目标的记忆页签
       goalId,
-      nodeTitle: (nodeId ? nodeById(store, nodeId)?.title : undefined) ?? agentTabTitle(tab),
       conversation: conv,
       conversations: goalId ? store.conversations.filter((c) => c.goalId === goalId) : [],
       streaming: stream?.parts ?? null,
@@ -2887,13 +3078,9 @@ export default function LearnWorkspace({
         if (convId) void agent.compactNow(convId)
       },
       // 菜单动作绑到这一枚页签的落点节点（节点归属的解析见 runWorkflow）
-      onRecall: () => {
-        if (nodeId) startRecall(nodeId)
-      },
       onSuperLab: () => {
         if (nodeId) startSuperLab(nodeId)
       },
-      onCheckin: () => startCheckin(nodeId ?? undefined),
       onBrowserUse: () => startBrowserUse(nodeId ?? undefined),
       onExam: () => newExam(nodeId ?? undefined),
       sub: {
@@ -2926,7 +3113,7 @@ export default function LearnWorkspace({
   const grading = useMemo(() => {
     if (!pendingWork) return false
     const node = nodeById(store, pendingWork.exam.nodeId)
-    const convId = node ? (latestConversation(store, node.goalId)?.id ?? null) : null
+    const convId = node ? (resolveDisplayedConversation(store, node.goalId) ?? null) : null
     return !!(convId && agent.runningByConversation[convId])
   }, [pendingWork, store, agent.runningByConversation])
 
@@ -2938,7 +3125,7 @@ export default function LearnWorkspace({
    */
   const docPending = useMemo(() => {
     if (!docSource || docSource.content.trim()) return false
-    const convId = docNode ? (latestConversation(store, docNode.goalId)?.id ?? null) : null
+    const convId = docNode ? (resolveDisplayedConversation(store, docNode.goalId) ?? null) : null
     if (!convId || !agent.runningByConversation[convId]) return false
     const msgs = conversationById(store, convId)?.messages ?? []
     return msgs[msgs.length - 1]?.hidden === true
@@ -2995,7 +3182,16 @@ export default function LearnWorkspace({
         return
       }
       if (p.type === 'web' && p.url) {
-        openWebTab(p.url)
+        const targetUrl = normalizeWebInput(p.url)
+        const group = focusedGroup(s.docArea)
+        const existingTab = group?.tabs.find(
+          (t) => t.ref.kind === 'web' && normalizeWebInput(t.ref.url) === targetUrl,
+        )
+        if (existingTab) {
+          activateTab(existingTab.id)
+          return
+        }
+        openWebTab(targetUrl)
         return
       }
       const ref = tabRefFromChip(s, p)
@@ -3005,7 +3201,7 @@ export default function LearnWorkspace({
       }
       openTab(ref)
     },
-    [getLatest, openTab, openWebTab, selectNode, exam, onToast],
+    [getLatest, openTab, openWebTab, activateTab, selectNode, exam, onToast],
   )
 
   // chip 的「点击打开」全走这一份登记（消息列表、输入框都不认识 store，见 lib/docChip）
@@ -3224,14 +3420,54 @@ export default function LearnWorkspace({
     [startOutline],
   )
 
+  const generateTeachingDoc = useCallback(
+    (targetNode: KnowledgeNode) => {
+      if (!hasKey) {
+        onToast(t('生成教学文档需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
+        onOpenSettings()
+        return
+      }
+      const s = getLatest()
+      let convId = resolveDisplayedConversation(s, targetNode.goalId)
+      if (!convId) {
+        const { store: nextStore, conversation } = addConversation(s, targetNode.goalId)
+        set(nextStore)
+        convId = conversation.id
+      }
+      agent.autoTeach({ goalId: targetNode.goalId, nodeId: targetNode.id, conversationId: convId }, false)
+      onToast(t('已开始为「{0}」生成教学文档', targetNode.title))
+    },
+    [hasKey, providerName, onToast, onOpenSettings, getLatest, set, agent],
+  )
+
+  /**
+   * 递给正文区的「生成教学文档」回调——**身份必须稳定**。
+   *
+   * DocPane / NodeNote / DocBody 都是 memo，且 DocBody 的比较器显式比了这个 prop。
+   * 在渲染里现造闭包（`() => generateTeachingDoc(node)`）会让比较恒为不等，
+   * 于是每次工作区渲染——包括 Agent 每一跳流式——都把当前正文整棵重渲一遍。
+   * 真正的那份实现依赖 agent 等易变对象，注定每轮都是新的；这里用 ref 转发，
+   * 只把「稳定的一层壳」交给 props，点下去时读到的仍是最新实现。
+   */
+  const generateDocRef = useRef(generateTeachingDoc)
+  generateDocRef.current = generateTeachingDoc
+  const requestGenerateDoc = useCallback(
+    (n: KnowledgeNode) => generateDocRef.current(n),
+    [],
+  )
+
   const handleOutlineFocusHandled = useCallback(() => {
     setOutlineFocus(null)
   }, [])
 
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
   const getNoteActions = useCallback(
-    (node: KnowledgeNode, source: DocSource): ComponentProps<typeof DocPane>['note'] => {
-      const key = `${node.id}:${source.kind}:${source.note ?? ''}`
+    (tabId: string, node: KnowledgeNode, source: DocSource): ComponentProps<typeof DocPane>['note'] => {
+      /*
+       * 缓存键带上页签 id：暂存区是**按页签**记的（同一份文档在两格各开一份，
+       * 改的是各格自己那一份），所以「改正文」这条回调必须认页签，不能只认文档。
+       */
+      const key = `${tabId}:${node.id}:${source.kind}:${source.note ?? ''}`
       let actions = noteActionsCache.current.get(key)
       if (!actions) {
         actions = {
@@ -3243,6 +3479,16 @@ export default function LearnWorkspace({
           onDeleteAnnotation: (term) => deleteAnnotation(node.id, term),
           onWarn: onToast,
           onAsk: (payload) => askAboutSelection(node.id, payload),
+          // 正文右键菜单的「粘贴」：改动进暂存区，与在源码视图里改是同一套（见 learn/drafts）
+          onEditContent: (next) => editDocSource(tabId, next),
+          /*
+           * 正文右键菜单的「定位源码」：先放下「选中哪一段」，再把这个页签切到源码视图。
+           * 顺序不能反——切完视图预览就卸载了，选区也随之消失（见 lib/docReveal）。
+           */
+          onRevealSource: (loc) => {
+            requestSourceReveal(nodeRevealKey(node.id, source.kind, source.note), loc.start, loc.end)
+            setTabView(tabId, 'source')
+          },
           onReading: (delta) => {
             const alive = nodeById(getLatest(), delta.nodeId)
             if (!alive) return
@@ -3267,7 +3513,7 @@ export default function LearnWorkspace({
       }
       return actions
     },
-    [openConcept, nodeImageResolver, understandConcept, saveAnnotation, deleteAnnotation, onToast, askAboutSelection, getLatest, patchQuiet],
+    [openConcept, nodeImageResolver, understandConcept, saveAnnotation, deleteAnnotation, onToast, askAboutSelection, getLatest, patchQuiet, editDocSource, setTabView],
   )
 
   // 保存：Ctrl+S 交给快捷键模块（见 lib/shortcuts）——改键与冲突检测都归它管，
@@ -3983,6 +4229,13 @@ export default function LearnWorkspace({
                 outlineSlot={getOutlineSlot(gTab.id)}
                 // 空 md 默认进编辑（空预览是一片白）：读完内容发现是空的，从预览切过来
                 onNeedEdit={() => setTabView(gTab.id, 'source')}
+                // 右键菜单的「定位源码」：先放下选中哪一段，再切到源码视图（见 lib/docReveal）
+                onRevealSource={(loc) => {
+                  if (gTab?.ref.kind !== 'local') return
+                  requestSourceReveal(localRevealKey(gTab.ref.path), loc.start, loc.end)
+                  setTabView(gTab.id, 'source')
+                }}
+                onToast={onToast}
               />
             ) : gTab?.ref.kind === 'ws' ? (
               /*
@@ -4014,6 +4267,13 @@ export default function LearnWorkspace({
                     onMissing={() => closeTab(groupId, gTab.id, 'self', { confirm: false })}
                     outlineSlot={getOutlineSlot(gTab.id)}
                     onNeedEdit={() => setTabView(gTab.id, 'source')}
+                    // 右键菜单的「定位源码」：先放下选中哪一段，再把这个页签切到源码视图
+                    // （切完预览就卸载了，选区也随之消失，顺序不能反，见 lib/docReveal）
+                    onRevealSource={(loc) => {
+                      requestSourceReveal(localRevealKey(abs), loc.start, loc.end)
+                      setTabView(gTab.id, 'source')
+                    }}
+                    onToast={onToast}
                   />
                 )
               })()
@@ -4099,6 +4359,8 @@ export default function LearnWorkspace({
                   // 切到预览又读到别处，共用一格会互相拽（见 learn/types 的 DocScroll）
                   scrollTop={store.docScroll[gTabId + SRC_SCROLL_SUFFIX]}
                   onScrollTop={(top) => rememberScroll(gTabId + SRC_SCROLL_SUFFIX, top)}
+                  // 「定位源码」放下的一次性请求：挂载时按这个身份取走并选中（见 lib/docReveal）
+                  revealKey={nodeRevealKey(dg.node.id, dg.source.kind, dg.source.note)}
                 />
               ) : null /* 预览那一份由下面的常驻列表渲染（见 DocPane） */
             ) : (
@@ -4121,6 +4383,8 @@ export default function LearnWorkspace({
             */}
             {panes.map(({ tab, node, source }) => {
               const paneActive = tab.id === gTab?.id && dg.view === 'preview'
+              const goalConvId = resolveDisplayedConversation(store, node.goalId) ?? null
+              const isAgentRunning = !!(goalConvId && agent.runningByConversation[goalConvId])
               return (
                 <DocPane
                   key={tab.id}
@@ -4130,6 +4394,8 @@ export default function LearnWorkspace({
                   source={source}
                   // 待写提示说的是「agent 正在给这个节点写文档」，只有眼前这一片才有意义
                   pending={paneActive && docPending}
+                  agentRunning={isAgentRunning}
+                  onGenerateDoc={requestGenerateDoc}
                   knownConceptKeys={conceptKeysOf(store, node)}
                   readingPaused={!!exam.live}
                   // 大纲句柄槽：每片正文对应自己页签的那一份（见 lib/outline 的 OutlineHandle）
@@ -4143,7 +4409,7 @@ export default function LearnWorkspace({
                   // 读到哪儿了：记在页签 id 上，重启回来接着读（见 lib/docScroll）
                   scrollTop={store.docScroll[tab.id]}
                   onScrollTop={(top) => rememberScroll(tab.id, top)}
-                  note={getNoteActions(node, source)}
+                  note={getNoteActions(tab.id, node, source)}
                 />
               )
             })}
@@ -4222,6 +4488,10 @@ export default function LearnWorkspace({
             悬浮组（这一格右上角，横向一条，见 components/learn/DocFloat）：左半边是这个
             节点的工具（笔记 / 超级文档 / 学习状态 / 试卷），右半边是这份文档的动作
             （源码 / 预览 / 导出）。一个页签都没有的空格子不画。
+
+            **新建文件页不画**（用户报的：那一条会压住页头右侧的「保存…」按钮）：
+            这一页右上角是它自己的页头，保存按钮就长在那儿；而悬浮组里的东西对它也
+            基本没意义——还没有类型，切不了预览，大纲也不存在。纯净阅读仍可用 F11。
           */}
           {gTab &&
             gTab.ref.kind !== 'web' &&
@@ -4230,7 +4500,8 @@ export default function LearnWorkspace({
             gTab.ref.kind !== 'mind' &&
             gTab.ref.kind !== 'agentSettings' &&
             gTab.ref.kind !== 'outline' &&
-            gTab.ref.kind !== 'newGoal' && (
+            gTab.ref.kind !== 'newGoal' &&
+            gTab.ref.kind !== 'draft' && (
             <DocFloat
               /*
                * key 绑「格 + 节点」：换节点时重挂，各块 tip 的展开状态自然回到收起；
@@ -4400,15 +4671,8 @@ export default function LearnWorkspace({
       structure: (nodeId) => nodeStructure(store, nodeId),
       onSetSelf: (nodeId, self) => setSelfReport(nodeId, self),
       onClearMistake: (nodeId, pattern) => clearMistake(nodeId, pattern),
-      onRecall: (nodeId) => startRecall(nodeId),
-      onProbe: (nodeId) => startProbe(nodeId),
-      busy:
-        !!agentView?.nodeId &&
-        !!agentView.conversationId &&
-        !!agent.runningByConversation[agentView.conversationId] &&
-        agentView.nodeId === activeNodeId,
     }),
-    [store, setSelfReport, clearMistake, startRecall, startProbe, agentView, agent.runningByConversation, activeNodeId],
+    [store, setSelfReport, clearMistake],
   )
 
   return (
@@ -4507,7 +4771,7 @@ export default function LearnWorkspace({
             onOpenUpdate={onOpenUpdate}
             onOpenNotice={onOpenNotice}
             onToast={onToast}
-            /* 番茄钟与打卡都是「自给自足的小块」：时钟/倒计时只在这一块里每秒重渲染，
+            /* 番茄钟是「自给自足的小块」：时钟/倒计时只在这一块里每秒重渲染，
                不会把整个学习区（正文 + 对话栏）一起带上 */
             pomodoro={
               <PomodoroDock
@@ -4518,8 +4782,6 @@ export default function LearnWorkspace({
                 onOpenGuard={openGuardTab}
               />
             }
-            checkin={<CheckinDock store={store} onCheckin={startCheckin} />}
-            review={<ReviewDock store={store} onReview={startReview} onBackfill={backfillReviewPlan} />}
             reading={<ReadingDock store={store} onOpenNode={selectNode} />}
           />
         </div>
@@ -4532,7 +4794,43 @@ export default function LearnWorkspace({
         */}
         <SplitRow
           side={side}
-            docsSlot={renderLayout(docs.layout)}
+            /*
+              随笔的入口与窗口挂在这一层：它是**文档区**的浮层（右下角那颗按钮），
+              不属于某一份文档——切页签、切节点都不该把它连根拔掉（目标变了才换一本账）。
+              外面这层 relative 是它的定位基准，且**没有** overflow-hidden：
+              按钮贴着文档区的角，窗口则 portal 到 body（见 EssayDock）。
+            */
+            docsSlot={
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                {renderLayout(docs.layout)}
+                {essayGoalId && (
+                  <EssayDock
+                    /*
+                     * key 绑目标：换目标是**换一本账**。重挂会让上一份的收尾（把没落库的
+                     * 那一下写掉）用**旧目标**的闭包跑完，而新的一份从空白开始——
+                     * 不这么做的话，切目标时那一笔会写进新目标的账里。
+                     */
+                    key={essayGoalId}
+                    goalId={essayGoalId}
+                    // 入口只在教学文档上露脸（需求：教学文档右下角）；窗口开着时另说
+                    showEntry={activeTab?.ref.kind === 'teach'}
+                    open={essayOpen}
+                    onOpenChange={setEssayOpen}
+                    essays={essayList}
+                    // 提交记录与提交动作（见 learn/essayCommits）：历史、快照与整理结果都在窗口里看
+                    commits={essayCommits}
+                    onCommit={essayCommit}
+                    onRetryCommit={essayCommitRetry}
+                    onOpenNote={essayOpenNote}
+                    geometry={store.essayDock ?? null}
+                    onGeometry={essayGeometry}
+                    onCreate={essayCreate}
+                    onUpdate={essayUpdate}
+                    onDelete={essayDelete}
+                  />
+                )}
+              </div>
+            }
             agentSlot={
               activeAgentTab ? (
                 <div className="flex h-full min-h-0 flex-col">

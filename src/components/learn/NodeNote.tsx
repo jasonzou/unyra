@@ -10,6 +10,8 @@ import { readingDocKey, type ReadingDelta } from '../../learn/reading'
 import type { OutlineHandle } from '../../lib/outline'
 import ReadingPulse from './ReadingPulse'
 import { DocBody } from './note/DocBody'
+import { DocContextMenu } from './note/docContextMenu'
+import { useDocContextMenu, type SourceSpan } from './note/useDocContextMenu'
 import { useAnnotationLayer } from './note/useAnnotationLayer'
 import { useDocOutline, useDocScrollMemory, useDocZoom } from './note/useDocView'
 import { useQuoteHighlight } from './note/useQuoteHighlight'
@@ -37,6 +39,10 @@ interface Props {
   doc: DocSource
   /** 这份文档还在等 Agent 写：为空时文档区显示等待动画，不给用户一片空白 */
   pending?: boolean
+  /** 当前 Agent 是否正在运行 */
+  agentRunning?: boolean
+  /** 触发生成教学文档。带 node 参数：上层因此能传一份身份稳定的回调（见 LearnWorkspace） */
+  onGenerateDoc?: (node: KnowledgeNode) => void
   /** 选中词条 → 展开一个下级节点（深入学习） */
   onLearnConcept: (term: string) => void
   /** 选中词条 → 只在原文挂一段短释义（了解），不改动知识树 */
@@ -53,6 +59,16 @@ interface Props {
   onSaveAnnotation?: (term: string, body: string, style?: AnnotationStyle, occurrence?: number) => void
   /** 删除某词条上的注解 */
   onDeleteAnnotation?: (term: string) => void
+  /**
+   * 正文被就地改了一段（右键菜单的「粘贴」）：上层把它记进暂存区（见 learn/drafts）。
+   * 预览本来是只读的，只有这一条路会写正文——用户自己按的粘贴，不算偷偷改。
+   */
+  onEditContent?: (next: string) => void
+  /**
+   * 「定位源码」：把选区在源文里的位置交给上层，由它切到源码视图
+   * （切视图是页签上的选择，见 LearnWorkspace 的 setTabView；选中由 lib/docReveal 递过去）。
+   */
+  onRevealSource?: (loc: SourceSpan) => void
   /** 提示一句话（词条已不在正文里等）；由上层接到全局 toast 上 */
   onWarn?: (message: string) => void
   /** 当前目标内已存在节点的归一化 key 集合：用于区分「已创建/未创建」的学习链接 */
@@ -114,11 +130,15 @@ export default memo(function NodeNote({
   node,
   doc,
   pending = false,
+  agentRunning = false,
+  onGenerateDoc,
   onLearnConcept,
   onUnderstand,
   onAsk,
   onSaveAnnotation,
   onDeleteAnnotation,
+  onEditContent,
+  onRevealSource,
   onWarn,
   knownConceptKeys,
   onReading,
@@ -181,6 +201,29 @@ export default memo(function NodeNote({
     setMenuOpen,
     dismiss,
   } = useSelectionMenu({ bodyRef, content, html })
+
+  /*
+   * 右键菜单（复制 / 粘贴 / 定位源码）：接线与三个动作的落地见 note/useDocContextMenu。
+   * 「粘贴」要拼新正文，就在这里拼完再交给上层——上层只管把它记进暂存区（onEditContent）。
+   * 定位源码则由上层切视图（那是页签上的选择，本组件不认识页签）。
+   */
+  const {
+    menu: ctxMenu,
+    menuRef: ctxMenuRef,
+    mounted: ctxMenuMounted,
+    closing: ctxMenuClosing,
+    close: ctxMenuClose,
+    runCopy: ctxCopy,
+    runPaste: ctxPaste,
+    runReveal: ctxReveal,
+  } = useDocContextMenu({
+    bodyRef,
+    content,
+    onInsert: (text, loc) => onEditContent?.(content.slice(0, loc.start) + text + content.slice(loc.end)),
+    onRevealSource,
+    onError: onWarn,
+    onCopied: () => onWarn?.(t('已复制为 Markdown')),
+  })
 
   /*
    * 文档视图：正文大纲与当前读到哪一节、Ctrl + 滚轮的字号、读到哪儿了。
@@ -308,6 +351,18 @@ export default memo(function NodeNote({
     onDeleteAnnotation,
   })
 
+  /*
+   * 交给 DocBody 的「生成教学文档」零参回调。
+   *
+   * DocBody 的比较器显式比这个 prop，所以它必须**每轮都是同一个身份**：
+   * 上层给的是稳定的 (node) => void，node 在 store 不变时也是同一个对象，
+   * 于是这里 useMemo 出来的闭包一直复用；否则每次工作区渲染都会把正文重渲一遍。
+   */
+  const generateDoc = useMemo(
+    () => (onGenerateDoc ? () => onGenerateDoc(node) : undefined),
+    [onGenerateDoc, node],
+  )
+
   return (
     <div ref={rootRef} className="print-flat relative flex min-h-0 flex-1 flex-col bg-card">
       {/* 正文。文档切换的标签不在这里——它在文档区顶上的
@@ -319,6 +374,8 @@ export default memo(function NodeNote({
           bodyRef={bodyRef}
           docScale={docScale}
           pending={pending}
+          agentRunning={agentRunning}
+          onGenerateDoc={generateDoc}
           kind={doc.kind}
           content={content}
           html={html}
@@ -353,6 +410,22 @@ export default memo(function NodeNote({
         {/* 注解输入区（见 note/useAnnotationLayer）：它占位地待在正文列底部 */}
         {noteDialogEl}
       </div>
+
+      {/* 正文的右键菜单（复制 / 粘贴 / 定位源码）：fixed 定位，挂在根节点上而不是正文里，
+          免得被滚动容器的 overflow 裁掉（见 note/useDocContextMenu） */}
+      {ctxMenuMounted && (
+        <DocContextMenu
+          menu={ctxMenu}
+          menuRef={ctxMenuRef}
+          closing={ctxMenuClosing}
+          canPaste={!!onEditContent}
+          canReveal={!!onRevealSource}
+          onCopy={ctxCopy}
+          onPaste={ctxPaste}
+          onReveal={ctxReveal}
+          onClose={ctxMenuClose}
+        />
+      )}
 
       {/*
         字号比例提示：贴在文档区右下角、页脚之上。

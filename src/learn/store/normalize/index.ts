@@ -19,7 +19,8 @@ import { normalizeAgentTabs } from '../../agentTabs'
 import { normalizeDrafts } from '../../drafts'
 import { BUILTIN_WORKFLOW_IDS, normalizeWorkflowEfforts, normalizeWorkflowEntries } from '../../workflows'
 import { normalizeReadingBook } from '../../reading'
-import { normalizeCheckinBook } from '../../checkin'
+import { normalizeEssayDock, normalizeEssays } from '../../essays'
+import { normalizeEssayCommits } from '../../essayCommits'
 import { normalizePomodoro } from '../../pomodoro'
 import { normalizeResourceList, retargetStaticRefs, type StaticResource } from '../../static'
 import { normalizeTmpStore, pruneTmpToNodes } from '../../../lib/tmpStore'
@@ -261,6 +262,9 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       }
     }
 
+    /** 随笔窗口的几何（认不出就是没有：下次打开按默认位置摆） */
+    const essayDock = normalizeEssayDock(d.essayDock)
+
     const store: LearnStore = {
       version: 2,
       nodes: fixedNodes,
@@ -273,6 +277,12 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       resources,
       minds,
       methods,
+      // 随笔同样是目标级的：目标没了的整本丢掉，空文本条目丢掉（见 learn/essays）
+      essays: normalizeEssays(d.essays, goalIds),
+      // 提交记录与随笔同一份 essay.json：目标没了的、认不出的丢掉；running 降成「未完成可重试」
+      essayCommits: normalizeEssayCommits(d.essayCommits, goalIds),
+      // 窗口几何只校验是不是数；夹进视口是打开那一刻的事（见 EssayDock）
+      ...(essayDock ? { essayDock } : {}),
       workflows,
       /*
        * 阅读 / 打卡 / 番茄钟：认不出的部分各自丢掉，坏数据不该拖垮整库。
@@ -280,11 +290,10 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
        * nodeId 索引的记录就成了空索引——今日阅读面板里一行 uuid、点不动的条目就是这么来的。
        * 放在这里做还能顺手清掉以前删节点时留下的旧空索引（读盘是唯一一次全量过手的机会）。
        *
-       * 阅读与打卡是**按目标**的账本（见 learn/reading 的 ReadingBook）：逐本过一遍，
+       * 阅读是**按目标**的账本（见 learn/reading 的 ReadingBook）：逐本过一遍，
        * 目标已经不在的那些直接丢掉——那是它的账，目标没了账就该跟着没。
        */
       reading: normalizeReadingBook(d.reading, ids, goalIds),
-      checkin: normalizeCheckinBook(d.checkin, goalIds),
       pomodoro: normalizePomodoro(d.pomodoro),
       activeGoalId,
       activeNodeId: nextActiveNodeId,

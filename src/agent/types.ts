@@ -44,6 +44,13 @@ export type AgentPart =
       ok: boolean
       status: 'running' | 'done' | 'error'
       /**
+       * **调用级**失败：代码跑通了，只是其中某几次 api 调用没有生效（位置校验不过、
+       * 标题撞名、题目格式不对……）。它与「这段代码根本跑不起来」是两回事——
+       * 后者是 red 的失败，前者只是「有一件事没做成」，界面上用黄色点一下，
+       * 状态仍算完成（见 ToolCard 与 agent/sandbox/execute 的 ok / soft 说明）。
+       */
+      soft?: boolean
+      /**
        * 这次调用**附带回的图片**（如 execute 里 res.read 看了一张图）。
        * 字节在磁盘上，这里只有引用（见 MessageImage）。
        */
@@ -130,10 +137,10 @@ export interface ConversationMessage {
   /** 内部指令（如自动开讲），参与模型上下文但不展示给用户 */
   hidden?: boolean
   /**
-   * 这条隐藏指令是「哪件事」：回忆 / 探针 / 出卷 / 阅卷 / 开讲…
+   * 这条隐藏指令是「哪件事」：出卷 / 阅卷 / 开讲…
    *
    * 有它的话，界面上会在对话流里画一条小小的分界条（见 AgentPanel），
-   * 消息定位条也把它当成一个锚点——否则「导师带我做的那次回忆」在长对话里根本找不回来：
+   * 消息定位条也把它当成一个锚点——否则「导师带我做的那次练习」在长对话里根本找不回来：
    * 那条指令是隐藏的，用户消息一个点都没有。**没有 mark 的隐藏指令照旧不显示**。
    */
   mark?: string
@@ -383,7 +390,16 @@ export type AgentEvent =
   | { type: 'thinking'; delta: string }
   | { type: 'text'; delta: string }
   | { type: 'tool-call'; id: string; name: string; args: string }
-  | { type: 'tool-result'; id: string; name: string; result: string; ok: boolean; images?: MessageImage[] }
+  | {
+      type: 'tool-result'
+      id: string
+      name: string
+      result: string
+      ok: boolean
+      /** 调用级失败（见 AgentPart 里同名字段的说明）：ok 为 false 但代码本身跑通了 */
+      soft?: boolean
+      images?: MessageImage[]
+    }
   /**
    * 跳边界：一跳的工具全部执行完、下一跳开始前发一次（见 AgentPart 的 hop 说明）。
    * 有了它，扁平的事件流才分得清「同一跳的两次调用」与「相邻两跳」——
@@ -426,6 +442,15 @@ export const MAX_TOOL_IMAGES = 4
 
 export interface AgentToolResult {
   ok: boolean
+  /**
+   * 这次失败是**调用级**的：代码本身跑通了，只是其中某几次 api 调用没有生效。
+   *
+   * 为什么要分出来：`ok:false` 在这两件事上是同一个值，可它们在界面上该长得不一样——
+   * 代码报错（语法、运行时抛错、超时）是「这一步没跑成」，红色、失败；
+   * 而「有一次写入被拒」是「跑完了，但那件事没做成」，模型下一步就能改，
+   * 界面上再标红只会让人以为整步都废了（见 ToolCard 的 soft 分支）。
+   */
+  soft?: boolean
   /** 回填给模型的内容（也会展示在工具卡片里）。**只能是文本** */
   content: string
   /**

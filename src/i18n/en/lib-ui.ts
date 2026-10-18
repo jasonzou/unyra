@@ -142,6 +142,10 @@ const dict: Record<string, string> = {
   '函数图像表达式含有不被允许的内容': 'The plot expression contains disallowed content',
   '正在绘制函数图像…': 'Drawing the plot...',
 
+  /* ---------- lib/mermaid.ts：超高图表的折叠 ---------- */
+  '展开图表': 'Expand chart',
+  '收起图表': 'Collapse chart',
+
   /* ---------- lib/annotation/popup.ts：浮层上的「修改 / 删除」 ---------- */
   '修改这条笔记': 'Edit this note',
   '修改': 'Edit',
@@ -218,8 +222,12 @@ const dict: Record<string, string> = {
   '音频只在这一次识别里存在内存中，不写盘、不出本机。': 'Audio exists in memory for that one recognition only: never written to disk, never sent off this machine.',
 
   /* ---------- 输入框上的麦克风按钮（agent/panel/MicButton） ---------- */
+  '语音输入：点一下开始，边说边写进输入框':
+    'Voice input: click to start — words land in the box as you speak',
+  '完成（空格 / 回车）': 'Done (Space / Enter)',
   '语音输入：点一下开始录，说完按空格结束': 'Voice input: click to start recording, press Space when you are done',
-  '正在录音（{0}）——按空格或再点一下结束，Esc 丢弃': 'Recording ({0}) — press Space or click again to stop, Esc to discard',
+  '正在录音（{0}）——按空格/回车或再点一下完成，Esc 丢弃剩余录音':
+    'Recording ({0}) — press Space/Enter or click again to finish; Esc discards the rest',
   '空格结束': 'Space to stop',
   '空格': 'Space',
 

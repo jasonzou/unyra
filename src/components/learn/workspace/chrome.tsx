@@ -62,16 +62,10 @@ export function Topbar({
   onOpenNotice,
   onToast: _onToast,
   pomodoro,
-  checkin,
-  review,
   reading,
 }: {
   /** 番茄钟入口（墙上时钟 + 进度条 + 倒计时，见下面的 PomodoroDock） */
   pomodoro: ReactNode
-  /** 打卡入口（今天的状态 + 日历 tip，见下面的 CheckinDock） */
-  checkin: ReactNode
-  /** 复习入口（到期清单 + 未来两周 + 补建，见下面的 ReviewDock） */
-  review: ReactNode
   /** 有效阅读入口（今天读了多久 + 节点清单 + 近七天，见下面的 ReadingDock） */
   reading: ReactNode
   /** **当前文档指向的那个节点**（本地文件页签、或一个页签都没有时为 null） */
@@ -201,13 +195,11 @@ export function Topbar({
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         {/* 更新入口：只有新版本**下载完成**之后它才存在，见 components/update/UpdateButton */}
         <UpdateButton onOpenUpdate={onOpenUpdate} />
-        {/* 四个入口都是「我今天的节奏」，与账号那一簇同属右侧。
+        {/* 两个入口都是「我今天的节奏」，与账号那一簇同属右侧。
             番茄钟排在最前：它是唯一一个「开始之后不看也要一直在跑」的东西，
             固定在最左边，开关它的时候手指不必每次都去找位置 */}
         {pomodoro}
         {reading}
-        {checkin}
-        {review}
         <UserMenu
           user={user}
           onOpenUser={onOpenUser}
@@ -477,9 +469,9 @@ export function NodeHints(_props: { node?: KnowledgeNode; store?: LearnStore }) 
  * - 底部上下两栏：**收藏**在上、**最近打开**在下（原资源管理器侧栏的「最近打开」区挪到这里，
  *   见 learn/recents）；两栏都空时各自给一句「去哪儿攒」的说明。
  *
- * 快捷入口的第一个是**新建文件**（用户定的）：它是这一页自己的正事——「我要写点东西」。
- * 点它就地换成一枚新建文件页签（还没有类型，保存时才定，见 learn/types 的 draft 分支），
- * 所以它排在「打开本地文件」前面。
+ * 快捷入口按用户定的顺序排：**新建目标 / 新建文件 / 本地文件 / 浏览网页**。
+ * 「新建文件」就地换成一枚新建文件页签（还没有类型，保存时才定，见 learn/types 的 draft 分支），
+ * 「新建目标」则开出一枚目标创建页——两者都在这张纸上就地发生，不弹窗。
  *
  * 数据与回调全部由 props 传入（收藏、最近打开、四个入口、拖拽提示），组件自己不读 store。
  */
@@ -529,8 +521,18 @@ export function EmptyDoc({
 
         {/* 快捷操作组：图标加大、去掉边框与背景，悬停反馈落在图标与文字上。
             四个入口**排成一行**（用户定的）：容器宽 680 时四张的说明文字都放得下，
-            更窄时说明自动折行、卡片等高，不会挤坏；小屏退回一列 */}
+            更窄时说明自动折行、卡片等高，不会挤坏；小屏退回一列。
+            顺序也是用户定的：**新建目标 → 新建文件 → 本地文件 → 浏览网页**——
+            从「开一门课」到「写点东西」「收一份文件」「看一个网页」，正好是从大到小四件事 */}
         <div className="mt-8 grid w-full grid-cols-1 gap-3 sm:grid-cols-4">
+          {onNewGoal && (
+            <QuickEntry
+              icon={<Compass size={22} className="stroke-[1.75]" />}
+              label={t('新建目标')}
+              hint={t('AI 生成体系化知识树')}
+              onClick={onNewGoal}
+            />
+          )}
           {onNewFile && (
             <QuickEntry
               icon={<FilePlus size={22} className="stroke-[1.75]" />}
@@ -541,24 +543,16 @@ export function EmptyDoc({
           )}
           <QuickEntry
             icon={<FolderOpen size={22} className="stroke-[1.75]" />}
-            label={t('打开本地文件')}
+            label={t('本地文件')}
             hint={t('Markdown / TXT / 代码')}
             onClick={onPickLocal}
           />
           {onOpenWeb && (
             <QuickEntry
               icon={<Globe size={22} className="stroke-[1.75]" />}
-              label={t('浏览网络网页')}
+              label={t('浏览网页')}
               hint={t('双链速记与知识批注')}
               onClick={onOpenWeb}
-            />
-          )}
-          {onNewGoal && (
-            <QuickEntry
-              icon={<Compass size={22} className="stroke-[1.75]" />}
-              label={t('新建学习目标')}
-              hint={t('AI 生成体系化知识树')}
-              onClick={onNewGoal}
             />
           )}
         </div>

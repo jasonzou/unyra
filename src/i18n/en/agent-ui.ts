@@ -7,7 +7,6 @@
 const dict: Record<string, string> = {
   /* ---------- AgentPanel：标题、状态行、字号提示 ---------- */
   '超级导师': 'Super Tutor',
-  '正在辅导「{0}」': 'Tutoring "{0}"',
   '思考中…': 'Thinking…',
   '导师正在准备': 'Your tutor is preparing',
   '正在{0}…': '{0}…',
@@ -112,7 +111,6 @@ const dict: Record<string, string> = {
   '{0} 段': '{0} conversations',
   '文件': 'Files',
   '把文件发给导师看（也可以直接拖进来）': 'Send files to the tutor (or just drag them in)',
-  '回忆 / 浏览器操作 / 打卡': 'Recall / Browser use / Daily check-in',
   '说清要在网页上做什么，导师用内置浏览器代办': 'Say what to do on the page; the tutor does it with the built-in browser',
   '正在压缩…': 'Compressing…',
   '折成摘要继续聊（自动压缩阈值 {0}%）': 'Fold into a summary and keep chatting (auto-compress threshold {0}%)',
@@ -164,6 +162,7 @@ const dict: Record<string, string> = {
   /* ---------- ToolCard ---------- */
   '执行中': 'Running',
   '失败': 'Failed',
+  '这段代码跑完了，但其中有 api 调用没有生效': 'The code ran, but some api calls did not take effect',
   '代码': 'Code',
   '参数': 'Params',
   '结果': 'Result',
@@ -298,7 +297,7 @@ const dict: Record<string, string> = {
   '每个学习目标的导师都能用': 'Available to the tutor of every learning goal',
   '只在当前学习目标里可用': 'Available only in the current learning goal',
   '{0} 条 · {1}': '{0} entries · {1}',
-  '工作流是「不由一条消息直接驱动」的任务模板：开讲、回忆、出卷、超级实验室…… 它们不进系统提示词——被触发时，指令才以一条 user 消息整段进入上下文（对话里是一条分界条）。 想登记新的工作流，在对话里让超级导师用': 'Workflows are task templates not driven directly by a single message: Teach, Recall, Generate exam, Super Lab… They never enter the system prompt — only when triggered do the instructions enter the context as one user message (a divider in the conversation). To register a new workflow, ask the Super Tutor in the conversation to use ',
+  '工作流是「不由一条消息直接驱动」的任务模板：开讲、出卷、超级实验室…… 它们不进系统提示词——被触发时，指令才以一条 user 消息整段进入上下文（对话里是一条分界条）。 想登记新的工作流，在对话里让超级导师用': 'Workflows are task templates not driven directly by a single message: Teach, Generate exam, Super Lab… They never enter the system prompt — only when triggered do the instructions enter the context as one user message (a divider in the conversation). To register a new workflow, ask the Super Tutor in the conversation to use ',
   '完成，这里会立刻看到。': 'to set it up — it will show up here right away.',
   '触发要参数：{0}': 'Needs parameters to trigger: {0}',
   '指令 {0} 字': 'Instruction: {0} chars',

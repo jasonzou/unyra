@@ -45,7 +45,6 @@ import { t, useLocale } from '../../i18n'
  */
 
 interface Props {
-  nodeTitle: string
   conversation: Conversation | null
   conversations: Conversation[]
   streaming: AgentPart[] | null
@@ -76,22 +75,8 @@ interface Props {
   queue: QueuedMessage[]
   onQueueDrop: (id: string) => void
   onQueueSendNow: (id: string) => void
-  /**
-   * 更多 → 工作流 → 回忆：请超级导师带用户做一次主动回忆。
-   *
-   * 与文档区悬浮组那颗「回忆」按钮是同一件事，但**这里不二次确认**：那边是鼠标
-   * 扫过右边顺手点一下，这里是用户主动翻菜单找出来的——误触概率差着一个量级（见 DocFloat）。
-   */
-  onRecall: () => void
   /** 更多 → 工作流 → 超级实验室：触发内置工作流「超级实验室」——导师先问想做什么实验，再生成一份可交互的超级文档 */
   onSuperLab: () => void
-  /**
-   * 更多 → 工作流 → 打卡：请导师按今天读到的内容出几道题，答到门槛才算打卡。
-   *
-   * 与顶栏那颗打卡是同一件事：那边是「顺手看一眼今天还差什么」，这里是
-   * 「翻菜单主动找出来做」——所以这里也不二次确认，直接跑。
-   */
-  onCheckin: () => void
   /** 更多 → 工作流 → 浏览器操作：替用户驱动内置浏览器完成任务（看=截图、输入=模拟鼠标键盘） */
   onBrowserUse: () => void
   /** 更多 → 压缩上下文：把前面的对话折成一份摘要 */
@@ -178,7 +163,6 @@ interface Props {
 }
 
 export default function AgentPanel({
-  nodeTitle,
   conversation,
   conversations,
   streaming,
@@ -194,9 +178,7 @@ export default function AgentPanel({
   onQueueDrop,
   onQueueSendNow,
   onNotice,
-  onRecall,
   onSuperLab,
-  onCheckin,
   onBrowserUse,
   onCompact,
   compacting,
@@ -244,9 +226,9 @@ export default function AgentPanel({
   const confirmDelRef = useRef<string | null>(null)
 
   /*
-   * 隐藏指令照旧不显示，**但带 mark 的那种要显示成一条分界条**（回忆 / 探针 / 出卷 / 阅卷 / 开讲）：
+   * 隐藏指令照旧不显示，**但带 mark 的那种要显示成一条分界条**（出卷 / 阅卷 / 开讲）：
    * 它们是导师自己发起的动作，对话里没有任何用户消息可以当锚点——不画出来的话，
-   * 「导师带我做的那次回忆」在长对话里就再也找不回来了（消息定位条也点不到）。
+   * 「导师带我做的那次练习」在长对话里就再也找不回来了（消息定位条也点不到）。
    */
   const messages = useMemo(
     () =>
@@ -590,9 +572,7 @@ export default function AgentPanel({
           conversation={conversation}
           onSelectConversation={onSelectConversation}
           onDeleteConversation={onDeleteConversation}
-          onRecall={onRecall}
           onSuperLab={onSuperLab}
-          onCheckin={onCheckin}
           onBrowserUse={onBrowserUse}
           onCompact={onCompact}
           compacting={compacting}
@@ -628,10 +608,11 @@ export default function AgentPanel({
         />
 
         {/*
-          状态行：输入框底下的一条细字。左边是「正在辅导哪个节点 / 这段对话叫什么」
-          （子代理页签则是这场任务的履历），右边是轮数 / 速度 / token——一行读全：
-          在看谁、跑到哪、花了多少。人格与格式选择器不在这行：它们搬进了输入框底行，
-          与提供商切换同一排（见 ComposerUi 的 strategySlot）。
+          状态行：输入框底下的一条细字。左边只放**这段对话叫什么**，右边是轮数 / 速度 / token——
+          一行读全：在聊什么、跑到哪、花了多少。
+          （「正在辅导「哪个节点」」已按需求撤掉：页签与左侧目录已经回答了「在学什么」，
+          这一行再写一遍只是重复，还占掉了对话标题的地方。）
+          人格与格式选择器不在这行：它们搬进了输入框底行，与提供商切换同一排（见 ComposerUi 的 strategySlot）。
         */}
         <div className="flex min-w-0 items-center gap-2.5 px-1 pb-1.5 pt-1.5">
           {subSession ? (
@@ -665,9 +646,6 @@ export default function AgentPanel({
             </>
           ) : (
             <>
-              <span className="shrink-0 text-[11px] leading-none text-ink-faint">
-                {t('正在辅导「{0}」', nodeTitle)}
-              </span>
               {/*
                 这一段对话叫什么。名字由模型读第一句话起（见 learn/title），还没起好时**什么都不显示**——
                 挂一个「对话 1」占着地方，等于告诉用户"它叫这个"，而它其实还没名字。

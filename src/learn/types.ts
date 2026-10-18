@@ -1,6 +1,5 @@
 import type { Conversation } from '../agent/types'
 import type { ReasoningEffort } from '../ai/types'
-import type { CheckinBook } from './checkin'
 import type { Drafts } from './drafts'
 import type { Exam } from './exam'
 import type { DocWorkspace } from './groups'
@@ -369,51 +368,6 @@ export interface Annotation {
   occurrence?: number
 }
 
-/** 复习阶段：默认间隔的档位（+1/+3/+7/+14/+30 天）。是默认计划，不是绝对规则 */
-export type ReviewStage = 'd1' | 'd3' | 'd7' | 'd14' | 'd30'
-
-/** 一次阶段复习的紧凑记录（每档只留最近几条）：数量级为主，细节在检验时间线与错误记忆里 */
-export interface ReviewStageHistoryEntry {
-  at: number
-  /** 这一阶段问了几个点 */
-  items: number
-  /** 其中没答上 / 答错的几个 */
-  missed: number
-  note?: string
-}
-
-export interface ReviewStageState {
-  stage: ReviewStage
-  /** 计划到期时刻（学习完成日 + 默认间隔） */
-  dueAt: number
-  /** 完成时刻；没完成就没有。**到了期没做也保持待复习**——不自动顺延 */
-  doneAt?: number
-  /** 跳过并入：完成更靠后的阶段时，此前未完成的阶段记上它（不做三次补课） */
-  mergedInto?: ReviewStage
-  history?: ReviewStageHistoryEntry[]
-}
-
-export interface ReviewExtraTask {
-  id: string
-  /** 针对哪个薄弱点（一句话，说法与错误记忆对齐） */
-  focus: string
-  dueAt: number
-  doneAt?: number
-  note?: string
-}
-
-/**
- * 一个节点的复习计划（逻辑与常量见 learn/review）。
- * 节点状态**首次**变为「已掌握」时由系统自动创建；老节点没有，复习面板上可手动补建。
- * groupId 是「合并复习组」的标记：强相关的节点经导师问过用户后合到一起复习。
- */
-export interface ReviewPlan {
-  createdAt: number
-  stages: ReviewStageState[]
-  groupId?: string
-  extra?: ReviewExtraTask[]
-}
-
 export interface KnowledgeNode {
   id: string
   title: string
@@ -448,8 +402,6 @@ export interface KnowledgeNode {
   status: MasteryStatus
   /** 学习状态（自评 / 掌握度 / 错误记忆 / 检验记录 / 学习行为）；没评估过就没有这一项 */
   learning?: LearningState
-  /** 复习计划（见 learn/review）：状态首次变 mastered 时系统自动建；没有就是「还没有计划」 */
-  review?: ReviewPlan
   origin: 'ai' | 'user'
   goalId: string
   createdAt: number
@@ -689,6 +641,18 @@ export interface LearnStore {
    */
   methods?: MethodStore
   /**
+   * 目标级随笔（见 learn/essays）。可选字段，理由同 methods。
+   * 落盘在各自目标目录的 essay.json（这个目标一条都没有就不写文件）。
+   */
+  essays?: EssayStore
+  /**
+   * 随笔提交记录（见 learn/essayCommits）。可选字段，理由同 essays。
+   * 与随笔同一份 essay.json：提交是「这一批随笔被封存的那一刻」，分开存反而会失去对应关系。
+   */
+  essayCommits?: EssayCommitStore
+  /** 随笔窗口拖到哪儿、多大（界面状态，跟 state.json 走；见 EssayDockRect） */
+  essayDock?: EssayDockRect
+  /**
    * 工作流登记表（wf.*，见 learn/workflows）。可选字段，理由同 methods。
    * global 存进 state.json（跨目标跟着用户走）；byGoal 存进各自目标目录的 workflow.json。
    */
@@ -696,13 +660,11 @@ export interface LearnStore {
   /**
    * 文档有效阅读记录（见 learn/reading），**按目标分开**：目标 id → 那个目标的账。
    *
-   * 它是学习计划、注意力评级（learn/attention）与打卡（learn/checkin）共同的事实底座。
+   * 它是学习计划与注意力评级（learn/attention）共同的事实底座。
    * 分目标是因为「今天读了两小时」这句话必须属于某一门课才有意义（见 ReadingBook 的说明）；
    * 落盘在各自的目标目录（`{目标}/reading.json`），不再进 state.json。
    */
   reading?: ReadingBook
-  /** 打卡账本（见 learn/checkin），**按目标分开**：目标 id → 那个目标的账 */
-  checkin?: CheckinBook
   /** 番茄钟（见 learn/pomodoro）：正在跑的那一段 + 跑完的专注记录。可选，理由同上 */
   pomodoro?: PomodoroStore
   /**
@@ -801,6 +763,78 @@ export interface MindEntry {
 
 /** 目标 id → 记忆条目。跟着 state.json 一起落盘 */
 export type MindStore = Record<string, MindEntry[]>
+
+/**
+ * 一条随笔（见 learn/essays）：**目标级**的随手记，没有标题、不挂节点。
+ *
+ * 与 MindEntry 的区别：记忆是**导师**写给自己（或关于学习者）的判断，只有 agent 主动
+ * api.mind.read 才看得到；随笔是**人写给自己**的，就摆在文档区右下角那个小窗口里。
+ */
+export interface EssayEntry {
+  id: string
+  /** 正文（Markdown）。随笔没有标题——列表里的那一行是它抹平后的预览 */
+  text: string
+  /** 写下的时刻：列表按它归到哪一天，也是排序依据 */
+  createdAt: number
+  updatedAt: number
+}
+
+/** 目标 id → 随笔清单（新的在前）。落盘在各自目标目录的 essay.json */
+export type EssayStore = Record<string, EssayEntry[]>
+
+/**
+ * 一次随笔提交里「动过的一份笔记」。
+ *
+ * 由宿主在整理前后对比 store 得出（见 learn/essayCommits 的 noteFingerprint / diffNoteChanges），
+ * **不靠模型自报**——模型说「我改了 A」而实际改的是 B 时，记录仍然是真的。
+ */
+export interface EssayCommitChange {
+  nodeId: string
+  /** 提交时的节点标题（之后节点改名了，也看得懂当时动的是哪儿） */
+  nodeTitle: string
+  /** 笔记名（一个节点可以有多份笔记） */
+  noteName: string
+  kind: 'created' | 'updated'
+}
+
+/**
+ * 一次随笔提交：**快照 + 整理结果**，像一次 git commit。
+ *
+ * - 快照里是提交那一刻的随笔全文：之后随笔被改写、删除，这一份仍然是当时的原样；
+ * - Agent 把这批随笔整理进知识树对应节点的笔记，`changes` 记下它实际动了哪几份；
+ * - `status` 说清这次整理跑到哪了（应用在整理途中被关掉时，读回来会当作「未完成，可重试」）。
+ */
+export interface EssayCommit {
+  id: string
+  /** 提交时刻：也是「哪些随笔还没提交」的分界（updatedAt > at 的算新改动） */
+  at: number
+  /** 提交说明（用户写，或默认的「随笔整理 · 日期」） */
+  message: string
+  /** 快照：提交那一刻的随笔（正文即全部内容，随笔本来就没有标题） */
+  snapshot: Array<{ id: string; createdAt: number; text: string }>
+  status: 'running' | 'done' | 'error'
+  /** Agent 整理后实际动过的节点笔记 */
+  changes: EssayCommitChange[]
+  /** 失败原因（没配 AI、模型报错、中途被关掉……） */
+  error?: string
+}
+
+/** 目标 id → 提交记录（新的在前）。落盘在各自目标目录的 essay.json 里 */
+export type EssayCommitStore = Record<string, EssayCommit[]>
+
+/**
+ * 随笔窗口的几何（左上角 + 宽高，视口坐标）。
+ *
+ * 属于**界面状态**（跟 state.json 走），不是学习数据：换台机器、导一份别人的备份，
+ * 都不该把「我把那个小窗口拖到哪儿了」也换掉。
+ */
+export interface EssayDockRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 
 /**
  * 一条工作流（见 learn/workflows）：**不由用户消息直接驱动**的任务模板。

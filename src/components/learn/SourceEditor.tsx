@@ -3,11 +3,12 @@ import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view'
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { HighlightStyle, syntaxHighlighting, indentOnInput, indentUnit, bracketMatching, LanguageDescription } from '@codemirror/language'
+import { syntaxHighlighting, indentOnInput, indentUnit, bracketMatching, LanguageDescription } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages as codeLanguages } from '@codemirror/language-data'
-import { tags } from '@lezer/highlight'
 import { countSourceWords } from '../../lib/wordCount'
+import { markdownEditorTheme, markdownHighlight } from '../../lib/cmMarkdown'
+import { takeSourceReveal, type SourceReveal } from '../../lib/docReveal'
 import { useDocScroll } from '../../lib/docScroll'
 import { DocStatChip } from './DocFloat'
 import { t } from '../../i18n'
@@ -43,48 +44,11 @@ const STATE_TONE: Record<SaveState, string> = {
   error: 'text-seal-deep',
 }
 
-/** 语法高亮配色：tags → `--color-code-*`（与 .tok-* 的映射一字不差，见 styles/code.css） */
-const highlight = HighlightStyle.define([
-  { tag: tags.comment, color: 'var(--color-code-comment)', fontStyle: 'italic' },
-  { tag: [tags.string, tags.special(tags.string)], color: 'var(--color-code-string)' },
-  { tag: [tags.number, tags.bool, tags.atom], color: 'var(--color-code-number)' },
-  {
-    tag: [
-      tags.keyword,
-      tags.modifier,
-      tags.operatorKeyword,
-      tags.definitionKeyword,
-      tags.controlKeyword,
-      tags.moduleKeyword,
-    ],
-    color: 'var(--color-code-keyword)',
-  },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: 'var(--color-code-function)' },
-  { tag: [tags.typeName, tags.className, tags.namespace], color: 'var(--color-code-type)' },
-  { tag: tags.variableName, color: 'var(--color-code-variable)' },
-  { tag: tags.tagName, color: 'var(--color-code-tag)' },
-  { tag: [tags.standard(tags.variableName), tags.standard(tags.name)], color: 'var(--color-code-builtin)' },
-  { tag: tags.meta, color: 'var(--color-code-meta)' },
-  { tag: [tags.operator, tags.punctuation, tags.separator, tags.bracket], color: 'var(--color-code-punct)' },
-  { tag: tags.invalid, color: 'var(--color-code-invalid)' },
-])
-
-/** 编辑器外观：底色透明（贴着面板走）、字体跟应用、正文留白与旧 textarea 一致 */
-const editorTheme = EditorView.theme({
-  '&': { height: '100%', backgroundColor: 'transparent', color: 'var(--color-ink)' },
-  '.cm-scroller': { overflow: 'auto', fontFamily: 'inherit', lineHeight: '1.75' },
-  '.cm-content': {
-    paddingTop: '20px',
-    paddingBottom: '20px',
-    paddingLeft: '10px',
-    paddingRight: '22px',
-    caretColor: 'var(--color-seal)',
-  },
-  '&.cm-focused': { outline: 'none' },
-  '.cm-placeholder': { color: 'var(--color-ink-faint)' },
-  '.cm-selectionBackground': { backgroundColor: 'color-mix(in srgb, var(--color-seal) 22%, transparent) !important' },
-  '.cm-cursor': { borderLeftColor: 'var(--color-seal)' },
-})
+/**
+ * 配色与主题在 lib/cmMarkdown（随笔窗口用的是同一份）：文档源码视图的内边距
+ * 按 doc-measure 那一列调（上 20 / 下 20 / 左 10 / 右 22）。
+ */
+const editorTheme = markdownEditorTheme({ top: 20, bottom: 20, left: 10, right: 22 })
 
 /** 语言按扩展名现配（markdown 内嵌代码块也各自高亮）；其余扩展名交给 language-data 的表 */
 const langComp = new Compartment()
@@ -118,6 +82,12 @@ interface Props {
   scrollTop?: number
   /** 滚动到哪儿了的上报（与预览各记各的：编辑位置与阅读位置是两回事） */
   onScrollTop?: (top: number) => void
+  /**
+   * 「定位源码」的取件凭证（见 lib/docReveal）：预览里右键选了「定位源码」时，
+   * 上层先放下「选中哪一段」再切到这个视图，编辑器挂载时凭它取走并选中。
+   * 手动点「源码」按钮进来时槽里没有请求，取到 null，行为与从前一模一样。
+   */
+  revealKey?: string
 }
 
 export default function SourceEditor({
@@ -132,6 +102,7 @@ export default function SourceEditor({
   scale = 1,
   scrollTop,
   onScrollTop,
+  revealKey,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -143,13 +114,30 @@ export default function SourceEditor({
   }, [onChange])
 
   /**
+   * 「定位源码」的那一次请求（见 lib/docReveal）：**挂载时取一次，之后一直用这一份**。
+   *
+   * 为什么在渲染期取、还配一个 done 哨兵：
+   * - 要在 useDocScroll 之前知道「这一次是被定位过来的」——那一次**不能**恢复上次的
+   *   编辑位置，否则下一帧就把刚滚到眼前的选区拽回老地方；
+   * - 而 StrictMode 下 effect 会跑两遍（卸载重建一次编辑器），槽里的请求取走就没了，
+   *   第二遍会取到 null、选区当场丢掉。哨兵让两遍拿到同一份。
+   */
+  const revealRef = useRef<{ taken: boolean; value: SourceReveal | null }>({ taken: false, value: null })
+  if (!revealRef.current.taken) {
+    revealRef.current.taken = true
+    revealRef.current.value = revealKey ? takeSourceReveal(revealKey) : null
+  }
+  const reveal = revealRef.current.value
+
+  /**
    * 取滚动元素的那只回调必须是**稳定**的：useDocScroll 拿它当 effect 依赖，每轮渲染
    * 现写的箭头会让滚动监听被反复拆掉重挂——而拆的时候还要补发一次位置上报，等于白写盘。
    * view 常驻到卸载（语言变化走 compartment 重配，不重建实例），scrollDOM 一直是同一个。
    */
   const getScrollEl = useCallback((): HTMLElement | null => viewRef.current?.scrollDOM ?? null, [])
-  // 编辑位置与阅读位置各记各的（键由上层分开）：共用一格的话，切换视图会互相拽
-  useDocScroll(getScrollEl, scrollTop, onScrollTop, true)
+  // 编辑位置与阅读位置各记各的（键由上层分开）：共用一格的话，切换视图会互相拽。
+  // 「定位源码」过来的那一次不恢复旧位置——落点由下面那个 effect 选中并滚过去
+  useDocScroll(getScrollEl, reveal ? undefined : scrollTop, onScrollTop, true)
 
   // 挂载：创建 view；卸载：销毁
   useEffect(() => {
@@ -170,7 +158,7 @@ export default function SourceEditor({
           readOnlyComp.of([]),
           langComp.of([]),
           cmPlaceholder(placeholder ?? ''),
-          syntaxHighlighting(highlight),
+          syntaxHighlighting(markdownHighlight),
           editorTheme,
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
@@ -184,6 +172,17 @@ export default function SourceEditor({
     })
     viewRef.current = view
     view.focus()
+    /*
+     * 「定位源码」：选中那段源文并滚到眼前。之后用户可能立刻开始打字，
+     * 光标该落在他要改的那一段上（取件规矩见上面 revealRef 的说明）。
+     */
+    if (reveal) {
+      const len = view.state.doc.length
+      const from = Math.max(0, Math.min(reveal.start, len))
+      const to = Math.max(from, Math.min(reveal.end, len))
+      view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true })
+      view.focus()
+    }
     return () => {
       view.destroy()
       viewRef.current = null

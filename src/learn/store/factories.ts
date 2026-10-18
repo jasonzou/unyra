@@ -109,9 +109,12 @@ export function mergeLearnStore(base: LearnStore, incoming: LearnStore): LearnSt
      */
     minds: base.minds,
     methods: base.methods,
+    // 随笔与窗口几何同理：是「我写过什么、我把它摆在哪」，不跟着别人的备份走
+    essays: base.essays,
+    essayCommits: base.essayCommits,
+    ...(base.essayDock ? { essayDock: base.essayDock } : {}),
     workflows: base.workflows,
     reading: base.reading,
-    checkin: base.checkin,
     pomodoro: base.pomodoro,
     // agent 栏的页签同样是「这台机器上开着什么」：不跟着别人的备份走（与 docArea 同一条道理）
     agentTabs: base.agentTabs,
