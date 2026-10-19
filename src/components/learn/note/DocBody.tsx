@@ -4,8 +4,9 @@
  * （见 DocFloat 的 DocStatChip）。
  *
  * 它不碰任何状态：字号系数、正文 HTML、注解都从上层传进来（见 NodeNote）。
- * 选词菜单是浮在正文上的，但定位与开合都不在这里——它作为 overlay 插回原来那一层，
- * 免得把它挪出正文区之后 fixed 定位的夹取与滚动容器的关系变了。
+ * 选词菜单是浮在正文上的，但定位与开合都不在这里——它以 overlay 挂在正文区的
+ * **遮罩层外面**：它是 fixed + 视口坐标，位置不受 DOM 层级影响；留在里面反而会被
+ * 两端渐隐的 mask 一起淡掉（它常常正好贴着正文上沿出现）。
  */
 import { memo, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { BookOpen, Sparkles } from 'lucide-react'
@@ -15,6 +16,7 @@ import type { Annotation, DocKind } from '../../../learn/types'
 import type { AnnotationActions } from '../../../lib/annotation'
 import type { LocalImageResolver } from '../../../lib/docImages'
 import { copySelectionAsMarkdown } from '../../../lib/copySource'
+import { fadeMask, useScrollEdges } from '../../../lib/scrollFade'
 import { DocStatChip } from '../DocFloat'
 import ZenResizeHandles from '../workspace/ZenResizeHandles'
 import { t } from '../../../i18n'
@@ -109,6 +111,10 @@ export const DocBody = memo(function DocBody({
   wordCount,
   overlay,
 }: Props) {
+  /* 两端渐隐：滚到头就摘掉那一端（判据与代价见 lib/scrollFade） */
+  const scrollEdges = useScrollEdges(scrollRef)
+  const mask = fadeMask(scrollEdges)
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {/* 字数统计：排在右上角悬浮组的正下方（见 DocFloat 的 DocStatChip） */}
@@ -116,45 +122,55 @@ export const DocBody = memo(function DocBody({
         <span className="tabular-nums">{t('{0} 字', wordCount)}</span>
       </DocStatChip>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        {/* 左侧留白给得多一点：标题定位栏就在旁边，正文（以及跳转高亮的底色）不贴过去 */}
-        <div className="doc-measure relative flex min-h-full flex-col pt-6 pl-[32px] pr-[22px]">
-          <ZenResizeHandles />
-          {/* 教学文档尚未生成或正在生成时的美观静态占位 */}
-          {kind === 'teaching' && !content.trim() && (
-            <EmptyTeachingDoc
-              pending={pending || agentRunning}
-              onGenerate={onGenerateDoc}
-            />
-          )}
+      {/*
+        两端渐隐的 mask 挂在这一层，不是滚动容器本身：两者落在同一层时，滚动合成层
+        与遮罩层套在一起，边缘有抖出一像素缝的先例；分开挂就没有这层顾虑。
 
-          {/* 空的笔记：说清它可以怎么被填上，而不是留一片白 */}
-          {!pending && kind === 'note' && !content.trim() && <EmptyNote />}
+        不画色块（旧做法），因为正文背后可能是壁纸：mask 只动 alpha，
+        滚出去的内容淡进「本来就在它背后的那一层」，与底色无关。
+      */}
+      <div className="flex min-h-0 flex-1 flex-col" style={{ maskImage: mask, WebkitMaskImage: mask }}>
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+          {/* 左侧留白给得多一点：标题定位栏就在旁边，正文（以及跳转高亮的底色）不贴过去 */}
+          <div className="doc-measure relative flex min-h-full flex-col pt-6 pl-[32px] pr-[22px]">
+            <ZenResizeHandles />
+            {/* 教学文档尚未生成或正在生成时的美观静态占位 */}
+            {kind === 'teaching' && !content.trim() && (
+              <EmptyTeachingDoc
+                pending={pending || agentRunning}
+                onGenerate={onGenerateDoc}
+              />
+            )}
 
-          {/* --doc-scale 是正文唯一的字号系数，index.css 里所有排版都按它等比缩放 */}
-          {/*
-            复制走源文：在预览里选中一段，进剪贴板的应当是它在 Markdown 里的原文
-            （公式的渲染产物、注解标记、视觉换行都不该跟着走，见 lib/copySource）；
-            映射不出来时它自己放行，默认复制照旧。
-          */}
-          <div
-            ref={bodyRef}
-            className="note-preview moji-node-note"
-            style={{ '--doc-scale': docScale } as CSSProperties}
-            onCopy={(e) => copySelectionAsMarkdown(e, bodyRef.current, content)}
-          >
-            <MarkdownView
-              html={html}
-              annotations={annotations}
-              knownConceptKeys={knownConceptKeys}
-              annotationActions={annotationActions}
-              resolveLocalImage={resolveLocalImage}
-            />
+            {/* 空的笔记：说清它可以怎么被填上，而不是留一片白 */}
+            {!pending && kind === 'note' && !content.trim() && <EmptyNote />}
+
+            {/* --doc-scale 是正文唯一的字号系数，index.css 里所有排版都按它等比缩放 */}
+            {/*
+              复制走源文：在预览里选中一段，进剪贴板的应当是它在 Markdown 里的原文
+              （公式的渲染产物、注解标记、视觉换行都不该跟着走，见 lib/copySource）；
+              映射不出来时它自己放行，默认复制照旧。
+            */}
+            <div
+              ref={bodyRef}
+              className="note-preview moji-node-note"
+              style={{ '--doc-scale': docScale } as CSSProperties}
+              onCopy={(e) => copySelectionAsMarkdown(e, bodyRef.current, content)}
+            >
+              <MarkdownView
+                html={html}
+                annotations={annotations}
+                knownConceptKeys={knownConceptKeys}
+                annotationActions={annotationActions}
+                resolveLocalImage={resolveLocalImage}
+              />
+            </div>
           </div>
-
-          {overlay}
         </div>
       </div>
+
+      {/* 选词菜单：挂在遮罩层外面（理由见文件头），fixed + 视口坐标，位置不受这里影响 */}
+      {overlay}
     </div>
   )
 }, areDocBodyPropsEqual)
