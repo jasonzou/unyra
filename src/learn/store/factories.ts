@@ -100,7 +100,7 @@ export function mergeLearnStore(base: LearnStore, incoming: LearnStore): LearnSt
     // 收藏夹同理：「我收藏了什么」是这台机器上的动作，不跟着别人的备份走
     favorites: base.favorites ?? [],
     /*
-     * 记忆、函数库、工作流登记、阅读记录、打卡、番茄钟：**一律以「我这一份」为准**
+     * 记忆、函数库、工作流登记、阅读记录、打卡、专注记录：**一律以「我这一份」为准**
      * （阅读与打卡是按目标的账，同样整本以我这份为准）。
      *
      * 与页签、暂存区同一条道理——它们是「我做过什么、我和导师之间定下过什么」，
@@ -115,7 +115,7 @@ export function mergeLearnStore(base: LearnStore, incoming: LearnStore): LearnSt
     ...(base.essayDock ? { essayDock: base.essayDock } : {}),
     workflows: base.workflows,
     reading: base.reading,
-    pomodoro: base.pomodoro,
+    focus: base.focus,
     // 日程同样是「我排给自己的」：导入别人的备份不该把这张表换掉
     schedule: base.schedule,
     // agent 栏的页签同样是「这台机器上开着什么」：不跟着别人的备份走（与 docArea 同一条道理）

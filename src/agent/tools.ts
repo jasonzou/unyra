@@ -33,7 +33,7 @@ export type {
   LearningOps,
   MemoryOps,
   MethodOps,
-  PomodoroOps,
+  FocusOps,
   ReadingOps,
   ResourceOps,
   ScheduleOps,

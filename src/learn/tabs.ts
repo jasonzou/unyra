@@ -64,7 +64,7 @@ export function tabKey(ref: TabRef): string {
   if (ref.kind === 'ws') return 'ws:' + ref.nodeId + ':' + ref.seg
   // 网页按**开签那一刻生成的 key**（而不是网址）认身份：同一个网址可以开两枚，起始页也不冲突
   if (ref.kind === 'web') return 'w:' + ref.key
-  // 守卫上下文全局只有一份（当前那次严格专注的会话）；报告按报告 id 一份一签
+  // 守卫上下文全局只有一份（当前那次专注的会话）；报告按报告 id 一份一签
   if (ref.kind === 'guard') return 'g:guard'
   if (ref.kind === 'report') return 'r:' + ref.reportId
   // 设置页与用量页同样全局只有一份：从哪个入口打开都是切到它，不会开出第二枚

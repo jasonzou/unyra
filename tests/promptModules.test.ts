@@ -77,7 +77,7 @@ describe('触发映射', () => {
     expect(promptModuleForApiName('ui.point')).toBe('ui')
     expect(promptModuleForApiName('reading.get')).toBe('learning-process')
     expect(promptModuleForApiName('attention.get')).toBe('learning-process')
-    expect(promptModuleForApiName('pomodoro.status')).toBe('learning-process')
+    expect(promptModuleForApiName('focus.status')).toBe('learning-process')
     // 每轮必用的组不触发——进了模块反而每轮都要注入一遍
     expect(promptModuleForApiName('doc.write')).toBeNull()
     expect(promptModuleForApiName('node.read')).toBeNull()

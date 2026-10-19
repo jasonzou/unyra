@@ -1,5 +1,5 @@
 /**
- * 随笔提交的单元用例：快照边界、二次提交只带新改动、整理前后笔记差异、读回归一化。
+ * 随笔提交的单元用例：全量快照、与上次的差异材料、整理前后笔记差异、读回归一化。
  *
  * 这一层的错误形态都很安静：快照漏了一条、改过的随笔没被再提交、整理动过的笔记记错，
  * 界面上都看不出来——只有对着这些纯函数才能钉住。
@@ -11,13 +11,12 @@ import {
   commitFeed,
   commitsOf,
   createEssayCommit,
+  diffEssaysAgainst,
   diffNoteChanges,
   essayCommentTitle,
-  lastCommitAt,
   noteFingerprint,
   normalizeEssayCommits,
   parseEssayComment,
-  pendingEssays,
   updateEssayCommit,
 } from '../src/learn/essayCommits'
 import type { EssayEntry, KnowledgeNode, LearnStore, NoteFile } from '../src/learn/types'
@@ -59,22 +58,47 @@ describe('随笔提交的快照边界', () => {
     // 标题一并封进快照：之后随笔改了名、删了，回看仍是当时的原样
     expect(commit.snapshot[0].title).toBe('随笔a')
     expect(commitsOf(created!.store, 'g1')).toHaveLength(1)
-    expect(lastCommitAt(created!.store, 'g1')).toBe(AT)
+    expect(commitsOf(created!.store, 'g1')[0].at).toBe(AT)
   })
 
-  it('第二次提交只带「上次之后写过 / 改过的」', () => {
-    const first = createEssayCommit(store([essay('a', AT - 10)]), 'g1', '一', AT)!
-    // 没动过 → 没得提交
-    expect(createEssayCommit(first.store, 'g1', '二', AT + 1000)).toBeNull()
-    // 改写 a（updatedAt 变新）+ 新写 b → 两条都进第二次快照
+  it('第二次提交仍然带**全部**随笔（不是只带改动的那几条）', () => {
+    const first = createEssayCommit(store([essay('a', AT - 10), essay('c', AT - 20)]), 'g1', '一', AT)!
     const edited: LearnStore = {
       ...first.store,
-      essays: { g1: [essay('b', AT + 1500), essay('a', AT + 1200, '改过的 a')] },
+      essays: { g1: [essay('b', AT + 1500), essay('a', AT + 1200, '改过的 a'), essay('c', AT - 20)] },
     }
-    expect(pendingEssays(edited, 'g1').map((e) => e.id)).toEqual(['b', 'a'])
     const second = createEssayCommit(edited, 'g1', '二', AT + 2000)!
-    expect(second.commit.snapshot.map((x) => x.text)).toEqual(['内容b', '改过的 a'])
+    // 快照 = 当前全部三条；未变化的 c 也在里面
+    expect(second.commit.snapshot.map((x) => x.id)).toEqual(['b', 'a', 'c'])
+    expect(second.commit.snapshot.map((x) => x.text)).toEqual(['内容b', '改过的 a', '内容c'])
     expect(commitsOf(second.store, 'g1').map((c) => c.message)).toEqual(['二', '一'])
+    // 差异只认新增 / 修改；未变化单独一档
+    const diff = diffEssaysAgainst(edited.essays!.g1, first.commit.snapshot)
+    expect(diff.added.map((e) => e.id)).toEqual(['b'])
+    expect(diff.edited.map((e) => e.id)).toEqual(['a'])
+    expect(diff.unchanged.map((e) => e.id)).toEqual(['c'])
+    expect(diff.removed).toEqual([])
+    expect(diff.changed).toBe(true)
+  })
+
+  it('删掉的随笔进「删除」一档；只改名不算变化', () => {
+    const first = createEssayCommit(store([essay('a', AT - 10), essay('b', AT - 20)]), 'g1', '一', AT)!
+    const next: LearnStore = {
+      ...first.store,
+      essays: { g1: [essay('a', AT + 100)] },
+    }
+    const diff = diffEssaysAgainst(next.essays!.g1, first.commit.snapshot)
+    expect(diff.removed.map((r) => r.id)).toEqual(['b'])
+    expect(diff.changed).toBe(true)
+
+    // 只改标题、正文没动：没有要整理的东西
+    const renamed: LearnStore = {
+      ...first.store,
+      essays: { g1: [{ ...essay('a', AT - 10), title: '换了个名字' }, essay('b', AT - 20)] },
+    }
+    const same = diffEssaysAgainst(renamed.essays!.g1, first.commit.snapshot)
+    expect(same.changed).toBe(false)
+    expect(same.unchanged.map((e) => e.id)).toEqual(['a', 'b'])
   })
 
   it('空文本不能提交；增量材料带日期，模型读得懂', () => {
@@ -97,15 +121,15 @@ describe('增量材料（提交历史 + 新增全文 + 修改差异）', () => {
     expect(feed).toContain('【本次没有修改随笔】')
   })
 
-  it('第二次提交：带上次改了哪些笔记，修改只给差异', () => {
-    const first = createEssayCommit(store([essay('a', AT - 10, '第一段')]), 'g1', '第一次', AT)!
+  it('第二次提交：带上次改了哪些笔记，修改只给差异，未变化只列标题', () => {
+    const first = createEssayCommit(store([essay('a', AT - 10, '第一段'), essay('c', AT - 20, '没动过的')]), 'g1', '第一次', AT)!
     const done = updateEssayCommit(first.store, 'g1', first.commit.id, {
       status: 'done',
       changes: [{ nodeId: 'n1', nodeTitle: '极限', noteName: '随笔整理', kind: 'created' }],
     })
     const edited: LearnStore = {
       ...done,
-      essays: { g1: [essay('a', AT + 100, '第一段\n后来又补了一句')] },
+      essays: { g1: [essay('a', AT + 100, '第一段\n后来又补了一句'), essay('c', AT - 20, '没动过的')] },
     }
     const second = createEssayCommit(edited, 'g1', '第二次', AT + 200)!
     const feed = commitFeed(commitsOf(second.store, 'g1'), second.commit)
@@ -116,6 +140,10 @@ describe('增量材料（提交历史 + 新增全文 + 修改差异）', () => {
     expect(feed).toContain('【本次没有新增随笔】')
     expect(feed).toContain('【本次修改的随笔（只给改动处）】')
     expect(feed).toContain('后来又补了一句')
+    // 全部随笔都在快照里，但没变的只列标题
+    expect(feed).toContain('【本次未变化的随笔（只列标题，不要重写）】')
+    expect(feed).toContain('「随笔c」')
+    expect(feed).toContain('全部 2 条随笔')
     // 只给改动处：不是把整段重新贴一遍（公共前缀放在 … 上下文里）
     expect(feed).toContain('>>> 新增 / 改动：')
   })

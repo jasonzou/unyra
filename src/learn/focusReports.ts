@@ -3,7 +3,7 @@
  *
  * 报告不进 state.json（它是「历史凭证」而不是「界面状态」，而且一轮监控一行的量级
  * 塞进整份重写的 state.json 太重）：每份一个 JSON 文件，住在用户目录的 focus/ 里，
- * 与番茄钟账本、阅读记录同一套「用户目录下平铺文件」的待遇。
+ * 与专注记录、阅读记录同一套「用户目录下平铺文件」的待遇。
  *
  * 资源管理器里的「专注报告」分类夹靠 listFocusReports 列行；写完一份就广播
  * REPORTS_CHANGED，开着的那扇列表自己刷新（与工作区目录的 ws-changed 铃同一套路）。
@@ -52,7 +52,6 @@ export interface FocusReportMeta {
   startedAt: number
   endedAt: number
   outcome: FocusReport['outcome']
-  completedGroups: number
   monitors: { screen: boolean; camera: boolean }
 }
 
@@ -78,7 +77,6 @@ export async function listFocusReports(): Promise<FocusReportMeta[]> {
       startedAt: report.startedAt,
       endedAt: report.endedAt,
       outcome: report.outcome,
-      completedGroups: report.completedGroups,
       monitors: report.monitors,
     })
   }

@@ -196,8 +196,8 @@ export interface SandboxOptions {
   attention?: AttentionOps
   /** 工作区目录（workspace.*，见 learn/workspace）；未注入就没有这一组 */
   workspace?: WorkspaceOps
-  /** 番茄钟（pomodoro.*，见 learn/pomodoro）；未注入就没有这一组 */
-  pomodoro?: PomodoroOps
+  /** 专注模式（focus.*，见 learn/focus）；未注入就没有这一组 */
+  focus?: FocusOps
   /** 读网页（web.*，见 learn/webDocs）；未注入就没有这一组 */
   web?: WebOps
   /** 上下文压缩（compact，见 learn/compact）；未注入就没有它 */
@@ -450,7 +450,7 @@ export type AskAnswers = AskAnswer[]
 
 /* ---------- memory：记忆（工作 / 长期） ---------- */
 
-/* ---------- reading / attention / pomodoro：学习过程的那一组 ---------- */
+/* ---------- reading / attention / focus：学习过程的那一组 ---------- */
 
 /**
  * reading.*：文档有效阅读的事实（见 learn/reading）。
@@ -492,13 +492,14 @@ export interface WorkspaceOps {
 }
 
 /**
- * pomodoro.*：番茄钟（见 learn/pomodoro）。
+ * focus.*：专注模式（见 learn/focus）。
  *
- * **只有 status，而且是只读**：番茄钟是用户自己的计时器——一段多长、做几组、
- * 什么时候停，全在他按的那颗按钮上。agent 连「排计划」都没有了，能看的只有记录。
+ * **只有 status，而且是只读**：专注模式是用户自己开的一场「有守卫盯着的学习」——
+ * 什么时候开始、什么时候结束，全在他按的那颗按钮上。agent 连「排计划」都没有了，
+ * 能看的只有记录。
  */
-export interface PomodoroOps {
-  /** 现状与记录：正在跑的哪一段、今天几组多少分钟、最近几天、最近几条 */
+export interface FocusOps {
+  /** 现状与记录：在跑的这一场、今天几场多少分钟、最近几天、最近几条 */
   status: () => unknown
 }
 

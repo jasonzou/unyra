@@ -38,7 +38,7 @@ import { createCodeOps } from './code'
 import { createWorkflowOps } from './workflow'
 import { createUserInfoOps } from './userinfo'
 import { createResourceOps } from './resource'
-import { createAttentionOps, createCompactOps, createPomodoroOps, createReadingOps } from './process'
+import { createAttentionOps, createCompactOps, createFocusOps, createReadingOps } from './process'
 import { createWorkspaceOps } from './workspace'
 import { createChipOps } from './chip'
 import { createScheduleOps } from '../schedule'
@@ -725,11 +725,11 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     workflows: createWorkflowOps(deps),
     // 代码块伪编译的交付口：纯渲染层逻辑（产物表 + 待编译登记），总是可用
     code: createCodeOps(),
-    // 学习过程：阅读事实、注意力评级、番茄钟——都是纯 store 逻辑，总是可用
-    // （见 learn/reading、learn/attention、learn/pomodoro）
+    // 学习过程：阅读事实、注意力评级、专注模式——都是纯 store 逻辑，总是可用
+    // （见 learn/reading、learn/attention、learn/focus）
     reading: createReadingOps(deps),
     attention: createAttentionOps(deps),
-    pomodoro: createPomodoroOps(deps),
+    focus: createFocusOps(deps),
     // 日程：用户级的提醒清单（见 learn/schedule）——agent 能排、能改，响铃在宿主那边
     schedule: createScheduleOps({ getLatest: deps.getLatest, set: deps.set, goalId: deps.goalId }),
     ...(deps.userInfo ? { userInfo: createUserInfoOps(deps.userInfo) } : {}),

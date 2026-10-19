@@ -4,8 +4,8 @@
  * - 判定解析（parseVerdict）：约定 JSON、裹着话的 JSON、坏回复、缺字段的口径；
  * - 策略决策（decideGuardAction）：熔断 > 暂停 > 警告的优先级，与「按勾选的监控调整」
  *   ——只开摄像头不评判内容、只开屏幕用交互旧程度当「人不在」的代理；
- * - 番茄钟暂停（learn/pomodoro）：计时冻结在暂停那一刻、恢复整体后挪、
- *   落盘往返不丢 pausedAt（这条字段曾经真漏过，见 state.json 的说明）；
+ * - 专注会话的暂停/恢复与记录（learn/focus）：暂停只是标记、恢复清标记、
+ *   停止按分钟阈值落记录、读盘会丢掉正在跑的那一场（守卫不跨重启）；
  * - 页签（learn/tabs + normalizeTab）：守卫页签不落盘（读回来就丢）、报告页签持久；
  * - 报告往返（buildFocusReport / normalizeFocusReport）：形状收口、坏文件不认。
  */
@@ -21,16 +21,7 @@ import {
   reportSpanLabel,
   type GuardMonitors,
 } from '../src/learn/focusGuard'
-import {
-  emptyPomodoro,
-  normalizePomodoro,
-  pausePomodoro,
-  pomodoroStatus,
-  remainingMsOf,
-  resumePomodoro,
-  startPomodoro,
-  tickPomodoro,
-} from '../src/learn/pomodoro'
+import { emptyFocus, focusStatus, normalizeFocus, pauseFocus, resumeFocus, startFocus, stopFocus } from '../src/learn/focus'
 import { tabKey, tabNodeId, tabTitle, tabTrail } from '../src/learn/tabs'
 import { normalizeTab } from '../src/learn/store/normalize/tabs'
 
@@ -116,47 +107,49 @@ describe('guardSystemPrompt', () => {
   })
 })
 
-/* ---------- 番茄钟的暂停 ---------- */
+/* ---------- 专注会话 ---------- */
 
-describe('pomodoro pause', () => {
+describe('focus session', () => {
   const t0 = 1_700_000_000_000
+  const screen = { screen: true, camera: false }
 
-  it('暂停时剩余时间冻结，恢复时把整段暂停从这一段里扣掉', () => {
-    const started = startPomodoro(emptyPomodoro(), { focusMinutes: 25, groups: 2 }, t0).store
-    // 跑了 10 分钟后暂停
-    const paused = pausePomodoro(started, t0 + 10 * 60_000)
-    const frozen = remainingMsOf(paused.current, t0 + 20 * 60_000)
-    expect(frozen).toBe(15 * 60_000) // 冻结在暂停那一刻，墙上的钟随便走
-    // 又过了 5 分钟恢复：这一段的起点整体后挪 5 分钟
-    const resumed = resumePomodoro(paused, t0 + 15 * 60_000)
+  it('没开任何守卫就开不起来（专注模式 = 守卫模式）', () => {
+    expect(startFocus(emptyFocus(), { screen: false, camera: false }, t0)).toBeNull()
+  })
+
+  it('暂停只是标记、不改时长；恢复清掉标记，没暂停时是空操作', () => {
+    const started = startFocus(emptyFocus(), screen, t0)!.store
+    const paused = pauseFocus(started, t0 + 10 * 60_000)
+    expect(paused.current?.pausedAt).toBe(t0 + 10 * 60_000)
+    // 专注模式不计时：墙上过多久，会话本身都不变
+    expect(focusStatus({ focus: paused }, t0 + 20 * 60_000).paused).toBe(true)
+    expect(focusStatus({ focus: paused }, t0 + 20 * 60_000).sessionMs).toBe(20 * 60_000)
+    const resumed = resumeFocus(paused)
     expect(resumed.current?.pausedAt ?? null).toBeNull()
-    expect(remainingMsOf(resumed.current, t0 + 15 * 60_000 + 30_000)).toBe(15 * 60_000 - 30_000)
+    expect(resumeFocus(started)).toBe(started)
+    expect(pauseFocus(started, t0).current?.pausedAt).toBe(t0)
+    const empty = emptyFocus()
+    expect(pauseFocus(empty, t0)).toBe(empty)
   })
 
-  it('暂停期间 tick 不推进（也不写盘：原样返回同一个 store）', () => {
-    const paused = pausePomodoro(startPomodoro(emptyPomodoro(), {}, t0).store, t0)
-    const out = tickPomodoro(paused, t0 + 3 * 60 * 60_000)
-    expect(out.store).toBe(paused)
-    expect(out.records).toHaveLength(0)
+  it('停止落一条记录；不到一分钟的当作误触，不记', () => {
+    const short = stopFocus(startFocus(emptyFocus(), screen, t0)!.store, t0 + 30_000)
+    expect(short.record).toBeNull()
+    expect(short.store.log).toEqual([])
+    const long = stopFocus(startFocus(emptyFocus(), screen, t0)!.store, t0 + 5 * 60_000)
+    expect(long.record).toEqual({ at: t0 + 5 * 60_000, ms: 5 * 60_000 })
+    expect(long.store.log).toHaveLength(1)
+    expect(long.store.current).toBeNull()
   })
 
-  it('重复暂停与没暂停就恢复都是空操作（对象身份不变）', () => {
-    const started = startPomodoro(emptyPomodoro(), {}, t0).store
-    const paused = pausePomodoro(started, t0)
-    expect(pausePomodoro(paused, t0 + 1)).toBe(paused)
-    expect(resumePomodoro(started, t0 + 1)).toBe(started)
-    const empty = emptyPomodoro()
-    expect(pausePomodoro(empty, t0)).toBe(empty)
-  })
-
-  it('落盘往返不丢 pausedAt（state.json 整份重写，漏一个字段就读不回来）', () => {
-    const paused = pausePomodoro(startPomodoro(emptyPomodoro(), { focusMinutes: 30, groups: 3 }, t0).store, t0 + 60_000)
-    const round = normalizePomodoro(JSON.parse(JSON.stringify(paused)))
-    expect(round.current?.pausedAt).toBe(t0 + 60_000)
-    expect(pomodoroStatus({ pomodoro: round }, t0 + 120_000).paused).toBe(true)
-    // 没暂停过的会话不带这个字段
-    const plain = normalizePomodoro(JSON.parse(JSON.stringify(startPomodoro(emptyPomodoro(), {}, t0).store)))
-    expect(plain.current?.pausedAt ?? null).toBeNull()
+  it('读盘丢掉正在跑的那一场：守卫上下文不跨重启，别留一个停不掉的空壳', () => {
+    const paused = pauseFocus(startFocus(emptyFocus(), screen, t0)!.store, t0 + 60_000)
+    const round = normalizeFocus(JSON.parse(JSON.stringify(paused)))
+    expect(round.current).toBeNull()
+    expect(focusStatus({ focus: round }, t0 + 120_000).session).toBeNull()
+    // 记录不受影响
+    const stopped = stopFocus(startFocus(emptyFocus(), screen, t0)!.store, t0 + 5 * 60_000).store
+    expect(normalizeFocus(JSON.parse(JSON.stringify(stopped))).log).toEqual([{ at: t0 + 5 * 60_000, ms: 5 * 60_000 }])
   })
 })
 
@@ -190,9 +183,6 @@ describe('focus report', () => {
   const input = {
     startedAt: 1_700_000_000_000,
     endedAt: 1_700_000_000_000 + 25 * 60_000,
-    focusMinutes: 25,
-    groups: 3,
-    completedGroups: 1,
     monitors: { screen: true, camera: false } as GuardMonitors,
     outcome: 'stopped' as const,
     pausedMs: 60_000,

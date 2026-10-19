@@ -7,7 +7,7 @@
  *
  * 为什么到点判定不放在渲染里、也不放进 store：日程的到点是一个**时间事件**，
  * 而 store 只在有人写它的时候才变。这里用一个不进渲染快照的 interval 盯着墙上时钟，
- * 只在「该响的那条换了」时 setState——顶栏因此不会每秒重渲染（与番茄钟同一条纪律，
+ * 只在「该响的那条换了」时 setState——顶栏因此不会每秒重渲染（与专注模式同一条纪律，
  * 见 lib/clock 的说明）。
  *
  * 响铃的边界：**只响一条**。多条同时到点时先响最早的那条，用户确认掉它，下一条自然浮上来；
@@ -42,7 +42,7 @@ export interface ScheduleFlowDeps {
  * 不该等某个「保存」动作——关掉窗口前那一条就不该丢。
  *
  * 每个动作都先比对象身份：`schedule.ts` 里没改成功时会原样返回同一个 store，
- * 这时一个字节都不写（与番茄钟 tick 同一条纪律）。
+ * 这时一个字节都不写（与专注会话同一条纪律）。
  */
 export function useScheduleFlow({ getLatest, set }: ScheduleFlowDeps) {
   const create = useCallback(

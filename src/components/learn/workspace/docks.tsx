@@ -1,17 +1,17 @@
 /*
  * 这个文件负责：顶栏里那两块「我今天的节奏」的数据接线——
- * 番茄钟（PomodoroDock）、有效阅读（ReadingDock）。
+ * 专注模式（FocusDock）、有效阅读（ReadingDock）。
  *
- * 两块的共同点是「自给自足的小块」：各自的时钟只让这一小块每秒重渲染，
- * 不会把整个学习区（正文 + 对话栏）一起带上；数据仍然来自 store（它是唯一真相），
- * 这里只负责把数据算成那两个纯展示按钮要的形状。
+ * 两块的共同点是「自给自足的小块」：订阅各自只落在这一小块（专注订阅守卫快照、
+ * 阅读订阅秒针），不会把整个学习区（正文 + 对话栏）一起带上；数据仍然来自 store
+ * （它是唯一真相），这里只负责把数据算成那两个纯展示按钮要的形状。
  */
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Eye, ShieldCheck } from 'lucide-react'
 import type { LearnStore } from '../../../learn/types'
 import { nodeById } from '../../../learn/graph'
-import PomodoroButton, { type FocusMonitors } from '../PomodoroButton'
+import FocusButton from '../FocusButton'
 import ScheduleButton from '../ScheduleButton'
 import ReadingButton, {
   type ReadingDayCell,
@@ -25,11 +25,7 @@ import {
   readingOfGoal,
   studyDayOf,
 } from '../../../learn/reading'
-import {
-  DEFAULT_FOCUS_MINUTES,
-  DEFAULT_GROUPS,
-  pomodoroStatus,
-} from '../../../learn/pomodoro'
+import type { FocusMonitors } from '../../../learn/focus'
 import { todayItems, type ScheduleItem } from '../../../learn/schedule'
 import { useClock } from '../../../lib/clock'
 import { useReadingDay, useReadingPulse } from '../../../lib/readingPulse'
@@ -45,7 +41,7 @@ import {
   subscribeGuardStreams,
 } from '../../../agent/guardRuntime'
 
-/** 严格专注勾选的持久化：下次打开 tip 还记得上次勾了什么（与「下一段多长」同一种待遇） */
+/** 守卫勾选的持久化：下次打开 tip 还记得上次勾了什么 */
 const MONITORS_KEY = 'moji-focus-monitors'
 
 function loadMonitors(): FocusMonitors {
@@ -58,43 +54,34 @@ function loadMonitors(): FocusMonitors {
 }
 
 /**
- * 番茄钟入口。
+ * 专注模式入口。
  *
- * 时钟与倒计时**只在这一小块里**每秒重渲染：放到学习区那一层，等于每秒把正文与
- * 对话栏一起重画一遍。数据仍然来自 store（它是唯一真相），这里只负责算「还剩多久」。
- *
- * 三个设置（一段多长、做几组、勾哪几路监控）是**这个组件自己的 state**：它们是
- * 「下一次开始」的参数，不是学习数据，没有理由进 store；跑起来之后以会话里的那一份
- * 为准（面板上会锁住不让改）。勾选监控会当场起媒体流——实时画面就出现在 tip 里，
+ * 只有守卫这一种模式（见 learn/focus）：这里要接线的是「让守卫看哪几路」与
+ * 「守卫现在看到了什么」。勾选监控会当场起媒体流——实时画面就出现在 tip 里，
  * 用户对着它把摄像头角度调好、确认没拍到不该拍的东西，再点开始。
  *
- * 到点收尾调一次 onTick：记账落在 store 上、提醒走全局 toast——两者都不该由这个
- * 展示块自己决定。守卫的判定与动作（暂停/警告/熔断）同样不在这里：Dock 只显示状态。
+ * 勾选状态是**这个组件自己的 state**：它是「下一场」的参数，不是学习数据，
+ * 没有理由进 store；跑起来之后以会话里的那一份为准（面板上会锁住不让改）。
+ * 守卫的判定与动作（暂停/警告/熔断）不在这里：Dock 只显示状态。
  */
-export function PomodoroDock({
+export function FocusDock({
   store,
+  starting,
   onStart,
   onStop,
-  onTick,
   onOpenGuard,
 }: {
   store: LearnStore
-  onStart: (focusMinutes: number, groups: number, monitors: FocusMonitors) => void
+  starting: boolean
+  onStart: (monitors: FocusMonitors) => void
   onStop: () => void
-  onTick: () => void
   onOpenGuard: () => void
 }) {
-  // 秒针走 useClock：只有这一小块订阅它，正文与对话栏不会被每秒带着重渲
-  const now = useClock(1000)
-  const status = pomodoroStatus(store, now)
-  const [focusMinutes, setFocusMinutes] = useState(DEFAULT_FOCUS_MINUTES)
-  const [groups, setGroups] = useState(DEFAULT_GROUPS)
   const [monitors, setMonitors] = useState<FocusMonitors>(loadMonitors)
-  // 已经过了点、但还没收尾：收尾一次（onTick 会把这一段翻过去，所以只会走一次）
-  const over = status.over
-  useEffect(() => {
-    if (over) onTick()
-  }, [over, onTick])
+  const cur = store.focus?.current ?? null
+  const running = cur ? { paused: !!cur.pausedAt } : null
+  /** 跑起来之后锁定的就是这一场实际开了的监控（勾不上的是没拿到的） */
+  const shown = cur?.monitors ?? monitors
 
   /** 勾/去一路监控：当场起停媒体流（预览跟着亮/熄），起不来就退回未勾。
       先算好下一份再 set：updater 要保持纯净（起停流与落 localStorage 都是副作用） */
@@ -118,21 +105,21 @@ export function PomodoroDock({
   // 守卫的会话与媒体流都是模块级单例（agent/guardRuntime）：这里只订阅它的快照
   const guard = useSyncExternalStore(subscribeGuard, guardSnapshot)
   const guardOn = guard.session?.state === 'running' || guard.session?.state === 'paused'
-  // 勾了监控但当前模型看不了图：严格专注发不了画面，提前说清，别等点了开始才扑空
+  // 勾了监控但当前模型看不了图：守卫发不了画面，提前说清，别等点了开始才扑空
   const strictHint = useMemo(
     () =>
       monitors.screen || monitors.camera
         ? supportsImage()
           ? null
-          : t('当前的模型不支持看图——严格专注需要能看图的模型，换一个或关闭勾选。')
+          : t('当前的模型不支持看图——守卫模式需要能看图的模型，换一个或关闭勾选。')
         : null,
     [monitors.screen, monitors.camera],
   )
   const previews =
-    monitors.screen || monitors.camera ? (
+    shown.screen || shown.camera ? (
       <div className="mt-2 grid grid-cols-2 gap-1.5">
-        {monitors.screen && <GuardPreviewTile kind="screen" />}
-        {monitors.camera && <GuardPreviewTile kind="camera" />}
+        {shown.screen && <GuardPreviewTile kind="screen" />}
+        {shown.camera && <GuardPreviewTile kind="camera" />}
       </div>
     ) : null
   const guardStatus = guardOn ? (
@@ -153,24 +140,17 @@ export function PomodoroDock({
     </div>
   ) : null
 
-  const cur = status.session
   return (
-    <PomodoroButton
-      running={cur ? { phase: cur.phase, index: cur.index, groups: cur.groups, focusMinutes: cur.focusMinutes } : null}
-      remainingMs={status.remainingMs}
-      phaseMs={status.phaseMs}
-      focusMinutes={focusMinutes}
-      groups={groups}
-      onFocusMinutes={setFocusMinutes}
-      onGroups={setGroups}
-      onStart={() => onStart(focusMinutes, groups, isWeb() ? { screen: false, camera: false } : monitors)}
-      onStop={onStop}
-      monitors={isWeb() ? { screen: false, camera: false } : monitors}
+    <FocusButton
+      running={running}
+      monitors={shown}
       onMonitorToggle={toggleMonitor}
-      previews={isWeb() ? null : previews}
-      guardStatus={isWeb() ? null : guardStatus}
-      paused={isWeb() ? false : status.paused}
-      strictHint={isWeb() ? null : strictHint}
+      onStart={() => onStart(shown)}
+      onStop={onStop}
+      starting={starting}
+      previews={previews}
+      guardStatus={guardStatus}
+      strictHint={strictHint}
     />
   )
 }
@@ -178,7 +158,7 @@ export function PomodoroDock({
 /**
  * 日程入口的数据接线。
  *
- * 与番茄钟同一套「自给自足的小块」：时钟只在这一块里走（30 秒一拍，够翻日界与
+ * 与专注模式同一套「自给自足的小块」：时钟只在这一块里走（30 秒一拍，够翻日界与
  * 把「已错过」算准），今日清单由 store 现算——store 变了（用户或 agent 排了一条）
  * 这块自然跟着重画，正文与对话栏不受影响。
  *
@@ -213,7 +193,7 @@ export function ScheduleDock({
 }
 
 /**
- * 严格专注 tip 里的一块实时画面（屏幕或摄像头）。
+ * 专注模式 tip 里的一块实时画面（屏幕或摄像头）。
  *
  * 媒体流在守卫运行时手里（它才是抽帧的来源）；这里只挂一个观众 <video>——
  * tile 卸了（tip 收起）流还在，守卫照常工作。没有流时给一块暗底占位：

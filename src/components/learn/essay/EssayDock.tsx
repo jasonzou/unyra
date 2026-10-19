@@ -13,12 +13,14 @@
  *    想开几条开几条；打开窗口时接着**最近的一条**写，一条都没有就自动备好一条新的
  *    （标题已填今天的日期，写下第一个字才真正落一条）。
  * 3. **顶部下拉选随笔**（用户定的）：不再在左边占一列列表——窗口只有一扇，正文才是主角。
+ *    「笔记」页签只列**当前目标**的笔记（不跨目标）：随笔本身是目标级的，翻到别的课
+ *    的笔记会让归属乱掉。
  *    下拉里按标题列，正文上方有一行标题输入框，随时改名；另有一项「空白（新的一条）」。
  *    提交页与提交详情里同理：摆的是标题，旧的提交快照没有标题才按日期回退。
  * 4. **提交像 git**（见 learn/essayCommits）：把这一批随笔封成快照，交给 Agent 整理进
  *    知识树对应节点的笔记；整理结果（新建 / 更新了哪几份笔记）与 Agent 的**提交评论**
- *    （Markdown，首行是标题）记在这次提交上。提交记录按随笔划界：历史只列**当前正在
- *    编写的那条随笔**参与过的提交，详情里的快照也只给它自己看，别人的日期不越界。
+ *    （Markdown，首行是标题）记在这次提交上。每次提交都封存**全部随笔**（需求定的），
+ *    所以提交记录是目标级的：历史与详情都按整次提交展示，不再按某一条随笔切分。
  *    历史排成 timeline：每个节点只摆「日期 + 评论标题」，全文点开详情再看。
  *
  * 窗口能拖、能拉右下角改大小，几何存在 state.json（见 learn/types 的 EssayDockRect）：
@@ -48,7 +50,7 @@ import {
 } from 'lucide-react'
 import type { DockNoteItem, EssayCommit, EssayDockRect, EssayDockState, EssayEntry } from '../../../learn/types'
 import { ESSAY_DOCK_MIN_H, ESSAY_DOCK_MIN_W, essayPreview, dayOfEssay } from '../../../learn/essays'
-import { changesSummary, essayCommentTitle } from '../../../learn/essayCommits'
+import { changesSummary, diffEssaysAgainst, essayCommentTitle } from '../../../learn/essayCommits'
 import { usePresence } from '../../../lib/presence'
 import { renderNote } from '../../../lib/markdown'
 import { t } from '../../../i18n'
@@ -170,7 +172,7 @@ interface Props {
   onUpdate: (goalId: string, id: string, patch: { text?: string; title?: string }) => void
   onDelete: (goalId: string, id: string) => void
 
-  /** 全局所有节点的笔记（标明来自哪个目标的哪个节点） */
+  /** 当前目标下所有节点的笔记（不跨目标，见 LearnWorkspace 的 dockNotes） */
   allNotes?: DockNoteItem[]
   /** 写入节点笔记 */
   onWriteNote?: (nodeId: string, noteName: string, content: string) => void
@@ -723,13 +725,15 @@ export default function EssayDock({
   }, [open, onOpenChange])
 
   /* ---------- 提交 ---------- */
-  /** 还没提交的随笔：最近一次提交之后写过 / 改过的 */
-  const lastCommitAt = commits[0]?.at ?? 0
-  const pending = essays.filter((e) => e.updatedAt > lastCommitAt)
+  /**
+   * 全部随笔 vs 上一次提交：新增 / 修改 / 删除 / 未变化。
+   * 提交本身带的是**全部随笔**（需求定的），这份差异只决定「这次有没有东西要整理」。
+   */
+  const diff = diffEssaysAgainst(essays, commits[0]?.snapshot)
   /** 编辑器里的字与已经落库的那一份不一样（刚敲下、去抖还没写进去） */
   const storedText = editingId ? (essays.find((e) => e.id === editingId)?.text ?? '') : ''
   const dirty = text.trim() !== storedText.trim()
-  const commitVisible = pending.length > 0 || dirty
+  const commitVisible = essays.length > 0 && (diff.changed || dirty)
 
   const openCommitPanel = () => {
     // 去抖中的正文先落库，否则刚写的最后一句不会进快照
@@ -749,24 +753,11 @@ export default function EssayDock({
   const activeCommit = detailId ? commits.find((c) => c.id === detailId) ?? null : null
 
   /**
-   * 提交记录按随笔划界（用户定的）：历史里只列当前正在编写的那条随笔参与过的提交。
-   * 如果在列表页看历史，则列出该目标下的全部提交记录。
+   * 每次提交都封存全部随笔（需求定的），所以提交记录是**目标级**的：
+   * 不再按「正在编辑的那条随笔」切分历史与快照——每条提交本来就包含所有随笔。
    */
-  const scopedCommits = useMemo(() => {
-    if (editingId && editingId !== '__blank__') {
-      return commits.filter((c) => c.snapshot.some((s) => s.id === editingId))
-    }
-    return commits
-  }, [commits, editingId])
-
-  /**
-   * 详情里的快照：若处于具体随笔二级页面则只给它自己的快照，否则列出全量快照。
-   */
-  const scopedSnapshot = activeCommit
-    ? editingId && editingId !== '__blank__'
-      ? activeCommit.snapshot.filter((s) => s.id === editingId)
-      : activeCommit.snapshot
-    : []
+  const scopedCommits = commits
+  const scopedSnapshot = activeCommit ? activeCommit.snapshot : []
 
   const backFromPanel = () => {
     if (subPanel === 'detail') {
@@ -778,7 +769,7 @@ export default function EssayDock({
 
   const panelTitle =
     subPanel === 'commit'
-      ? t('提交随笔')
+      ? t('提交全部随笔')
       : subPanel === 'history'
         ? t('提交记录')
         : activeCommit?.message ?? t('提交详情')
@@ -940,13 +931,13 @@ export default function EssayDock({
                           disabled={!commitVisible}
                           title={
                             commitVisible
-                              ? t('提交随笔：封存快照，交给 AI 整理进对应节点的笔记')
-                              : t('还没有新的随笔需要提交')
+                              ? t('提交全部随笔：带上全部内容，AI 按与上次的差异统一整理')
+                              : t('和上次提交相比没有变化')
                           }
                           className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-seal/10 px-1.5 text-[10.5px] font-medium text-seal-deep transition hover:bg-seal/15 disabled:cursor-default disabled:opacity-40"
                         >
                           <GitCommitHorizontal size={12} />
-                          {t('提交…')}
+                          {t('提交全部…')}
                         </button>
                         <button
                           type="button"
@@ -1054,13 +1045,13 @@ export default function EssayDock({
                           disabled={!commitVisible}
                           title={
                             commitVisible
-                              ? t('提交这批随笔：封存快照，交给 AI 整理进对应节点的笔记')
-                              : t('还没有写过的内容，先写点什么再提交')
+                              ? t('提交全部随笔：带上全部内容，AI 按与上次的差异统一整理')
+                              : t('和上次提交相比没有变化')
                           }
                           className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-seal/10 px-1.5 text-[10.5px] font-medium text-seal-deep transition hover:bg-seal/15 disabled:cursor-default disabled:opacity-40"
                         >
                           <GitCommitHorizontal size={12} />
-                          {t('提交…')}
+                          {t('提交全部…')}
                         </button>
                         <button
                           type="button"
@@ -1104,7 +1095,7 @@ export default function EssayDock({
               {subPanel === 'main' && dockTab === 'note' && (
                 <>
                   {noteTarget === null ? (
-                    /* ----- 笔记一级页面：笔记列表（标明来自哪个目标的哪个节点） ----- */
+                    /* ----- 笔记一级页面：当前目标下的笔记列表（不跨目标，见 LearnWorkspace 的 dockNotes） ----- */
                     <div className="flex min-h-0 flex-1 flex-col bg-card">
                       {/* 操作与搜索栏 */}
                       <div className="flex shrink-0 items-center gap-2 border-b border-line/80 px-3 py-2 bg-paper/40">
@@ -1118,7 +1109,7 @@ export default function EssayDock({
                             type="text"
                             value={noteSearch}
                             onChange={(e) => setNoteSearch(e.target.value)}
-                            placeholder={t('搜索笔记、目标或节点…')}
+                            placeholder={t('搜索笔记或节点…')}
                             className="h-6 w-full rounded-md border border-line bg-paper/70 pl-6 pr-2 text-[11px] text-ink outline-none transition focus:border-seal/50"
                           />
                         </div>
@@ -1129,9 +1120,9 @@ export default function EssayDock({
                         {filteredNotes.length === 0 ? (
                           <div className="flex h-full flex-col items-center justify-center py-12 text-center text-ink-faint">
                             <BookOpen size={28} className="text-line-strong/60 mb-2" />
-                            <p className="text-[12px]">{noteSearch ? t('未找到匹配的笔记') : t('知识库中暂无笔记')}</p>
+                            <p className="text-[12px]">{noteSearch ? t('未找到匹配的笔记') : t('当前目标还没有笔记')}</p>
                             <p className="text-[10.5px] text-ink-faint mt-1 max-w-[260px]">
-                              {t('笔记是节点级的，在学习文档或右键菜单中可为每个节点记录独立笔记。')}
+                              {t('笔记是节点级的，只列当前目标下的节点；在学习文档或右键菜单中可为节点记笔记。')}
                             </p>
                           </div>
                         ) : (
@@ -1141,13 +1132,9 @@ export default function EssayDock({
                               onClick={() => openNote(item)}
                               className="group relative cursor-pointer rounded-lg border border-line bg-paper/60 p-2.5 transition hover:border-seal/45 hover:bg-paper hover:shadow-xs"
                             >
-                              {/* 标明来自哪个目标的哪个节点 */}
+                              {/* 只列当前目标：只需标明是哪个节点的笔记 */}
                               <div className="flex items-center gap-1.5 text-[10.5px] text-ink-faint">
-                                <span className="truncate max-w-[120px] rounded bg-line/60 px-1 py-0.5 text-[10px] text-ink-soft">
-                                  {item.goalTitle || t('未知目标')}
-                                </span>
-                                <span className="text-line-strong">/</span>
-                                <span className="truncate max-w-[150px] text-[10.5px] font-medium text-ink-soft">
+                                <span className="truncate max-w-[220px] rounded bg-line/60 px-1 py-0.5 text-[10px] font-medium text-ink-soft">
                                   {item.nodeTitle || t('未知节点')}
                                 </span>
                                 <span className="ml-auto shrink-0 tabular-nums text-[10px] text-ink-faint">
@@ -1281,7 +1268,7 @@ export default function EssayDock({
                 <div className="flex min-h-0 flex-1 flex-col bg-card">
                   <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
                     <p className="text-[11px] leading-relaxed text-ink-faint">
-                      {t('提交后 AI 会按内容把这些随笔整理进对应节点的笔记；整理结果会记在这次提交上，随时可以回看。')}
+                      {t('每次提交都会带上当前的全部随笔；AI 按与上次相比的新增、修改与删除，统一整理进对应节点的笔记，整理结果会记在这次提交上。')}
                     </p>
                     <label className="mt-3 block text-[11px] font-medium text-ink-soft" htmlFor="essay-commit-message">
                       {t('提交说明')}
@@ -1295,20 +1282,56 @@ export default function EssayDock({
                     />
                     <div className="mt-3 flex items-baseline gap-2">
                       <span className="text-[11px] font-medium text-ink-soft">{t('本次快照')}</span>
-                      <span className="text-[10.5px] text-ink-faint">{t('{0} 条随笔', String(pending.length))}</span>
+                      <span className="text-[10.5px] text-ink-faint">{t('全部 {0} 条随笔', String(essays.length))}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-ink-faint">
+                      <span>{t('新增 {0}', String(diff.added.length))}</span>
+                      <span>·</span>
+                      <span>{t('修改 {0}', String(diff.edited.length))}</span>
+                      <span>·</span>
+                      <span>{t('删除 {0}', String(diff.removed.length))}</span>
+                      <span>·</span>
+                      <span>{t('未变化 {0}', String(diff.unchanged.length))}</span>
                     </div>
                     <div className="mt-1.5 space-y-1.5">
-                      {pending.length === 0 ? (
-                        <p className="px-1 py-2 text-[11px] text-ink-faint">{t('没有新的随笔可以提交')}</p>
+                      {!diff.changed ? (
+                        <p className="px-1 py-2 text-[11px] text-ink-faint">{t('和上次提交相比没有变化')}</p>
                       ) : (
-                        pending.map((essay) => (
-                          <div key={essay.id} className="rounded-lg border border-line bg-paper/60 px-2.5 py-2">
-                            <div className="truncate text-[10.5px] text-ink-faint">{titleOf(essay)}</div>
-                            <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-relaxed text-ink-soft">
-                              {essayPreview(essay.text, 140)}
+                        <>
+                          {diff.added.map((essay) => (
+                            <div key={essay.id} className="rounded-lg border border-line bg-paper/60 px-2.5 py-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="rounded bg-ok/10 px-1 py-px text-[9.5px] text-ok-deep">{t('新增')}</span>
+                                <span className="truncate text-[10.5px] text-ink-faint">{titleOf(essay)}</span>
+                              </div>
+                              <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-relaxed text-ink-soft">
+                                {essayPreview(essay.text, 140)}
+                              </p>
+                            </div>
+                          ))}
+                          {diff.edited.map((essay) => (
+                            <div key={essay.id} className="rounded-lg border border-line bg-paper/60 px-2.5 py-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="rounded bg-seal/10 px-1 py-px text-[9.5px] text-seal-deep">{t('已修改')}</span>
+                                <span className="truncate text-[10.5px] text-ink-faint">{titleOf(essay)}</span>
+                              </div>
+                              <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-relaxed text-ink-soft">
+                                {essayPreview(essay.text, 140)}
+                              </p>
+                            </div>
+                          ))}
+                          {diff.removed.map((r) => (
+                            <div key={r.id} className="flex items-center gap-1.5 rounded-lg border border-line/70 bg-paper/40 px-2.5 py-2">
+                              <span className="rounded bg-warn/10 px-1 py-px text-[9.5px] text-warn-deep">{t('已删除')}</span>
+                              <span className="truncate text-[11px] text-ink-soft">{r.title || dateLabelOfEssay(r.createdAt)}</span>
+                            </div>
+                          ))}
+                          {diff.unchanged.length > 0 && (
+                            <p className="px-1 pt-1 text-[10.5px] leading-relaxed text-ink-faint">
+                              {t('其余 {0} 条未变化，也会随快照一起交给 AI。', String(diff.unchanged.length))}
                             </p>
-                          </div>
-                        ))
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -1323,11 +1346,11 @@ export default function EssayDock({
                     <button
                       type="button"
                       onClick={submitCommit}
-                      disabled={pending.length === 0}
+                      disabled={!diff.changed}
                       className="flex h-7 items-center gap-1.5 rounded-md bg-seal px-3 text-[11.5px] font-medium text-white shadow-sm transition hover:bg-seal-deep disabled:cursor-default disabled:opacity-40"
                     >
                       <GitCommitHorizontal size={13} />
-                      {t('提交并整理')}
+                      {t('提交全部并整理')}
                     </button>
                   </div>
                 </div>
@@ -1338,9 +1361,7 @@ export default function EssayDock({
                   <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
                     {scopedCommits.length === 0 ? (
                       <p className="px-2 py-4 text-[11px] leading-relaxed text-ink-faint">
-                        {editingId
-                          ? t('这条随笔还没有提交记录：提交一次，这里会沿时间轴留下快照与整理评论。')
-                          : t('当前目标还没有随笔提交记录。')}
+                        {t('当前目标还没有随笔提交记录：提交一次，这里会沿时间轴留下快照与整理评论。')}
                       </p>
                     ) : (
                       /*
@@ -1458,11 +1479,11 @@ export default function EssayDock({
 
                       <section className="mt-3">
                         <h4 className="text-[11px] font-medium text-ink-soft">{t('快照')}</h4>
-                        {/* 只给当前正在编写的那条随笔自己的原样（边界同上，见 scopedSnapshot） */}
+                        {/* 这次提交封存的全部随笔（见上面的 scopedSnapshot） */}
                         <div className="mt-1.5 space-y-1.5">
                           {scopedSnapshot.length === 0 ? (
                             <p className="px-1 py-1.5 text-[11px] text-ink-faint">
-                              {t('这条随笔不在这次提交里')}
+                              {t('这次提交里没有随笔')}
                             </p>
                           ) : (
                             scopedSnapshot.map((essay) => (
@@ -1486,7 +1507,7 @@ export default function EssayDock({
                   {activeCommit && (
                     <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-1.5 text-[10.5px] text-ink-faint">
                       <span className="min-w-0 flex-1 truncate">
-                        {t('提交后仍可继续写；下次提交只整理新增和改动')}
+                        {t('每次提交都带全部随笔；AI 只整理与上次相比新增、修改、删除的部分')}
                       </span>
                       <button
                         type="button"

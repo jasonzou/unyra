@@ -1,7 +1,7 @@
 /**
  * 这个文件负责什么：**沙箱里能调到的全部 api 的定义**。buildApi 把 SandboxOptions 上的宿主能力
  * 逐个包成 api 方法（doc / node / state / tmp / exam / memory / method / sdoc / wf / code /
- * reading / attention / pomodoro / compact / web / userInfo / wait / ask /
+ * reading / attention / focus / compact / web / userInfo / wait / ask /
  * tiktok / ui / res），wrapApi 负责记账与失败判定；每个 api 都是调用时才读 opts，不持有快照。
  */
 import { needleForDoc } from '../../lib/docDom'
@@ -595,7 +595,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     wrapApi(api, 'code.silent', (args) => code.silent(asRecord(args[0])), log)
   }
 
-  // 有效阅读 / 注意力 / 番茄钟：学习过程那一组（见 learn/reading 等）
+  // 有效阅读 / 注意力 / 专注模式：学习过程那一组（见 learn/reading 等）
   if (opts.reading) {
     const reading = opts.reading
     wrapApi(api, 'reading.get', (args) => reading.get(asOptionalPath(args[0])), log)
@@ -606,9 +606,9 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     const attention = opts.attention
     wrapApi(api, 'attention.get', (args) => attention.get(asOptionalPath(args[0])), log)
   }
-  if (opts.pomodoro) {
-    const pomodoro = opts.pomodoro
-    wrapApi(api, 'pomodoro.status', () => pomodoro.status(), log)
+  if (opts.focus) {
+    const focus = opts.focus
+    wrapApi(api, 'focus.status', () => focus.status(), log)
   }
   // 工作区目录：节点的真实系统目录（见 learn/workspace），只收文本
   if (opts.workspace) {

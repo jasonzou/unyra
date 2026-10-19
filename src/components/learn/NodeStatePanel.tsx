@@ -30,7 +30,7 @@ function masteryTone(m: number): string {
   return 'bg-seal'
 }
 
-/** 一块井槽：tip 里的小分区。边框与底色取自番茄钟那块设置区，全站同一套 */
+/** 一块井槽：tip 里的小分区。边框与底色取自专注模式那块设置区，全站同一套 */
 const WELL = 'rounded-md border border-line bg-paper-deep/40 px-2.5 py-2'
 
 export function NodeStatePanel({

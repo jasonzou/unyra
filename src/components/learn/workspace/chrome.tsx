@@ -61,13 +61,13 @@ export function Topbar({
   onOpenUpdate,
   onOpenNotice,
   onToast: _onToast,
-  pomodoro,
+  focus,
   reading,
   schedule,
   scheduleRinging,
 }: {
-  /** 番茄钟入口（墙上时钟 + 进度条 + 倒计时，见下面的 PomodoroDock） */
-  pomodoro: ReactNode
+  /** 专注模式入口（守卫勾选 + 实时画面 + 状态，见 docks 的 FocusDock） */
+  focus: ReactNode
   /** 有效阅读入口（今天读了多久 + 节点清单 + 近七天，见下面的 ReadingDock） */
   reading: ReactNode
   /** 日程入口（今天还有什么 + 手动安排；到点提醒的弹层也在这里，见 ScheduleButton） */
@@ -209,10 +209,10 @@ export function Topbar({
         {/* 更新入口：只有新版本**下载完成**之后它才存在，见 components/update/UpdateButton */}
         <UpdateButton onOpenUpdate={onOpenUpdate} />
         {/* 这三个入口都是「我今天的节奏」，与账号那一簇同属右侧。
-            顺序按「现在最该看什么」排：日程（几点做什么）→ 番茄钟（这一段跑了多久）
+            顺序按「现在最该看什么」排：日程（几点做什么）→ 专注（守卫在不在当值）
             → 有效阅读（今天读了多少）。日程排最前，因为它是唯一一个**到点会主动叫人**的。 */}
         {schedule}
-        {pomodoro}
+        {focus}
         {reading}
         <UserMenu
           user={user}

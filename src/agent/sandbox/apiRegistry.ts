@@ -361,12 +361,12 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
     ],
   ),
   g(
-    'pomodoro',
-    '番茄钟',
-    '当前番茄钟状态与最近记录（只读）。',
-    `番茄钟是用户自己的计时器；agent 只能看，不能排计划或改计时。`,
+    'focus',
+    '专注模式',
+    '当前专注状态与最近记录（只读）。',
+    `专注模式只有守卫、没有倒计时；agent 只能看，不能开始或结束。`,
     [
-      a('status', 'pomodoro.status()', '读番茄钟状态', '回正在跑的段、今天几组、最近几天与最近几条。', `const p = await api.pomodoro.status()`),
+      a('status', 'focus.status()', '读专注状态', '回在跑的那一场、今天几场、最近几天与最近几条。', `const f = await api.focus.status()`),
     ],
   ),
   g(

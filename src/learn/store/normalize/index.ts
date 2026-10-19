@@ -19,7 +19,7 @@ import { BUILTIN_WORKFLOW_IDS, normalizeWorkflowEfforts, normalizeWorkflowEntrie
 import { normalizeReadingBook } from '../../reading'
 import { normalizeEssayDock, normalizeEssays } from '../../essays'
 import { normalizeEssayCommits } from '../../essayCommits'
-import { normalizePomodoro } from '../../pomodoro'
+import { normalizeFocus } from '../../focus'
 import { normalizeSchedule } from '../../schedule'
 import { normalizeMemoryStore } from '../../memory'
 import { normalizeResourceList, retargetStaticRefs, type StaticResource } from '../../static'
@@ -41,7 +41,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
      * 原始那一份（不经过 LearnStore 的形状）：文件区那一块要读**旧版**字段
      * （顶层的 tabs / activeTab），而它们已经不在 LearnStore 里了——从 d 上读不到。
      */
-    const legacy = data as { tabs?: unknown; activeTab?: unknown }
+    const legacy = data as { tabs?: unknown; activeTab?: unknown; pomodoro?: unknown }
     if (!Array.isArray(d.nodes)) return null
 
     const parsed = d.nodes.map(normalizeNode).filter((n): n is KnowledgeNode => n !== null)
@@ -274,7 +274,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       ...(essayDock ? { essayDock } : {}),
       workflows,
       /*
-       * 阅读 / 打卡 / 番茄钟：认不出的部分各自丢掉，坏数据不该拖垮整库。
+       * 阅读 / 打卡 / 专注：认不出的部分各自丢掉，坏数据不该拖垮整库。
        * 阅读记录还要**按节点过滤**（与上面 tmp 同一个道理）：节点被删掉之后，那些按
        * nodeId 索引的记录就成了空索引——今日阅读面板里一行 uuid、点不动的条目就是这么来的。
        * 放在这里做还能顺手清掉以前删节点时留下的旧空索引（读盘是唯一一次全量过手的机会）。
@@ -283,7 +283,8 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
        * 目标已经不在的那些直接丢掉——那是它的账，目标没了账就该跟着没。
        */
       reading: normalizeReadingBook(d.reading, ids, goalIds),
-      pomodoro: normalizePomodoro(d.pomodoro),
+      // 专注于旧版是 pomodoro：读盘时就地迁移（旧 log 的 minutes 折算成 ms，见 learn/focus）
+      focus: normalizeFocus(d.focus ?? legacy.pomodoro),
       // 日程是用户级数据（见 learn/schedule）：不按目标过滤，坏条目逐条丢
       schedule: normalizeSchedule(d.schedule),
       activeGoalId,

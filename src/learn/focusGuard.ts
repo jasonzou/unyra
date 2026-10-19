@@ -1,9 +1,9 @@
 /**
- * 严格专注的守卫（focusGuard）：**纯逻辑**——判定怎么解析、画面怎么判、报告长什么样。
+ * 专注模式的守卫（focusGuard）：**纯逻辑**——判定怎么解析、画面怎么判、报告长什么样。
  *
- * 与 learn/pomodoro 的关系：番茄钟仍是「一个自己会走的计时器」，守卫只是**旁观者**，
- * 每隔一轮看一眼（屏幕截图 / 摄像头画面交给模型），给出一个判定；真正的动作
- * （警告、暂停计时、熔断停表）由守卫运行时（agent/guardRuntime）转给宿主执行。
+ * 与 learn/focus 的关系：专注模式**只有守卫这一种形态**（没有倒计时），守卫每隔一轮
+ * 看一眼（屏幕截图 / 摄像头画面交给模型），给出一个判定；真正的动作
+ * （警告、暂停值守、熔断收场）由守卫运行时（agent/guardRuntime）转给宿主执行。
  * 这里不碰 store、不发请求、不持 MediaStream——全部可以单独测。
  *
  * 三条策略上的定死（改这里之前先想清楚）：
@@ -116,7 +116,7 @@ export function guardSystemPrompt(monitors: GuardMonitors): string {
   if (monitors.camera) sees.push('摄像头画面（学生本人）')
   sees.push('当前系统获得焦点的应用名称（前台窗口）')
   return [
-    '你是一个学习守护者（守卫 agent），在学生开启严格专注模式期间周期性地看一眼画面，判断学习状态。',
+    '你是一个学习守护者（守卫 agent），在学生开启专注模式（守卫）期间周期性地看一眼画面，判断学习状态。',
     '你每一轮能看到：' + sees.join(' 与 ') + '。',
     '',
     '## 判什么',
@@ -159,25 +159,20 @@ export interface FocusReportRound {
   reason: string
 }
 
-/** 一次专注怎么收场的 */
-export type FocusOutcome = 'completed' | 'stopped' | 'fused'
+/** 一次专注怎么收场的（专注模式没有「跑完」，只有用户结束与隐私熔断） */
+export type FocusOutcome = 'stopped' | 'fused'
 
 /**
- * 一份专注模式报告。正常跑完、开始三分钟后停止、熔断，都会各落一份——
+ * 一份专注模式报告。结束一次三分钟以上的专注、或熔断，都会各落一份——
  * 报告是**回看的凭据**：这段时间专注了多久、被警告几次、为什么暂停、为什么熔断。
  */
 export interface FocusReport {
   id: string
   startedAt: number
   endedAt: number
-  /** 开始时设的参数（与番茄钟会话一致） */
-  focusMinutes: number
-  groups: number
-  /** 这场会跑完的专注段数（从番茄钟 log 里数出来的） */
-  completedGroups: number
   monitors: GuardMonitors
   outcome: FocusOutcome
-  /** 守卫判离开而暂停的总量与次数（严格专注才有） */
+  /** 守卫判离开而暂停的总量与次数 */
   pausedMs: number
   pauseCount: number
   /** 每次暂停的起止（resumedAt 为 null = 收场时还暂停着） */
@@ -196,9 +191,6 @@ export function newReportId(now = Date.now()): string {
 export interface FocusReportInput {
   startedAt: number
   endedAt: number
-  focusMinutes: number
-  groups: number
-  completedGroups: number
   monitors: GuardMonitors
   outcome: FocusOutcome
   pausedMs: number
@@ -215,9 +207,6 @@ export function buildFocusReport(input: FocusReportInput): FocusReport {
     id: newReportId(input.endedAt),
     startedAt: Math.max(0, Math.round(input.startedAt)),
     endedAt: Math.max(input.startedAt, Math.round(input.endedAt)),
-    focusMinutes: input.focusMinutes,
-    groups: input.groups,
-    completedGroups: Math.max(0, Math.round(input.completedGroups)),
     monitors: { screen: !!input.monitors.screen, camera: !!input.monitors.camera },
     outcome: input.outcome,
     pausedMs: Math.max(0, Math.round(input.pausedMs)),
@@ -241,8 +230,8 @@ export function normalizeFocusReport(raw: unknown): FocusReport | null {
   const startedAt = numOr(r.startedAt, 0)
   const endedAt = numOr(r.endedAt, 0)
   if (!id || startedAt <= 0 || endedAt < startedAt) return null
-  const outcome: FocusOutcome =
-    r.outcome === 'completed' || r.outcome === 'stopped' || r.outcome === 'fused' ? r.outcome : 'stopped'
+  // 旧报告里的 'completed'（番茄钟跑完一组）在新模型里没有对应物：按「结束」收
+  const outcome: FocusOutcome = r.outcome === 'fused' ? 'fused' : 'stopped'
   const monitors = (r.monitors ?? {}) as Record<string, unknown>
   const rounds: FocusReportRound[] = Array.isArray(r.rounds)
     ? r.rounds.flatMap((item: unknown) => {
@@ -273,9 +262,6 @@ export function normalizeFocusReport(raw: unknown): FocusReport | null {
     id,
     startedAt,
     endedAt,
-    focusMinutes: numOr(r.focusMinutes, 0),
-    groups: numOr(r.groups, 0),
-    completedGroups: numOr(r.completedGroups, 0),
     monitors: { screen: !!monitors.screen, camera: !!monitors.camera },
     outcome,
     pausedMs: numOr(r.pausedMs, 0),

@@ -1,14 +1,14 @@
 /**
  * 日程（schedule）：用户「某天某时间做什么」的提醒清单。
  *
- * 与番茄钟的分工（两者都出现在顶栏，但回答的是两件事）：
- * - 番茄钟是**计时器**：用户按下开始，它只管这一段专注跑多久；
+ * 与专注模式的分工（两者都出现在顶栏，但回答的是两件事）：
+ * - 专注模式是**守卫**：用户按下开始，它只管这一场学习有没有人盯着；
  * - 日程是**约定**：用户（或导师）先把它写下来，到点由宿主叫他。
  *
  * 四条定死的规则，改这个文件之前先读一遍：
  *
  * 1. **日程是用户级数据**（不挂目标）：今天几点做什么，与「在学哪门课」无关。
- *    整块存在 `state.json` 里（与番茄钟同一套：没有磁盘镜像），目标删掉也不该带走它。
+ *    整块存在 `state.json` 里（与专注记录同一套：没有磁盘镜像），目标删掉也不该带走它。
  * 2. **时间就是墙上时间**：不做「学习日」（凌晨 4 点为界）那一套折算——日程上的
  *    「23:30」就该在 23:30 响，而不是被算进第二天的学习日。日界一律按本地日历日。
  * 3. **提醒只响一次**：`remindAt` 到点之后进入「响铃中」，用户确认（完成）或
@@ -100,7 +100,7 @@ export function emptySchedule(): ScheduleStore {
   return { version: 1, items: [], sound: { ...DEFAULT_SCHEDULE_SOUND } }
 }
 
-/** 读侧兜底：旧数据没有 schedule 字段时一律走空库（与 memory / pomodoro 同一口径） */
+/** 读侧兜底：旧数据没有 schedule 字段时一律走空库（与 memory / focus 同一口径） */
 export const scheduleOf = (store: Pick<LearnStore, 'schedule'>): ScheduleStore => store.schedule ?? emptySchedule()
 
 export const scheduleSoundOf = (store: Pick<LearnStore, 'schedule'>): ScheduleSound => scheduleOf(store).sound

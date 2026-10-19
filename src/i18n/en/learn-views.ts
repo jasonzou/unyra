@@ -33,7 +33,7 @@ const dict: Record<string, string> = {
   '浏览器操作': 'Browser use',
   '替用户操作内置浏览器：截图看页面、模拟鼠标键盘完成任务': 'Drives the built-in browser for you: looks via screenshots, acts via simulated mouse and keyboard',
 
-  // ---------- 共享的标签常量（在使用处包 t()：learn/types、learn/learning、learn/review、pomodoro 等） ----------
+  // ---------- 共享的标签常量（在使用处包 t()：learn/types、learn/learning、learn/review、focus 等） ----------
   '学习中': 'Learning',
   '已掌握': 'Mastered',
   '未评估': 'Not assessed',
@@ -104,24 +104,11 @@ const dict: Record<string, string> = {
   '错': 'False',
   '清除': 'Clear',
 
-  // ---------- 顶栏（顶栏 / 番茄钟 / 有效阅读） ----------
-  '番茄钟：设好时长与组数，点开始': 'Pomodoro: set length and sets, then start',
-  '第 {0}/{1} 组 · {2}': 'Set {0}/{1} · {2}',
-  ' · 还剩 {0}': ' · {0} left',
+  // ---------- 顶栏（顶栏 / 专注模式 / 有效阅读） ----------
   '还没开始': 'Not started',
-  '一段专注多长': 'Focus length',
   '{0} 分钟': '{0} min',
-  '做几组': 'Sets',
-  '每组之后休息 {0} 分钟（专注的 1/5）': 'Rest {0} min after each set (1/5 of focus)',
-  '做 {0} 组': 'Do {0} sets',
   '停止': 'Stop',
   '开始专注': 'Start focus',
-  '没有暂停：停下来这一段就不算数，要接着跑只能重新开始。 只有跑完的专注段会记一笔（休息、半途停掉的不算），': 'No pause: stop and the set does not count; to continue you start over. Only completed focus sets are recorded (rests and aborted ones do not count), ',
-  '切屏不打断计时。': 'switching windows does not stop the timer.',
-  '到点会提醒你。': 'you will be reminded when time is up.',
-  '第 {0}/{1} 组专注结束——都跑完了，起来走两步': 'Set {0}/{1} finished — all done, get up and stretch',
-  '第 {0}/{1} 组专注结束——休息 {2} 分钟': 'Set {0}/{1} finished — rest {2} min',
-  '番茄钟停太久了（那段时间应用不在），这一次不算数': 'The pomodoro was stopped too long (the app was away); this one does not count',
   '不到 1 分钟': 'Under 1 min',
   '<1 分': '<1 min',
   '今天还没有有效阅读': 'No effective reading today yet',
@@ -638,32 +625,45 @@ const dict: Record<string, string> = {
   '写下第一个字，它就成了一条随笔': 'Type the first character and it becomes a jotting',
   '拖动调整大小': 'Drag to resize',
   '{0} 年 {1} 月 {2} 日': '{0}/{1}/{2}',
+  '搜索笔记或节点…': 'Search notes or nodes…',
+  '当前目标还没有笔记': 'No notes in this goal yet',
+  '笔记是节点级的，只列当前目标下的节点；在学习文档或右键菜单中可为节点记笔记。':
+    'Notes belong to nodes; only nodes of the current goal are listed. Add notes from a learning doc or the context menu.',
 
   // ---------- 随笔提交（learn/essayCommits + 随笔窗口的提交/历史） ----------
   '随笔整理': 'Jottings digest',
   '随笔整理 · {0}': 'Jottings digest · {0}',
-  '按提交历史把这次新增 / 改动的随笔增量整理进知识树对应节点的笔记':
-    'Incrementally file the new or changed jottings into notes on the matching knowledge nodes, using the commit history',
+  '每次带上全部随笔，按与上次的差异（新增 / 修改 / 删除）统一整理进知识树对应节点的笔记':
+    'Carry all jottings each time and file them into notes on the matching knowledge nodes by their diff from the last commit (new / modified / deleted)',
   '选择要编辑的随笔': 'Choose a jotting to edit',
   '随笔标题': 'Jotting title',
   '标题（默认为日期，可改）': 'Title (defaults to the date — editable)',
   '空白（新的一条）': 'Blank (new jotting)',
-  '提交…': 'Commit…',
-  '提交这批随笔：封存快照，交给 AI 整理进对应节点的笔记':
-    'Commit these jottings: freeze a snapshot and let the AI file them into notes on the matching nodes',
-  '还没有写过的内容，先写点什么再提交': 'Nothing written yet — jot something down first',
+  '提交全部…': 'Commit all…',
+  '提交全部随笔：带上全部内容，AI 按与上次的差异统一整理':
+    'Commit all jottings: send everything and let the AI file them by their diff from the last commit',
+  '和上次提交相比没有变化': 'Nothing changed since the last commit',
+  '还没有随笔可以提交': 'No jottings to commit yet',
+  '提交全部随笔': 'Commit all jottings',
   '提交记录：快照与每次整理动过的笔记': 'Commit history: snapshots and the notes each digest touched',
   '提交记录': 'Commit history',
-  '提交随笔': 'Commit jottings',
   '提交详情': 'Commit details',
-  '提交后 AI 会按内容把这些随笔整理进对应节点的笔记；整理结果会记在这次提交上，随时可以回看。':
-    'After committing, the AI files these jottings into notes on the matching nodes. The result is recorded on this commit and can be reviewed anytime.',
+  '每次提交都会带上当前的全部随笔；AI 按与上次相比的新增、修改与删除，统一整理进对应节点的笔记，整理结果会记在这次提交上。':
+    'Every commit carries all current jottings; the AI files what is new, modified, or deleted since the last commit into notes on the matching nodes, and the result is recorded on this commit.',
   '提交说明': 'Commit message',
   '这次随笔在整理什么？': 'What are these jottings about?',
   '本次快照': 'Snapshot',
   '{0} 条随笔': '{0} jottings',
-  '没有新的随笔可以提交': 'No new jottings to commit',
-  '提交并整理': 'Commit & file',
+  '全部 {0} 条随笔': 'All {0} jottings',
+  '新增 {0}': '{0} new',
+  '修改 {0}': '{0} modified',
+  '删除 {0}': '{0} deleted',
+  '未变化 {0}': '{0} unchanged',
+  '新增': 'New',
+  '已修改': 'Modified',
+  '已删除': 'Deleted',
+  '其余 {0} 条未变化，也会随快照一起交给 AI。': 'The other {0} unchanged jottings are included in the snapshot too.',
+  '提交全部并整理': 'Commit all & file',
   '已整理': 'Filed',
   '整理失败': 'Digest failed',
   '整理中': 'Filing…',
@@ -678,13 +678,11 @@ const dict: Record<string, string> = {
   '更新': 'Update',
   '快照': 'Snapshot',
   '这条提交记录已经不在了': 'This commit record no longer exists',
-  '这条随笔还没有提交记录：提交一次，这里会沿时间轴留下快照与整理评论。':
-    'No commits for this jotting yet. Commit once and its snapshots and comments will line up on this timeline.',
-  '先写下或选择一条随笔——这里只显示它自己的提交记录。':
-    'Write or pick a jotting first — this list only shows the commits of the jotting you are editing.',
+  '当前目标还没有随笔提交记录：提交一次，这里会沿时间轴留下快照与整理评论。':
+    'No commits in this goal yet. Commit once and the snapshots and comments will line up on this timeline.',
   '点击查看这次提交的详细记录': 'Click to view the details of this commit',
   '整理评论': 'Comment',
-  '这条随笔不在这次提交里': 'This jotting is not part of this commit',
+  '这次提交里没有随笔': 'This commit has no jottings',
   '没有改动任何笔记': 'No notes changed',
   '更新了 {0} 份笔记': 'Updated {0} notes',
   '新建了 {0} 份笔记': 'Created {0} notes',
@@ -696,8 +694,8 @@ const dict: Record<string, string> = {
   '没能启动整理：目标或会话已经不在': 'Could not start filing: the goal or conversation no longer exists',
   '随笔整理完成：{0}': 'Jottings digest finished: {0}',
   '随笔整理失败：{0}': 'Jottings digest failed: {0}',
-  '提交后仍可继续写；下次提交只整理新增和改动':
-    'You can keep writing after committing; the next commit files only what is new or changed',
+  '每次提交都带全部随笔；AI 只整理与上次相比新增、修改、删除的部分':
+    'Every commit carries all jottings; the AI only files what is new, modified, or deleted since the last commit',
   '继续写随笔': 'Keep writing',
 }
 

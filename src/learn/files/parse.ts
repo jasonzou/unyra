@@ -284,7 +284,7 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
     /*
      * 阅读现在按目标存在各自目录里（reading.json，见上面）。
      * state.json 里那两个老字段**故意不读**：这次改口径不迁移数据，旧的那一份直接丢掉。
-     * 番茄钟仍旧整份存在 state.json 里（它是用户级的：今天专注了几组与哪门课无关）。
+     * 专注模式整份存在 state.json 里（它是用户级的：今天专注了几场与哪门课无关）。
      */
     reading: { byGoal: readingByGoal },
     // 随笔按目标存在各自目录（essay.json）：目标没了那本账跟着没（normalize 里校验）
@@ -293,7 +293,7 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
     essayCommits: essayCommitsByGoal,
     // 随笔窗口的几何是界面状态：跟着 state.json 走（与 docScroll / docArea 同一类）
     essayDock: s.essayDock ?? null,
-    pomodoro: s.pomodoro ?? null,
+    focus: s.focus ?? s.pomodoro ?? null,
     // 日程整块跟着 state.json 走（见 learn/schedule）
     schedule: s.schedule ?? null,
     // agent 栏页签原样交给 normalizeLearnStore：对着「目标/会话/子代理会话还活着吗」校验

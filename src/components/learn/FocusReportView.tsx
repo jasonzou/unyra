@@ -1,18 +1,17 @@
-import { AlertTriangle, CheckCircle2, Clock, Pause, Square } from 'lucide-react'
+import { AlertTriangle, Clock, Pause, Square } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { readFocusReport } from '../../learn/focusReports'
 import { reportSpanLabel, type FocusReport } from '../../learn/focusGuard'
 import { t } from '../../i18n'
 
 /**
- * 专注模式报告的只读视图：一次专注（普通或严格）收场后的凭据——
+ * 专注模式报告的只读视图：一场专注收场后的凭据——
  * 专注了多久、被暂停几次、警告几回、为什么熔断，以及守卫每一轮的判定。
  * 报告不进 store：按 reportId 从用户目录现读（文件丢了就说不见了，不装样子）。
  */
 
-const OUTCOME_META: Record<FocusReport['outcome'], { label: string; cls: string; icon: typeof CheckCircle2 }> = {
-  completed: { label: '跑完了', cls: 'bg-ok/10 text-ok-deep', icon: CheckCircle2 },
-  stopped: { label: '中途停止', cls: 'bg-line/60 text-ink-soft', icon: Square },
+const OUTCOME_META: Record<FocusReport['outcome'], { label: string; cls: string; icon: typeof Square }> = {
+  stopped: { label: '结束专注', cls: 'bg-line/60 text-ink-soft', icon: Square },
   fused: { label: '隐私熔断', cls: 'bg-seal-deep/10 text-seal-deep', icon: AlertTriangle },
 }
 
@@ -59,12 +58,12 @@ export default function FocusReportView({ reportId }: { reportId: string }) {
           <span className="text-[12px] text-ink-faint">{t('共 {0} 分钟', minutes)}</span>
         </div>
 
-        {/* 账目：计划与完成、暂停、警告 */}
+        {/* 账目：时长、暂停、警告、监控 */}
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat label={t('完成专注')} value={t('{0}/{1} 组', report.completedGroups, report.groups)} />
+          <Stat label={t('专注时长')} value={t('{0} 分钟', minutes)} />
           <Stat label={t('被暂停')} value={report.pauseCount ? t('{0} 次 · {1} 分钟', report.pauseCount, Math.round(report.pausedMs / 60_000)) : t('没有')} />
           <Stat label={t('分心警告')} value={report.warnings.length ? t('{0} 次', report.warnings.length) : t('没有')} />
-          <Stat label={t('监控')} value={report.monitors.screen && report.monitors.camera ? t('屏幕 + 摄像头') : report.monitors.screen ? t('屏幕') : report.monitors.camera ? t('摄像头') : t('没开（普通专注）')} />
+          <Stat label={t('监控')} value={report.monitors.screen && report.monitors.camera ? t('屏幕 + 摄像头') : report.monitors.screen ? t('屏幕') : report.monitors.camera ? t('摄像头') : t('没开')} />
         </div>
 
         {report.fused && (
@@ -116,7 +115,7 @@ export default function FocusReportView({ reportId }: { reportId: string }) {
         )}
         {report.rounds.length === 0 && (
           <p className="mt-6 text-[11.5px] leading-relaxed text-ink-faint">
-            {t('这一场没有开监控，报告里只有计时账目。要守卫盯着，在番茄钟 tip 里勾选「监控屏幕」或「监控摄像头」。')}
+            {t('这一场没有守卫轮次（监控没拿到画面或开始后立即结束）。开一路守卫再开始，才会留下判定记录。')}
           </p>
         )}
       </div>

@@ -323,7 +323,7 @@ export async function apiNameTests() {
     'reading.list': '',
     'reading.day': "''",
     'attention.get': "''",
-    'pomodoro.status': '',
+    'focus.status': '',
     'wf.create': "{ name: '探针流程', instruction: '第一步' }",
     'wf.remove': "'探针流程'",
     'web.fetch': "{ url: 'https://example.com/a' }",

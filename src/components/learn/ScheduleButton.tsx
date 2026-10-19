@@ -21,7 +21,7 @@ import {
 } from '../../learn/schedule'
 import { t } from '../../i18n'
 
-/** 指针离开后延后这么久再收：按钮与面板之间有一道 pt-1 的缝（与番茄钟一致） */
+/** 指针离开后延后这么久再收：按钮与面板之间有一道 pt-1 的缝（与专注模式一致） */
 const HOVER_CLOSE_MS = 90
 /** 退场时长，与 index.css 的 .moji-wipe-corner-out 对齐 */
 const PANEL_EXIT_MS = 160

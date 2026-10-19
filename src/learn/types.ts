@@ -3,7 +3,7 @@ import type { ReasoningEffort } from '../ai/types'
 import type { Drafts } from './drafts'
 import type { Exam } from './exam'
 import type { DocWorkspace } from './groups'
-import type { PomodoroStore } from './pomodoro'
+import type { FocusStore } from './focus'
 import type { ScheduleStore } from './schedule'
 import type { ReadingBook } from './reading'
 import type { StaticResource } from './static'
@@ -470,9 +470,9 @@ export type TabRef =
    */
   | { kind: 'web'; url: string; key: string }
   /**
-   * 守卫 agent 的上下文页签（严格专注的监控轮次：截图帧、模型思考与判定，见 GuardView）。
+   * 守卫 agent 的上下文页签（专注模式的监控轮次：截图帧、模型思考与判定，见 GuardView）。
    * 上下文只活在会话里，**不落盘**——normalizeTab 不认它，重启后自然消失；
-   * 下一次严格专注开始时会再建一份。
+   * 下一次专注开始时会再建一份。
    */
   | { kind: 'guard' }
   /** 一份专注模式报告（只读，见 learn/focusGuard 的 FocusReport 与 FocusReportView） */
@@ -675,12 +675,12 @@ export interface LearnStore {
    * 落盘在各自的目标目录（`{目标}/reading.json`），不再进 state.json。
    */
   reading?: ReadingBook
-  /** 番茄钟（见 learn/pomodoro）：正在跑的那一段 + 跑完的专注记录。可选，理由同上 */
-  pomodoro?: PomodoroStore
+  /** 专注模式（见 learn/focus）：正在跑的那一场 + 结束过的记录。可选，理由同上 */
+  focus?: FocusStore
   /**
    * 日程（见 learn/schedule）：用户级的提醒清单 + 铃声设置。
    *
-   * 与番茄钟同一档：整块存在 state.json 里，不挂任何目标——「今天 19:30 复习」
+   * 与专注记录同一档：整块存在 state.json 里，不挂任何目标——「今天 19:30 复习」
    * 与「在学哪门课」无关，删掉目标也不该带走它。可选，理由同上（旧数据没有这个字段）。
    */
   schedule?: ScheduleStore

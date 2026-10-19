@@ -29,7 +29,7 @@ export const ATTENTION_MAX_SESSIONS = 8
 /** 样本门槛：不足就不给档位 */
 export const ATTENTION_MIN_SESSIONS = 3
 export const ATTENTION_MIN_MS = 15 * 60_000
-/** 番茄钟在样本不足时的默认专注块长度（分钟） */
+/** 专注模式在样本不足时的默认专注块长度（分钟） */
 export const FOCUS_DEFAULT_MINUTES = 25
 
 export type AttentionLevel = 'unknown' | 'focused' | 'steady' | 'fragmented' | 'drifting'
@@ -68,7 +68,7 @@ export interface Attention {
   line: string
   /** 建议：怎么调整教法 / 下一段专注多久 */
   advice: string
-  /** 建议的专注块长度（分钟）：番茄钟直接用它 */
+  /** 建议的专注块长度（分钟）：专注模式直接用它 */
   focusMinutes: number
   sampleMs: number
   sessions: number

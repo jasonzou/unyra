@@ -891,7 +891,7 @@ const dict: Record<string, string> = {
   "鼠标悬停在页签栏上时，滑动滚轮可横向平滑滚动标签页": "Hover over the tab strip and scroll mouse wheel to scroll tabs horizontally",
   "右键点击页签可执行批量管理：关闭无关联、关闭子级或关闭非文档": "Right-click a tab for batch management: close unrelated, close children, or close non-documents",
   "按 Ctrl + L 可在当前分栏快速开启内置网页浏览器标签页": "Press Ctrl+L to open a built-in web browser tab in the active pane",
-  "点击顶栏番茄钟开启专注计时，养成专注学习节奏": "Click Pomodoro timer in top bar for structured focus sessions",
+  "点击顶栏「专注」开启守卫：分心会提醒，隐私场面立即熔断": "Click Focus in the top bar to start the guard: distraction alerts and an instant privacy fuse",
   "知识图谱支持拖拽缩放与回溯，点击节点即刻切换学习": "Knowledge map supports drag, zoom, and backtrack; click nodes to switch learning",
   "小技巧（每10秒自动切换，点击切换下一条）": "Tip (auto-switches every 10s, click to advance)",
   "全局壁纸": "Wallpaper",
