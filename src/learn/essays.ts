@@ -199,7 +199,37 @@ export function normalizeEssayDock(raw: unknown): EssayDockRect | undefined {
   const w = typeof r.w === 'number' && Number.isFinite(r.w) ? Math.round(r.w) : null
   const h = typeof r.h === 'number' && Number.isFinite(r.h) ? Math.round(r.h) : null
   if (x === null || y === null || w === null || h === null) return undefined
-  return { x, y, w: Math.max(ESSAY_DOCK_MIN_W, w), h: Math.max(ESSAY_DOCK_MIN_H, h) }
+
+  const activeTab = r.activeTab === 'note' || r.activeTab === 'essay' ? r.activeTab : undefined
+  const essayEditingId =
+    typeof r.essayEditingId === 'string' || r.essayEditingId === null ? r.essayEditingId : undefined
+
+  let noteTarget: EssayDockRect['noteTarget'] = undefined
+  if (r.noteTarget && typeof r.noteTarget === 'object') {
+    const nt = r.noteTarget as Record<string, unknown>
+    if (typeof nt.nodeId === 'string' && typeof nt.noteName === 'string') {
+      noteTarget = {
+        goalId: typeof nt.goalId === 'string' ? nt.goalId : undefined,
+        nodeId: nt.nodeId,
+        noteName: nt.noteName,
+      }
+    }
+  } else if (r.noteTarget === null) {
+    noteTarget = null
+  }
+
+  const noteViewMode = r.noteViewMode === 'preview' || r.noteViewMode === 'edit' ? r.noteViewMode : undefined
+
+  return {
+    x,
+    y,
+    w: Math.max(ESSAY_DOCK_MIN_W, w),
+    h: Math.max(ESSAY_DOCK_MIN_H, h),
+    ...(activeTab ? { activeTab } : {}),
+    ...(essayEditingId !== undefined ? { essayEditingId } : {}),
+    ...(noteTarget !== undefined ? { noteTarget } : {}),
+    ...(noteViewMode ? { noteViewMode } : {}),
+  }
 }
 
 /**

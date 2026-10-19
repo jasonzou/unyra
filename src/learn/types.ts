@@ -837,17 +837,44 @@ export interface EssayCommit {
 export type EssayCommitStore = Record<string, EssayCommit[]>
 
 /**
- * 随笔窗口的几何（左上角 + 宽高，视口坐标）。
+ * 随笔窗口的状态（位置几何 + 当前二级页面状态持久化）。
  *
- * 属于**界面状态**（跟 state.json 走），不是学习数据：换台机器、导一份别人的备份，
- * 都不该把「我把那个小窗口拖到哪儿了」也换掉。
+ * 属于**界面状态**（跟 state.json 走），不是学习数据：
+ * - x, y, w, h：窗口坐标与尺寸
+ * - activeTab：当前顶部的固定 tab（'essay' | 'note'）
+ * - essayEditingId：正在编辑的随笔 id（'__blank__' 为空白预备，null 为列表页）
+ * - noteTarget：正在查看/编辑的笔记定位（{ nodeId, noteName, goalId? }，null 为列表页）
+ * - noteViewMode：笔记二级页面的视图模式（'edit' | 'preview'）
  */
-export interface EssayDockRect {
+export interface EssayDockState {
   x: number
   y: number
   w: number
   h: number
+  activeTab?: 'essay' | 'note'
+  essayEditingId?: string | null
+  noteTarget?: {
+    goalId?: string
+    nodeId: string
+    noteName: string
+  } | null
+  noteViewMode?: 'edit' | 'preview'
 }
+
+export type EssayDockRect = EssayDockState
+
+/** 随笔窗口中汇总的各节点笔记条目 */
+export interface DockNoteItem {
+  goalId: string
+  goalTitle: string
+  nodeId: string
+  nodeTitle: string
+  name: string
+  content: string
+  updatedAt: number
+  createdAt: number
+}
+
 
 
 /**

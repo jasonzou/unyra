@@ -35,6 +35,7 @@ import { ExternalLink, Globe } from 'lucide-react'
 import type {
   DocKind,
   DocView,
+  DockNoteItem,
   EssayCommit,
   EssayDockRect,
   EssayEntry,
@@ -120,6 +121,8 @@ import {
   touchNode,
   updateMessageText,
   updateNode,
+  deleteNote,
+  writeNote,
 } from '../../learn/graph'
 import {
   agentTabCloseBlock,
@@ -2200,13 +2203,60 @@ export default function LearnWorkspace({
     },
     [getLatest, set],
   )
-  /** 窗口几何：纯界面状态，安静写盘就够（窗口自己已经摆好了，不必为它重渲染整棵学习区） */
+  /** 窗口几何与状态：纯界面状态，安静写盘就够（窗口自己已经摆好了，不必为它重渲染整棵学习区） */
   const essayGeometry = useCallback(
-    (rect: EssayDockRect) => {
-      patchQuiet((s) => ({ ...s, essayDock: rect }))
+    (state: EssayDockRect) => {
+      patchQuiet((s) => ({ ...s, essayDock: state }))
     },
     [patchQuiet],
   )
+
+  /**
+   * 随笔窗口中的笔记列表（跨目标/节点）：收集当前所有节点的笔记，
+   * 标明来自哪个目标的哪个节点（按修改时间倒序）。
+   */
+  const dockNotes = useMemo(() => {
+    const nodeMap = new Map(store.nodes.map((n) => [n.id, n]))
+    const goalTitleMap = new Map<string, string>()
+    for (const g of store.goals) {
+      const rootNode = nodeMap.get(g.rootNodeId)
+      goalTitleMap.set(g.id, rootNode?.title || g.question || '')
+    }
+    const list: DockNoteItem[] = []
+    for (const node of store.nodes) {
+      const gTitle = (node.goalId && goalTitleMap.get(node.goalId)) || ''
+      const notes = notesOf(node)
+      for (const note of notes) {
+        list.push({
+          goalId: node.goalId,
+          goalTitle: gTitle,
+          nodeId: node.id,
+          nodeTitle: node.title,
+          name: note.name,
+          content: note.content,
+          updatedAt: note.updatedAt,
+          createdAt: note.createdAt,
+        })
+      }
+    }
+    list.sort((a, b) => b.updatedAt - a.updatedAt)
+    return list
+  }, [store.goals, store.nodes])
+
+  const dockWriteNote = useCallback(
+    (nodeId: string, name: string, content: string) => {
+      set(writeNote(getLatest(), nodeId, name, content))
+    },
+    [getLatest, set],
+  )
+
+  const dockDeleteNote = useCallback(
+    (nodeId: string, name: string) => {
+      set(deleteNote(getLatest(), nodeId, name))
+    },
+    [getLatest, set],
+  )
+
 
   /* ---------- 随笔提交（见 learn/essayCommits） ---------- */
 
@@ -4846,6 +4896,9 @@ export default function LearnWorkspace({
                     onCreate={essayCreate}
                     onUpdate={essayUpdate}
                     onDelete={essayDelete}
+                    allNotes={dockNotes}
+                    onWriteNote={dockWriteNote}
+                    onDeleteNote={dockDeleteNote}
                   />
                 )}
               </div>

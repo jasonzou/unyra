@@ -163,4 +163,49 @@ describe('随笔窗口几何的归一化', () => {
     expect(rect.w).toBe(ESSAY_DOCK_MIN_W)
     expect(rect.h).toBe(ESSAY_DOCK_MIN_H)
   })
+
+  it('保留合法的持久化状态字段（activeTab / essayEditingId / noteTarget / noteViewMode）', () => {
+    const res = normalizeEssayDock({
+      x: 100,
+      y: 100,
+      w: 500,
+      h: 600,
+      activeTab: 'note',
+      essayEditingId: 'essay-1',
+      noteTarget: { nodeId: 'node-1', noteName: '重点.md', goalId: 'goal-1' },
+      noteViewMode: 'preview',
+    })
+    expect(res).toEqual({
+      x: 100,
+      y: 100,
+      w: 500,
+      h: 600,
+      activeTab: 'note',
+      essayEditingId: 'essay-1',
+      noteTarget: { nodeId: 'node-1', noteName: '重点.md', goalId: 'goal-1' },
+      noteViewMode: 'preview',
+    })
+
+    const blankRes = normalizeEssayDock({
+      x: 100,
+      y: 100,
+      w: 500,
+      h: 600,
+      activeTab: 'essay',
+      essayEditingId: null,
+      noteTarget: null,
+      noteViewMode: 'edit',
+    })
+    expect(blankRes).toEqual({
+      x: 100,
+      y: 100,
+      w: 500,
+      h: 600,
+      activeTab: 'essay',
+      essayEditingId: null,
+      noteTarget: null,
+      noteViewMode: 'edit',
+    })
+  })
 })
+

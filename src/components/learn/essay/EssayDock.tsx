@@ -31,16 +31,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowLeft,
+  BookOpen,
+  Edit3,
+  ExternalLink,
+  Eye,
   FileText,
   GitCommitHorizontal,
   History,
   Loader2,
   PenLine,
+  Plus,
   RefreshCw,
+  Search,
   Trash2,
   X,
 } from 'lucide-react'
-import type { EssayCommit, EssayDockRect, EssayEntry } from '../../../learn/types'
+import type { DockNoteItem, EssayCommit, EssayDockRect, EssayDockState, EssayEntry } from '../../../learn/types'
 import { ESSAY_DOCK_MIN_H, ESSAY_DOCK_MIN_W, essayPreview, dayOfEssay } from '../../../learn/essays'
 import { changesSummary, essayCommentTitle } from '../../../learn/essayCommits'
 import { usePresence } from '../../../lib/presence'
@@ -70,8 +76,8 @@ interface Box {
   r: number
 }
 
-/** 窗口里的四块：写随笔 / 提交确认 / 提交历史 / 某次提交的详情 */
-type Panel = 'edit' | 'commit' | 'history' | 'detail'
+/** 窗口里的子块：提交确认 / 提交历史 / 某次提交的详情（主要列表/编辑由 tab 与二级状态决定） */
+type SubPanel = 'main' | 'commit' | 'history' | 'detail'
 
 /**
  * 没存过几何时的位置：**视口居中**（用户定的）。量不到按钮也无所谓——
@@ -95,6 +101,7 @@ function clampRect(r: EssayDockRect): EssayDockRect {
   const w = Math.min(Math.max(ESSAY_DOCK_MIN_W, r.w), maxW)
   const h = Math.min(Math.max(ESSAY_DOCK_MIN_H, r.h), maxH)
   return {
+    ...r,
     w,
     h,
     x: Math.min(Math.max(8, r.x), Math.max(8, window.innerWidth - w - 8)),
@@ -152,16 +159,23 @@ interface Props {
   onCommit: (message: string) => string | null
   /** 重试一次失败的整理（快照还在，不必重新提交） */
   onRetryCommit: (id: string) => void
-  /** 从提交详情里打开一份被整理过的笔记 */
+  /** 从提交详情里或笔记项打开一份笔记到主工作区 */
   onOpenNote: (nodeId: string, noteName: string) => void
-  /** 上次存下来的窗口几何（没有就用默认位置） */
-  geometry: EssayDockRect | null
-  onGeometry: (rect: EssayDockRect) => void
+  /** 上次存下来的窗口状态与几何（没有就用默认位置） */
+  geometry: EssayDockState | null
+  onGeometry: (state: EssayDockState) => void
   /** 写下第一个字时落一条（标题缺省取当天日期）；返回新条目的 id（空文本返回 null，什么都不做） */
   onCreate: (goalId: string, title: string, text: string) => string | null
   /** 改一条：给了谁改谁（正文 / 标题），去抖后调 */
   onUpdate: (goalId: string, id: string, patch: { text?: string; title?: string }) => void
   onDelete: (goalId: string, id: string) => void
+
+  /** 全局所有节点的笔记（标明来自哪个目标的哪个节点） */
+  allNotes?: DockNoteItem[]
+  /** 写入节点笔记 */
+  onWriteNote?: (nodeId: string, noteName: string, content: string) => void
+  /** 删除节点笔记 */
+  onDeleteNote?: (nodeId: string, noteName: string) => void
 }
 
 export default function EssayDock({
@@ -179,6 +193,9 @@ export default function EssayDock({
   onCreate,
   onUpdate,
   onDelete,
+  allNotes = [],
+  onWriteNote,
+  onDeleteNote,
 }: Props) {
   // 退场要等变形播完才卸载：130ms 那套默认时序会把缩回去的动画切掉一半
   const { setOpen: setMounted, mounted } = usePresence(false, MORPH_MS + 20)
@@ -209,28 +226,137 @@ export default function EssayDock({
   /** 双 rAF 的收尾令牌：关得比开得快时，旧的那一段不许再把状态写回去 */
   const morphSeq = useRef(0)
 
-  /** 现在看的是窗口里的哪一块 */
-  const [panel, setPanel] = useState<Panel>('edit')
+  /** 当前选中的固定 Tab：随笔 或 笔记 */
+  const [dockTab, setDockTab] = useState<'essay' | 'note'>(() => geometry?.activeTab ?? 'essay')
+  const dockTabRef = useRef(dockTab)
+  useEffect(() => {
+    dockTabRef.current = dockTab
+  }, [dockTab])
+
+  /** 子面板：main = 列表或编辑区；commit / history / detail 为提交相关流程 */
+  const [subPanel, setSubPanel] = useState<SubPanel>('main')
   /** 正在看哪一条提交；null = 没打开详情 */
   const [detailId, setDetailId] = useState<string | null>(null)
-  /** 详情是从哪儿进去的：返回时回到那儿（历史 / 刚提交完的编辑页） */
-  const [detailBack, setDetailBack] = useState<'edit' | 'history'>('history')
+  /** 详情是从哪儿进去的：返回时回到那儿（history / 刚提交完） */
+  const [detailBack, setDetailBack] = useState<'main' | 'history'>('history')
   /** 提交说明（打开提交页时给一句默认的） */
   const [commitMessage, setCommitMessage] = useState('')
 
-  /** 正在编辑哪一条；null = 空白编辑器（下一条随笔还没出生） */
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const editingRef = useRef<string | null>(null)
-  const [text, setText] = useState('')
-  const textRef = useRef('')
-  /**
-   * 标题（随笔不再拿日期当唯一标识，见 learn/essays）：正在编辑的那条的标题；
-   * 空白编辑器时是「下一条」的预备标题（默认今天日期），落条时跟着一起写进去。
-   */
-  const [title, setTitle] = useState('')
-  const titleRef = useRef('')
+  /* ---------- 随笔状态（目标级） ---------- */
+  /** 正在编辑哪一条随笔；null = 随笔列表（一级页面），'__blank__' = 新建空白随笔，或随笔 id */
+  const [editingId, setEditingId] = useState<string | null>(() => {
+    if (geometry?.essayEditingId === '__blank__') return '__blank__'
+    if (geometry?.essayEditingId && essays.some((e) => e.id === geometry.essayEditingId)) {
+      return geometry.essayEditingId
+    }
+    return null
+  })
+  const editingRef = useRef<string | null>(editingId)
+  useEffect(() => {
+    editingRef.current = editingId
+  }, [editingId])
 
-  /** 还没落库的那一次改动（正文与标题一起带：400ms 里两头都可能动） */
+  const initialEssay = editingId && editingId !== '__blank__' ? essays.find((e) => e.id === editingId) : null
+  const [text, setText] = useState(initialEssay?.text ?? '')
+  const textRef = useRef(text)
+  const [title, setTitle] = useState(initialEssay?.title ?? (editingId === '__blank__' ? dateLabelOfEssay(Date.now()) : ''))
+  const titleRef = useRef(title)
+
+  /* ---------- 笔记状态（节点级） ---------- */
+  /** 笔记列表搜索过滤词 */
+  const [noteSearch, setNoteSearch] = useState('')
+  /** 选中的笔记（二级页面）；null = 笔记列表（一级页面） */
+  const [noteTarget, setNoteTarget] = useState<{ nodeId: string; noteName: string; goalId?: string } | null>(() => {
+    const t = geometry?.noteTarget
+    if (t && allNotes?.some((n) => n.nodeId === t.nodeId && n.name === t.noteName)) {
+      return t
+    }
+    return null
+  })
+  const noteTargetRef = useRef(noteTarget)
+  useEffect(() => {
+    noteTargetRef.current = noteTarget
+  }, [noteTarget])
+
+  /** 笔记二级页面模式：可自由切换预览与编辑模式 */
+  const [noteViewMode, setNoteViewMode] = useState<'edit' | 'preview'>(() => geometry?.noteViewMode ?? 'preview')
+  const noteViewModeRef = useRef(noteViewMode)
+  useEffect(() => {
+    noteViewModeRef.current = noteViewMode
+  }, [noteViewMode])
+
+  const currentNoteItem = useMemo(() => {
+    if (!noteTarget || !allNotes) return null
+    return allNotes.find((n) => n.nodeId === noteTarget.nodeId && n.name === noteTarget.noteName) ?? null
+  }, [allNotes, noteTarget])
+
+  const filteredNotes = useMemo(() => {
+    if (!allNotes) return []
+    if (!noteSearch.trim()) return allNotes
+    const q = noteSearch.trim().toLowerCase()
+    return allNotes.filter(
+      (n) =>
+        n.name.toLowerCase().includes(q) ||
+        n.goalTitle.toLowerCase().includes(q) ||
+        n.nodeTitle.toLowerCase().includes(q) ||
+        n.content.toLowerCase().includes(q),
+    )
+  }, [allNotes, noteSearch])
+
+  const [noteText, setNoteText] = useState(() => currentNoteItem?.content ?? '')
+  const noteTextRef = useRef(noteText)
+  const noteTimerRef = useRef<number | null>(null)
+  const noteDirtyRef = useRef(false)
+
+  // 当外部 noteItem 更新时同步正文（仅在没有本地未保存改动时）
+  useEffect(() => {
+    if (currentNoteItem && !noteDirtyRef.current) {
+      setNoteText(currentNoteItem.content)
+      noteTextRef.current = currentNoteItem.content
+    }
+  }, [currentNoteItem])
+
+  /** 持久化当前状态到 state.json */
+  const persistState = useCallback(
+    (patch: Partial<EssayDockState>) => {
+      onGeometry({
+        ...rectRef.current,
+        activeTab: dockTabRef.current,
+        essayEditingId: editingRef.current,
+        noteTarget: noteTargetRef.current,
+        noteViewMode: noteViewModeRef.current,
+        ...patch,
+      })
+    },
+    [onGeometry],
+  )
+
+  /** 笔记保存：去抖写入 store */
+  const flushNote = useCallback(() => {
+    if (noteTimerRef.current !== null) {
+      window.clearTimeout(noteTimerRef.current)
+      noteTimerRef.current = null
+    }
+    if (!noteDirtyRef.current || !noteTargetRef.current || !onWriteNote) return
+    noteDirtyRef.current = false
+    onWriteNote(noteTargetRef.current.nodeId, noteTargetRef.current.noteName, noteTextRef.current)
+  }, [onWriteNote])
+
+  const handleNoteTextChange = useCallback(
+    (next: string) => {
+      noteTextRef.current = next
+      setNoteText(next)
+      noteDirtyRef.current = true
+      if (noteTimerRef.current !== null) return
+      noteTimerRef.current = window.setTimeout(() => {
+        noteTimerRef.current = null
+        flushNote()
+      }, SAVE_MS)
+    },
+    [flushNote],
+  )
+
+  /** 还没落库的那一次随笔改动（正文与标题一起带：400ms 里两头都可能动） */
   const pendingRef = useRef<{ id: string | null; text: string; title: string } | null>(null)
   const timerRef = useRef<number | null>(null)
 
@@ -242,8 +368,8 @@ export default function EssayDock({
     const p = pendingRef.current
     pendingRef.current = null
     if (!p) return
-    if (p.id) {
-      // 改成空 = 这条随笔被擦干净了：不写空文本，留给 settle 去删（见下）
+    if (p.id && p.id !== '__blank__') {
+      // 改成空 = 这条随笔被擦干净了：不写空文本，留给 settle 去删
       if (p.text.trim()) onUpdate(goalId, p.id, { text: p.text, title: p.title })
       return
     }
@@ -252,26 +378,29 @@ export default function EssayDock({
     if (id) {
       editingRef.current = id
       setEditingId(id)
+      persistState({ essayEditingId: id })
     }
-  }, [goalId, onCreate, onUpdate])
+  }, [goalId, onCreate, onUpdate, persistState])
 
   /**
-   * 收尾：把没落库的那一下写掉，再把「被擦干净的那一条」删掉。
-   * 切到别的随笔、关窗口、卸载都走它——空文本不该在列表里留一行空白。
+   * 收尾：把没落库的写掉，擦干净的删掉。
    */
   const settle = useCallback(() => {
     flush()
+    flushNote()
     const id = editingRef.current
-    if (id && !textRef.current.trim()) {
+    if (id && id !== '__blank__' && !textRef.current.trim()) {
       onDelete(goalId, id)
       editingRef.current = null
       setEditingId(null)
+      persistState({ essayEditingId: null })
     }
-  }, [flush, goalId, onDelete])
+  }, [flush, flushNote, goalId, onDelete, persistState])
 
   /** 去抖排队：正文与标题各自改了什么都以 ref 里的最新值为准 */
   const queue = useCallback(() => {
-    pendingRef.current = { id: editingRef.current, text: textRef.current, title: titleRef.current }
+    const curId = editingRef.current === '__blank__' ? null : editingRef.current
+    pendingRef.current = { id: curId, text: textRef.current, title: titleRef.current }
     if (timerRef.current !== null) return
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null
@@ -298,19 +427,21 @@ export default function EssayDock({
     [queue],
   )
 
-  /** 空白编辑器：下一条随笔从这儿开始，标题先备好今天的日期（可改） */
+  /** 空白编辑器：从这儿开始新随笔，标题先备好今天的日期（可改） */
   const startBlank = useCallback(() => {
     settle()
-    editingRef.current = null
-    setEditingId(null)
+    editingRef.current = '__blank__'
+    setEditingId('__blank__')
     textRef.current = ''
     setText('')
     const fresh = dateLabelOfEssay(Date.now())
     titleRef.current = fresh
     setTitle(fresh)
-    setPanel('edit')
-  }, [settle])
+    setSubPanel('main')
+    persistState({ essayEditingId: '__blank__' })
+  }, [settle, persistState])
 
+  /** 打开指定随笔编辑（二级页面） */
   const openEssay = useCallback(
     (essay: EssayEntry) => {
       if (essay.id !== editingRef.current) {
@@ -321,15 +452,25 @@ export default function EssayDock({
         setText(essay.text)
         titleRef.current = essay.title
         setTitle(essay.title)
+        persistState({ essayEditingId: essay.id })
       }
-      setPanel('edit')
+      setSubPanel('main')
     },
-    [settle],
+    [settle, persistState],
   )
 
+  /** 返回随笔列表（一级页面） */
+  const backToEssayList = useCallback(() => {
+    settle()
+    editingRef.current = null
+    setEditingId(null)
+    setSubPanel('main')
+    persistState({ essayEditingId: null })
+  }, [settle, persistState])
+
+  /** 删除随笔 */
   const removeEssay = useCallback(
     (id: string) => {
-      // 先掐掉去抖：否则 400ms 后 flush 会把这句「已删除的正文」又写成一条新随笔
       if (timerRef.current !== null) {
         window.clearTimeout(timerRef.current)
         timerRef.current = null
@@ -337,45 +478,81 @@ export default function EssayDock({
       pendingRef.current = null
       onDelete(goalId, id)
       if (id === editingRef.current) {
-        editingRef.current = null
-        setEditingId(null)
-        textRef.current = ''
-        setText('')
-        const fresh = dateLabelOfEssay(Date.now())
-        titleRef.current = fresh
-        setTitle(fresh)
+        backToEssayList()
       }
     },
-    [goalId, onDelete],
+    [goalId, onDelete, backToEssayList],
   )
 
-  /**
-   * 打开那一刻接上**最近的一条**：随笔不再按日期归属（想开几条开几条，见 learn/essays），
-   * 继续写最近在写的那份最合常理；一条都没有时自动备好一条新的——标题已经填好
-   * 今天的日期，写下第一个字它就落成一条（空文本仍然不落盘）。
-   * 用 ref 读最新清单：把 essays 写进下面的依赖会让「写一个字」就重跑一次打开逻辑。
-   */
+  /** 打开指定笔记编辑/预览（二级页面） */
+  const openNote = useCallback(
+    (item: DockNoteItem) => {
+      flushNote()
+      const target = { nodeId: item.nodeId, noteName: item.name, goalId: item.goalId }
+      noteTargetRef.current = target
+      setNoteTarget(target)
+      noteTextRef.current = item.content
+      setNoteText(item.content)
+      noteDirtyRef.current = false
+      persistState({ noteTarget: target })
+    },
+    [flushNote, persistState],
+  )
+
+  /** 返回笔记列表（一级页面） */
+  const backToNoteList = useCallback(() => {
+    flushNote()
+    noteTargetRef.current = null
+    setNoteTarget(null)
+    noteDirtyRef.current = false
+    persistState({ noteTarget: null })
+  }, [flushNote, persistState])
+
+  /** 切换笔记视图模式（预览 / 编辑） */
+  const toggleNoteViewMode = useCallback(() => {
+    flushNote()
+    const next = noteViewMode === 'preview' ? 'edit' : 'preview'
+    noteViewModeRef.current = next
+    setNoteViewMode(next)
+    persistState({ noteViewMode: next })
+  }, [flushNote, noteViewMode, persistState])
+
+  /** 切换顶部的两个固定 Tab */
+  const switchTab = useCallback(
+    (nextTab: 'essay' | 'note') => {
+      if (nextTab === dockTabRef.current) return
+      settle()
+      dockTabRef.current = nextTab
+      setDockTab(nextTab)
+      persistState({ activeTab: nextTab })
+    },
+    [settle, persistState],
+  )
+
   const essaysRef = useRef(essays)
   useEffect(() => {
     essaysRef.current = essays
   }, [essays])
 
   const openInitial = useCallback(() => {
-    setPanel('edit')
+    setSubPanel('main')
     setDetailId(null)
-    const latest = essaysRef.current[0]
-    if (!latest) {
-      startBlank()
-      return
+    // 根据持久化恢复，若已存在 editingId 则加载对应随笔
+    const curEditing = editingRef.current
+    if (curEditing && curEditing !== '__blank__') {
+      const found = essaysRef.current.find((e) => e.id === curEditing)
+      if (found) {
+        textRef.current = found.text
+        setText(found.text)
+        titleRef.current = found.title
+        setTitle(found.title)
+      } else {
+        editingRef.current = null
+        setEditingId(null)
+        persistState({ essayEditingId: null })
+      }
     }
-    settle()
-    editingRef.current = latest.id
-    setEditingId(latest.id)
-    textRef.current = latest.text
-    setText(latest.text)
-    titleRef.current = latest.title
-    setTitle(latest.title)
-  }, [settle, startBlank])
+  }, [persistState])
 
   /*
    * 打开：接上最近的一条（没有就备好一条新的），然后**从按钮那颗圆长出来**；
@@ -499,24 +676,32 @@ export default function EssayDock({
     window.addEventListener('pointercancel', onUp)
   }
 
-  // Esc：在子页面里先退回编辑页；已经在编辑页了才收起窗口
+  // Esc：在子页面里先退回上一级；已经在列表页了才收起窗口
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      if (panel === 'detail') {
-        setPanel(detailBack)
+      if (subPanel === 'detail') {
+        setSubPanel(detailBack)
         return
       }
-      if (panel !== 'edit') {
-        setPanel('edit')
+      if (subPanel !== 'main') {
+        setSubPanel('main')
+        return
+      }
+      if (dockTab === 'essay' && editingId !== null) {
+        backToEssayList()
+        return
+      }
+      if (dockTab === 'note' && noteTarget !== null) {
+        backToNoteList()
         return
       }
       onOpenChange(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, panel, detailBack, onOpenChange])
+  }, [open, subPanel, detailBack, dockTab, editingId, noteTarget, backToEssayList, backToNoteList, onOpenChange])
 
   /**
    * 点窗口外面的任何东西都快速收起（用户定的）：随笔窗口是「随手记」的便签，
@@ -550,47 +735,53 @@ export default function EssayDock({
     // 去抖中的正文先落库，否则刚写的最后一句不会进快照
     flush()
     setCommitMessage(t('随笔整理 · {0}', dateLabelOfEssay(Date.now())))
-    setPanel('commit')
+    setSubPanel('commit')
   }
 
   const submitCommit = () => {
     const id = onCommit(commitMessage.trim())
     if (!id) return
     setDetailId(id)
-    setDetailBack('edit')
-    setPanel('detail')
+    setDetailBack('main')
+    setSubPanel('detail')
   }
 
   const activeCommit = detailId ? commits.find((c) => c.id === detailId) ?? null : null
 
   /**
-   * 提交记录按随笔划界（用户定的）：历史里只列**当前正在编写的那条随笔**参与过的提交——
-   * 要看的是「这条随笔被整理过几次、怎么归的档」，别的日期的随笔不许越界进来。
-   * 空白编辑器（下一条随笔还没出生）没有归属，历史先空着。
+   * 提交记录按随笔划界（用户定的）：历史里只列当前正在编写的那条随笔参与过的提交。
+   * 如果在列表页看历史，则列出该目标下的全部提交记录。
    */
-  const scopedCommits = useMemo(
-    () => (editingId ? commits.filter((c) => c.snapshot.some((s) => s.id === editingId)) : []),
-    [commits, editingId],
-  )
+  const scopedCommits = useMemo(() => {
+    if (editingId && editingId !== '__blank__') {
+      return commits.filter((c) => c.snapshot.some((s) => s.id === editingId))
+    }
+    return commits
+  }, [commits, editingId])
+
   /**
-   * 详情里的快照同一条边界：只给当前这条随笔自己的那份原样。
-   * 详情页没有「当前随笔」可认（从空白编辑器直接提交的极端路径）时才整批列出。
+   * 详情里的快照：若处于具体随笔二级页面则只给它自己的快照，否则列出全量快照。
    */
   const scopedSnapshot = activeCommit
-    ? editingId
+    ? editingId && editingId !== '__blank__'
       ? activeCommit.snapshot.filter((s) => s.id === editingId)
       : activeCommit.snapshot
     : []
 
   const backFromPanel = () => {
-    if (panel === 'detail') {
-      setPanel(detailBack)
+    if (subPanel === 'detail') {
+      setSubPanel(detailBack)
       return
     }
-    setPanel('edit')
+    setSubPanel('main')
   }
 
-  const panelTitle = panel === 'commit' ? t('提交随笔') : panel === 'history' ? t('提交记录') : activeCommit?.message ?? t('提交详情')
+  const panelTitle =
+    subPanel === 'commit'
+      ? t('提交随笔')
+      : subPanel === 'history'
+        ? t('提交记录')
+        : activeCommit?.message ?? t('提交详情')
 
   /** 下拉里的那一行：标题（旧数据没标题时按日期回退——normalize 会补，这里只是保险） */
   const titleOf = (essay: EssayEntry): string => essay.title || dateLabelOfEssay(essay.createdAt)
@@ -654,91 +845,45 @@ export default function EssayDock({
               }
               style={{ transition: 'opacity 140ms ease-out' }}
             >
-              {/* 顶栏：编辑时是下拉 + 提交 + 历史；子页面里是返回 + 标题。整条都能拖动挪窗口 */}
+              {/* 顶栏：两个固定 Tab（随笔 / 笔记） + 拖拽窗口区 + 关闭按钮 */}
               <div
                 onPointerDown={beginDrag}
-                className="flex shrink-0 cursor-grab items-center gap-1.5 border-b border-line bg-card/70 px-2.5 py-1.5 active:cursor-grabbing"
+                className="flex shrink-0 cursor-grab items-center justify-between border-b border-line bg-card/85 px-2.5 py-1.5 active:cursor-grabbing select-none"
               >
-                <PenLine size={13} className="shrink-0 text-seal/80" />
-                {panel === 'edit' ? (
-                  <>
-                    <select
-                      value={editingId ?? ''}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        if (!v) {
-                          startBlank()
-                          return
-                        }
-                        const found = essays.find((x) => x.id === v)
-                        if (found) openEssay(found)
-                      }}
-                      title={t('选择要编辑的随笔')}
-                      className="h-6 min-w-0 max-w-[150px] flex-1 cursor-pointer rounded-md border border-line bg-paper/70 px-1 text-[11px] text-ink-soft outline-none transition hover:border-line-strong focus:border-seal/50"
-                    >
-                      <option value="">{t('空白（新的一条）')}</option>
-                      {essays.map((essay) => (
-                        <option key={essay.id} value={essay.id}>
-                          {titleOf(essay)}
-                        </option>
-                      ))}
-                    </select>
-                    {editingId && (
-                      <button
-                        type="button"
-                        onClick={() => removeEssay(editingId)}
-                        title={t('删除这条随笔')}
-                        aria-label={t('删除')}
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-seal-deep"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-                    <span className="min-w-0 flex-1" aria-hidden="true" />
-                    <button
-                      type="button"
-                      onClick={openCommitPanel}
-                      disabled={!commitVisible}
-                      title={
-                        commitVisible
-                          ? t('提交这批随笔：封存快照，交给 AI 整理进对应节点的笔记')
-                          : t('还没有写过的内容，先写点什么再提交')
-                      }
-                      className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-seal/10 px-1.5 text-[10.5px] font-medium text-seal-deep transition hover:bg-seal/15 disabled:cursor-default disabled:opacity-40"
-                    >
-                      <GitCommitHorizontal size={12} />
-                      {t('提交…')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPanel('history')}
-                      title={t('提交记录：快照与每次整理动过的笔记')}
-                      aria-label={t('提交记录')}
-                      className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-ink"
-                    >
-                      <History size={13} />
-                      {scopedCommits.length > 0 && (
-                        <span className="absolute -right-0.5 -top-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-seal px-0.5 text-[8px] leading-none text-white">
-                          {scopedCommits.length > 9 ? '9+' : scopedCommits.length}
-                        </span>
-                      )}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={backFromPanel}
-                      title={t('返回')}
-                      aria-label={t('返回')}
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-ink"
-                    >
-                      <ArrowLeft size={13} />
-                    </button>
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">{panelTitle}</span>
-                    {panel === 'detail' && activeCommit && <StatusBadge status={activeCommit.status} />}
-                  </>
-                )}
+                {/* 两个固定 Tab */}
+                <div className="flex items-center rounded-lg bg-paper/80 p-0.5 border border-line/60">
+                  <button
+                    type="button"
+                    onClick={() => switchTab('essay')}
+                    className={
+                      'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition ' +
+                      (dockTab === 'essay'
+                        ? 'bg-seal/15 text-seal-deep shadow-xs'
+                        : 'text-ink-soft hover:text-ink hover:bg-line/40')
+                    }
+                  >
+                    <PenLine size={12} className={dockTab === 'essay' ? 'text-seal' : 'text-ink-faint'} />
+                    {t('随笔')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchTab('note')}
+                    className={
+                      'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition ' +
+                      (dockTab === 'note'
+                        ? 'bg-seal/15 text-seal-deep shadow-xs'
+                        : 'text-ink-soft hover:text-ink hover:bg-line/40')
+                    }
+                  >
+                    <BookOpen size={12} className={dockTab === 'note' ? 'text-seal' : 'text-ink-faint'} />
+                    {t('笔记')}
+                  </button>
+                </div>
+
+                {/* 拖动留白 */}
+                <span className="min-w-0 flex-1 h-6" aria-hidden="true" />
+
+                {/* 关闭窗口 */}
                 <button
                   type="button"
                   onClick={() => onOpenChange(false)}
@@ -750,31 +895,389 @@ export default function EssayDock({
                 </button>
               </div>
 
-              {panel === 'edit' && (
+              {/* 子流程（提交、历史、详情）顶栏标题 */}
+              {subPanel !== 'main' && (
+                <div className="flex shrink-0 items-center gap-1.5 border-b border-line bg-card/70 px-2.5 py-1.5">
+                  <button
+                    type="button"
+                    onClick={backFromPanel}
+                    title={t('返回')}
+                    aria-label={t('返回')}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-ink"
+                  >
+                    <ArrowLeft size={13} />
+                  </button>
+                  <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">{panelTitle}</span>
+                  {subPanel === 'detail' && activeCommit && <StatusBadge status={activeCommit.status} />}
+                </div>
+              )}
+
+              {/* ==================== 随笔 Tab ==================== */}
+              {subPanel === 'main' && dockTab === 'essay' && (
                 <>
-                  <div className="flex min-h-0 flex-1 flex-col bg-card">
-                    {/* 标题：随笔不再拿日期当唯一标识（见 learn/essays），默认日期、随时可改 */}
-                    <input
-                      value={title}
-                      onChange={(e) => rename(e.target.value)}
-                      placeholder={t('标题（默认为日期，可改）')}
-                      aria-label={t('随笔标题')}
-                      className="shrink-0 border-b border-line bg-transparent px-3.5 py-2 text-[13px] font-medium text-ink-strong outline-none transition placeholder:font-normal placeholder:text-ink-faint focus:border-seal/40"
-                    />
-                    <EssayEditor
-                      value={text}
-                      onChange={change}
-                      placeholder={t('随手记点什么…（支持 Markdown，停手即存）')}
-                    />
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-1 text-[10.5px] text-ink-faint">
-                    <span>{editingId ? t('已自动保存') : t('写下第一个字，它就成了一条随笔')}</span>
-                    <span className="ml-auto tabular-nums">{text.length ? t('{0} 字', text.length) : ''}</span>
-                  </div>
+                  {editingId === null ? (
+                    /* ----- 随笔一级页面：随笔列表 ----- */
+                    <div className="flex min-h-0 flex-1 flex-col bg-card">
+                      {/* 操作栏 */}
+                      <div className="flex shrink-0 items-center gap-1.5 border-b border-line/80 px-3 py-2 bg-paper/40">
+                        <span className="text-[11.5px] font-medium text-ink-strong">
+                          {t('随笔列表')}
+                          <span className="ml-1 text-[10.5px] font-normal text-ink-faint">({essays.length})</span>
+                        </span>
+                        <span className="min-w-0 flex-1" aria-hidden="true" />
+                        <button
+                          type="button"
+                          onClick={startBlank}
+                          title={t('新建一条随笔')}
+                          className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-seal px-2 text-[10.5px] font-medium text-white shadow-xs transition hover:bg-seal-deep"
+                        >
+                          <Plus size={12} />
+                          {t('新建随笔')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={openCommitPanel}
+                          disabled={!commitVisible}
+                          title={
+                            commitVisible
+                              ? t('提交随笔：封存快照，交给 AI 整理进对应节点的笔记')
+                              : t('还没有新的随笔需要提交')
+                          }
+                          className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-seal/10 px-1.5 text-[10.5px] font-medium text-seal-deep transition hover:bg-seal/15 disabled:cursor-default disabled:opacity-40"
+                        >
+                          <GitCommitHorizontal size={12} />
+                          {t('提交…')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSubPanel('history')}
+                          title={t('提交记录')}
+                          aria-label={t('提交记录')}
+                          className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-ink"
+                        >
+                          <History size={13} />
+                          {scopedCommits.length > 0 && (
+                            <span className="absolute -right-0.5 -top-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-seal px-0.5 text-[8px] leading-none text-white">
+                              {scopedCommits.length > 9 ? '9+' : scopedCommits.length}
+                            </span>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* 随笔列表项 */}
+                      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 space-y-2">
+                        {essays.length === 0 ? (
+                          <div className="flex h-full flex-col items-center justify-center py-12 text-center text-ink-faint">
+                            <PenLine size={28} className="text-line-strong/60 mb-2" />
+                            <p className="text-[12px]">{t('还没有随笔')}</p>
+                            <p className="text-[10.5px] text-ink-faint mt-1 max-w-[260px]">
+                              {t('随笔是目标级的灵感记录，随时记下你的思考与疑问，并可一键提交给 AI 整理。')}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={startBlank}
+                              className="mt-3 inline-flex items-center gap-1 rounded-md bg-seal/10 px-2.5 py-1 text-[11px] font-medium text-seal transition hover:bg-seal/20"
+                            >
+                              <Plus size={12} />
+                              {t('记一条随笔')}
+                            </button>
+                          </div>
+                        ) : (
+                          essays.map((essay) => (
+                            <div
+                              key={essay.id}
+                              onClick={() => openEssay(essay)}
+                              className="group relative cursor-pointer rounded-lg border border-line bg-paper/60 p-2.5 transition hover:border-seal/45 hover:bg-paper hover:shadow-xs"
+                            >
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="truncate text-[12px] font-medium text-ink-strong">
+                                  {titleOf(essay)}
+                                </span>
+                                <span className="shrink-0 text-[10px] tabular-nums text-ink-faint">
+                                  {timeLabel(essay.updatedAt)}
+                                </span>
+                              </div>
+                              <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-ink-soft">
+                                {essayPreview(essay.text, 140) || t('（空随笔）')}
+                              </p>
+                              <div className="mt-1.5 flex items-center justify-between text-[10px] text-ink-faint">
+                                <span>{t('{0} 字', essay.text.length)}</span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    removeEssay(essay.id)
+                                  }}
+                                  title={t('删除这条随笔')}
+                                  aria-label={t('删除')}
+                                  className="opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-ink-faint transition hover:bg-line/60 hover:text-seal-deep"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    /* ----- 随笔二级页面：随笔编辑（不能切换到预览模式） ----- */
+                    <div className="flex min-h-0 flex-1 flex-col bg-card">
+                      {/* 二级顶栏 */}
+                      <div className="flex shrink-0 items-center gap-1.5 border-b border-line bg-card/70 px-2.5 py-1.5">
+                        <button
+                          type="button"
+                          onClick={backToEssayList}
+                          title={t('返回列表')}
+                          aria-label={t('返回列表')}
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-ink"
+                        >
+                          <ArrowLeft size={13} />
+                        </button>
+                        <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-ink-strong">
+                          {title || t('未命名随笔')}
+                        </span>
+                        {editingId && editingId !== '__blank__' && (
+                          <button
+                            type="button"
+                            onClick={() => removeEssay(editingId)}
+                            title={t('删除这条随笔')}
+                            aria-label={t('删除')}
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-seal-deep"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={openCommitPanel}
+                          disabled={!commitVisible}
+                          title={
+                            commitVisible
+                              ? t('提交这批随笔：封存快照，交给 AI 整理进对应节点的笔记')
+                              : t('还没有写过的内容，先写点什么再提交')
+                          }
+                          className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-seal/10 px-1.5 text-[10.5px] font-medium text-seal-deep transition hover:bg-seal/15 disabled:cursor-default disabled:opacity-40"
+                        >
+                          <GitCommitHorizontal size={12} />
+                          {t('提交…')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSubPanel('history')}
+                          title={t('提交记录：快照与每次整理动过的笔记')}
+                          aria-label={t('提交记录')}
+                          className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-ink"
+                        >
+                          <History size={13} />
+                          {scopedCommits.length > 0 && (
+                            <span className="absolute -right-0.5 -top-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-seal px-0.5 text-[8px] leading-none text-white">
+                              {scopedCommits.length > 9 ? '9+' : scopedCommits.length}
+                            </span>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* 编辑内容 */}
+                      <input
+                        value={title}
+                        onChange={(e) => rename(e.target.value)}
+                        placeholder={t('标题（默认为日期，可改）')}
+                        aria-label={t('随笔标题')}
+                        className="shrink-0 border-b border-line bg-transparent px-3.5 py-2 text-[13px] font-medium text-ink-strong outline-none transition placeholder:font-normal placeholder:text-ink-faint focus:border-seal/40"
+                      />
+                      <EssayEditor
+                        value={text}
+                        onChange={change}
+                        placeholder={t('随手记点什么…（支持 Markdown，停手即存）')}
+                      />
+                      <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-1 text-[10.5px] text-ink-faint">
+                        <span>{editingId && editingId !== '__blank__' ? t('已自动保存') : t('写下第一个字，它就成了一条随笔')}</span>
+                        <span className="ml-auto tabular-nums">{text.length ? t('{0} 字', text.length) : ''}</span>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
-              {panel === 'commit' && (
+              {/* ==================== 笔记 Tab ==================== */}
+              {subPanel === 'main' && dockTab === 'note' && (
+                <>
+                  {noteTarget === null ? (
+                    /* ----- 笔记一级页面：笔记列表（标明来自哪个目标的哪个节点） ----- */
+                    <div className="flex min-h-0 flex-1 flex-col bg-card">
+                      {/* 操作与搜索栏 */}
+                      <div className="flex shrink-0 items-center gap-2 border-b border-line/80 px-3 py-2 bg-paper/40">
+                        <span className="shrink-0 text-[11.5px] font-medium text-ink-strong">
+                          {t('笔记列表')}
+                          <span className="ml-1 text-[10.5px] font-normal text-ink-faint">({filteredNotes.length})</span>
+                        </span>
+                        <div className="relative min-w-0 flex-1">
+                          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint" />
+                          <input
+                            type="text"
+                            value={noteSearch}
+                            onChange={(e) => setNoteSearch(e.target.value)}
+                            placeholder={t('搜索笔记、目标或节点…')}
+                            className="h-6 w-full rounded-md border border-line bg-paper/70 pl-6 pr-2 text-[11px] text-ink outline-none transition focus:border-seal/50"
+                          />
+                        </div>
+                      </div>
+
+                      {/* 笔记列表项 */}
+                      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 space-y-2">
+                        {filteredNotes.length === 0 ? (
+                          <div className="flex h-full flex-col items-center justify-center py-12 text-center text-ink-faint">
+                            <BookOpen size={28} className="text-line-strong/60 mb-2" />
+                            <p className="text-[12px]">{noteSearch ? t('未找到匹配的笔记') : t('知识库中暂无笔记')}</p>
+                            <p className="text-[10.5px] text-ink-faint mt-1 max-w-[260px]">
+                              {t('笔记是节点级的，在学习文档或右键菜单中可为每个节点记录独立笔记。')}
+                            </p>
+                          </div>
+                        ) : (
+                          filteredNotes.map((item) => (
+                            <div
+                              key={item.nodeId + '\u0000' + item.name}
+                              onClick={() => openNote(item)}
+                              className="group relative cursor-pointer rounded-lg border border-line bg-paper/60 p-2.5 transition hover:border-seal/45 hover:bg-paper hover:shadow-xs"
+                            >
+                              {/* 标明来自哪个目标的哪个节点 */}
+                              <div className="flex items-center gap-1.5 text-[10.5px] text-ink-faint">
+                                <span className="truncate max-w-[120px] rounded bg-line/60 px-1 py-0.5 text-[10px] text-ink-soft">
+                                  {item.goalTitle || t('未知目标')}
+                                </span>
+                                <span className="text-line-strong">/</span>
+                                <span className="truncate max-w-[150px] text-[10.5px] font-medium text-ink-soft">
+                                  {item.nodeTitle || t('未知节点')}
+                                </span>
+                                <span className="ml-auto shrink-0 tabular-nums text-[10px] text-ink-faint">
+                                  {timeLabel(item.updatedAt)}
+                                </span>
+                              </div>
+
+                              <div className="mt-1 truncate text-[12px] font-medium text-ink-strong">
+                                {item.name}
+                              </div>
+
+                              <p className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-ink-soft">
+                                {essayPreview(item.content, 140) || t('（空笔记）')}
+                              </p>
+
+                              <div className="mt-1.5 flex items-center justify-between text-[10px] text-ink-faint">
+                                <span>{t('{0} 字', item.content.length)}</span>
+                                <span className="text-seal/80 opacity-0 group-hover:opacity-100 transition text-[10.5px]">
+                                  {t('查看 / 编辑 →')}
+                                </span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    /* ----- 笔记二级页面：笔记编辑 / 预览（自由切换预览与编辑模式，不可提交） ----- */
+                    <div className="flex min-h-0 flex-1 flex-col bg-card">
+                      {/* 二级顶栏 */}
+                      <div className="flex shrink-0 items-center gap-1.5 border-b border-line bg-card/70 px-2.5 py-1.5">
+                        <button
+                          type="button"
+                          onClick={backToNoteList}
+                          title={t('返回列表')}
+                          aria-label={t('返回列表')}
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-ink"
+                        >
+                          <ArrowLeft size={13} />
+                        </button>
+
+                        {/* 节点归属面包屑 */}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1 text-[10px] text-ink-faint truncate">
+                            <span>{currentNoteItem?.goalTitle || t('未知目标')}</span>
+                            <span>/</span>
+                            <span className="font-medium text-ink-soft">{currentNoteItem?.nodeTitle || t('未知节点')}</span>
+                          </div>
+                          <div className="truncate text-[12px] font-medium text-ink-strong leading-none mt-0.5">
+                            {noteTarget.noteName}
+                          </div>
+                        </div>
+
+                        {/* 自由切换预览或者编辑模式 */}
+                        <button
+                          type="button"
+                          onClick={toggleNoteViewMode}
+                          title={noteViewMode === 'preview' ? t('切换到编辑模式') : t('切换到预览模式')}
+                          className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-line bg-paper/80 px-2 text-[10.5px] font-medium text-ink-soft transition hover:border-seal/40 hover:text-seal-deep"
+                        >
+                          {noteViewMode === 'preview' ? (
+                            <>
+                              <Edit3 size={11} className="text-seal" />
+                              {t('编辑')}
+                            </>
+                          ) : (
+                            <>
+                              <Eye size={11} className="text-seal" />
+                              {t('预览')}
+                            </>
+                          )}
+                        </button>
+
+                        {/* 在工作区中打开 */}
+                        <button
+                          type="button"
+                          onClick={() => onOpenNote(noteTarget.nodeId, noteTarget.noteName)}
+                          title={t('在主工作区打开此笔记')}
+                          aria-label={t('在工作区打开')}
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-ink"
+                        >
+                          <ExternalLink size={12} />
+                        </button>
+
+                        {onDeleteNote && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onDeleteNote(noteTarget.nodeId, noteTarget.noteName)
+                              backToNoteList()
+                            }}
+                            title={t('删除这份笔记')}
+                            aria-label={t('删除')}
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-seal-deep"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* 笔记展示区：预览模式 vs 编辑模式 */}
+                      {noteViewMode === 'preview' ? (
+                        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 bg-paper/40">
+                          {noteText.trim() ? (
+                            <MarkdownView
+                              html={renderNote(noteText)}
+                              className="moji-md text-[12.5px] leading-relaxed text-ink"
+                            />
+                          ) : (
+                            <p className="text-[11.5px] text-ink-faint py-4">{t('（笔记内容为空，点击上方「编辑」开始记录）')}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <EssayEditor
+                          value={noteText}
+                          onChange={handleNoteTextChange}
+                          placeholder={t('写点笔记…（支持 Markdown，停手即存）')}
+                        />
+                      )}
+
+                      <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-1 text-[10.5px] text-ink-faint">
+                        <span>{noteViewMode === 'edit' ? t('已自动保存') : t('只读预览模式')}</span>
+                        <span className="ml-auto tabular-nums">{noteText.length ? t('{0} 字', noteText.length) : ''}</span>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {subPanel === 'commit' && (
                 <div className="flex min-h-0 flex-1 flex-col bg-card">
                   <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
                     <p className="text-[11px] leading-relaxed text-ink-faint">
@@ -812,7 +1315,7 @@ export default function EssayDock({
                   <div className="flex shrink-0 items-center justify-end gap-1.5 border-t border-line px-3 py-2">
                     <button
                       type="button"
-                      onClick={() => setPanel('edit')}
+                      onClick={() => setSubPanel('main')}
                       className="h-7 rounded-md px-2.5 text-[11.5px] text-ink-soft transition hover:bg-line/60 hover:text-ink"
                     >
                       {t('取消')}
@@ -830,14 +1333,14 @@ export default function EssayDock({
                 </div>
               )}
 
-              {panel === 'history' && (
+              {subPanel === 'history' && (
                 <div className="flex min-h-0 flex-1 flex-col bg-card">
                   <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
                     {scopedCommits.length === 0 ? (
                       <p className="px-2 py-4 text-[11px] leading-relaxed text-ink-faint">
                         {editingId
                           ? t('这条随笔还没有提交记录：提交一次，这里会沿时间轴留下快照与整理评论。')
-                          : t('先写下或选择一条随笔——这里只显示它自己的提交记录。')}
+                          : t('当前目标还没有随笔提交记录。')}
                       </p>
                     ) : (
                       /*
@@ -857,7 +1360,7 @@ export default function EssayDock({
                               onClick={() => {
                                 setDetailId(commit.id)
                                 setDetailBack('history')
-                                setPanel('detail')
+                                setSubPanel('detail')
                               }}
                               title={t('点击查看这次提交的详细记录')}
                               className="mb-1 block w-full rounded-lg px-2 py-1.5 text-left transition last:mb-0 hover:bg-line/50"
@@ -880,7 +1383,7 @@ export default function EssayDock({
                 </div>
               )}
 
-              {panel === 'detail' && (
+              {subPanel === 'detail' && (
                 <div className="flex min-h-0 flex-1 flex-col bg-card">
                   {activeCommit ? (
                     <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
@@ -987,11 +1490,11 @@ export default function EssayDock({
                       </span>
                       <button
                         type="button"
-                        onClick={() => setPanel('edit')}
+                        onClick={() => setSubPanel('main')}
                         className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-seal/10 px-2 text-[10.5px] font-medium text-seal-deep transition hover:bg-seal/15"
                       >
                         <PenLine size={11} />
-                        {t('继续写随笔')}
+                        {t('返回')}
                       </button>
                     </div>
                   )}
