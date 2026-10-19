@@ -27,6 +27,37 @@ import type {
 export const ESSAY_COMMIT_MESSAGE_MAX = 200
 /** 一条快照里保留的正文上限：与随笔本身的单条上限一致（见 essays 的 ESSAY_TEXT_MAX） */
 const SNAPSHOT_TEXT_MAX = 20_000
+/** 提交评论的上限：评论是「这次整理的几句话」，不是第二份笔记 */
+const ESSAY_COMMENT_MAX = 2_000
+
+/**
+ * 提交评论在回复里的标记（见 workflows 的 essay-commit 指令）：
+ * Agent 把评论写在这一对 HTML 注释之间——它同时是 Markdown 里的注释，
+ * 误解析失败时那段文字也不会在对话气泡里碍事。
+ */
+export const ESSAY_COMMENT_BEGIN = '<!-- essay-commit-comment'
+export const ESSAY_COMMENT_END = '-->'
+
+/**
+ * 从回复全文里抠出提交评论：**最后一对**标记之间的 Markdown（首行应是标题）。
+ * 解析不到 / 中间是空的返回 null——评论是锦上添花，绝不能因为它挡住整理结果本身。
+ */
+export function parseEssayComment(reply: string): string | null {
+  if (!reply) return null
+  const begin = reply.lastIndexOf(ESSAY_COMMENT_BEGIN)
+  if (begin < 0) return null
+  const rest = reply.slice(begin + ESSAY_COMMENT_BEGIN.length)
+  const end = rest.indexOf(ESSAY_COMMENT_END)
+  const body = (end >= 0 ? rest.slice(0, end) : rest).trim().slice(0, ESSAY_COMMENT_MAX)
+  return body || null
+}
+
+/** 一条提交的评论标题：Markdown 的第一行抹掉记号（`## `）就是标题；没写评论退回提交说明 */
+export function essayCommentTitle(commit: EssayCommit): string {
+  const first = commit.comment?.replace(/\r\n?/g, '\n').split('\n', 1)[0] ?? ''
+  const title = first.replace(/^\s{0,3}#{1,6}\s*/, '').trim()
+  return title || commit.message
+}
 
 /** 这个目标的提交记录（新的在前） */
 export function commitsOf(store: LearnStore, goalId: string): EssayCommit[] {
@@ -87,12 +118,12 @@ export function createEssayCommit(
   }
 }
 
-/** 改一条提交记录（整理完成 / 失败 / 重试） */
+/** 改一条提交记录（整理完成 / 失败 / 重试 / 写入评论） */
 export function updateEssayCommit(
   store: LearnStore,
   goalId: string,
   id: string,
-  patch: Partial<Pick<EssayCommit, 'status' | 'changes' | 'error'>>,
+  patch: Partial<Pick<EssayCommit, 'status' | 'changes' | 'error' | 'comment'>>,
 ): LearnStore {
   const list = commitsOf(store, goalId)
   if (!list.some((c) => c.id === id)) return store
@@ -315,6 +346,11 @@ export function normalizeEssayCommits(raw: unknown, aliveGoals: Set<string>): Es
         }
       }
       const status = r.status === 'done' || r.status === 'error' ? r.status : 'error'
+      // 评论可选：认不出的（不是字符串 / 空白）就不给，界面按「没有评论」渲染
+      const comment =
+        typeof r.comment === 'string' && r.comment.trim()
+          ? r.comment.trim().slice(0, ESSAY_COMMENT_MAX)
+          : undefined
       items.push({
         id,
         at,
@@ -322,6 +358,7 @@ export function normalizeEssayCommits(raw: unknown, aliveGoals: Set<string>): Es
         snapshot,
         status,
         changes,
+        ...(comment ? { comment } : {}),
         ...(status === 'error'
           ? {
               error:

@@ -243,6 +243,7 @@ import {
   createEssayCommit,
   diffNoteChanges,
   noteFingerprint,
+  parseEssayComment,
   updateEssayCommit,
 } from '../../learn/essayCommits'
 import { useDoubleShift } from '../../lib/useDoubleShift'
@@ -2259,7 +2260,25 @@ export default function LearnWorkspace({
           // 整理完成：对比前后两份指纹，把真正动过的笔记记到这次提交上
           const after = getLatest()
           const changes = diffNoteChanges(before, noteFingerprint(after, goalId))
-          set(updateEssayCommit(getLatest(), goalId, commit.id, { status: 'done', changes }))
+          // 提交评论：Agent 按约定格式写在回复末尾（见 essayCommits 的 parseEssayComment），
+          // 从这一轮对话最后一条回复里抠出来。解析不到就算了——评论是锦上添花，
+          // 不能因为它挡住整理结果本身（changes 由指纹对比得出，不靠模型自报，见上）。
+          const conv = conversationById(after, convId)
+          const lastReply = conv ? [...conv.messages].reverse().find((m) => m.role === 'assistant') : null
+          const replyText = lastReply
+            ? lastReply.parts
+                .filter((p) => p.type === 'text')
+                .map((p) => p.text)
+                .join('')
+            : ''
+          const comment = parseEssayComment(replyText)
+          set(
+            updateEssayCommit(getLatest(), goalId, commit.id, {
+              status: 'done',
+              changes,
+              ...(comment ? { comment } : {}),
+            }),
+          )
           onToast(t('随笔整理完成：{0}', changesSummary(changes)))
         })
         .catch((err: unknown) => {

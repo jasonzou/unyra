@@ -13,14 +13,18 @@
  * 3. **顶部下拉选随笔**（用户定的）：不再在左边占一列列表——窗口只有一扇，正文才是主角。
  *    下拉里按日期列（同一天有多条时带序号），另有一项「空白（新的一条）」。
  * 4. **提交像 git**（见 learn/essayCommits）：把这一批随笔封成快照，交给 Agent 整理进
- *    知识树对应节点的笔记；整理结果（新建 / 更新了哪几份笔记）记在这次提交上，
- *    历史与详情都在同一个窗口里看。快照是自足的：之后随笔再改，回看仍是当时的原样。
+ *    知识树对应节点的笔记；整理结果（新建 / 更新了哪几份笔记）与 Agent 的**提交评论**
+ *    （Markdown，首行是标题）记在这次提交上。提交记录按随笔划界：历史只列**当前正在
+ *    编写的那条随笔**参与过的提交，详情里的快照也只给它自己看，别人的日期不越界。
+ *    历史排成 timeline：每个节点只摆「日期 + 评论标题」，全文点开详情再看。
  *
  * 窗口能拖、能拉右下角改大小，几何存在 state.json（见 learn/types 的 EssayDockRect）：
- * 下次打开还在你摆的那个位置。**打开那一刻要重新夹一遍视口**——上次是 1440 宽的屏，
- * 这次可能只有 900，存下来的坐标必须当场收回来（见 clampRect）。
+ * 下次打开还在你摆的那个位置；**没摆过时的默认是视口居中、500×700**。打开那一刻要
+ * 重新夹一遍视口——上次是 1440 宽的屏，这次可能只有 900，存下来的坐标必须当场收回来
+ * （见 clampRect）。窗口开着时，**点窗口外面的任何东西都直接收起**：随笔是随手记，
+ * 注意力走了窗口就该让路（Esc 同效）。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowLeft,
@@ -35,14 +39,16 @@ import {
 } from 'lucide-react'
 import type { EssayCommit, EssayDockRect, EssayEntry } from '../../../learn/types'
 import { ESSAY_DOCK_MIN_H, ESSAY_DOCK_MIN_W, essayPreview, dayOfEssay } from '../../../learn/essays'
-import { changesSummary } from '../../../learn/essayCommits'
+import { changesSummary, essayCommentTitle } from '../../../learn/essayCommits'
 import { usePresence } from '../../../lib/presence'
+import { renderNote } from '../../../lib/markdown'
 import { t } from '../../../i18n'
+import MarkdownView from '../../MarkdownView'
 import EssayEditor from './EssayEditor'
 
-/** 默认尺寸：够一屏里读一段、写一段，又不至于把正文全挡住 */
-const DEFAULT_W = 620
-const DEFAULT_H = 420
+/** 默认尺寸（用户定的）：500×700，居中摆——够写一段、读一段历史，也不偏到角落去 */
+const DEFAULT_W = 500
+const DEFAULT_H = 700
 /** 自动落库的去抖：一直在打字就不写盘，停手这么久才落一条 */
 const SAVE_MS = 400
 /** 圆 → 方的变形时长；与 CSS 过渡、退场时序同一个数 */
@@ -65,15 +71,18 @@ interface Box {
 type Panel = 'edit' | 'commit' | 'history' | 'detail'
 
 /**
- * 没存过几何时的位置：**从按钮那一角长出来**（窗口的右下角贴着按钮的右下角）。
- * 量不到按钮（双击 Shift 唤出的、或此刻不在教学文档上）就退回视口右下角。
+ * 没存过几何时的位置：**视口居中**（用户定的）。量不到按钮也无所谓——
+ * 变形动画的起点仍由按钮那颗圆决定（见 boxOfButton），终点落在这里。
  */
-function defaultRect(anchor?: DOMRect | null): EssayDockRect {
-  const w = Math.min(DEFAULT_W, Math.max(ESSAY_DOCK_MIN_W, window.innerWidth - 96))
-  const h = Math.min(DEFAULT_H, Math.max(ESSAY_DOCK_MIN_H, window.innerHeight - 140))
-  const right = anchor ? anchor.right + 4 : window.innerWidth - 20
-  const bottom = anchor ? anchor.bottom + 4 : window.innerHeight - 20
-  return { x: right - w, y: bottom - h, w, h }
+function defaultRect(): EssayDockRect {
+  const w = Math.min(DEFAULT_W, Math.max(ESSAY_DOCK_MIN_W, window.innerWidth - 24))
+  const h = Math.min(DEFAULT_H, Math.max(ESSAY_DOCK_MIN_H, window.innerHeight - 24))
+  return {
+    x: Math.max(8, Math.round((window.innerWidth - w) / 2)),
+    y: Math.max(8, Math.round((window.innerHeight - h) / 2)),
+    w,
+    h,
+  }
 }
 
 /** 夹进视口：窗口不许被拖到看不见的地方（拖出去就再也抓不回来了） */
@@ -170,6 +179,8 @@ export default function EssayDock({
   // 退场要等变形播完才卸载：130ms 那套默认时序会把缩回去的动画切掉一半
   const { setOpen: setMounted, mounted } = usePresence(false, MORPH_MS + 20)
   const btnRef = useRef<HTMLButtonElement | null>(null)
+  /** 挂出来的那扇窗口：点外关闭用它判断「这一下落在不在窗口里」 */
+  const panelRef = useRef<HTMLDivElement | null>(null)
 
   // 开合时序交给 usePresence：退场动画播完才卸载（与其它浮层同一条规矩）
   useEffect(() => {
@@ -350,7 +361,7 @@ export default function EssayDock({
     if (open) {
       openInitial()
       const btn = btnRef.current
-      const next = clampRect(geometry ?? defaultRect(btn?.getBoundingClientRect() ?? null))
+      const next = clampRect(geometry ?? defaultRect())
       rectRef.current = next
       setRect(next)
       setFade(false)
@@ -475,6 +486,25 @@ export default function EssayDock({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, panel, detailBack, onOpenChange])
 
+  /**
+   * 点窗口外面的任何东西都快速收起（用户定的）：随笔窗口是「随手记」的便签，
+   * 注意力回正文去了它就该让路，不必先精确瞄准右上角那颗 ×。
+   * 捕获阶段监听：别的浮层拦了冒泡也拦不住收起。按钮本身排除在外——
+   * 它在窗口开着时只是藏着，防御性绕开它的位置上的那一下。
+   */
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node | null
+      if (!target) return
+      if (panelRef.current?.contains(target)) return
+      if (btnRef.current?.contains(target)) return
+      onOpenChange(false)
+    }
+    window.addEventListener('pointerdown', onDown, true)
+    return () => window.removeEventListener('pointerdown', onDown, true)
+  }, [open, onOpenChange])
+
   /* ---------- 提交 ---------- */
   /** 还没提交的随笔：最近一次提交之后写过 / 改过的 */
   const lastCommitAt = commits[0]?.at ?? 0
@@ -500,6 +530,25 @@ export default function EssayDock({
   }
 
   const activeCommit = detailId ? commits.find((c) => c.id === detailId) ?? null : null
+
+  /**
+   * 提交记录按随笔划界（用户定的）：历史里只列**当前正在编写的那条随笔**参与过的提交——
+   * 要看的是「这条随笔被整理过几次、怎么归的档」，别的日期的随笔不许越界进来。
+   * 空白编辑器（下一条随笔还没出生）没有归属，历史先空着。
+   */
+  const scopedCommits = useMemo(
+    () => (editingId ? commits.filter((c) => c.snapshot.some((s) => s.id === editingId)) : []),
+    [commits, editingId],
+  )
+  /**
+   * 详情里的快照同一条边界：只给当前这条随笔自己的那份原样。
+   * 详情页没有「当前随笔」可认（从空白编辑器直接提交的极端路径）时才整批列出。
+   */
+  const scopedSnapshot = activeCommit
+    ? editingId
+      ? activeCommit.snapshot.filter((s) => s.id === editingId)
+      : activeCommit.snapshot
+    : []
 
   const backFromPanel = () => {
     if (panel === 'detail') {
@@ -557,6 +606,7 @@ export default function EssayDock({
       {mounted &&
         createPortal(
           <div
+            ref={panelRef}
             className={
               'no-print fixed z-[80] overflow-hidden border border-line-strong bg-paper shadow-[0_24px_64px_rgba(31,27,23,0.28)] ' +
               // 几何过渡就是「圆变方」本身：与按钮同一颗圆角起点，长到窗口的方角
@@ -640,9 +690,9 @@ export default function EssayDock({
                       className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-faint transition hover:bg-line/60 hover:text-ink"
                     >
                       <History size={13} />
-                      {commits.length > 0 && (
+                      {scopedCommits.length > 0 && (
                         <span className="absolute -right-0.5 -top-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-seal px-0.5 text-[8px] leading-none text-white">
-                          {commits.length > 9 ? '9+' : commits.length}
+                          {scopedCommits.length > 9 ? '9+' : scopedCommits.length}
                         </span>
                       )}
                     </button>
@@ -747,42 +797,49 @@ export default function EssayDock({
 
               {panel === 'history' && (
                 <div className="flex min-h-0 flex-1 flex-col bg-card">
-                  <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-                    {commits.length === 0 ? (
+                  <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
+                    {scopedCommits.length === 0 ? (
                       <p className="px-2 py-4 text-[11px] leading-relaxed text-ink-faint">
-                        {t('还没有提交记录：把随笔提交一次，这里会留下快照与每次整理动过的笔记。')}
+                        {editingId
+                          ? t('这条随笔还没有提交记录：提交一次，这里会沿时间轴留下快照与整理评论。')
+                          : t('先写下或选择一条随笔——这里只显示它自己的提交记录。')}
                       </p>
                     ) : (
-                      commits.map((commit) => (
-                        <button
-                          key={commit.id}
-                          type="button"
-                          onClick={() => {
-                            setDetailId(commit.id)
-                            setDetailBack('history')
-                            setPanel('detail')
-                          }}
-                          className="mb-1 flex w-full flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-line/50"
-                        >
-                          <span className="flex w-full items-center gap-2">
-                            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">
-                              {commit.message}
-                            </span>
-                            <StatusBadge status={commit.status} />
-                          </span>
-                          <span className="flex w-full items-center gap-2 text-[10.5px] text-ink-faint">
-                            <span>{timeLabel(commit.at)}</span>
-                            <span>·</span>
-                            <span>{t('{0} 条随笔', String(commit.snapshot.length))}</span>
-                            {commit.status === 'done' && (
-                              <>
-                                <span>·</span>
-                                <span className="min-w-0 truncate">{changesSummary(commit.changes)}</span>
-                              </>
-                            )}
-                          </span>
-                        </button>
-                      ))
+                      /*
+                       * timeline（用户定的）：一条竖线串起每次提交，节点上只摆
+                       * 「日期 + 评论标题」两行小字——细节（动过的笔记、快照原文、
+                       * 评论全文）点开详情再看，列表保持一眼能扫完。
+                       */
+                      <ol className="ml-1 border-l border-line pl-3.5">
+                        {scopedCommits.map((commit) => (
+                          <li key={commit.id} className="relative">
+                            <span
+                              aria-hidden="true"
+                              className="absolute -left-[18.5px] top-2.5 h-2 w-2 rounded-full border border-seal/50 bg-seal/60"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDetailId(commit.id)
+                                setDetailBack('history')
+                                setPanel('detail')
+                              }}
+                              title={t('点击查看这次提交的详细记录')}
+                              className="mb-1 block w-full rounded-lg px-2 py-1.5 text-left transition last:mb-0 hover:bg-line/50"
+                            >
+                              <span className="flex w-full items-center gap-2">
+                                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">
+                                  {essayCommentTitle(commit)}
+                                </span>
+                                <StatusBadge status={commit.status} />
+                              </span>
+                              <span className="mt-0.5 block text-[10.5px] tabular-nums text-ink-faint">
+                                {timeLabel(commit.at)}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ol>
                     )}
                   </div>
                 </div>
@@ -793,8 +850,19 @@ export default function EssayDock({
                   {activeCommit ? (
                     <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
                       <div className="text-[10.5px] text-ink-faint">
-                        {timeLabel(activeCommit.at)} · {t('{0} 条随笔', String(activeCommit.snapshot.length))}
+                        {timeLabel(activeCommit.at)} · {t('{0} 条随笔', String(scopedSnapshot.length))}
                       </div>
+
+                      {activeCommit.comment && (
+                        <section className="mt-3">
+                          <h4 className="text-[11px] font-medium text-ink-soft">{t('整理评论')}</h4>
+                          {/* Agent 对这次提交的评论（Markdown，首行是标题，见 learn/essayCommits） */}
+                          <MarkdownView
+                            html={renderNote(activeCommit.comment)}
+                            className="moji-agent-md mt-1.5 rounded-lg border border-line bg-paper/60 px-2.5 py-2 text-[11.5px] leading-relaxed text-ink-soft"
+                          />
+                        </section>
+                      )}
 
                       {activeCommit.status === 'running' && (
                         <div className="mt-2 flex items-center gap-2 rounded-lg border border-line bg-paper/60 px-2.5 py-2 text-[11px] text-ink-soft">
@@ -852,15 +920,22 @@ export default function EssayDock({
 
                       <section className="mt-3">
                         <h4 className="text-[11px] font-medium text-ink-soft">{t('快照')}</h4>
+                        {/* 只给当前正在编写的那条随笔自己的原样（边界同上，见 scopedSnapshot） */}
                         <div className="mt-1.5 space-y-1.5">
-                          {activeCommit.snapshot.map((essay) => (
-                            <div key={essay.id} className="rounded-lg border border-line bg-paper/50 px-2.5 py-2">
-                              <div className="text-[10px] text-ink-faint">{dateLabelOfEssay(essay.createdAt)}</div>
-                              <p className="mt-1 whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-ink-soft">
-                                {essay.text}
-                              </p>
-                            </div>
-                          ))}
+                          {scopedSnapshot.length === 0 ? (
+                            <p className="px-1 py-1.5 text-[11px] text-ink-faint">
+                              {t('这条随笔不在这次提交里')}
+                            </p>
+                          ) : (
+                            scopedSnapshot.map((essay) => (
+                              <div key={essay.id} className="rounded-lg border border-line bg-paper/50 px-2.5 py-2">
+                                <div className="text-[10px] text-ink-faint">{dateLabelOfEssay(essay.createdAt)}</div>
+                                <p className="mt-1 whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-ink-soft">
+                                  {essay.text}
+                                </p>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </section>
                     </div>

@@ -815,6 +815,12 @@ export interface EssayCommit {
   status: 'running' | 'done' | 'error'
   /** Agent 整理后实际动过的节点笔记 */
   changes: EssayCommitChange[]
+  /**
+   * Agent 对这次提交的评论（Markdown，**首行是标题**），整理完由宿主从回复里按约定
+   * 标记抠出来（见 learn/essayCommits 的 parseEssayComment）；没写 / 没解析到就没有。
+   * 提交记录的 timeline 节点只显示「日期 + 评论标题」，全文要点开详情看。
+   */
+  comment?: string
   /** 失败原因（没配 AI、模型报错、中途被关掉……） */
   error?: string
 }

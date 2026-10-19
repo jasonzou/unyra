@@ -676,8 +676,13 @@ const dict: Record<string, string> = {
   '更新': 'Update',
   '快照': 'Snapshot',
   '这条提交记录已经不在了': 'This commit record no longer exists',
-  '还没有提交记录：把随笔提交一次，这里会留下快照与每次整理动过的笔记。':
-    'No commits yet. Commit your jottings once and the snapshots plus the notes each digest touched will appear here.',
+  '这条随笔还没有提交记录：提交一次，这里会沿时间轴留下快照与整理评论。':
+    'No commits for this jotting yet. Commit once and its snapshots and comments will line up on this timeline.',
+  '先写下或选择一条随笔——这里只显示它自己的提交记录。':
+    'Write or pick a jotting first — this list only shows the commits of the jotting you are editing.',
+  '点击查看这次提交的详细记录': 'Click to view the details of this commit',
+  '整理评论': 'Comment',
+  '这条随笔不在这次提交里': 'This jotting is not part of this commit',
   '没有改动任何笔记': 'No notes changed',
   '更新了 {0} 份笔记': 'Updated {0} notes',
   '新建了 {0} 份笔记': 'Created {0} notes',

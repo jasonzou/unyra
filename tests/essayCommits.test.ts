@@ -12,9 +12,11 @@ import {
   commitsOf,
   createEssayCommit,
   diffNoteChanges,
+  essayCommentTitle,
   lastCommitAt,
   noteFingerprint,
   normalizeEssayCommits,
+  parseEssayComment,
   pendingEssays,
   updateEssayCommit,
 } from '../src/learn/essayCommits'
@@ -179,6 +181,53 @@ describe('整理结果的记录', () => {
     expect(commitsOf(done, 'g1')[0].status).toBe('done')
     expect(commitsOf(done, 'g1')[0].changes).toHaveLength(1)
     expect(updateEssayCommit(done, 'g1', '不存在', { status: 'error' })).toBe(done)
+  })
+})
+
+describe('提交评论（Agent 写的 Markdown，首行是标题）', () => {
+  it('parseEssayComment 只认标记对之间的内容，且取最后一对', () => {
+    const reply = [
+      '先列改动：',
+      '极限/笔记/随笔整理（新建）',
+      '<!-- essay-commit-comment',
+      '## 第二次的标题',
+      '把导数的新想法并进了极限。',
+      '-->',
+    ].join('\n')
+    expect(parseEssayComment(reply)).toBe('## 第二次的标题\n把导数的新想法并进了极限。')
+    // 多轮回复只有最后一条评论算数：前面的成对标记被忽略
+    const twice = reply + '\n<!-- essay-commit-comment\n## 第二份草稿\n-->\n收尾。'
+    expect(parseEssayComment(twice)).toBe('## 第二份草稿')
+  })
+
+  it('parseEssayComment：没有标记、只有开头标记、标记间空白，都返回 null', () => {
+    expect(parseEssayComment('普通回复，没有评论')).toBeNull()
+    expect(parseEssayComment('')).toBeNull()
+    expect(parseEssayComment('<!-- essay-commit-comment\n## 有头没尾')).toBe('## 有头没尾')
+    expect(parseEssayComment('<!-- essay-commit-comment\n   \n-->')).toBeNull()
+  })
+
+  it('essayCommentTitle：首行抹掉标题记号；没写评论退回提交说明', () => {
+    const created = createEssayCommit(store([essay('a', AT - 10)]), 'g1', '提交说明原文', AT)!
+    expect(essayCommentTitle(created.commit)).toBe('提交说明原文')
+    const done = updateEssayCommit(created.store, 'g1', created.commit.id, {
+      status: 'done',
+      changes: [],
+      comment: '## 把杂念归档\n正文两句。',
+    })
+    expect(essayCommentTitle(commitsOf(done, 'g1')[0])).toBe('把杂念归档')
+  })
+
+  it('读回归一化保留合法评论、丢掉空白评论', () => {
+    const raw = {
+      g1: [
+        { id: 'c1', at: AT, message: '一', status: 'done', comment: '  ## 有评论  ', snapshot: [{ id: 'a', createdAt: AT, text: '正文' }] },
+        { id: 'c2', at: AT - 1, message: '二', status: 'done', comment: '   ', snapshot: [{ id: 'b', createdAt: AT, text: '正文' }] },
+      ],
+    }
+    const out = normalizeEssayCommits(raw, new Set(['g1']))
+    expect(out.g1[0].comment).toBe('## 有评论')
+    expect(out.g1[1].comment).toBeUndefined()
   })
 })
 
