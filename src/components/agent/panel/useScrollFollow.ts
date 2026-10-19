@@ -59,10 +59,15 @@ export function useScrollFollow(
     rootRef: React.RefObject<HTMLDivElement | null>
     msgRefs: React.RefObject<Map<string, HTMLDivElement>>
     railAnchorsRef: React.RefObject<{ id: string; top: number }[]>
+    /**
+     * 滚动容器里那一层**内容**（带 zoom 的那个 div）。可选：不给就没有
+     * 「内容自己长高也贴底」这一条（见下面那个 ResizeObserver）。
+     */
+    contentRef?: React.RefObject<HTMLDivElement | null>
   },
   setRailActive: (id: string | null) => void,
 ): ScrollFollow {
-  const { scrollRef, rootRef, msgRefs, railAnchorsRef } = refs
+  const { scrollRef, rootRef, msgRefs, railAnchorsRef, contentRef } = refs
   /**
    * 消息的渲染顺序：ref 回调每次渲染都会重挂，按 Map 自己的顺序读会乱
    */
@@ -81,6 +86,8 @@ export function useScrollFollow(
   const wheelRef = useRef({ last: 0, up: 0 })
   /** 上一次的滚动位置：用来判断「这次往上走」是不是用户干的 */
   const lastTopRef = useRef(0)
+  /** 上一次看到的内容高度：内容**变矮**时浏览器会把 scrollTop 夹回去，那不是用户在往上翻 */
+  const lastHeightRef = useRef(0)
 
   /** 对话区文字大小系数：Ctrl + 滚轮调，与文档区同一套手感（见 lib/appearance） */
   const [chatScale, setChatScale] = useState(() => getAppearance().chatScale)
@@ -275,6 +282,37 @@ export function useScrollFollow(
     glide()
   }
 
+  /**
+   * 内容**自己**长高时也贴底。
+   *
+   * 调用方那个 effect 只在「消息 / 流式内容变了」时敲一下，而这两样之外还有一堆
+   * 会让内容长高的东西：Markdown 渲染完、图片解码完、mermaid 画完、工具卡异步展开、
+   * 字体加载完……它们都发生在 React 提交之后，没有任何一次渲染记得要再贴一次底。
+   * 结果就是「导师明明在跑、列表却停在上一条消息」——用户报的就是这个。
+   *
+   * 于是观察内容那一层的高度：只要还跟着最新（pinned），长高就继续滑。
+   * 内容变矮（思考块收起、工具卡折叠）不做事——那时底部离得更近，不需要滚。
+   */
+  useEffect(() => {
+    const el = contentRef?.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      const box = scrollRef.current
+      if (!box) return
+      /*
+        只记「长高」，不记「变矮」：变矮要留给 onScroll 去认——那里拿的是**上一次滚动时**
+        的高度，才知道 scrollTop 是被布局夹回去的。这里若把新高度先记下来，
+        紧接着那次滚动就再也看不出「矮了一截」，误判脱离的老毛病又回来了。
+      */
+      if (box.scrollHeight > lastHeightRef.current) lastHeightRef.current = box.scrollHeight
+      if (pinnedRef.current) glide()
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+    // 这里读的全是 identity 稳定的 ref；glide 只认 ref，挂在首帧那一份上行为不变
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contentRef])
+
   const detach = () => {
     pinnedRef.current = false
     setPinned(false)
@@ -315,6 +353,15 @@ export function useScrollFollow(
     const top = el.scrollTop
     const prev = lastTopRef.current
     lastTopRef.current = top
+    /*
+      内容**变矮**时（思考块收起、工具卡折叠、流式段落被合并重排）浏览器会把 scrollTop
+      夹回新的最大值——那是布局干的，不是用户往上翻。不认这一条，导师收口那一下内容
+      缩了一截就会被当成「他想往上看」，跟随从此断掉，此后每一轮都不再自动贴底。
+      阈值 2px：亚像素抖动不算。
+    */
+    const height = el.scrollHeight
+    const shrank = height < lastHeightRef.current - 2
+    lastHeightRef.current = height
 
     // 定位条：标出「现在读到哪一条」——最后一条已经越过视口顶部一点点的
     let current: string | null = null
@@ -329,6 +376,7 @@ export function useScrollFollow(
       return
     }
     if (!pinnedRef.current) return
+    if (shrank) return
     if (isUserScrollUp(top, prev, nowMs() - wheelRef.current.last)) detach()
   }
 

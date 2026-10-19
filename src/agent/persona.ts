@@ -241,8 +241,9 @@ export function needsPersonaAnnounce(messages: ConversationMessage[], id: Person
 /**
  * 那条「从现在起按这个人格来」的隐藏消息。
  *
- * hidden + mark：它与工作流的指令是同一种东西——用户看得见一条分界条（知道导师换了人格），
- * 而正文只在上下文里。id 由调用方给（宿主那一层才有 crypto.randomUUID）。
+ * hidden + mark：它是一条**提示词注入**（inject: 'prompt'）——不分割轮次，
+ * 界面上并进那一轮的「思考、工具与提示词」过程组（见 agent/messageKind 的说明）；
+ * 正文只在上下文里。id 由调用方给（宿主那一层才有 crypto.randomUUID）。
  */
 export function personaMessage(
   id: PersonaId,
@@ -259,5 +260,6 @@ export function personaMessage(
     hidden: true,
     mark: t('导师人格 · {0}', t(persona.label)),
     persona: persona.id,
+    inject: 'prompt',
   }
 }

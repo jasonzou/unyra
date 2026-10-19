@@ -12,38 +12,68 @@
  * 每条消息本身（画法与 memo）在 MessageBubble.tsx 的 MessageRow 里，这里只把它们排成一列。
  */
 
+import { useMemo } from 'react'
 import WaveBars from '../../WaveBars'
 import { CompactionDivider } from './CompactionDivider'
 import { HiddenDivider, MessageRow, Parts } from './MessageBubble'
 import type { MessageListProps } from './MessageList'
+import type { InjectItem } from './partGroups'
 import type { ConversationMessage } from '../../../agent/types'
+import { isPromptInject } from '../../../agent/messageKind'
 import { t } from '../../../i18n'
 
 /**
- * 把消息列切成渲染段：隐藏消息（导师动作）按**相邻**归成一段，其余各自一段。
- * 相邻的分割线在 HiddenDivider 里融成一条——不归段的话，工作流连着触发的两下
- * 就画出两条紧贴的横线（见 HiddenDivider 的说明）。
- * 动态注入的提示词模块**不在这一层**：mid-loop 注入记成回复里的 prompt-module
- * 片段，由 Parts 并进「思考与工具」那个消息组（不分割轮次）；只有工作流轮开始时
- * 注入的那种独立隐藏消息走 HiddenDivider（它本来就在轮与轮之间）。
+ * 把消息列切成渲染段。
+ *
+ * 两类隐藏消息在界面上**去向不同**（判据见 agent/messageKind）：
+ * - **工作流指令**（出卷 / 阅卷 / 开讲 / 压缩…）：按**相邻**归成一段，画一条分界条。
+ *   相邻的融成一条——工作流连着触发两下，各画各的就是两条紧贴的横线。
+ * - **提示词注入**（人格 / 文档格式 / 技能库 / 提示词模块）：不画分界条，攒起来交给
+ *   **紧接着的那条导师回复**，并进它的「思考、工具与提示词」过程组。它们与思考、
+ *   工具调用是同一层的东西（这一轮凭什么这么答），从前挤在分界条上会把那行字挤爆。
+ *
+ * 攒着的那几条若碰上一条**用户自己发的**消息，就继续往下带：它们是为「这一轮的回答」
+ * 注入的，跟着回答走才说得通。整段消息里都没有回复（用户刚发出去、导师还没开口）时
+ * 由调用方交给正在流式的那一段（见返回的 pending）。
  */
 type Segment =
   | { kind: 'marks'; msgs: ConversationMessage[]; start: number }
-  | { kind: 'row'; m: ConversationMessage; at: number }
+  | { kind: 'row'; m: ConversationMessage; at: number; prelude?: InjectItem[] }
 
-function toSegments(messages: ConversationMessage[]): Segment[] {
+/** 隐藏消息 → 过程组里那一条（标签取 mark，正文取它进上下文的原文） */
+function toInjectItem(m: ConversationMessage): InjectItem {
+  return {
+    type: 'inject',
+    id: m.id,
+    label: t(m.mark ?? '提示词注入'),
+    text: m.parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n\n').trim(),
+  }
+}
+
+function toSegments(messages: ConversationMessage[]): { segments: Segment[]; pending: InjectItem[] } {
   const segments: Segment[] = []
+  /** 已经攒下、还没交给任何一条回复的提示词注入 */
+  let pending: InjectItem[] = []
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]
     if (m.hidden) {
+      if (isPromptInject(m)) {
+        pending.push(toInjectItem(m))
+        continue
+      }
       const last = segments[segments.length - 1]
       if (last && last.kind === 'marks') last.msgs.push(m)
       else segments.push({ kind: 'marks', msgs: [m], start: i })
-    } else {
-      segments.push({ kind: 'row', m, at: i })
+      continue
     }
+    if (m.role === 'assistant' && pending.length) {
+      segments.push({ kind: 'row', m, at: i, prelude: pending })
+      pending = []
+      continue
+    }
+    segments.push({ kind: 'row', m, at: i })
   }
-  return segments
+  return { segments, pending }
 }
 
 export function useMessageList({
@@ -66,6 +96,12 @@ export function useMessageList({
   setBubblePreview,
   onOpenFile,
 }: MessageListProps) {
+  /*
+   * 分段只在 messages 变了之后重算：流式写作时 messages 身份不变（正在长的那一段
+   * 走 streaming，见 AgentPanel），于是 prelude 数组的身份也稳定——memo 过的消息行
+   * 不会因为每个 chunk 重渲染一次而被打掉。
+   */
+  const { segments, pending } = useMemo(() => toSegments(messages), [messages])
   return (
     <>
       {messages.length === 0 && !streaming && (
@@ -85,12 +121,12 @@ export function useMessageList({
         <CompactionDivider summary={summary} open={summaryOpen} onToggle={() => setSummaryOpen((v) => !v)} />
       )}
 
-      {toSegments(messages).map((seg) => {
+      {segments.map((seg) => {
         /*
          * 一条消息一行，行自己 memo 过（见 MessageBubble 的 MessageRow）：
-         * 能变的东西（消息本体、是否失活、是否在闪、是否待确认删除、正在编辑的文本）
-         * 都在 props 里，流式逐跳重渲染时没变过的那些就整棵子树跳过。
-         * toSegments 每次渲染现算，但产出的 row 段里的 m 是同一个对象——memo 不受影响。
+         * 能变的东西（消息本体、是否失活、是否在闪、是否待确认删除、正在编辑的文本、
+         * 以及并进过程组的那几条提示词注入）都在 props 里，流式逐跳重渲染时
+         * 没变过的那些就整棵子树跳过。
          */
         if (seg.kind === 'marks') {
           return (
@@ -108,6 +144,7 @@ export function useMessageList({
           <MessageRow
             key={m.id}
             m={m}
+            prelude={seg.prelude}
             faded={seg.at < summaryStart}
             flash={flashId === m.id}
             confirming={confirmDel === m.id}
@@ -125,7 +162,18 @@ export function useMessageList({
 
       {streaming && streaming.length > 0 && (
         <div className="mb-4">
-          <Parts parts={streaming} streaming={true} />
+          {/*
+            还没落库的那一轮：攒下的提示词注入交给它——与落库之后并进回复是同一个位置，
+            用户不会在这一轮收口时看到那几行「跳」一下。
+          */}
+          <Parts parts={streaming} prelude={pending.length ? pending : undefined} streaming={true} />
+        </div>
+      )}
+
+      {/* 没有流式内容、也没有回复可挂的注入（极少见：用户刚发出、导师还没开口）：自己成一组 */}
+      {pending.length > 0 && !(streaming && streaming.length > 0) && (
+        <div className="mb-4">
+          <Parts parts={[]} prelude={pending} />
         </div>
       )}
 

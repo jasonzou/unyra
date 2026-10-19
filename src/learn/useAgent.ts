@@ -420,7 +420,13 @@ export function useAgent(opts: {
         parts: [{ type: 'text', text: trimmed }],
         ts: Date.now(),
         hidden,
-        ...(hidden && mark ? { mark } : {}),
+        /*
+         * 带 mark 的隐藏轮就是**工作流指令**（runWorkflow 把工作流名当 mark 传下来，
+         * runHidden 那几个动作同理）：界面上画一条分界条，定位条给它一个锚点。
+         * 提示词注入（人格 / 格式 / 技能库 / 模块）自己带 inject: 'prompt'，不走这里——
+         * 两者从前混在一条分界条上，几条一起注入时那行字会被挤爆（见 agent/messageKind）。
+         */
+        ...(hidden && mark ? { mark, inject: 'instruction' as const } : {}),
         context: extraContext ? nodeContext + '\n\n' + extraContext : nodeContext,
         ...(quote ? { quote } : {}),
         ...(attached.images.length ? { images: attached.images } : {}),

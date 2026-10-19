@@ -237,6 +237,12 @@ export function normalizeConversation(
          * 重新变成「没注入过」——重启后每用到一次低频组就重复注一遍规范。
          */
         ...(typeof mr.promptModule === 'string' && mr.promptModule ? { promptModule: mr.promptModule } : {}),
+        /*
+         * 注入类别（工作流指令 / 提示词注入）：丢了界面会把人格、格式这些提示词
+         * 重新塞回分界条（几条一起就是一行溢出的字）。缺这个字段的老会话由
+         * agent/messageKind 按上面那些标记反推，所以这里只做「有就带上」。
+         */
+        ...(mr.inject === 'instruction' || mr.inject === 'prompt' ? { inject: mr.inject } : {}),
         ...(typeof mr.context === 'string' && mr.context ? { context: mr.context } : {}),
         ...(quote ? { quote } : {}),
         ...(images.length ? { images } : {}),

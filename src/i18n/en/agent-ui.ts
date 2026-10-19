@@ -243,6 +243,8 @@ const dict: Record<string, string> = {
   '已注入上下文': 'injected into context',
   '点开查看注入的完整提示词': 'Click to view the full injected prompt',
   '收起模块全文': 'Collapse module text',
+  /* 提示词注入（人格 / 格式 / 技能库 / 模块）并进过程组，不再是分界条 */
+  '提示词注入': 'Prompt injection',
 
   /* ---------- toolLabel 的旧工具名标签 ---------- */
   '执行代码': 'Execute code',

@@ -127,6 +127,12 @@ export interface PendingFile {
   binary?: boolean
 }
 
+/**
+ * 隐藏消息的注入类别（见 ConversationMessage.inject 的说明）。
+ * 纯类型放在这里，判据函数住在 agent/messageKind（要能被 UI 与测试共用）。
+ */
+export type InjectKind = 'instruction' | 'prompt'
+
 export interface ConversationMessage {
   id: string
   role: 'user' | 'assistant'
@@ -144,6 +150,21 @@ export interface ConversationMessage {
    * 那条指令是隐藏的，用户消息一个点都没有。**没有 mark 的隐藏指令照旧不显示**。
    */
   mark?: string
+  /**
+   * 隐藏消息的**注入类别**——决定它在对话流里怎么出现（判据见 agent/messageKind）。
+   *
+   * - `'instruction'`：**工作流指令**。触发一条工作流时整段进入上下文的那条 user 消息
+   *   （开讲 / 出卷 / 阅卷 / 压缩…）。它是一道**轮次边界**：界面上画一条分界条。
+   * - `'prompt'`：**提示词注入**。人格 / 文档格式 / 技能库 / 提示词模块这些「补给上下文」
+   *   的隐藏消息。它们不分割轮次，界面上并进那一轮的「思考、工具与提示词」过程组——
+   *   与思考、工具调用是同一层的东西（都是「这一轮它凭什么这么答」）。
+   *
+   * 两者从前都塞进同一条分界条里，几条一起注入时那行字被挤得溢出（用户报的 bug）。
+   * 这个字段就是那条分界线的判据：**只有 instruction 才画**。
+   * 老数据没有这个字段，由 messageKind 按 persona / docFormat / promptModule / skillsDigest
+   * 这些既有标记反推（见 injectKindOf）。
+   */
+  inject?: InjectKind
   /**
    * 这是「导师人格」那一条隐藏指令，值是人格 id（见 agent/persona）。
    *

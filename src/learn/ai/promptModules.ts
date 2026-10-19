@@ -633,8 +633,11 @@ export function missingPromptModules(messages: ConversationMessage[], keys: stri
 }
 
 /**
- * 一条模块消息：隐藏 user 消息，mark 画成界面上可展开的分界条，promptModule 供去重。
- * 与 personaMessage 同一个形状家族——它进模型上下文、不显示气泡正文（展开看全文）。
+ * 一条模块消息：隐藏 user 消息，promptModule 供去重。
+ *
+ * 与 personaMessage 同一个形状家族，也是一条**提示词注入**（inject: 'prompt'）：
+ * 它不分割轮次，界面上并进那一轮的「思考、工具与提示词」过程组——与思考、工具调用
+ * 同一层（见 agent/messageKind 与 panel/partGroups）。正文只在上下文里，展开看全文。
  */
 export function promptModuleMessage(mod: PromptModule, uuid: string, at: number): ConversationMessage {
   return {
@@ -645,5 +648,6 @@ export function promptModuleMessage(mod: PromptModule, uuid: string, at: number)
     hidden: true,
     mark: t('提示词模块 · {0}', mod.title),
     promptModule: mod.key,
+    inject: 'prompt',
   }
 }

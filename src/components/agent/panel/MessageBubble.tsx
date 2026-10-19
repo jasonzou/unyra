@@ -14,7 +14,7 @@
  * 没变过的历史消息不该跟着把整棵子树重新 reconcile 一遍。
  */
 
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Brain,
@@ -38,7 +38,7 @@ import { lastLineOf } from './preview'
 import { toolLabel } from './toolLabel'
 import { useFold } from './useFold'
 import { isInterruptedNotice } from '../../../learn/agent/inflight'
-import { groupParts, isProcessPart, type ProcessPart } from './partGroups'
+import { groupParts, isProcessPart, type InjectItem, type ProcessPart } from './partGroups'
 import { openChipRef, type ChipPayload } from '../../../lib/docChip'
 import { chipLabel, chipSvg, chipToken, maskChipTokens, restoreChipTokens, splitChips } from '../../../lib/chipSyntax'
 import { promptModuleByKey } from '../../../learn/ai/promptModules'
@@ -62,6 +62,13 @@ interface MessageRowProps {
   confirming: boolean
   /** 这一条正在编辑时的文本；没在编辑就是 null */
   editingText: string | null
+  /**
+   * 这一轮开始前注入的那几条提示词（人格 / 文档格式 / 技能库 / 提示词模块，
+   * 见 agent/messageKind）。它们并进回复里的「思考、工具与提示词」过程组——
+   * 与思考、工具调用同一层，而不是在对话流里单独画一条分界条。
+   * 由 useMessageList 从隐藏消息合成，身份只在 messages 变了之后才换。
+   */
+  prelude?: InjectItem[]
   /** 每条消息的 DOM：定位条与缩放都要用 */
   msgRefs: React.RefObject<Map<string, HTMLDivElement>>
   /** 点中断说明旁的「继续」：恢复被中断的一轮（见 AgentPanel；只挂在正文的 NoticeBlock 上） */
@@ -95,6 +102,7 @@ export const MessageRow = memo(function MessageRow({
   flash,
   confirming,
   editingText,
+  prelude,
   msgRefs,
   onResumeNotice,
   onSaveEdit,
@@ -188,7 +196,7 @@ export const MessageRow = memo(function MessageRow({
       }}
       className={'group relative mb-4' + fadedCls}
     >
-      <Parts parts={m.parts} onResumeNotice={onResumeNotice} />
+      <Parts parts={m.parts} prelude={prelude} onResumeNotice={onResumeNotice} />
       {m.usage && (
         <div className="mt-1">
           <UsageLine usage={m.usage} />
@@ -339,23 +347,36 @@ function EditBox({
  * 连成的候选组，以及其余独立成条的东西（正文、运行时提示）。归组规则本身是纯函数、
  * 住在 panel/partGroups 里（有单元用例钉着）——这里只管「怎么画」。
  *
+ * prelude（轮开始前注入的那几条提示词）由 groupParts 排在最前面、与后面的过程件同组：
+ * 于是这一轮从头到尾只有**一条**折叠标题，而不是「提示词注入」与「思考与工具」两行。
+ *
  * 只有一个成员的组按单条画：孤零零一件没有可收拢的东西，硬套组壳等于多一次点击。
  */
 function Parts({
   parts,
+  prelude,
   onResumeNotice,
   streaming = false,
 }: {
   parts: AgentPart[]
+  prelude?: InjectItem[]
   onResumeNotice?: () => void
   streaming?: boolean
 }) {
-  const groups = groupParts(parts)
+  const groups = groupParts(parts, prelude)
   return (
     <div className="flex flex-col gap-2">
       {groups.map((g, i) => {
         if (g.kind === 'group' && g.items.length > 1) return <ProcessGroup key={i} items={g.items} />
         const part = g.kind === 'single' ? g.part : g.items[0]
+        // 落单的提示词注入：与过程件同一副样子（折叠标题 + 展开看全文），也带那道下边框
+        if (part.type === 'inject') {
+          return (
+            <div key={'inject-' + part.id} className="border-b border-line pb-2">
+              <InjectBlock item={part} />
+            </div>
+          )
+        }
         // 落单的过程件与组一样带一道下边框，和后面的正文分割开；正文与提示不带
         return isProcessPart(part) ? (
           <div key={i} className="border-b border-line pb-2">
@@ -387,11 +408,12 @@ function SinglePart({
 }
 
 /**
- * 消息组：**相邻且至少两条**的过程件（思考 / 工具调用 / 注入的提示词模块）合进来，
- * 默认折叠。组本身**不画壳**——没有边框、没有底色、没有内边距，收拢关系全靠标题行
- * 与展开后的缩进表达；底部一道下边框把它和后面的正文分割开。展开后里面是一条条
- * 独立的思考气泡（ThinkingBlock）、工具调用气泡（ToolCard）与提示词模块块
- * （PromptModuleBlock），各自管各自的展开收起，底部还有组级的「收起」。
+ * 消息组：**相邻且至少两条**的过程件（思考 / 工具调用 / 注入的提示词模块 / 轮开始时的
+ * 提示词注入）合进来，默认折叠。组本身**不画壳**——没有边框、没有底色、没有内边距，
+ * 收拢关系全靠标题行与展开后的缩进表达；底部一道下边框把它和后面的正文分割开。
+ * 展开后里面是一条条独立的思考气泡（ThinkingBlock）、工具调用气泡（ToolCard）、
+ * 提示词模块块（PromptModuleBlock）与注入块（InjectBlock），各自管各自的展开收起，
+ * 底部还有组级的「收起」。
  *
  * 折叠态不是一行死标题——它持续显示组里**当前最后一件**的内容，与思考气泡
  * 同一个意图：模型可能安静十几秒，一行不断往左滚的字，一眼就能看出「它还在写」。
@@ -399,13 +421,13 @@ function SinglePart({
  * 提示词模块取模块名；组里新进来一件，预览就跟着换过去。模型的正文永远在组外
  * （见 Parts 的归组规则），那才是用户要直接读的话。
  *
- * 标题里的「提示词」只在组里真有模块时才写：常驻一个用不上的词，等于把「这一步
- * 是什么」这件事说糊（模块本来就是低频的十几条之一）。
+ * 标题里的「提示词」只在组里真有模块或注入时才写：常驻一个用不上的词，等于把
+ * 「这一步是什么」这件事说糊（模块本来就是低频的十几条之一）。
  */
 function ProcessGroup({ items }: { items: ProcessPart[] }) {
   const { open, shown, toggle } = useFold()
   const last = items[items.length - 1]
-  const hasModule = items.some((p) => p.type === 'prompt-module')
+  const hasPrompt = items.some((p) => p.type === 'prompt-module' || p.type === 'inject')
   /**
    * 预览不进 useMemo：流式时 applyEvent 是**原地改 part 对象**的（setStreaming 只换
    * 数组壳，对象身份不变），认对象会让预览冻在第一帧——思考在长，组上却看不见。
@@ -416,7 +438,9 @@ function ProcessGroup({ items }: { items: ProcessPart[] }) {
       ? lastLineOf(last.text) || '…'
       : last.type === 'prompt-module'
         ? t('提示词模块 · {0}', promptModuleByKey(last.key)?.title ?? last.key)
-        : toolLabel(last.name, last.args)
+        : last.type === 'inject'
+          ? last.label
+          : toolLabel(last.name, last.args)
 
   return (
     <div className="border-b border-line pb-2">
@@ -428,7 +452,7 @@ function ProcessGroup({ items }: { items: ProcessPart[] }) {
         {/* 折叠指示：与思考气泡、工具气泡同一套 chevron 词汇 */}
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <span className="shrink-0">
-          {hasModule ? t('思考、工具与提示词 · {0} 步', items.length) : t('思考与工具 · {0} 步', items.length)}
+          {hasPrompt ? t('思考、工具与提示词 · {0} 步', items.length) : t('思考与工具 · {0} 步', items.length)}
         </span>
         {!open && (
           /*
@@ -452,6 +476,8 @@ function ProcessGroup({ items }: { items: ProcessPart[] }) {
                   <ThinkingBlock key={i} text={p.text} />
                 ) : p.type === 'prompt-module' ? (
                   <PromptModuleBlock key={'m' + i} part={p} />
+                ) : p.type === 'inject' ? (
+                  <InjectBlock key={'i' + p.id} item={p} />
                 ) : (
                   <ToolCard key={p.id || i} part={p} />
                 ),
@@ -480,10 +506,29 @@ function ProcessGroup({ items }: { items: ProcessPart[] }) {
  * 一行不断往左滚的字，一眼就能看出「它还在写」——这正是这个气泡存在的意义。
  * 展开就是完整正文，预览随之收起（那时整段话都看得见了）；高度过渡见 moji-fold，
  * 内容的挂载时机见 useFold，底部给一个「收起」，读完就地收起。
+ *
+ * **展开后的正文限高**（用户定的）：一段思考可以是几千字，全摊开会把下面的正文
+ * 顶出好几屏——那一块本来只是「它怎么想的」的旁注。超过上限就在框内滚动，
+ * 滚动条细一档（moji-scroll-thin）：用户得看得见「下面还有」，而不是以为到此为止。
+ * 流式期间还在写的时候，只要读者本来就停在底部就继续跟着贴底（往上翻过就不抢，
+ * 与消息列表同一条礼貌）。
  */
 function ThinkingBlock({ text }: { text: string }) {
   const { open, shown, toggle } = useFold()
   const tail = useMemo(() => lastLineOf(text), [text])
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  /** 读者此刻是不是停在正文底部：流式续写时据此决定要不要跟着滚 */
+  const atBottomRef = useRef(true)
+  /** 上一次渲染的正文：只有它**变长了**才谈得上跟着滚（展开历史思考不该跳到末尾） */
+  const prevText = useRef(text)
+
+  useEffect(() => {
+    const el = bodyRef.current
+    const grew = text !== prevText.current
+    prevText.current = text
+    if (!el || !grew || !atBottomRef.current) return
+    el.scrollTop = el.scrollHeight
+  }, [text])
 
   return (
     <div>
@@ -505,7 +550,14 @@ function ThinkingBlock({ text }: { text: string }) {
         <div>
           {shown && (
             <>
-              <div className="whitespace-pre-wrap py-1 text-[12.5px] leading-relaxed text-ink-soft">
+              <div
+                ref={bodyRef}
+                onScroll={(e) => {
+                  const el = e.currentTarget
+                  atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 24
+                }}
+                className="moji-scroll-thin max-h-[22rem] overflow-y-auto overscroll-contain whitespace-pre-wrap py-1 pr-1.5 text-[12.5px] leading-relaxed text-ink-soft"
+              >
                 {text}
               </div>
               <button
@@ -567,15 +619,23 @@ function NoticeBlock({
  */
 
 /**
- * 导师动作分界条（出卷 / 阅卷 / 开讲）。不显示指令原文（那是内部
+ * 工作流指令的分界条（开讲 / 出卷 / 阅卷 / 压缩…）。不显示指令原文（那是内部
  * 提示词，不是给用户看的话），只标出「这里发生了什么」；定位条按它做锚点，
  * 点一下能跳回来。
  *
- * **相邻的分界条融成一条**：工作流常连着触发（换人格 → 开讲），各画各的就是
+ * **只有工作流指令才画这一条**（判据见 agent/messageKind）：人格、文档格式、技能库、
+ * 提示词模块这些「提示词注入」并进那一轮的过程组，不再挤到这里来——从前它们混在
+ * 一起，几条连着注入时这一行字会被挤出边界（用户报的那个 bug）。
+ *
+ * **相邻的分界条融成一条**：工作流常连着触发（出卷 → 阅卷），各画各的就是
  * 两条紧贴的横线，中间只隔一行字高的空——空间上重复表达「这里有一次导师动作」。
  * 融合后一条横线串起全部动作名，动作之间用一截细竖线分开（不用「·」：动作名
  * 本身可能带「·」，如「导师人格 · 标准导师」）。每条消息仍各自往 msgRefs 里
  * 注册自己的 DOM（就是这同一条分界条）：定位条的锚点一个不少。
+ *
+ * 排版是**可折行**的：动作名一多（或名字本身很长）就换行，而不是把整条挤出容器。
+ * 单个名字还给了上限并截断（title 里留着全文）——一个名字就能占满一整行时，
+ * 让它独占一行比让它把两边的横线顶没更好看。
  */
 export function HiddenDivider({
   msgs,
@@ -596,18 +656,26 @@ export function HiddenDivider({
           else msgRefs.current.delete(m.id)
         }
       }}
-      className={'mb-3 flex items-center gap-2 rounded px-1 text-[11px] text-ink-faint' +
+      className={'mb-3 flex items-start gap-2 rounded px-1 py-0.5 text-[11px] text-ink-faint' +
         (faded ? ' opacity-55' : '') +
         (flash ? ' moji-msg-flash' : '')}
     >
-      <span className="h-px flex-1 bg-line" />
-      {msgs.map((m, i) => (
-        <span key={m.id} className="flex shrink-0 items-center gap-2">
-          {i > 0 && <span aria-hidden="true" className="h-2.5 w-px bg-line-strong" />}
-          {t(m.mark ?? '导师动作')}
-        </span>
-      ))}
-      <span className="h-px flex-1 bg-line" />
+      {/* mt-[7px]：让那截横线落在这一行文字的**垂直中线**上（11px 字、行高约 16px） */}
+      <span aria-hidden="true" className="mt-[7px] h-px min-w-4 flex-1 bg-line" />
+      <span className="flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-1">
+        {msgs.map((m, i) => {
+          const label = t(m.mark ?? '导师动作')
+          return (
+            <span key={m.id} className="flex min-w-0 items-center gap-2">
+              {i > 0 && <span aria-hidden="true" className="h-2.5 w-px shrink-0 bg-line-strong" />}
+              <span className="max-w-[16rem] truncate" title={label}>
+                {label}
+              </span>
+            </span>
+          )
+        })}
+      </span>
+      <span aria-hidden="true" className="mt-[7px] h-px min-w-4 flex-1 bg-line" />
     </div>
   )
 }
@@ -643,8 +711,44 @@ function PromptModuleBlock({ part }: { part: Extract<AgentPart, { type: 'prompt-
           展开体按 Markdown 渲染：注入的模块全文本来就是按 Markdown 写的（围栏、列表、
           表格都有），裸 <pre> 只会把源码摆出来——渲染后才是它在上下文里的真实形态。
         */
-        <div className="moji-in-soft mt-1.5 max-h-80 overflow-auto rounded border border-line bg-card/70 p-2.5 text-left text-[11.5px] leading-relaxed text-ink-soft">
+        <div className="moji-in-soft moji-scroll-thin mt-1.5 max-h-80 overflow-auto rounded border border-line bg-card/70 p-2.5 text-left text-[11.5px] leading-relaxed text-ink-soft">
           <MarkdownView html={renderNote(part.text)} className="moji-agent-md" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 一条**提示词注入**（人格 / 文档格式 / 技能库 / 提示词模块）在过程组里的折叠块。
+ *
+ * 与 PromptModuleBlock 是同一副样子、同一个道理：折叠时一行「导师人格 · ADHD 导师 ·
+ * 已注入上下文」，展开看注入的全文。区别只在标题来源——模块块查模块表拿标题，
+ * 这里直接用隐藏消息自己的 mark（那本来就是给人看的那句话）。
+ *
+ * 它取代的是从前那条分界条：一条分界条只说「导师动作」，而这几条根本不是动作，
+ * 它们是**这一轮被补进上下文的提示词**——与思考、工具调用同一层。
+ * 透明化不变：上下文里被注入了什么，用户随时点开就能看到。
+ */
+function InjectBlock({ item }: { item: InjectItem }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={open ? t('收起模块全文') : t('点开查看注入的完整提示词')}
+        className="flex w-full min-w-0 items-center gap-1.5 text-left text-[12.5px] text-ink-faint transition hover:text-ink-soft"
+      >
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <span className="min-w-0 truncate" title={item.label}>
+          {item.label}
+        </span>
+        <span className="shrink-0 opacity-75">{t('已注入上下文')}</span>
+      </button>
+      {open && (
+        <div className="moji-in-soft moji-scroll-thin mt-1.5 max-h-80 overflow-auto rounded border border-line bg-card/70 p-2.5 text-left text-[11.5px] leading-relaxed text-ink-soft">
+          <MarkdownView html={renderNote(item.text)} className="moji-agent-md" />
         </div>
       )}
     </div>

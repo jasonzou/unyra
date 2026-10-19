@@ -98,6 +98,60 @@
 }
 
 /*
+ * 空白页签**未被选中**时的提醒（见 TabBar 的 idleBlank）：
+ * 一圈印章红的描边与极淡的底色缓慢呼吸，配着图标一起明暗——「这里还开着一个
+ * 什么都没打开的页签」，不处理就一直轻轻亮着。
+ *
+ * 为什么只动 border-color / background-color：这两个属性只触发重绘、不触发排版，
+ * 一枚 120px 宽的小方块在 2.8s 一个来回里几乎不花什么；换成 transform/box-shadow
+ * 反而要额外一层合成。
+ *
+ * 鼠标扫上去就停（animation: none）：那时用户已经在看它，底色该让给 hover 的正常反馈，
+ * 不然两种底色会打架。同样的理由，prefers-reduced-motion 下直接不呼吸。
+ */
+@keyframes moji-tab-attn {
+  0%,
+  100% {
+    border-color: transparent;
+    background-color: transparent;
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--color-seal) 45%, transparent);
+    background-color: color-mix(in srgb, var(--color-seal) 6%, transparent);
+  }
+}
+
+.moji-tab-attn {
+  animation: moji-tab-attn 2.8s ease-in-out infinite;
+}
+
+.moji-tab-attn:hover {
+  animation: none;
+}
+
+/* 图标跟着一起呼吸：比描边稍亮一档，让人先看到「这张纸」，再看到「这一格」 */
+@keyframes moji-blank-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.moji-tab-attn .moji-blank-glyph {
+  animation: moji-blank-breathe 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moji-tab-attn,
+  .moji-tab-attn .moji-blank-glyph {
+    animation: none;
+  }
+}
+
+/*
  * 激活页签的**反向圆角**（仿浏览器页签，agent 栏与文档区共用）：两块 7px 的小方块
  * 贴在激活页签底部两角的**外侧**，径向渐变把靠外的四分之一圆抠成透明——页签的底色
  * 于是「弯」进了面板的顶边，与盖住下边框（各自 TabBar/AgentTabStrip 那条线）一起

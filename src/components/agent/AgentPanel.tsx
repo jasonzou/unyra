@@ -293,6 +293,12 @@ export default function AgentPanel({
   const rootRef = useRef<HTMLDivElement | null>(null)
   /** 滚动容器：列表、定位条、缩放共用它的实时几何 */
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * 滚动容器里那一层内容（带字号 zoom 的 div）。
+   * 交给 useScrollFollow 观察高度：Markdown / 图片 / 工具卡都是**渲染之后**才长高的，
+   * 那几毫秒里没有任何一次 React 渲染会记得再贴一次底（见那边的 ResizeObserver）。
+   */
+  const contentRef = useRef<HTMLDivElement | null>(null)
   /** 每条消息的 DOM：定位条靠它算位置，缩放时也靠它把视口顶部那条贴回原处 */
   const msgRefs = useRef(new Map<string, HTMLDivElement>())
   /**
@@ -319,14 +325,19 @@ export default function AgentPanel({
     zoomHud,
   } = useScrollFollow(
     viewMessages,
-    { scrollRef, rootRef, msgRefs, railAnchorsRef },
+    { scrollRef, rootRef, msgRefs, railAnchorsRef, contentRef },
     setRailActive,
   )
 
-  /** 跟随状态下，内容每长一点就贴到底部；脱离之后一律不动 */
+  /**
+   * 跟随状态下，内容每长一点就贴到底部；脱离之后一律不动。
+   *
+   * 依赖里除了条数，还有 viewMessages 本身（编辑一条消息、压缩之后换了一整份列表，
+   * 条数可能没变但高度变了）——只认条数会漏掉这些「不增不减、只是变高」的改动。
+   */
   useEffect(() => {
     stickToBottom()
-  }, [stickToBottom, viewMessages.length, viewStreaming, viewRunning])
+  }, [stickToBottom, viewMessages, viewStreaming, viewRunning])
 
   // 定位条排在后面：它的 useLayoutEffect 与上面那个「贴底」谁先跑与拆分前一致（见各自注释）
   const { railWide, anchors, railHover, setRailHover, hoverAnchor, measureAnchors } = useMsgRail(
@@ -523,7 +534,7 @@ export default function AgentPanel({
             }}
           />
           {/* 字号系数挂在这一层、而不是滚动容器上：滚动条与内边距不该跟着缩放（上边距 20px：列表内容与页签栏之间留一口呼吸） */}
-          <div className="pt-5" style={{ zoom: chatScale } as CSSProperties}>
+          <div ref={contentRef} className="pt-5" style={{ zoom: chatScale } as CSSProperties}>
             {messageList}
           </div>
         </div>

@@ -63,6 +63,7 @@ const dict: Record<string, string> = {
   '删除目标': 'Delete goal',
   '删除': 'Delete',
   '（有未保存的改动，Ctrl+S 保存）': ' (unsaved changes, Ctrl+S to save)',
+  '（空白页签：还没有打开任何文档）': ' (blank tab: nothing opened yet)',
   '关闭': 'Close',
   '没有打开的文档': 'No documents open',
   '这一格里的页签全部关掉（含当前这一个）': 'Closes all tabs in this pane (including the current one)',
