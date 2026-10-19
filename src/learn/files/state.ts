@@ -1,7 +1,7 @@
 /** 这个文件负责什么：界面状态（state.json）的形状与写出——「上次看到哪儿」、页签、暂存区与本地文件那一份。 */
 
 import type { Drafts } from '../drafts'
-import type { DocKind, DocScroll, FavoriteItem, LearnStore, LearnTab, LocalFile, WorkflowEffortSetting, WorkflowEntry } from '../types'
+import type { DocKind, DocScroll, FavoriteItem, LearnStore, LearnTab, LocalFile, MemoryItem, WorkflowEffortSetting, WorkflowEntry } from '../types'
 
 /**
  * 界面状态（相对用户目录的 state.json）。
@@ -44,6 +44,13 @@ export interface LearnState {
    * 档位是「设置」不是学习数据，不随目标文件走。
    */
   workflows?: { global?: WorkflowEntry[]; efforts?: Record<string, WorkflowEffortSetting> }
+  /**
+   * 记忆库里的**长期**那一半（见 learn/memory）。
+   *
+   * 长期记忆跨目标、跟着用户走，不属于任何一个目标的目录，所以和全局工作流一样存在这里；
+   * 工作记忆按目标落在各自目录的 mind.json（见 buildDocs）。
+   */
+  memory?: { long?: MemoryItem[] }
   /*
    * 番茄钟（见 learn/pomodoro）**整块**存在 state.json 里，没有磁盘镜像，
    * 所以这里漏一个字段就等于「写下去了、读不回来」——曾经真漏过。
@@ -90,6 +97,11 @@ export function buildState(store: LearnStore): Record<string, unknown> {
           },
         }
       : {}),
+    /*
+     * 长期记忆：只在真有条目时写（与 workflows 同一条纪律——空清单只会让人以为存过什么）。
+     * 工作记忆不在这里：它按目标写在各自目录的 mind.json（见 buildDocs）。
+     */
+    ...(store.memory?.long?.length ? { memory: { long: store.memory.long } } : {}),
     /*
      * 番茄钟也只在真有东西时才写。
      *

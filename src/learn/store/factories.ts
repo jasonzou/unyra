@@ -107,7 +107,7 @@ export function mergeLearnStore(base: LearnStore, incoming: LearnStore): LearnSt
      * 导入一份别人的备份不该把它们换掉，更不该让它们凭空消失（早先这里是「一个都不带」，
      * 于是导入一次就把自己这些数据抹了）。
      */
-    minds: base.minds,
+    memory: base.memory,
     methods: base.methods,
     // 随笔与窗口几何同理：是「我写过什么、我把它摆在哪」，不跟着别人的备份走
     essays: base.essays,

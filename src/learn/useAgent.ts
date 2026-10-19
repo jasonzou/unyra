@@ -43,7 +43,7 @@ import { conversationById, nodeById, resolveDisplayedConversation, addConversati
 import { currentNodeBlock, makeExamTool } from './agentOps'
 import { findWorkflow, renderWorkflowInstruction, resolveWorkflowEffort, workflowPrep, workflowModules } from './workflows'
 import { generateConversationTitle, namingSource } from './title'
-import { createMindOps } from './mind'
+import { createMemoryOps } from './memory'
 import { saveScreenshot } from './screenshots'
 import { makeBrowserOps, type BrowserDeps } from './web/browserOps'
 import { loadImagesById, loadImagesFor, releasePending } from './images'
@@ -660,8 +660,8 @@ export function useAgent(opts: {
           onPromptModule: (key) => moduleQueue.add(key),
           // 用户点「停止」时，正在等用户的 ask 与正在睡的 wait 要能立刻退场
           signal,
-          /** 长期记忆：按目标归档；绝不自动拼进上下文，agent 需要时主动读写 */
-          mind: createMindOps({ getLatest, set, goalId: () => target.goalId }),
+          /** 记忆：长期跨目标、工作按目标；绝不自动拼进上下文，agent 需要时主动读写 */
+          memory: createMemoryOps({ getLatest, set, goalId: () => target.goalId }),
           wait: (ms) =>
             new Promise<void>((resolve, reject) => {
               const t = setTimeout(() => {

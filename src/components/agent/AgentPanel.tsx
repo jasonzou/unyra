@@ -85,7 +85,7 @@ interface Props {
   compacting: boolean
   /** 更多 → 超级导师设置：打开超级导师自己的设置页签（与全局设置不是同一个） */
   onOpenAgentSettings: () => void
-  /** 更多 → 记忆：打开导师长期记忆的管理页签（learn/mind） */
+  /** 更多 → 记忆：打开记忆管理页签（长期 + 工作两类，见 learn/memory） */
   onOpenMinds: () => void
   /** 斜杠 /exam：跑内置工作流「出卷」（与文档区、资源管理器里的入口是同一个 newExam） */
   onExam: () => void

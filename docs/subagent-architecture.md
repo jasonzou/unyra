@@ -88,7 +88,7 @@ SubAgentBucket  一段对话的桶：{ defs, sessions }——住在 Conversation
 子代理可以选的白名单（`agent/subagent/groups.ts`）：
 
 `web`（检索 / 读网页）· `tmp`（大中间结果）· `res`（资源库）· `doc`（文档读写）·
-`node`（节点读写）· `outline` · `mind`（长期记忆）· `workspace`（工作区文件）·
+`node`（节点读写）· `outline` · `memory`（工作 / 长期记忆）· `workspace`（工作区文件）·
 `reading` / `attention`（学习事实，只读）。
 
 ## 网络检索类子代理（常用模板）

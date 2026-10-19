@@ -41,15 +41,15 @@ export const PROMPT_MODULES: PromptModule[] = [
 - 目标根级超级文档：存放于 \`superdocs/\${name}.html\`。
 - 命名契约：文件名强制以 .html 结尾；在界面中与 api.ui.superdoc 中引用的名称 name 不含 .html 后缀。
 
-二、怎么读与怎么写（核心动线）
+二、怎么读与怎么写（核心动线，全部走 api.sdoc.*）
 1. 读取已有超级文档：
-   - 查验列表：await api.files.list(\`\${p.dir}/superdocs/\`)；
-   - 读取源码：await api.files.read(\`\${p.dir}/superdocs/\${name}.html\`)。
+   - 查验列表：await api.sdoc.list(path)；
+   - 读取源码：await api.sdoc.read(path, name)。
 2. 创建与写入：
-   - 使用标准文件写入：await api.files.write(\`\${p.dir}/superdocs/\${name}.html\`, htmlCode)。
+   - await api.sdoc.write(path, name, htmlCode)（同名覆盖，name 不含 .html）。
    - 写入后立即在文档区展示：await api.ui.superdoc(p.path, name)（若为当前激活节点可直接 await api.ui.superdoc(name)）。
-   - 局部改动：await api.files.edit(\`\${p.dir}/superdocs/\${name}.html\`, { replace: { old: '...', new: '...' } }) 或 files.write 整体覆写。
-   - 响应式同步机制已打通：api.files 写入或修改后，底层 VFS 事件总线会在 0ms 乐观同步至应用内存状态并驱动 React 实时刷新，绝不会发生 0 字节清空或静默还原。
+   - 局部改动：读回源码改完再 api.sdoc.write 整份覆盖。
+   - 响应式同步机制已打通：api.sdoc.write 落进 store 后驱动 React 实时刷新，绝不会发生 0 字节清空或静默还原。
 
 三、技术格式规范
 - 自包含单页：HTML 中直接书写完整结构、<style> 内联样式与 <script> 交互代码。
@@ -68,8 +68,9 @@ export const PROMPT_MODULES: PromptModule[] = [
 
 四、读写边界与严禁行为
 - ✅ 能写：纯 HTML/CSS/JS 代码、SVG 矢量动画、moji-markdown 讲解、调用 window.api.method.call。
-- ❌ 严禁调用退役桩：api.sdoc.write / api.sdoc.read（调用即抛异常，已被收敛为 api.files）。
-- ❌ 严禁写入非法路径：不要脱离 superdocs/ 目录写入未归档的 HTML 文件。`,
+- ✅ 读写一律走 api.sdoc.*（list / read / write / delete）；用前先 await api.sdoc.__help() 查用法。
+- ❌ 严禁用 api.files.* 直接读写 superdocs/ 下的 HTML——那是应用数据，files 通道会被拒绝。
+- ❌ 严禁写入非法路径：不要脱离 superdocs/ 目录写未归档的 HTML 文件。`,
   },
   {
     key: 'browser',
@@ -183,8 +184,9 @@ export const PROMPT_MODULES: PromptModule[] = [
   {
     key: 'res',
     title: '资源库',
-    text: `目标资源库已收敛为真实文件系统：
-- 图片与静态资源直接使用 api.files 读写 docs/目标/static/ 目录（如 docs/.../static/{uuid}.png）。
+    text: `目标资源库（api.res.*）——这份规范在你第一次读写静态资源时注入：
+- 清单/详情/读/建/改/删/引用扫描全部走 api.res.*（先 await api.res.__help() 查用法）；
+- 图片与静态资源物理存放于 docs/目标/static/，但**不要用 api.files.* 直接读写**——那是应用数据；
 - 在文档和讲义中引用静态资源使用标准 Markdown 格式：![说明](moji:static/{uuid})。`,
   },
   {
@@ -192,15 +194,11 @@ export const PROMPT_MODULES: PromptModule[] = [
     title: '试卷与考试',
     text: `试卷与考试（Exam & ExamAttempt）——数据文件收敛于真实文件系统，两层结构与严密读写边界：
 
-一、两层架构与物理路径契约
+一、两层架构与读写口径
 - 试卷是严密的【两层分离结构】：
   - Exam（试卷本体）：题目、类型、难度、时限，是静态试题模板。
   - ExamAttempt（历次考试记录）：用户的实际作答、击键流水、耗时统计、切屏记录与判分结论。同一试卷可反复考核，历次记录按 startedAt 升序保存在 attempts 数组中。
-- 物理路径契约：
-  - 节点试卷（推荐）：docs/.../exams/{examId}.json。先调用 const p = await api.node.paths()，其返回 dir 与 examsDir，路径为 \`\${p.dir}/exams/\${examId}.json\`。
-  - 目标级试卷：exams/{examId}.json。
-  - 命名契约：文件名强制为 {examId}.json，且与 JSON 内的 id 字段必须严格一致。
-  - 批改错题报告（辅助）：可在同目录下保存 Markdown 讲解，如 \`\${p.dir}/exams/\${examId}_批改.md\`。
+- 读写一律走 api.exam.*（先 await api.exam.__help() 查用法），**不要用 api.files.* 碰 exams/ 目录**——那是应用数据，files 通道会被拒绝。
 
 二、完整 JSON Schema 规范
 试卷文件必须严格符合以下 JSON 契约：
@@ -233,13 +231,13 @@ export const PROMPT_MODULES: PromptModule[] = [
 
 三、两阶段工作流：教 Agent 怎么读、怎么写
 1. 出题阶段（阶段一，Agent 生成试卷）：
-   - 读：先读节点讲义与掌握度；用 api.ask 询问用户期望的试卷类型与难度。
-   - 写：构造符合上述 Schema 的试卷 JSON，写入 await api.files.write(\`\${p.dir}/exams/\${examId}.json\`, JSON.stringify(exam, null, 2))。
-   - 纪律：出题阶段 attempts 必须传空数组 []，不要伪造或预置任何作答数据。
+   - 读：先读节点讲义与掌握度（api.doc.read / api.state.read）；用 api.ask 询问用户期望的试卷类型与难度。
+   - 写：一条 await api.exam.create({ title?, kind?, level?, minutes?, questions }) 落卷——它自己生成 id、归属与空 attempts，不要手写试卷 JSON 文件。
+   - 纪律：出题阶段 attempts 必须为空，不要伪造或预置任何作答数据。
 2. 阅卷阶段（阶段二，用户交卷后批改）：
-   - 读：调用 await api.files.read(\`\${p.dir}/exams/\${examId}.json\`) 读取试卷与最新作答（exam.attempts[exam.attempts.length - 1]，携带 attemptId）。
-   - 判分：客观题严格核对 answer；填空题与简答题依据 rubric 评判，生成 results 数组。
-   - 更新并写回：更新该 attempt 的评价字段后，用 api.files.write 写回整份试卷 JSON。
+   - 读：await api.exam.read(attemptId?) 读取试卷与最新作答（attempts[attempts.length - 1]，携带 attemptId）。
+   - 判分：客观题严格核对 answer；填空题与简答题依据 rubric 评判，生成 results 数组后，用 await api.exam.grade({ attemptId?, passed?, summary?, results }) 落账。
+   - 讲解：await api.exam.explain({ content, attemptId? }) 写错题讲解，它落在同一次考试上并自动打开试卷副本。
    - 更新状态：调用 api.node.update(path, { status: passed ? 'mastered' : 'learning' }) 同步节点掌握状态。
 
 四、读写权限与严格边界（哪些能写、哪些绝对禁止篡改）
@@ -255,22 +253,25 @@ export const PROMPT_MODULES: PromptModule[] = [
   - attempt.summary：综合成绩与掌握分析（字符串）；
   - attempt.explanation：针对错题的详尽步骤推导与 Markdown 解析。
 - ❌ 严禁行为：
-  - 绝不调用退役桩 api.exam.create / api.exam.read / api.exam.grade（调用即抛异常）；
+  - 绝不用 api.files.* 直接读写 exams/ 目录（那是应用数据，files 通道会被拒绝），试卷读写一律走 api.exam.*；
+  - 绝不改写用户作答事实（answers / inputs / dwell / blurs）；
   - 绝不改动或覆盖之前的历史 attempts 作答轮次。`,
   },
   {
     key: 'learning-process',
     title: '学习过程',
-    text: `学习过程记录已收敛为真实数据文件管理：
-- 有效阅读事实直接使用 api.files 读写 docs/目标/reading.json。
-- 专注记录与学习状态从数据文件中读取，无需调用过时的专属接口。`,
+    text: `学习过程记录（api.reading.* / api.attention.* / api.pomodoro.*）：
+- 有效阅读事实走 api.reading.get / api.reading.list / api.reading.day；
+- 注意力评级走 api.attention.get，番茄钟状态走 api.pomodoro.status（只读）；
+- 学习状态的写（掌握度/错题/检验）走 api.state.*，不要用 api.files.* 碰 reading.json 或 meta.json。`,
   },
   {
     key: 'workspace',
     title: '工作区',
-    text: `工作区目录已统一收敛为真实文件系统：
-- 每个节点的工作区物理目录为 docs/.../workspace/，在磁盘上真实存在。
-- 直接使用 api.files.* 进行文件与目录的读写、列表、删除及管理，交付给用户的物理文件均落盘在此。`,
+    text: `工作区目录（api.workspace.*）——用户交付物的落点：
+- 每个节点的工作区物理目录为 docs/.../workspace/，在磁盘上真实存在；
+- 列/读/写优先走 api.workspace.*（list / read / write，先 await api.workspace.__help() 查用法）；
+- api.files.* 也可以操作 workspace/（它是少数对 files 开放的应用目录），但结构化读写请用 api.workspace.*。`,
   },
   {
     key: 'method',
@@ -279,7 +280,7 @@ export const PROMPT_MODULES: PromptModule[] = [
 - api.method.create({ name, code })：把一段**可执行的函数源码**存进这个目标的函数库。
   code 写成匿名 async 函数，**第一个参数是 api**（整套沙箱 api 都在），其余参数是调用方传的实参：
 
-      api.method.create({ name: '统计句号', code: "((api, path) => { const d = await api.files.read(path); return { count: (d.content.match(/。/g) ?? []).length, size: d.size } })" })
+      api.method.create({ name: '统计句号', code: "((api, path) => { const d = await api.doc.read(path); return { count: (d.content.match(/。/g) ?? []).length, size: d.chars } })" })
 
 - 同名 create 就是**覆盖**（那是更新一个函数，不是重复建）。创建时会编译校验，
   编不过的当场被拒并给出原因。list() 只回名字与体量；delete(name) 删一个。

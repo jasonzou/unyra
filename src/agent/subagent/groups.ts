@@ -22,7 +22,7 @@ export const SUBAGENT_ALLOWED_GROUPS = [
   'doc',
   'node',
   'outline',
-  'mind',
+  'memory',
   'workspace',
   'reading',
   'attention',

@@ -200,12 +200,16 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
         files.set(`${path}/${STATIC_DIR}/${MANIFEST_FILE}`, manifestText(resources))
       }
       /**
-       * 长期记忆（mind，见 learn/mind）写在目标目录里，与 chat.json / 资源清单同一层：
-       * 它与对话、资源同属「目标级的学习数据」。没有记忆就不写文件（同空清单的道理）。
+       * 工作记忆（memory.work，见 learn/memory）写在目标目录里，与 chat.json / 资源清单
+       * 同一层：它与对话、资源同属「目标级的学习数据」。没有记忆就不写文件（同空清单的道理）。
+       *
+       * 文件名沿用 `mind.json`：上一版把「按目标的记忆」存在这里，换名字等于把老用户的
+       * 记忆扔在磁盘上读不回来。文件里换成新形状（version 2 + work），读侧两种都认
+       * （见 learn/files/parse）。长期记忆不在这里——它跨目标，跟着 state.json 走。
        */
-      const minds = store.minds?.[goal.id] ?? []
-      if (minds.length) {
-        files.set(`${path}/mind.json`, jsonText({ version: 1, minds }))
+      const workMemory = store.memory?.work?.[goal.id] ?? []
+      if (workMemory.length) {
+        files.set(`${path}/mind.json`, jsonText({ version: 2, work: workMemory }))
       }
       /**
        * 目标级持久化函数（method，见 learn/methods）同样写在目标目录里、同一条纪律：

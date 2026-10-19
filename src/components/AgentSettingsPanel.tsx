@@ -22,7 +22,8 @@ import { isDevUnlocked } from '../lib/devMode'
 import { REASONING_EFFORTS, REASONING_LABEL } from '../ai/types'
 import { BUILTIN_EFFORT, type WorkflowEffortSetting, type WorkflowRow, type WorkflowTier } from '../learn/workflows'
 import { getActiveSkills } from '../agent/skill/registry'
-import type { LearningGoal, MindStore } from '../learn/types'
+import type { LearningGoal, MemoryStore } from '../learn/types'
+import type { MemoryInput, MemoryPatch } from '../learn/memory'
 import { StrategyTab } from './agent-settings/StrategyTab'
 import { SkillsTab } from './agent-settings/SkillsTab'
 import { McpTab } from './agent-settings/McpTab'
@@ -41,7 +42,7 @@ import { t } from '../i18n'
  *
  * 分页：
  * - 「对话」：上下文压缩阈值与自动折叠策略。
- * - 「记忆」：导师跨对话沉淀的长期偏好、薄弱点与认知记录 (Mind)。
+ * - 「记忆」：导师跨对话记下的东西——工作记忆（目标级）与长期记忆（跨目标）(Memory)。
  * - 「技能」：专业思维模型、解题框架与认知规范 (Skills)。
  * - 「MCP 服务」：Model Context Protocol 开放工具与远端/本地上下文服务。
  * - 「工具」：沙箱与原生 API (进程监控、上下文健康度、API 目录)。
@@ -68,12 +69,14 @@ interface Props {
   onWorkflowEffort?: (row: WorkflowRow, effort: WorkflowEffortSetting) => void
   /** 学习目标清单（记忆管理页用） */
   goals?: LearningGoal[]
-  /** 记忆存储（store.minds，按目标归档） */
-  minds?: MindStore
-  onMindWrite?: (goalId: string, input: { key?: string; text: string }) => void
-  onMindUpdate?: (goalId: string, id: string, text: string) => void
-  onMindDelete?: (goalId: string, idOrKey: string) => void
-  onMindClear?: (goalId: string) => void
+  /** 记忆库：长期跨目标 + 工作按目标（见 learn/memory） */
+  memory?: MemoryStore
+  /** 当前目标：新建工作记忆时的默认归属 */
+  activeGoalId?: string | null
+  onMemoryCreate?: (input: MemoryInput) => void
+  onMemoryUpdate?: (uuid: string, patch: MemoryPatch) => void
+  onMemoryDelete?: (uuid: string) => void
+  onMemoryClearWork?: (goalId: string) => void
   onToast?: (msg: string) => void
 }
 
@@ -137,11 +140,12 @@ export default function AgentSettingsPanel({
   onRemoveWorkflow,
   onWorkflowEffort,
   goals = [],
-  minds = {},
-  onMindWrite,
-  onMindUpdate,
-  onMindDelete,
-  onMindClear,
+  memory = { long: [], work: {} },
+  activeGoalId = null,
+  onMemoryCreate = () => {},
+  onMemoryUpdate = () => {},
+  onMemoryDelete = () => {},
+  onMemoryClearWork = () => {},
   onToast = () => {},
 }: Props) {
   /** 三击「超级导师设置」标题：开发者分页的隐藏入口 */
@@ -173,10 +177,10 @@ export default function AgentSettingsPanel({
   // 统计各模块的活跃徽标数
   const activeSkillsCount = getActiveSkills(settings.skills).length
   const activeMcpCount = (settings.mcp?.servers || []).filter((s) => s.enabled).length
-  const totalMindsCount = Object.values(minds).reduce(
-    (acc, items) => acc + (Array.isArray(items) ? items.length : 0),
-    0,
-  )
+  /** 记忆分页的徽标：长期 + 各目标的工作记忆 */
+  const totalMemoryCount =
+    (memory.long?.length ?? 0) +
+    Object.values(memory.work ?? {}).reduce((acc: number, items) => acc + (Array.isArray(items) ? items.length : 0), 0)
   const allowedDirsCount = (settings.permissions?.allowedDirs || []).length
 
   return (
@@ -207,7 +211,7 @@ export default function AgentSettingsPanel({
             if (tb.key === 'skills' && activeSkillsCount > 0) badgeText = activeSkillsCount
             else if (tb.key === 'mcp' && activeMcpCount > 0) badgeText = activeMcpCount
             else if (tb.key === 'flow' && flowRows) badgeText = flowRows.length
-            else if (tb.key === 'memory' && totalMindsCount > 0) badgeText = totalMindsCount
+            else if (tb.key === 'memory' && totalMemoryCount > 0) badgeText = totalMemoryCount
             else if (tb.key === 'permissions' && allowedDirsCount > 0) badgeText = allowedDirsCount
 
             return (
@@ -276,7 +280,7 @@ export default function AgentSettingsPanel({
                           : tab === 'permissions'
                             ? t('权限设置与安全沙箱')
                             : tab === 'memory'
-                              ? t('Agent 长期记忆管理 (Mind)')
+                              ? t('导师记忆管理 (Memory)')
                               : t('对话与上下文设置')}
             </h2>
             <p className="text-[11.5px] text-ink-faint mt-0.5">
@@ -295,7 +299,7 @@ export default function AgentSettingsPanel({
                           : tab === 'permissions'
                             ? t('真实文件系统访问白名单授权与安全沙箱边界治理')
                             : tab === 'memory'
-                              ? t('超级导师跨对话沉淀的认知、学习偏好与薄弱点记录')
+                              ? t('工作记忆跟着目标走、长期记忆跨目标共享；两者都不会自动进上下文')
                               : t('只影响对话区里的超级导师自身，与全局 AI 设置保持独立')}
             </p>
           </div>
@@ -317,11 +321,12 @@ export default function AgentSettingsPanel({
           ) : tab === 'memory' ? (
             <MemoryTab
               goals={goals}
-              minds={minds}
-              onWrite={onMindWrite || (() => {})}
-              onUpdate={onMindUpdate || (() => {})}
-              onDelete={onMindDelete || (() => {})}
-              onClear={onMindClear || (() => {})}
+              memory={memory}
+              activeGoalId={activeGoalId}
+              onCreate={onMemoryCreate}
+              onUpdate={onMemoryUpdate}
+              onDelete={onMemoryDelete}
+              onClearWork={onMemoryClearWork}
               onToast={onToast}
             />
           ) : tab === 'skills' ? (

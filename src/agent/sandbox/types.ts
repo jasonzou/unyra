@@ -154,11 +154,11 @@ export interface SandboxOptions {
     remove: (payload: Record<string, unknown>) => AgentToolResult
   }
   /**
-   * 长期记忆（mind.*，见 learn/mind）；未注入时沙箱里没有 mind 这一组。
-   * 记忆**不会**被拼进系统提示词——agent 需要时必须主动 read，这是这条边界的一半；
-   * 另一半（写入克制）写在提示词里。
+   * 记忆（memory.*，见 learn/memory）；未注入时沙箱里没有 memory 这一组。
+   * 记忆**不会**被拼进系统提示词——agent 需要时必须主动 list/get，这是这条边界的一半；
+   * 另一半（什么时候该记、记哪一类）写在提示词里。
    */
-  mind?: MindOps
+  memory?: MemoryOps
   /**
    * 目标级持久化函数（method.*，见 learn/methods）；未注入就没有 method 这一组。
    *
@@ -181,7 +181,7 @@ export interface SandboxOptions {
   /**
    * 学习者画像（userInfo.*，见 user/fields 与 learn/agentOps）；未注入就没有这一组。
    *
-   * 与 mind 同一条边界：**画像不会被拼进系统提示词**——导师需要时自己 get。
+   * 与 memory 同一条边界：**画像不会被拼进系统提示词**——导师需要时自己 get。
    * 头像不走这条路（它是几百 KB 的 data URL，进上下文就是灾难）。
    */
   reading?: ReadingOps
@@ -441,16 +441,8 @@ export interface AskAnswer {
 /** 表单提交后的回答集（ask 的返回值里 answers 的形状） */
 export type AskAnswers = AskAnswer[]
 
-/* ---------- mind：长期记忆 ---------- */
+/* ---------- memory：记忆（工作 / 长期） ---------- */
 
-/**
- * 记忆那一组（沙箱里的 mind.*）的宿主实现（见 learn/mind）。
- *
- * 与 tmp 的分界：tmp 是一次编排里的大中间结果（按节点、会过期、不进上下文）；
- * mind 是**跨对话长期有效**的判断与偏好（按目标、不过期、也不自动进上下文——
- * 系统提示词不拼它，agent 需要时必须主动 read，这是需求明确的边界）。
- * 返回普通对象，失败用 { error }（与 res.* 同一约定）。
- */
 /* ---------- reading / attention / pomodoro：学习过程的那一组 ---------- */
 
 /**
@@ -517,17 +509,24 @@ export interface WebOps {
   search?: (queryOrArgs: unknown, opts?: Record<string, unknown>) => Promise<unknown>
 }
 
-export interface MindOps {
-  /** 清单：id、key、摘要、更新时间 */
-  list: () => unknown
-  /** 按 id 或 key 读一条的完整正文 */
-  read: (idOrKey: string) => unknown
-  /** 写入 / 覆盖（给了 key 且已存在同 key 条目时覆盖）；输入是 { key?, text } 或裸字符串 */
-  write: (input: unknown) => unknown
-  /** 删除一条；成功回 { ok: true, deleted }，没有就 { error } */
-  delete: (idOrKey: string) => unknown
-  /** 清空当前目标的全部记忆 */
-  clear: () => unknown
+/**
+ * memory.*：记忆（见 learn/memory）。
+ *
+ * 两类：**工作**（目标级，只有本目标的会话读得到，agent 觉得是负担就能删）与
+ * **长期**（跨目标，删除必须 `{ confirm: true }`）。返回普通对象，失败用 { error }
+ * （与 res.* 同一约定）。
+ */
+export interface MemoryOps {
+  /** 清单：type 可选过滤；工作记忆只回当前目标那一份 */
+  list: (query?: Record<string, unknown>) => unknown
+  /** 读一条全文（uuid）；看不见的条目按「没有」处理 */
+  get: (uuid: string) => unknown
+  /** 新建：{ type, title, keys?, content }（type 省略按 work） */
+  create: (payload: Record<string, unknown>) => unknown
+  /** 更新：只改给了的字段（title / keys / content / type） */
+  update: (uuid: string, patch: Record<string, unknown>) => unknown
+  /** 删除：长期记忆需要 { confirm: true } */
+  remove: (uuid: string, opts?: Record<string, unknown>) => unknown
 }
 
 /**
@@ -561,7 +560,7 @@ export interface ChipOps {
 /**
  * method.* 的宿主实现（见 learn/methods）。
  *
- * 与 mind 的分界：mind 存的是「判断与偏好」（文本，给人与模型读）；
+ * 与 memory 的分界：memory 存的是「判断与事实」（文本，给人与模型读）；
  * method 存的是**可执行的函数源码**——它存在的意义是被调用（agent 的编排里、
  * 以及超级文档的按钮经 api.method.call）。name 就是身份，create 同名覆盖。
  */

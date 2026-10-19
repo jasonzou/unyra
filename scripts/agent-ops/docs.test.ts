@@ -11,7 +11,7 @@ import { createAgentOps } from '../../src/learn/agentOps'
 import { loadAgentSettings, saveAgentSettings } from '../../src/agent/settings'
 import { createExecuteTool, plainLineOf } from '../../src/agent/tools'
 import { makePermissionOps } from '../../src/agent/permissions'
-import { createMindOps } from '../../src/learn/mind'
+import { createMemoryOps } from '../../src/learn/memory'
 import { SANDBOX_API_NAMES } from '../../src/agent/sandboxWorker'
 import { SANDBOX_API_CATALOG } from '../../src/agent/apiCatalog'
 import { emptyProfile } from '../../src/user/types'
@@ -274,6 +274,58 @@ export async function apiNameTests() {
     'permission.list': '',
     'permission.revoke': "'C:/probe/not-allowed'",
     'permission.request': "{ path: 'C:/probe-approval', reason: '探针：外部数据集' }",
+    // 名单扩张后补上的那批（数据面回归 api 组）：这批只问「名字真的注册了吗」，
+    // 行为断言由各自领域的小节覆盖（examTests / methodAndSdocTests / workflowTests / workspaceTests …）
+    'node.createTree': "{ tree: [{ title: '临时树节点' }] }",
+    'doc.read': "''",
+    'doc.readRange': "'', 0, 100",
+    'doc.find': "'', '极限'",
+    'doc.write': "'', '探针正文'",
+    'doc.replace': "'', { expected: '探针正文', content: '探针正文（改）' }",
+    'doc.append': "'', '探针追加'",
+    'doc.annotate': "'', { term: '夹逼定理', body: '用两个边界函数夹住目标函数。' }",
+    'outline.read': "''",
+    'outline.write': "'', { intro: '探针大纲', children: [{ title: '临时子目标' }] }",
+    'state.read': "''",
+    'state.update': "'', { mastery: 60, note: '探针' }",
+    'state.mistake': "'', { pattern: '探针错法' }",
+    'state.forget': "'', '探针错法'",
+    'state.check': "'', { kind: 'probe', score: 80 }",
+    'tmp.set': "{ key: 'probe', value: 1 }",
+    'tmp.get': "'probe'",
+    'tmp.has': "'probe'",
+    'tmp.del': "'probe'",
+    'tmp.list': '',
+    'tmp.clear': '',
+    'exam.create': "{ title: '探针卷', kind: 'quiz', level: 'easy', minutes: 0, questions: [] }",
+    'exam.read': "''",
+    'exam.grade': '{ passed: true }',
+    'exam.explain': "{ content: '探针讲解' }",
+    'exam.delete': '{}',
+    'sdoc.list': "''",
+    'sdoc.read': "'', '探针文档'",
+    'sdoc.write': "'', '探针文档', '<!doctype html><html><body></body></html>'",
+    'sdoc.delete': "'', '探针文档'",
+    'res.list': '',
+    'res.info': "'probe-uuid'",
+    'res.read': "'probe-uuid'",
+    'res.create': "{ name: '探针资源', ext: 'md', content: '# 探针' }",
+    'res.update': "'probe-uuid', { description: '探针' }",
+    'res.delete': "'probe-uuid'",
+    'res.refs': "''",
+    'workspace.list': "''",
+    'workspace.read': "''",
+    'workspace.write': "{ path: '探针.txt', content: '探针' }",
+    'userInfo.get': '',
+    'userInfo.update': "{ nickname: '探针用户' }",
+    'reading.get': "''",
+    'reading.list': '',
+    'reading.day': "''",
+    'attention.get': "''",
+    'pomodoro.status': '',
+    'wf.create': "{ name: '探针流程', instruction: '第一步' }",
+    'wf.remove': "'探针流程'",
+    'web.fetch': "{ url: 'https://example.com/a' }",
   }
   let s = staticStore()
   let tmpStore: Record<string, unknown> = {}
@@ -318,7 +370,7 @@ export async function apiNameTests() {
     },
   })
   // 人机协作与界面那一组：wait / ask / tiktok / ui 都是桩（行为由界面接线保证），
-  // mind 用真的 createMindOps（它是纯 store 逻辑，Node 里就能跑）
+  // memory 用真的 createMemoryOps（它是纯 store 逻辑，Node 里就能跑）
   let sawToast = ''
   let sawScroll: unknown = null
   let sawOpenSuper: string | null = null
@@ -333,7 +385,7 @@ export async function apiNameTests() {
   const tool = createExecuteTool({
     ...ops,
     runSandbox: fakeRunner,
-    mind: createMindOps({ getLatest: () => s, set: (n) => { s = n }, goalId: () => goalId }),
+    memory: createMemoryOps({ getLatest: () => s, set: (n) => { s = n }, goalId: () => goalId }),
     wait: async () => {},
     ask: async () => ({ ok: true, cancelled: false, answers: [] }),
     tiktok: async () => {},
@@ -419,6 +471,15 @@ export async function apiNameTests() {
   ok(sawToast === '你好' && !!sawScroll, 'ui.toast / ui.scroll 都到了宿主')
   ok(sawInvoke === 'compact', 'wf.invoke 把要触发的那一条交给了宿主（按 id 交出去）', sawInvoke)
   ok(sawOpenSuper === '探针文档', 'ui.superdoc 把要开的文档名递给了宿主', sawOpenSuper)
+  // __help 三级：组 / 单条 / 根。假沙箱把它们当普通调用转回宿主，execute 的 callApi 兜底渲染
+  const groupHelp = await tool.run({ description: '组 help', body: '((api)=>{ return await api.node.__help() })' }, { nodeId: childId, goalId })
+  ok(groupHelp.ok && groupHelp.content.includes('node.create'), 'api.node.__help() 列出组内 api', groupHelp.content.slice(0, 150))
+  const apiHelp = await tool.run({ description: '单条 help', body: '((api)=>{ return await api.doc.write.__help() })' }, { nodeId: childId, goalId })
+  ok(apiHelp.ok && apiHelp.content.includes('示例：') && apiHelp.content.includes('await api.doc.write'), 'api.doc.write.__help() 带签名与示例', apiHelp.content.slice(0, 150))
+  const rootHelp = await tool.run({ description: '根 help', body: '((api)=>{ return await api.__help() })' }, { nodeId: childId, goalId })
+  ok(rootHelp.ok && rootHelp.content.includes('api.node') && rootHelp.content.includes('api.<组>.<api>.__help()'), 'api.__help() 是组总览并教用法', rootHelp.content.slice(0, 150))
+  const bogusHelp = await tool.run({ description: '不存在的组', body: '((api)=>{ return await api.nope.__help() })' }, { nodeId: childId, goalId })
+  ok(bogusHelp.content.includes('await api.__help()'), '查不存在的组给出指路而不是空话', bogusHelp.content.slice(0, 120))
   ok(
     sawBrowserOpen === 'https://example.com' &&
       sawBrowserDom === '1:click' &&

@@ -106,6 +106,18 @@ export function deleteGoal(store: LearnStore, goalId: string): LearnStore {
     conversations: remaining,
     exams: store.exams.filter((e) => !removed.has(e.nodeId)),
     tmp: withoutTmpNodes(store.tmp, removed),
+    /*
+     * 工作记忆也挂在目标上（见 learn/memory）：目标没了，它的那一本不该还留在内存里
+     * （否则记忆管理页会冒出一串「未知目标」的条目）。长期记忆跨目标，不在此列。
+     */
+    ...(store.memory
+      ? {
+          memory: {
+            ...store.memory,
+            work: Object.fromEntries(Object.entries(store.memory.work).filter(([g]) => g !== goalId)),
+          },
+        }
+      : {}),
     docArea: withOwners(closeIds(store.docArea, doomedTabs), dropTabs(store.docArea.tabOwners, doomedTabs)),
     drafts: dropDrafts(store.drafts, doomedTabs),
     activeGoalId: nextActiveGoalId,

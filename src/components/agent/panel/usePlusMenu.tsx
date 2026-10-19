@@ -56,7 +56,7 @@ export interface PlusMenuArgs {
   onCompact: () => void
   /** 更多 → 超级导师设置：打开超级导师自己的设置页签（与全局设置不是同一个） */
   onOpenAgentSettings: () => void
-  /** 更多 → 记忆：打开导师长期记忆的管理页签（learn/mind） */
+  /** 更多 → 记忆：打开记忆管理页签（长期 + 工作两类，见 learn/memory） */
   onOpenMinds: () => void
   /** 自由聊天（固定页签）：一级菜单只留 新建对话/对话历史/文件 三件 */
   free?: boolean
@@ -177,9 +177,9 @@ export function usePlusMenu({
       run: onCompact,
     },
     {
-      key: 'minds',
+      key: 'memory',
       label: t('记忆'),
-      hint: t('查看与编辑本目标的导师记忆'),
+      hint: t('工作记忆（本目标）与长期记忆（跨目标）'),
       icon: <Brain size={14} />,
       run: onOpenMinds,
     },

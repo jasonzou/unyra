@@ -158,7 +158,7 @@ import { docFormatOf } from '../../agent/docFormat'
 import AgentSettingsPanel from '../AgentSettingsPanel'
 import MindPanel from '../agent/MindPanel'
 import { addFreeConversation, deleteFreeConversation, freeConversationById, getFreeConversations, subscribeFreeChat } from '../../learn/freeChat'
-import { clearMinds, deleteMind, mindsOf, updateMind, writeMind } from '../../learn/mind'
+import { clearWorkMemories, createMemory, deleteMemory, updateMemory, type MemoryInput, type MemoryPatch } from '../../learn/memory'
 import ExportDialog from './ExportDialog'
 import FloatWindow from '../FloatWindow'
 import { usePresence } from '../../lib/presence'
@@ -472,20 +472,24 @@ export default function LearnWorkspace({
   const topbarGoalQuestion = hasTargetOutline ? (activeGoal?.question ?? '') : ''
 
   /*
-   * 记忆管理页（kind 'mind'）的写入口：**一枚目标一枚页签**，落点由页签自己携带的
-   * goalId 决定（ref.kind === 'mind' 时必带），不随活动目标漂移。
+   * 记忆的写入口（见 learn/memory）：**目标由调用方给**——工作记忆落进哪个目标，
+   * 由页签携带的 goalId 或设置页里的选择决定，不随活动目标漂移；长期记忆跨目标，
+   * 根本没有归属这回事。
+   *
+   * 四个回调都是「纯函数 + set」：校验、上限、作用域搬家全在 learn/memory 里，
+   * 界面只管把用户填的东西交下去（与 workflows / essays 同一套做法）。
    */
-  const mindWrite = (goalId: string, input: { key?: string; text: string }) => {
-    set(writeMind(getLatest(), goalId, input))
+  const memoryCreate = (input: MemoryInput) => {
+    set(createMemory(getLatest(), input))
   }
-  const mindUpdate = (goalId: string, id: string, text: string) => {
-    set(updateMind(getLatest(), goalId, id, text))
+  const memoryUpdate = (uuid: string, patch: MemoryPatch) => {
+    set(updateMemory(getLatest(), uuid, patch))
   }
-  const mindDelete = (goalId: string, idOrKey: string) => {
-    set(deleteMind(getLatest(), goalId, idOrKey))
+  const memoryDelete = (uuid: string) => {
+    set(deleteMemory(getLatest(), uuid))
   }
-  const mindClear = (goalId: string) => {
-    set(clearMinds(getLatest(), goalId))
+  const memoryClearWork = (goalId: string) => {
+    set(clearWorkMemories(getLatest(), goalId))
   }
 
   /*
@@ -3964,8 +3968,6 @@ export default function LearnWorkspace({
     const gTab = g.tab
     /** 这一格显示的页签 id；回调里用（TS 的收窄穿不进闭包，见下面几处 onChange） */
     const gTabId = gTab?.id ?? ''
-    /** 记忆页签携带的目标 id：同上，闭包里用（goalId 缺省只在页签不是记忆页时发生） */
-    const gMindGoalId = gTab?.ref.kind === 'mind' ? gTab.ref.goalId : ''
     /** 网页页签携带的 URL：闭包里用（TS 的收窄穿不进闭包） */
     const gWebUrl = gTab?.ref.kind === 'web' ? gTab.ref.url : ''
     const isFocused = groupId === docs.focus
@@ -4221,18 +4223,19 @@ export default function LearnWorkspace({
               <SettingsPanel onRootChanged={onRootChanged} onToast={onToast} />
             ) : gTab?.ref.kind === 'mind' ? (
               /*
-                记忆管理：导师长期记忆（learn/mind）的查看与编辑。**一枚目标一枚页签**
-                （tabKey = 'm:' + goalId），目标删掉时页签一起关（见 deleteGoal）。
-                gMindGoalId 是给下面几个闭包用的（TS 的收窄穿不进闭包，与 gTabId 同理）。
+                记忆管理：导师写下的记忆（learn/memory）的查看与编辑。**一枚目标一枚页签**
+                （tabKey = 'm:' + goalId），打开时默认筛到该目标的工作记忆；长期记忆跨目标，
+                这一页也看得到。目标删掉时页签一起关（见 deleteGoal）。
+                界面与设置页里的「记忆管理」是同一份实现（components/agent/MemoryManager）。
               */
               <MindPanel
                 goalId={gTab.ref.goalId}
-                goalTitle={store.goals.find((g) => g.id === gMindGoalId)?.question ?? ''}
-                entries={mindsOf(store, gTab.ref.goalId)}
-                onWrite={(input) => mindWrite(gMindGoalId, input)}
-                onUpdate={(id, text) => mindUpdate(gMindGoalId, id, text)}
-                onDelete={(idOrKey) => mindDelete(gMindGoalId, idOrKey)}
-                onClear={() => mindClear(gMindGoalId)}
+                goals={store.goals}
+                memory={store.memory ?? { long: [], work: {} }}
+                onCreate={memoryCreate}
+                onUpdate={memoryUpdate}
+                onDelete={memoryDelete}
+                onClearWork={memoryClearWork}
                 onToast={onToast}
               />
             ) : gTab?.ref.kind === 'agentSettings' ? (
@@ -4254,11 +4257,12 @@ export default function LearnWorkspace({
                 onRemoveWorkflow={removeWorkflowRow}
                 onWorkflowEffort={setWorkflowEffortRow}
                 goals={store.goals}
-                minds={store.minds ?? {}}
-                onMindWrite={mindWrite}
-                onMindUpdate={mindUpdate}
-                onMindDelete={mindDelete}
-                onMindClear={mindClear}
+                memory={store.memory ?? { long: [], work: {} }}
+                activeGoalId={activeGoalId}
+                onMemoryCreate={memoryCreate}
+                onMemoryUpdate={memoryUpdate}
+                onMemoryDelete={memoryDelete}
+                onMemoryClearWork={memoryClearWork}
                 onToast={onToast}
               />
             ) : gTab?.ref.kind === 'draft' ? (

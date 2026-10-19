@@ -488,9 +488,11 @@ export type TabRef =
    */
   | { kind: 'usage' }
   /**
-   * 记忆管理页：超级导师写下的长期记忆（learn/mind 的 store.minds）的查看与编辑，
-   * 入口在 agent 栏输入框的「+」菜单。**记忆按学习目标归档，页签也按目标一枚**
-   * （tabKey = 'm:' + goalId）——不是全局单例；目标删掉时它的记忆页签一起关。
+   * 记忆管理页：导师写下的记忆（learn/memory 的 store.memory）的查看与编辑，
+   * 入口在 agent 栏输入框的「+」菜单。**页签也按目标一枚**（tabKey = 'm:' + goalId）：
+   * 打开时默认筛到该目标的工作记忆；长期记忆跨目标，这一页同样看得到。
+   * 目标删掉时它的记忆页签一起关。kind 仍叫 'mind'——改名会让老用户开着的这枚页签
+   * 在升级后凭空消失，而它承载的只是界面状态，不值得为名字付这个代价。
    */
   | { kind: 'mind'; goalId: string }
   /**
@@ -631,10 +633,11 @@ export interface LearnStore {
   /** 临时变量：按节点分组，带过期时间（见 lib/tmpStore） */
   tmp: TmpStore
   /**
-   * 长期记忆：按目标分组（见 learn/mind）。**可选字段**：旧 state.json 里没有它，
-   * 读回来的旧数据不必补——所有使用处都按 `?? []` 兜底，写入时自然会带上。
+   * 记忆库：长期（跨目标）+ 工作（按目标）两类，见 learn/memory。
+   * **可选字段**：旧 state.json 里没有它，读回来的旧数据不必补——使用处一律
+   * `?? { long: [], work: {} }` 兜底，写入时自然会带上。
    */
-  minds?: MindStore
+  memory?: MemoryStore
   /**
    * 目标级持久化函数（method.*，见 learn/methods）。可选字段，理由同 minds：
    * 旧数据没有它，读回来按 `?? []` 兜底。
@@ -744,31 +747,61 @@ export interface TmpEntry {
 export type TmpStore = Record<string, Record<string, TmpEntry>>
 
 /**
- * 一条长期记忆（mind，见 learn/mind）。
+ * 记忆的类型（见 learn/memory）。
+ *
+ * - `work`（工作 / 短期记忆）：**目标级**，记录这个目标里「发生了什么 / 要做什么 /
+ *   怎么做 / 过程怎么样 / 结果怎么样」。只有这个目标的会话读得到；agent 觉得它是
+ *   信息负担时可以随手删掉。
+ * - `long`（长期记忆）：**跨目标**，记聊天中对用户的印象、作息、重要约定。
+ *   任何目标都读得到，也因此**不能随手删**（删除要显式确认，见 memory.delete）。
+ */
+export type MemoryType = 'work' | 'long'
+
+/**
+ * 一条记忆（见 learn/memory）。
  *
  * 与 tmp 的分界：tmp 服务于一次编排里的中间结果（按节点、会过期）；
- * mind 是导师对「这个人、这个目标」长期有效的判断与偏好（按目标、不过期）。
- * 关键边界：记忆**不会**被拼进系统提示词或任何消息——agent 需要时必须主动
- * api.mind.read，这是需求明确的约束（自动注入会让上下文逐轮漂移，前缀缓存
- * 跟着遭殃；更重要的是，记忆该由 agent 自己决定何时取用）。
+ * 记忆是跨对话有效的东西（不过期）。关键边界：记忆**不会**被拼进系统提示词或任何
+ * 消息——agent 需要时必须主动 api.memory.list / get，这是需求明确的约束
+ * （自动注入会让上下文逐轮漂移，前缀缓存跟着遭殃；更重要的是，记忆该由 agent
+ * 自己决定何时取用）。
  */
-export interface MindEntry {
-  id: string
-  /** 稳定的主题名（如「学习者偏好」「目标背景」）；给了 key 再写同 key 会覆盖 */
-  key?: string
-  text: string
-  createdAt: number
-  updatedAt: number
+export interface MemoryItem {
+  /** 唯一标识：api.memory.update / delete 都按它认条目 */
+  uuid: string
+  /** 关键词：检索与展示用（一条记忆可以挂多个） */
+  keys: string[]
+  /** 标题：一行说清这条记忆是什么 */
+  title: string
+  /** 详细内容（Markdown 纯文本，给人与模型读） */
+  content: string
+  /** 创建时间（毫秒） */
+  createAt: number
+  /** 最后更新时间（毫秒） */
+  updateAt: number
+  type: MemoryType
 }
 
-/** 目标 id → 记忆条目。跟着 state.json 一起落盘 */
-export type MindStore = Record<string, MindEntry[]>
+/**
+ * 记忆库。
+ *
+ * 两种类型分两处放，因为它们的**作用域不同**：
+ * - `long` 跨目标，跟着用户走 → state.json（不属于任何一个目标的目录）；
+ * - `work` 按目标归档 → `docs/{目标}/mind.json`（与 chat.json 同层，目标删了它跟着没）。
+ *
+ * 文件名沿用 `mind.json`：那是上一版「长期记忆」的落点，换个名字等于把老用户的记忆
+ * 扔在磁盘上读不回来（读侧按老形状兼容，见 learn/files/parse）。
+ */
+export interface MemoryStore {
+  long: MemoryItem[]
+  work: Record<string, MemoryItem[]>
+}
 
 /**
  * 一条随笔（见 learn/essays）：**目标级**的随手记，没有标题、不挂节点。
  *
- * 与 MindEntry 的区别：记忆是**导师**写给自己（或关于学习者）的判断，只有 agent 主动
- * api.mind.read 才看得到；随笔是**人写给自己**的，就摆在文档区右下角那个小窗口里。
+ * 与 MemoryItem 的区别：记忆是**导师**写给自己（或关于学习者）的判断，只有 agent 主动
+ * api.memory.list / get 才看得到；随笔是**人写给自己**的，就摆在文档区右下角那个小窗口里。
  */
 export interface EssayEntry {
   id: string

@@ -9,8 +9,8 @@ import type {
   EssayCommit,
   EssayEntry,
   LearnStore,
+  MemoryItem,
   MethodEntry,
-  MindEntry,
   NoteFile,
   SuperDocFile,
   TmpEntry,
@@ -55,8 +55,10 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
   const tmp: Record<string, Record<string, TmpEntry>> = {}
   /** 目标 id → 资源清单（见 learn/static） */
   const resources: Record<string, StaticResource[]> = {}
-  /** 目标 id → 长期记忆（见 learn/mind） */
-  const minds: Record<string, MindEntry[]> = {}
+  /** 目标 id → 工作记忆（见 learn/memory）；长期记忆在 state.json，不在这里 */
+  const workMemory: Record<string, MemoryItem[]> = {}
+  /** 上一版按目标存的记忆（mind.json 的老形状）：交给 normalize 折成工作记忆 */
+  const legacyMinds: Record<string, unknown[]> = {}
   /** 目标 id → 持久化函数（见 learn/methods） */
   const methods: Record<string, MethodEntry[]> = {}
   /** 目标 id → 登记的工作流（见 learn/workflows） */
@@ -113,9 +115,15 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
     // 资源清单只有目标目录下才有这一份；子节点目录不会有
     const manifest = parseManifest(files.get(`${dir}/${STATIC_DIR}/${MANIFEST_FILE}`))
     if (manifest.length) resources[goal.id] = manifest
-    // 长期记忆同样只有目标目录一份（见 buildDocs）
-    const mindFile = parseJson<{ minds?: MindEntry[] }>(files.get(`${dir}/mind.json`))
-    if (Array.isArray(mindFile?.minds) && mindFile.minds.length) minds[goal.id] = mindFile.minds
+    /*
+      记忆只有目标目录一份（见 buildDocs）。两种形状都认：
+      - 新版 { version: 2, work: MemoryItem[] }；
+      - 上一版 { version: 1, minds: MindEntry[] }——折成这个目标的工作记忆（见 learn/memory
+        的 normalizeMemoryStore），老用户的记忆因此一条都不丢。
+    */
+    const memoryFile = parseJson<{ work?: MemoryItem[]; minds?: unknown[] }>(files.get(`${dir}/mind.json`))
+    if (Array.isArray(memoryFile?.work) && memoryFile.work.length) workMemory[goal.id] = memoryFile.work
+    else if (Array.isArray(memoryFile?.minds) && memoryFile.minds.length) legacyMinds[goal.id] = memoryFile.minds
     // 持久化函数同上（method.json，与 mind.json 同层同纪律）
     const methodFile = parseJson<{ methods?: MethodEntry[] }>(files.get(`${dir}/method.json`))
     if (Array.isArray(methodFile?.methods) && methodFile.methods.length) methods[goal.id] = methodFile.methods
@@ -238,7 +246,15 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
     exams,
     tmp,
     resources,
-    minds,
+    /*
+      记忆：长期那份跟着 state.json 走（它跨目标、不属于任何目标目录），
+      工作那份按目标来自 mind.json。老形状（minds）一并交下去，由 normalize 折成工作记忆。
+    */
+    memory: {
+      long: s.memory?.long ?? null,
+      work: workMemory,
+    },
+    legacyMinds,
     methods,
     workflows: {
       // 全局那份跟着 state.json 走（buildState）；交给 normalize 按目标存活情况校验

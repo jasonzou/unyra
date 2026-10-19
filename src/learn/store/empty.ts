@@ -14,6 +14,8 @@ export function emptyLearnStore(): LearnStore {
     exams: [],
     tmp: {},
     resources: {},
+    // 记忆库：长期跨目标、工作按目标（见 learn/memory）；空库就是两边都空
+    memory: { long: [], work: {} },
     activeGoalId: null,
     activeNodeId: null,
     activeConversationId: null,
