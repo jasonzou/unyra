@@ -30,6 +30,8 @@ import {
 import { t } from '../../i18n'
 import { type SwitchRootResult } from '../../lib/boot'
 import { AppearancePanel } from './AppearancePanel'
+import { ReminderPanel } from './ReminderPanel'
+import type { ScheduleSound } from '../../learn/schedule'
 import InputPanel from '../InputPanel'
 import TabButton from '../TabButton'
 import { pane } from '../Pane'
@@ -52,6 +54,9 @@ interface Props {
   /** 换用户数据目录：整份数据换一套，交给上层重新载入 */
   onRootChanged: (dir?: string) => Promise<SwitchRootResult>
   onToast: (msg: string) => void
+  /** 日程铃声（设置 → 提醒）：数据是用户级的 schedule.sound，由工作区传进来 */
+  scheduleSound?: ScheduleSound
+  onScheduleSoundChange?: (patch: Partial<ScheduleSound>) => void
 }
 
 type Page = { view: 'list' } | { view: 'config'; providerId: string }
@@ -65,7 +70,7 @@ type Page = { view: 'list' } | { view: 'config'; providerId: string }
  *   预设不再以「已内置的提供商」形式出现——它们只是创建时的模板。
  * 二级「配置页」：选预设（或自定义兼容格式）→ 名称 → Key → 模型列表。
  */
-export default function SettingsPanel({ onRootChanged, onToast }: Props) {
+export default function SettingsPanel({ onRootChanged, onToast, scheduleSound, onScheduleSoundChange }: Props) {
   const initial = loadAiSettings()
   const [tab, setTab] = useState<TabKey>(loadSavedTab)
   const [activeSubTab, setActiveSubTab] = useState<string>('theme')
@@ -302,6 +307,8 @@ export default function SettingsPanel({ onRootChanged, onToast }: Props) {
             <h2 className="text-[15px] font-semibold text-ink-strong">
               {tab === 'appearance'
                 ? t('外观')
+                : tab === 'reminder'
+                  ? t('提醒')
                 : tab === 'window'
                   ? t('窗口')
                   : tab === 'storage'
@@ -407,6 +414,11 @@ export default function SettingsPanel({ onRootChanged, onToast }: Props) {
           />
         ) : tab === 'input' ? (
           <InputPanel onToast={onToast} />
+        ) : tab === 'reminder' ? (
+          <ReminderPanel
+            sound={scheduleSound ?? { preset: 'chime', volume: 0.7 }}
+            onChange={onScheduleSoundChange ?? (() => {})}
+          />
         ) : tab === 'window' ? (
           <WindowPanel onToast={onToast} />
         ) : tab === 'storage' ? (

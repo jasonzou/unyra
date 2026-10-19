@@ -2,7 +2,8 @@
 
 import type { LearnStore } from '../types'
 import { emptyDocs } from '../groups'
-import { emptyPomodoro } from '../pomodoro'
+import { emptyFocus } from '../focus'
+import { emptySchedule } from '../schedule'
 
 export function emptyLearnStore(): LearnStore {
   return {
@@ -14,6 +15,8 @@ export function emptyLearnStore(): LearnStore {
     exams: [],
     tmp: {},
     resources: {},
+    // 记忆库：长期跨目标、工作按目标（见 learn/memory）；空库就是两边都空
+    memory: { long: [], work: {} },
     activeGoalId: null,
     activeNodeId: null,
     activeConversationId: null,
@@ -26,6 +29,8 @@ export function emptyLearnStore(): LearnStore {
     favGroups: [],
     // 阅读按目标分开存（见 learn/reading 的 ReadingBook）：空库就是空账本
     reading: { byGoal: {} },
-    pomodoro: emptyPomodoro(),
+    focus: emptyFocus(),
+    // 日程：空清单 + 默认铃声（见 learn/schedule）
+    schedule: emptySchedule(),
   }
 }

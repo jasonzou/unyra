@@ -38,6 +38,7 @@ export function favoriteKeyOfTab(ref: TabRef): string | null {
     ref.kind === 'report' ||
     ref.kind === 'settings' ||
     ref.kind === 'usage' ||
+    ref.kind === 'schedule' ||
     ref.kind === 'mind' ||
     ref.kind === 'agentSettings' ||
     ref.kind === 'newGoal' ||
@@ -58,6 +59,7 @@ export function favoriteRefOfTab(ref: TabRef): FavoriteRef | null {
     ref.kind === 'report' ||
     ref.kind === 'settings' ||
     ref.kind === 'usage' ||
+    ref.kind === 'schedule' ||
     ref.kind === 'mind' ||
     ref.kind === 'agentSettings' ||
     ref.kind === 'newGoal' ||

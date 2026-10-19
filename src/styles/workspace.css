@@ -98,6 +98,60 @@
 }
 
 /*
+ * 空白页签**未被选中**时的提醒（见 TabBar 的 idleBlank）：
+ * 一圈印章红的描边与极淡的底色缓慢呼吸，配着图标一起明暗——「这里还开着一个
+ * 什么都没打开的页签」，不处理就一直轻轻亮着。
+ *
+ * 为什么只动 border-color / background-color：这两个属性只触发重绘、不触发排版，
+ * 一枚 120px 宽的小方块在 2.8s 一个来回里几乎不花什么；换成 transform/box-shadow
+ * 反而要额外一层合成。
+ *
+ * 鼠标扫上去就停（animation: none）：那时用户已经在看它，底色该让给 hover 的正常反馈，
+ * 不然两种底色会打架。同样的理由，prefers-reduced-motion 下直接不呼吸。
+ */
+@keyframes moji-tab-attn {
+  0%,
+  100% {
+    border-color: transparent;
+    background-color: transparent;
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--color-seal) 45%, transparent);
+    background-color: color-mix(in srgb, var(--color-seal) 6%, transparent);
+  }
+}
+
+.moji-tab-attn {
+  animation: moji-tab-attn 2.8s ease-in-out infinite;
+}
+
+.moji-tab-attn:hover {
+  animation: none;
+}
+
+/* 图标跟着一起呼吸：比描边稍亮一档，让人先看到「这张纸」，再看到「这一格」 */
+@keyframes moji-blank-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.moji-tab-attn .moji-blank-glyph {
+  animation: moji-blank-breathe 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moji-tab-attn,
+  .moji-tab-attn .moji-blank-glyph {
+    animation: none;
+  }
+}
+
+/*
  * 激活页签的**反向圆角**（仿浏览器页签，agent 栏与文档区共用）：两块 7px 的小方块
  * 贴在激活页签底部两角的**外侧**，径向渐变把靠外的四分之一圆抠成透明——页签的底色
  * 于是「弯」进了面板的顶边，与盖住下边框（各自 TabBar/AgentTabStrip 那条线）一起
@@ -266,5 +320,47 @@
   .moji-preview-sprout,
   .moji-preview-collapse {
     animation: none;
+  }
+}
+
+/*
+ * 日程到点的「顶栏呼吸」。
+ *
+ * 铺在顶栏里的一层绝对定位光带（见 chrome.tsx）：从印章色到警告色再回来，
+ * 背景横向缓慢推移 + 整体透明度呼吸。负 z-index 让它只压在顶栏背景之上、
+ * 所有按钮之下——顶栏是 backdrop-blur 建立的层叠上下文，负值不会漏到外面去。
+ *
+ * 为什么是「光」而不是直接给顶栏换背景：顶栏本身带着 from-card/90 到 paper/70 的
+ * 渐变，改它就得在两个渐变之间插值，主题一换还得再调一次；叠一层光只要一个 color-mix，
+ * 深浅主题都成立。指针穿透由调用点上的 pointer-events-none 保证。
+ */
+@keyframes moji-schedule-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+    background-position: 0% 50%;
+  }
+  50% {
+    opacity: 0.95;
+    background-position: 100% 50%;
+  }
+}
+
+.moji-schedule-glow {
+  background-image: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--color-seal) 30%, transparent) 0%,
+    color-mix(in srgb, var(--color-warn) 22%, transparent) 32%,
+    color-mix(in srgb, var(--color-seal) 8%, transparent) 58%,
+    color-mix(in srgb, var(--color-warn) 20%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  animation: moji-schedule-glow 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moji-schedule-glow {
+    animation: none;
+    opacity: 0.6;
   }
 }

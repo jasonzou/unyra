@@ -136,8 +136,9 @@ export function needsDocFormatAnnounce(messages: ConversationMessage[], id: DocF
 /**
  * 那条「从现在起按这种格式写」的隐藏消息。
  *
- * hidden + mark：与 personaMessage 同一个形状家族——用户看得见一条分界条
- * （知道导师换了写法），正文只在上下文里。id 由调用方给（宿主那一层才有 crypto.randomUUID）。
+ * hidden + mark：与 personaMessage 同一个形状家族，也是一条**提示词注入**
+ * （inject: 'prompt'，不画分界条、并进过程组——见 agent/messageKind）。
+ * id 由调用方给（宿主那一层才有 crypto.randomUUID）。
  */
 export function docFormatMessage(
   id: DocFormatId,
@@ -154,6 +155,7 @@ export function docFormatMessage(
     hidden: true,
     mark: t('文档格式 · {0}', t(format.label)),
     docFormat: format.id,
+    inject: 'prompt',
   }
 }
 

@@ -33,6 +33,7 @@ import { toolLabel } from './panel/toolLabel'
 import { useComposer } from './panel/useComposer'
 import { useMsgRail } from './panel/useMsgRail'
 import { useScrollFollow } from './panel/useScrollFollow'
+import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
 import { t, useLocale } from '../../i18n'
 
 /**
@@ -85,7 +86,7 @@ interface Props {
   compacting: boolean
   /** 更多 → 超级导师设置：打开超级导师自己的设置页签（与全局设置不是同一个） */
   onOpenAgentSettings: () => void
-  /** 更多 → 记忆：打开导师长期记忆的管理页签（learn/mind） */
+  /** 更多 → 记忆：打开记忆管理页签（长期 + 工作两类，见 learn/memory） */
   onOpenMinds: () => void
   /** 斜杠 /exam：跑内置工作流「出卷」（与文档区、资源管理器里的入口是同一个 newExam） */
   onExam: () => void
@@ -293,6 +294,12 @@ export default function AgentPanel({
   const rootRef = useRef<HTMLDivElement | null>(null)
   /** 滚动容器：列表、定位条、缩放共用它的实时几何 */
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * 滚动容器里那一层内容（带字号 zoom 的 div）。
+   * 交给 useScrollFollow 观察高度：Markdown / 图片 / 工具卡都是**渲染之后**才长高的，
+   * 那几毫秒里没有任何一次 React 渲染会记得再贴一次底（见那边的 ResizeObserver）。
+   */
+  const contentRef = useRef<HTMLDivElement | null>(null)
   /** 每条消息的 DOM：定位条靠它算位置，缩放时也靠它把视口顶部那条贴回原处 */
   const msgRefs = useRef(new Map<string, HTMLDivElement>())
   /**
@@ -319,14 +326,28 @@ export default function AgentPanel({
     zoomHud,
   } = useScrollFollow(
     viewMessages,
-    { scrollRef, rootRef, msgRefs, railAnchorsRef },
+    { scrollRef, rootRef, msgRefs, railAnchorsRef, contentRef },
     setRailActive,
   )
 
-  /** 跟随状态下，内容每长一点就贴到底部；脱离之后一律不动 */
+  /*
+    列表两端的渐隐：滚到头就摘掉那一端（判据与代价见 lib/scrollFade）。
+    与上面 pinned 是两件事——那个决定要不要跟着最新消息走，这个只回答「那一端还压着内容没有」。
+  */
+  const scrollEdges = useScrollEdges(scrollRef)
+  const listMask = fadeMask(scrollEdges)
+  /** 两端都到头时 mask 是 undefined：这一层根本不进合成，字形保持次像素清晰 */
+  const listMaskStyle = { maskImage: listMask, WebkitMaskImage: listMask }
+
+  /**
+   * 跟随状态下，内容每长一点就贴到底部；脱离之后一律不动。
+   *
+   * 依赖里除了条数，还有 viewMessages 本身（编辑一条消息、压缩之后换了一整份列表，
+   * 条数可能没变但高度变了）——只认条数会漏掉这些「不增不减、只是变高」的改动。
+   */
   useEffect(() => {
     stickToBottom()
-  }, [stickToBottom, viewMessages.length, viewStreaming, viewRunning])
+  }, [stickToBottom, viewMessages, viewStreaming, viewRunning])
 
   // 定位条排在后面：它的 useLayoutEffect 与上面那个「贴底」谁先跑与拆分前一致（见各自注释）
   const { railWide, anchors, railHover, setRailHover, hoverAnchor, measureAnchors } = useMsgRail(
@@ -499,32 +520,29 @@ export default function AgentPanel({
       <div className="relative mx-auto min-h-0 w-full max-w-[768px] flex-1">
         {/* moji-selectable：聊天列表是全站仅有的两处「可选文字、可拖拽」的区域之一
             （另一处是左侧文档浏览区），见 index.css 的只读界面规则 */}
-        <div
-          ref={scrollRef}
-          onWheel={onWheel}
-          onScroll={onScroll}
-          // 不显示滚动条（moji-scroll-none）：右边那条位置留给定位条，见 index.css。
-          // pr-9 而不是 px-3.5：最宽的那个点（18px）也要与正文留出空隙（几何见 panel/constants.ts）
-          // 顶边距不放在容器上：容器一垫，下面的 sticky 渐隐就贴不住滚动口顶端（空出一截）
-          className="moji-scroll-none moji-selectable h-full overflow-y-auto pb-3 pl-3.5 pr-9"
-        >
-          {/*
-            顶部渐隐：滚出去的内容在这条渐变里淡出，而不是被容器上缘一刀切掉。
-            背景色就是面板这一层的底色（paper-deep 四成叠在 paper 上，见根节点的
-            bg-paper-deep/40），color-mix 在这里现算出同一个合成色；sticky 负下边距
-            让它压住列表顶端而不占布局。
-          */}
+        {/*
+          两端渐隐：mask 挂在这一层，不是滚动容器本身——两者落在同一层时，滚动合成层
+          与遮罩层套在一起，边缘有抖出一像素缝的先例；分开挂就没有这层顾虑，滚动仍在内层。
+
+          这里没有色块可画（旧做法），因为底色取决于底下有没有壁纸：mask 只动 alpha，
+          滚出去的内容淡进「本来就在它背后的那一层」，与壁纸无关。
+
+          顶部那条「内边距不能加在容器上、否则渐隐贴不住滚动口顶端」的约束是旧粘性
+          幕布逼出来的，现在没有了：内边距加在哪一层都不会把渐隐顶歪。
+        */}
+        <div className="h-full" style={listMaskStyle}>
           <div
-            aria-hidden="true"
-            className="agent-msg-fade-curtain pointer-events-none sticky top-0 z-[1] -mb-12 h-12 shrink-0"
-            style={{
-              background:
-                'linear-gradient(to bottom, color-mix(in srgb, var(--color-paper-deep) 40%, var(--color-paper)), transparent)',
-            }}
-          />
-          {/* 字号系数挂在这一层、而不是滚动容器上：滚动条与内边距不该跟着缩放（上边距 20px：列表内容与页签栏之间留一口呼吸） */}
-          <div className="pt-5" style={{ zoom: chatScale } as CSSProperties}>
-            {messageList}
+            ref={scrollRef}
+            onWheel={onWheel}
+            onScroll={onScroll}
+            // 不显示滚动条（moji-scroll-none）：右边那条位置留给定位条，见 index.css。
+            // pr-9 而不是 px-3.5：最宽的那个点（18px）也要与正文留出空隙（几何见 panel/constants.ts）
+            className="moji-scroll-none moji-selectable h-full overflow-y-auto pb-3 pl-3.5 pr-9"
+          >
+            {/* 字号系数挂在这一层、而不是滚动容器上：滚动条与内边距不该跟着缩放（上边距 20px：列表内容与页签栏之间留一口呼吸） */}
+            <div ref={contentRef} className="pt-5" style={{ zoom: chatScale } as CSSProperties}>
+              {messageList}
+            </div>
           </div>
         </div>
 

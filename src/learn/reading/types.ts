@@ -78,7 +78,7 @@ export interface ReadingSession {
   minutes: MinuteTick[]
   breaks: ReadingBreak[]
   sections: SectionRead[]
-  /** 前瞻字段：这段阅读是否服务于某个计划块（番茄钟） */
+  /** 前瞻字段：这段阅读是否服务于某个计划块（专注模式） */
   planId?: string
 }
 

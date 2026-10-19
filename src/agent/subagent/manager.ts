@@ -472,7 +472,7 @@ function subsetSandbox(base: SandboxOptions, groups: string[]): SandboxOptions {
     ...(has('tmp') && base.tmp ? { tmp: base.tmp } : {}),
     ...(has('res') && base.resources ? { resources: base.resources } : {}),
     ...(has('web') && base.web ? { web: base.web } : {}),
-    ...(has('mind') && base.mind ? { mind: base.mind } : {}),
+    ...(has('memory') && base.memory ? { memory: base.memory } : {}),
     ...(has('outline') && base.outline ? { outline: base.outline } : {}),
     ...(has('workspace') && base.workspace ? { workspace: base.workspace } : {}),
     ...(has('reading') && base.reading ? { reading: base.reading } : {}),

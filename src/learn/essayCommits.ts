@@ -1,10 +1,14 @@
 /**
- * 随笔提交：把「这一段随笔」封成一份快照，交给 Agent 整理进知识树，再把整理结果记回来。
+ * 随笔提交：把**这个目标的全部随笔**封成一份快照，交给 Agent 统一整理进知识树，
+ * 再把整理结果记回来。
  *
  * 为什么要提交，而不是每次写完就让 Agent 整理：
  * - 随笔是**随手写**的，半句话、错别字、临时念头都有；一提交才算「这批可以归档了」；
  * - 提交要有一份**当时的原样**（snapshot）——之后随笔改了、删了，回看这次整理时
  *   仍然知道它当时读到了什么；
+ * - 每次提交都带**全部随笔**（需求定的）：模型看到的是完整语料，而不是「这一批补丁」，
+ *   归类与合并才有全局观；本次真正要动手的部分由**与上一次快照的差异**给出
+ *   （新增全文 / 修改差异 / 删除清单 / 未变化只列标题），避免把整理过的内容再写一遍；
  * - 整理动了哪几份笔记**由宿主自己对比 store 得出**（noteFingerprint / diffNoteChanges），
  *   不靠模型自报：模型说改了 A、实际改的是 B 时，记录仍然可信。
  *
@@ -13,7 +17,7 @@
  */
 
 import { t } from '../i18n'
-import { essaysOf } from './essays'
+import { essaysOf, ESSAY_TITLE_MAX } from './essays'
 import type {
   EssayCommit,
   EssayCommitChange,
@@ -27,27 +31,85 @@ import type {
 export const ESSAY_COMMIT_MESSAGE_MAX = 200
 /** 一条快照里保留的正文上限：与随笔本身的单条上限一致（见 essays 的 ESSAY_TEXT_MAX） */
 const SNAPSHOT_TEXT_MAX = 20_000
+/** 提交评论的上限：评论是「这次整理的几句话」，不是第二份笔记 */
+const ESSAY_COMMENT_MAX = 2_000
+
+/**
+ * 提交评论在回复里的标记（见 workflows 的 essay-commit 指令）：
+ * Agent 把评论写在这一对 HTML 注释之间——它同时是 Markdown 里的注释，
+ * 误解析失败时那段文字也不会在对话气泡里碍事。
+ */
+export const ESSAY_COMMENT_BEGIN = '<!-- essay-commit-comment'
+export const ESSAY_COMMENT_END = '-->'
+
+/**
+ * 从回复全文里抠出提交评论：**最后一对**标记之间的 Markdown（首行应是标题）。
+ * 解析不到 / 中间是空的返回 null——评论是锦上添花，绝不能因为它挡住整理结果本身。
+ */
+export function parseEssayComment(reply: string): string | null {
+  if (!reply) return null
+  const begin = reply.lastIndexOf(ESSAY_COMMENT_BEGIN)
+  if (begin < 0) return null
+  const rest = reply.slice(begin + ESSAY_COMMENT_BEGIN.length)
+  const end = rest.indexOf(ESSAY_COMMENT_END)
+  const body = (end >= 0 ? rest.slice(0, end) : rest).trim().slice(0, ESSAY_COMMENT_MAX)
+  return body || null
+}
+
+/** 一条提交的评论标题：Markdown 的第一行抹掉记号（`## `）就是标题；没写评论退回提交说明 */
+export function essayCommentTitle(commit: EssayCommit): string {
+  const first = commit.comment?.replace(/\r\n?/g, '\n').split('\n', 1)[0] ?? ''
+  const title = first.replace(/^\s{0,3}#{1,6}\s*/, '').trim()
+  return title || commit.message
+}
 
 /** 这个目标的提交记录（新的在前） */
 export function commitsOf(store: LearnStore, goalId: string): EssayCommit[] {
   return store.essayCommits?.[goalId] ?? []
 }
 
-/** 最近一次提交的时刻；一次都没提交过就是 0（于是所有随笔都算「还没提交」） */
-export function lastCommitAt(store: LearnStore, goalId: string): number {
-  return commitsOf(store, goalId)[0]?.at ?? 0
+/** 一次提交相对上一份快照的差异：新增全文、修改差异、删除清单、未变化只列标题 */
+export interface EssayDiff {
+  /** 上次快照里没有的（新材料里给全文） */
+  added: EssayEntry[]
+  /** 正文改过的（新材料里只给改动处） */
+  edited: EssayEntry[]
+  /** 上次快照里有、这次已经没有的（只剩标题与创建时间） */
+  removed: Array<{ id: string; title: string; createdAt: number }>
+  /** 正文没变的（只列标题，提醒模型不要重做） */
+  unchanged: EssayEntry[]
+  /** 有增 / 删 / 改：界面据此决定提交按钮能不能点 */
+  changed: boolean
 }
 
 /**
- * 还没提交的随笔：`updatedAt` 晚于最近一次提交的都算。
+ * 全部随笔 vs 上一份快照的差异。
  *
- * 用时间而不是「id 有没有出现过」：一条旧随笔改了两个字也应该再次进整理，
- * 而「改过」这件事只有 updatedAt 说得清。
+ * 为什么按**正文**比而不是按 updatedAt：改名不该触发一轮整理（笔记里不记标题），
+ * 而「正文有没有变」才是模型要不要动手的唯一判据。快照为 null（从没提交过）时
+ * 所有随笔都算新增。
  */
-export function pendingEssays(store: LearnStore, goalId: string): EssayEntry[] {
-  const since = lastCommitAt(store, goalId)
-  return essaysOf(store, goalId).filter((e) => e.updatedAt > since)
+export function diffEssaysAgainst(
+  essays: EssayEntry[],
+  snapshot: EssayCommit['snapshot'] | null | undefined,
+): EssayDiff {
+  const prev = new Map((snapshot ?? []).map((s) => [s.id, s]))
+  const out: EssayDiff = { added: [], edited: [], removed: [], unchanged: [], changed: false }
+  const seen = new Set<string>()
+  for (const essay of essays) {
+    seen.add(essay.id)
+    const before = prev.get(essay.id)
+    if (!before) out.added.push(essay)
+    else if (before.text !== essay.text) out.edited.push(essay)
+    else out.unchanged.push(essay)
+  }
+  for (const s of snapshot ?? []) {
+    if (!seen.has(s.id)) out.removed.push({ id: s.id, title: s.title || '', createdAt: s.createdAt })
+  }
+  out.changed = out.added.length > 0 || out.edited.length > 0 || out.removed.length > 0
+  return out
 }
+
 
 /** 换一份提交清单（保持「新的在前」） */
 function withCommits(store: LearnStore, goalId: string, list: EssayCommit[]): LearnStore {
@@ -58,8 +120,11 @@ function withCommits(store: LearnStore, goalId: string, list: EssayCommit[]): Le
 }
 
 /**
- * 提交一次：把「上次提交之后写/改过的」随笔封成快照，插到最前面。
- * 没有待提交内容时返回 null（空提交没有意义，也不该在历史里留一条空记录）。
+ * 提交一次：把**当前的全部随笔**封成快照，插到最前面。
+ * 一条随笔都没有时返回 null（空提交没有意义，也不该在历史里留一条空记录）。
+ *
+ * 注意：这里不判断「有没有变化」——那是界面的门禁（见 diffEssaysAgainst 的 changed）。
+ * 数据层允许在没变化时再提交一次（等价于「按当前全部内容重新整理」）。
  */
 export function createEssayCommit(
   store: LearnStore,
@@ -67,14 +132,16 @@ export function createEssayCommit(
   message: string,
   at: number,
 ): { store: LearnStore; commit: EssayCommit } | null {
-  const pending = pendingEssays(store, goalId)
-  if (!pending.length) return null
+  const all = essaysOf(store, goalId)
+  if (!all.length) return null
   const commit: EssayCommit = {
     id: crypto.randomUUID(),
     at,
     message: (message.trim() || t('随笔整理')).slice(0, ESSAY_COMMIT_MESSAGE_MAX),
-    snapshot: pending.map((e) => ({
+    snapshot: all.map((e) => ({
       id: e.id,
+      // 标题一并封存：提交之后随笔改了名、删了，回看仍是当时的原样
+      title: e.title.slice(0, ESSAY_TITLE_MAX),
       createdAt: e.createdAt,
       text: e.text.slice(0, SNAPSHOT_TEXT_MAX),
     })),
@@ -87,12 +154,12 @@ export function createEssayCommit(
   }
 }
 
-/** 改一条提交记录（整理完成 / 失败 / 重试） */
+/** 改一条提交记录（整理完成 / 失败 / 重试 / 写入评论） */
 export function updateEssayCommit(
   store: LearnStore,
   goalId: string,
   id: string,
-  patch: Partial<Pick<EssayCommit, 'status' | 'changes' | 'error'>>,
+  patch: Partial<Pick<EssayCommit, 'status' | 'changes' | 'error' | 'comment'>>,
 ): LearnStore {
   const list = commitsOf(store, goalId)
   if (!list.some((c) => c.id === id)) return store
@@ -144,16 +211,31 @@ function deltaOf(prev: string, next: string): string {
 }
 
 /**
- * 交给 Agent 的「增量材料」：**提交历史 + 本次新增全文 + 本次修改的差异**。
+ * 交给 Agent 的整理材料：**提交历史 + 全部随笔相对上次的差异**。
  *
- * 这是「整理之后还能继续写、继续提交，Agent 按历史增量改」的关键——
- * 只喂当前快照的话，模型会把上次已经整理过的内容再写一遍，笔记越整理越重复。
+ * 快照是全部随笔（需求定的），但材料只把「要动手的部分」讲清楚：
+ * 新增给全文、修改给改动处、删除给标题、没变化只列标题。这样才能既看到完整语料，
+ * 又不会把上次已经整理过的内容再写一遍（笔记越整理越重复的那口坑）。
  */
 export function commitFeed(commits: EssayCommit[], current: EssayCommit): string {
   const older = commits.filter((c) => c.id !== current.id && c.at <= current.at).sort((a, b) => a.at - b.at)
+  const prev = older.length ? older[older.length - 1] : null
+  const diff = diffEssaysAgainst(
+    current.snapshot.map((s) => ({
+      id: s.id,
+      title: s.title ?? '',
+      text: s.text,
+      createdAt: s.createdAt,
+      updatedAt: current.at,
+    })),
+    prev?.snapshot,
+  )
+
   const lines: string[] = []
   lines.push(
     '这是随笔的第 ' + (older.length + 1) + ' 次提交（提交说明：' + current.message + '）。',
+    '本次快照包含**全部 ' + current.snapshot.length + ' 条随笔**；与上次相比：新增 ' + diff.added.length +
+      ' 条、修改 ' + diff.edited.length + ' 条、删除 ' + diff.removed.length + ' 条、未变化 ' + diff.unchanged.length + ' 条。',
   )
   if (older.length) {
     lines.push('', '【已有整理记录】（这些内容已经整理进笔记，不要重复写入）')
@@ -172,19 +254,6 @@ export function commitFeed(commits: EssayCommit[], current: EssayCommit): string
     }
   }
 
-  // 每条随笔「上一次提交时的样子」：从新往旧扫，第一次遇到的就是最后一次提交的版本
-  const prevById = new Map<string, string>()
-  for (const c of [...older].reverse()) {
-    for (const s of c.snapshot) if (!prevById.has(s.id)) prevById.set(s.id, s.text)
-  }
-  const fresh: EssayCommit['snapshot'] = []
-  const edited: Array<{ day: string; prev: string; next: string }> = []
-  for (const s of current.snapshot) {
-    const before = prevById.get(s.id)
-    if (before === undefined) fresh.push(s)
-    else if (before !== s.text) edited.push({ day: dayOfTs(s.createdAt), prev: before, next: s.text })
-  }
-
   let budget = SNAPSHOT_FEED_MAX
   const take = (text: string): string => {
     if (budget <= 0) return '…（本次材料过长，后面的内容已省略；完整快照在提交记录里）'
@@ -193,13 +262,28 @@ export function commitFeed(commits: EssayCommit[], current: EssayCommit): string
     return body
   }
 
-  lines.push('', fresh.length ? '【本次新增的随笔】' : '【本次没有新增随笔】')
-  for (const s of fresh) {
+  lines.push('', diff.added.length ? '【本次新增的随笔】' : '【本次没有新增随笔】')
+  for (const s of diff.added) {
     lines.push('【' + dayOfTs(s.createdAt) + '】', take(s.text.slice(0, PER_ESSAY_FEED_MAX)))
   }
-  lines.push('', edited.length ? '【本次修改的随笔（只给改动处）】' : '【本次没有修改随笔】')
-  for (const e of edited) {
-    lines.push('【' + e.day + '】', take(deltaOf(e.prev, e.next)))
+
+  // 修改只给改动处：prev 里那一条的全文与当前对比（取公共前后缀）
+  const prevById = new Map((prev?.snapshot ?? []).map((s) => [s.id, s]))
+  lines.push('', diff.edited.length ? '【本次修改的随笔（只给改动处）】' : '【本次没有修改随笔】')
+  for (const e of diff.edited) {
+    const before = prevById.get(e.id)?.text ?? ''
+    lines.push('【' + dayOfTs(e.createdAt) + '】', take(deltaOf(before, e.text)))
+  }
+
+  lines.push('', diff.removed.length ? '【本次删除的随笔（只剩标题）】' : '【本次没有删除随笔】')
+  for (const r of diff.removed) {
+    lines.push('- 「' + (r.title || stampOfTs(r.createdAt)) + '」（' + dayOfTs(r.createdAt) + '）')
+  }
+
+  lines.push('', '【本次未变化的随笔（只列标题，不要重写）】')
+  if (!diff.unchanged.length) lines.push('（没有）')
+  for (const u of diff.unchanged) {
+    lines.push('- 「' + (u.title || stampOfTs(u.createdAt)) + '」（' + dayOfTs(u.createdAt) + '）')
   }
   return lines.join('\n')
 }
@@ -293,6 +377,10 @@ export function normalizeEssayCommits(raw: unknown, aliveGoals: Set<string>): Es
           if (!text.trim()) continue
           snapshot.push({
             id: typeof e.id === 'string' && e.id ? e.id : crypto.randomUUID(),
+            // 旧提交没有 title：不硬补，界面按提交日期回退显示
+            ...(typeof e.title === 'string' && e.title.trim()
+              ? { title: e.title.trim().slice(0, ESSAY_TITLE_MAX) }
+              : {}),
             createdAt: isNum(e.createdAt) ? e.createdAt : at,
             text,
           })
@@ -315,6 +403,11 @@ export function normalizeEssayCommits(raw: unknown, aliveGoals: Set<string>): Es
         }
       }
       const status = r.status === 'done' || r.status === 'error' ? r.status : 'error'
+      // 评论可选：认不出的（不是字符串 / 空白）就不给，界面按「没有评论」渲染
+      const comment =
+        typeof r.comment === 'string' && r.comment.trim()
+          ? r.comment.trim().slice(0, ESSAY_COMMENT_MAX)
+          : undefined
       items.push({
         id,
         at,
@@ -322,6 +415,7 @@ export function normalizeEssayCommits(raw: unknown, aliveGoals: Set<string>): Es
         snapshot,
         status,
         changes,
+        ...(comment ? { comment } : {}),
         ...(status === 'error'
           ? {
               error:

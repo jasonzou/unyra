@@ -19,7 +19,7 @@ describe('产物归属规则（用户定的）', () => {
     expect(system).toContain('workspace/')
   })
 
-  it('路径索引里也有节点工作区一行（executeGuide 的那份清单）', () => {
-    expect(system).toContain('docs/:goal/.../workspace/:filename')
+  it('路径索引里也有节点工作区一行（executeGuide 的组索引给出 api.workspace）', () => {
+    expect(system).toContain('api.workspace — 工作区')
   })
 })

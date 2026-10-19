@@ -71,3 +71,24 @@ describe('归组', () => {
     expect(groupParts([{ type: 'hop' }, { type: 'hop' }])).toEqual([])
   })
 })
+
+describe('轮开始时的提示词注入', () => {
+  const inject = (id: string, label: string) => ({ type: 'inject' as const, id, label, text: '注入全文' })
+
+  it('排在最前面，并与后面的思考 / 工具同组（一轮只有一条折叠标题）', () => {
+    const groups = groupParts([think('想'), tool('t1')], [inject('m1', '导师人格 · 标准导师')])
+    expect(groups).toHaveLength(1)
+    if (groups[0].kind !== 'group') throw new Error('应该是一组')
+    expect(groups[0].items.map((p) => p.type)).toEqual(['inject', 'thinking', 'tool'])
+  })
+
+  it('回复里只有正文时，注入自己成一组（不并进正文，正文永远在组外）', () => {
+    const groups = groupParts([text('开场白')], [inject('m1', '文档格式 · 混合')])
+    expect(groups.map((g) => g.kind)).toEqual(['group', 'single'])
+    if (groups[0].kind === 'group') expect(groups[0].items).toHaveLength(1)
+  })
+
+  it('没有注入时归组结果与从前逐字一致', () => {
+    expect(groupParts([think('想')], [])).toEqual(groupParts([think('想')]))
+  })
+})

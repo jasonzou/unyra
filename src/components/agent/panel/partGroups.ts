@@ -8,16 +8,37 @@
 import type { AgentPart } from '../../../agent/types'
 
 /**
+ * 一条**提示词注入**在过程组里的样子（人格 / 文档格式 / 技能库 / 提示词模块）。
+ *
+ * 它是宿主按隐藏消息合成出来的**渲染件**，不落库、也不进 AgentPart：那些消息本身
+ * 是上下文的一部分（role: user），只是不该在对话流里单独占一行——
+ * 与思考、工具调用一样，它们是「这一轮它凭什么这么答」（见 agent/messageKind）。
+ */
+export interface InjectItem {
+  type: 'inject'
+  /** 原隐藏消息的 id：组内列表的 React key */
+  id: string
+  /** 那行标题（「导师人格 · ADHD 导师」），即隐藏消息的 mark */
+  label: string
+  /** 注入的全文：展开看 */
+  text: string
+}
+
+/**
  * 「过程件」：思考、工具调用、动态注入的提示词模块。
  *
  * 三种是同一层的东西——**轮次进行中的一个片段**：模型自己看得见的上下文（思考与工具结果）
  * 与系统悄悄补进去的上下文（提示词模块）一起构成「这一轮它是怎么走过来的」。
  * 提示词模块另画一块独立的气泡只会把同一件事拆成两截（它还偏偏就发生在两次工具调用之间）。
+ *
+ * 另有第四种：InjectItem（轮开始时的提示词注入，见上）——同样是「凭什么这么答」。
  */
-export type ProcessPart = Extract<AgentPart, { type: 'thinking' } | { type: 'tool' } | { type: 'prompt-module' }>
+export type ProcessPart =
+  | Extract<AgentPart, { type: 'thinking' } | { type: 'tool' } | { type: 'prompt-module' }>
+  | InjectItem
 
-/** 是不是过程件（组内可收拢的那三种） */
-export function isProcessPart(p: AgentPart): p is ProcessPart {
+/** 是不是过程件（组内可收拢的那三种；InjectItem 由调用方按 type 单独认） */
+export function isProcessPart(p: AgentPart): p is Exclude<ProcessPart, InjectItem> {
   return p.type === 'thinking' || p.type === 'tool' || p.type === 'prompt-module'
 }
 
@@ -34,9 +55,14 @@ export type PartGroup = { kind: 'group'; items: ProcessPart[] } | { kind: 'singl
  * ——一轮循环跨了几跳，都是同一段过程；notice 是异常提示，藏进默认折叠的组里
  * 等于藏起警告，所以它也留在组外（并切断组）。历史消息与正在流式的那一段走的是
  * 同一个函数，归组行为天然一致。
+ *
+ * `injects` 是这一轮开始前注入的那几条提示词（见 InjectItem）：它们发生在第一个
+ * 思考/工具之前，所以排在最前面、与后面的过程件同属一组——用户看到的是**一条**
+ * 「思考、工具与提示词 · N 步」，而不是两行各自折叠的标题。
  */
-export function groupParts(parts: AgentPart[]): PartGroup[] {
+export function groupParts(parts: AgentPart[], injects?: InjectItem[]): PartGroup[] {
   const groups: PartGroup[] = []
+  if (injects?.length) groups.push({ kind: 'group', items: [...injects] })
   for (const p of parts) {
     if (p.type === 'hop') continue
     if (isProcessPart(p)) {

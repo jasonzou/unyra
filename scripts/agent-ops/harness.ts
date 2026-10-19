@@ -204,14 +204,14 @@ ok(!resolveNode(st, scope, '不存在').ok, 'resolveNode 失败时有 message')
 export const fakeRunner = async (req: SandboxRequest): Promise<SandboxReply> => {
   try {
     const fn = new Function('api', 'return (' + req.body + ')')() as (api: unknown) => unknown
+    // 任意深度的可调用代理：api.x / api.x.y / api.x.y.z 都能调，也能 .__help() 一路查下去——
+    // 与真实 Worker 的 makeApi 同构（那里每层函数都挂了 __help）。
+    const proxyFor = (full: string): unknown =>
+      new Proxy((...args: unknown[]) => req.callApi(full, args), {
+        get: (_t, method: string) => proxyFor(full + '.' + String(method)),
+      })
     const api = new Proxy({}, {
-      get: (_t, group: string) =>
-        // 组代理本身是**可调用**的函数：不带点的顶层 api（wait…）走 api.wait(...) 直调，
-        // 带点的组（doc.*）则继续取方法。两条路都归到 callApi。
-        new Proxy((...args: unknown[]) => req.callApi(group, args), {
-          get: (_t2, method: string) =>
-            (...args: unknown[]) => req.callApi(group + '.' + String(method), args),
-        }),
+      get: (_t, group: string) => proxyFor(String(group)),
     })
     const value = await fn(api)
     return { ok: true, value, ms: 0 }

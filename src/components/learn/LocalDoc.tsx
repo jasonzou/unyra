@@ -8,6 +8,7 @@ import { maskChipTokens, restoreChipTokens } from '../../lib/chipSyntax'
 import { countVisibleWords, countVisibleWordsFromHtml } from '../../lib/wordCount'
 import { createLocalDocImageResolver } from '../../lib/docImages'
 import { copySelectionAsMarkdown } from '../../lib/copySource'
+import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
 import { readUserImage, readUserText, userAbsPrefix } from '../../lib/storage'
 import type { OutlineHandle } from '../../lib/outline'
 import { localRevealKey } from '../../lib/docReveal'
@@ -294,6 +295,14 @@ export default function LocalDoc({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  /*
+   * 两端渐隐（与笔记正文同一套，见 lib/scrollFade）。挂在这里而不是最后的 return 里：
+   * 下面几条早返回（加载 / 出错 / 媒体 / 源码 / html）都不渲染滚动容器，钩子必须无条件调用；
+   * 容器晚一拍挂上这件事由钩子自己接住。
+   */
+  const scrollEdges = useScrollEdges(scrollRef)
+  const mask = fadeMask(scrollEdges)
+
   if (loading) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-[12.5px] text-ink-faint">
@@ -395,16 +404,20 @@ export default function LocalDoc({
         <span className="tabular-nums">{t('{0} 字', wordCount)}</span>
       </DocStatChip>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        {/* 复制同样走源文：预览里选的这一段，进剪贴板的该是它 Markdown 的样子（见 lib/copySource） */}
-        <div
-          ref={bodyRef}
-          className="note-preview moji-node-note doc-measure relative px-7 py-6"
-          style={{ '--doc-scale': scale } as CSSProperties}
-          onCopy={(e) => copySelectionAsMarkdown(e, e.currentTarget, text)}
-        >
-          <ZenResizeHandles />
-          <MarkdownView html={html} resolveLocalImage={resolveLocalImage} />
+      {/* 两端渐隐的 mask 挂在滚动容器外面一层：两者落在同一层时，滚动合成层与遮罩层
+          套在一起，边缘有抖出一像素缝的先例（理由与笔记正文那边一致，见 note/DocBody） */}
+      <div className="flex min-h-0 flex-1 flex-col" style={{ maskImage: mask, WebkitMaskImage: mask }}>
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+          {/* 复制同样走源文：预览里选的这一段，进剪贴板的该是它 Markdown 的样子（见 lib/copySource） */}
+          <div
+            ref={bodyRef}
+            className="note-preview moji-node-note doc-measure relative px-7 py-6"
+            style={{ '--doc-scale': scale } as CSSProperties}
+            onCopy={(e) => copySelectionAsMarkdown(e, e.currentTarget, text)}
+          >
+            <ZenResizeHandles />
+            <MarkdownView html={html} resolveLocalImage={resolveLocalImage} />
+          </div>
         </div>
       </div>
 

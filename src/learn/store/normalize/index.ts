@@ -8,8 +8,6 @@ import type {
   LearnStore,
   MethodEntry,
   MethodStore,
-  MindEntry,
-  MindStore,
   WorkflowBook,
 } from '../../types'
 import type { Exam } from '../../exam'
@@ -21,7 +19,9 @@ import { BUILTIN_WORKFLOW_IDS, normalizeWorkflowEfforts, normalizeWorkflowEntrie
 import { normalizeReadingBook } from '../../reading'
 import { normalizeEssayDock, normalizeEssays } from '../../essays'
 import { normalizeEssayCommits } from '../../essayCommits'
-import { normalizePomodoro } from '../../pomodoro'
+import { normalizeFocus } from '../../focus'
+import { normalizeSchedule } from '../../schedule'
+import { normalizeMemoryStore } from '../../memory'
 import { normalizeResourceList, retargetStaticRefs, type StaticResource } from '../../static'
 import { normalizeTmpStore, pruneTmpToNodes } from '../../../lib/tmpStore'
 import { normalizeNode } from './node'
@@ -41,7 +41,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
      * 原始那一份（不经过 LearnStore 的形状）：文件区那一块要读**旧版**字段
      * （顶层的 tabs / activeTab），而它们已经不在 LearnStore 里了——从 d 上读不到。
      */
-    const legacy = data as { tabs?: unknown; activeTab?: unknown }
+    const legacy = data as { tabs?: unknown; activeTab?: unknown; pomodoro?: unknown }
     if (!Array.isArray(d.nodes)) return null
 
     const parsed = d.nodes.map(normalizeNode).filter((n): n is KnowledgeNode => n !== null)
@@ -143,29 +143,18 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       if (items.length) resources[goalId] = items
     }
 
-    // 长期记忆按目标归属：目标没了的记忆也没有意义（与 resources 同一条纪律）
-    const minds: MindStore = {}
-    const rawMinds = (d.minds && typeof d.minds === 'object' ? d.minds : {}) as Record<string, unknown>
-    for (const [goalId, list] of Object.entries(rawMinds)) {
-      if (!goalIds.has(goalId) || !Array.isArray(list)) continue
-      const items: MindEntry[] = []
-      for (const item of list) {
-        if (!item || typeof item !== 'object') continue
-        const m = item as Record<string, unknown>
-        const id = typeof m.id === 'string' ? m.id : ''
-        const text = typeof m.text === 'string' ? m.text.trim() : ''
-        if (!id || !text) continue
-        items.push({
-          id,
-          // key 是「同主题覆盖」的依据；手改丢了就退化成按 id 的独立条目
-          ...(typeof m.key === 'string' && m.key.trim() ? { key: m.key.trim() } : {}),
-          text,
-          createdAt: typeof m.createdAt === 'number' ? m.createdAt : Date.now(),
-          updatedAt: typeof m.updatedAt === 'number' ? m.updatedAt : Date.now(),
-        })
-      }
-      if (items.length) minds[goalId] = items
-    }
+    /*
+      记忆（见 learn/memory）：长期那份跨目标（来自 state.json），工作那份按目标归属——
+      目标没了的记忆也没有意义（与 resources 同一条纪律）。
+      老形状（上一版的 minds，目标 id → 条目）一并交下去，折成这个目标的工作记忆。
+    */
+    const memory = normalizeMemoryStore(
+      d.memory,
+      // legacyMinds 来自 parseDocs（磁盘上老形状的 mind.json）；minds 来自导入的旧备份
+      (d as { legacyMinds?: unknown; minds?: unknown }).legacyMinds ??
+        (d as { minds?: unknown }).minds,
+      goalIds,
+    )
 
     // 目标级持久化函数（method.*）按目标归属：目标没了的函数也没有意义
     const methods: MethodStore = {}
@@ -275,7 +264,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       // 临时变量只保留还挂在现有节点上的那些——节点没了，它的暂存数据也没有意义
       tmp: pruneTmpToNodes(normalizeTmpStore(d.tmp), ids),
       resources,
-      minds,
+      memory,
       methods,
       // 随笔同样是目标级的：目标没了的整本丢掉，空文本条目丢掉（见 learn/essays）
       essays: normalizeEssays(d.essays, goalIds),
@@ -285,7 +274,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       ...(essayDock ? { essayDock } : {}),
       workflows,
       /*
-       * 阅读 / 打卡 / 番茄钟：认不出的部分各自丢掉，坏数据不该拖垮整库。
+       * 阅读 / 打卡 / 专注：认不出的部分各自丢掉，坏数据不该拖垮整库。
        * 阅读记录还要**按节点过滤**（与上面 tmp 同一个道理）：节点被删掉之后，那些按
        * nodeId 索引的记录就成了空索引——今日阅读面板里一行 uuid、点不动的条目就是这么来的。
        * 放在这里做还能顺手清掉以前删节点时留下的旧空索引（读盘是唯一一次全量过手的机会）。
@@ -294,7 +283,10 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
        * 目标已经不在的那些直接丢掉——那是它的账，目标没了账就该跟着没。
        */
       reading: normalizeReadingBook(d.reading, ids, goalIds),
-      pomodoro: normalizePomodoro(d.pomodoro),
+      // 专注于旧版是 pomodoro：读盘时就地迁移（旧 log 的 minutes 折算成 ms，见 learn/focus）
+      focus: normalizeFocus(d.focus ?? legacy.pomodoro),
+      // 日程是用户级数据（见 learn/schedule）：不按目标过滤，坏条目逐条丢
+      schedule: normalizeSchedule(d.schedule),
       activeGoalId,
       activeNodeId: nextActiveNodeId,
       activeConversationId,

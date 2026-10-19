@@ -14,7 +14,7 @@
  * - useLinkHandlers            —— moji:node / doc / super 三种链接的跳转；
  * - useLibraryActions          —— 笔记与本地文件的动作；
  * - useConceptActions          —— 选区上的学习 / 了解 / 注解 / 询问；
- * - usePomodoroFlow            —— 番茄钟动作；
+ * - useFocusFlow               —— 专注模式动作；
  * - useWorkflowStarters        —— 一切「交给导师工作流跑」的启动器。
  *
  * renderGroup / renderLayout 刻意留在这里（见它们头上的说明）。
@@ -35,6 +35,7 @@ import { ExternalLink, Globe } from 'lucide-react'
 import type {
   DocKind,
   DocView,
+  DockNoteItem,
   EssayCommit,
   EssayDockRect,
   EssayEntry,
@@ -120,6 +121,8 @@ import {
   touchNode,
   updateMessageText,
   updateNode,
+  deleteNote,
+  writeNote,
 } from '../../learn/graph'
 import {
   agentTabCloseBlock,
@@ -155,7 +158,7 @@ import { docFormatOf } from '../../agent/docFormat'
 import AgentSettingsPanel from '../AgentSettingsPanel'
 import MindPanel from '../agent/MindPanel'
 import { addFreeConversation, deleteFreeConversation, freeConversationById, getFreeConversations, subscribeFreeChat } from '../../learn/freeChat'
-import { clearMinds, deleteMind, mindsOf, updateMind, writeMind } from '../../learn/mind'
+import { clearWorkMemories, createMemory, deleteMemory, updateMemory, type MemoryInput, type MemoryPatch } from '../../learn/memory'
 import ExportDialog from './ExportDialog'
 import FloatWindow from '../FloatWindow'
 import { usePresence } from '../../lib/presence'
@@ -228,9 +231,14 @@ import DocFloat from './DocFloat'
 import GuardView from './GuardView'
 import FocusReportView from './FocusReportView'
 import { collectGuardFacts, startGuard, stopGuard, type GuardHooks } from '../../agent/guardRuntime'
-import { buildFocusReport, REPORT_MIN_MS, type FocusOutcome, type GuardMonitors } from '../../learn/focusGuard'
+import {
+  buildFocusReport,
+  REPORT_MIN_MS,
+  type FocusOutcome,
+  type GuardMonitors,
+} from '../../learn/focusGuard'
 import { writeFocusReport } from '../../learn/focusReports'
-import { formatClock, pomodoroStatus } from '../../learn/pomodoro'
+import { sessionMsOf } from '../../learn/focus'
 import LocalDoc from './LocalDoc'
 import DraftDoc from './DraftDoc'
 import SourceEditor from './SourceEditor'
@@ -243,6 +251,7 @@ import {
   createEssayCommit,
   diffNoteChanges,
   noteFingerprint,
+  parseEssayComment,
   updateEssayCommit,
 } from '../../learn/essayCommits'
 import { useDoubleShift } from '../../lib/useDoubleShift'
@@ -251,6 +260,7 @@ import ConfirmDialog from '../ConfirmDialog'
 import { AgentTabPane } from './workspace/AgentTabPane'
 import SettingsPanel from '../settings/SettingsPanel'
 import UsagePanel from '../settings/UsagePanel'
+import { SchedulePage } from '../schedule/SchedulePage'
 import AgentTabStrip from '../agent/AgentTabStrip'
 import ContextDebugger from '../agent/ContextDebugger'
 import { resetPrefixGate } from '../../agent/prefixGate'
@@ -268,7 +278,7 @@ import { ZONE_BOX } from './workspace/drag'
 import { examDeleteWarn } from './workspace/labels'
 import { conceptKeysOf, emptyNote, examCopyOf, paneInfo, paneOf } from './workspace/panes'
 import { DocPane } from './workspace/DocPane'
-import { PomodoroDock, ReadingDock } from './workspace/docks'
+import { FocusDock, ReadingDock, ScheduleDock } from './workspace/docks'
 import { EmptyDoc, GoalInput, Topbar } from './workspace/chrome'
 import { useSideColumns } from './workspace/useSideColumns'
 import SplitRow from './workspace/SplitRow'
@@ -279,7 +289,8 @@ import { useLinkHandlers } from './workspace/useLinkHandlers'
 import { useLibraryActions } from './workspace/useLibraryActions'
 import { useExplorerUndo } from './workspace/useExplorerUndo'
 import { useConceptActions } from './workspace/useConceptActions'
-import { usePomodoroFlow } from './workspace/usePomodoroFlow'
+import { useFocusFlow } from './workspace/useFocusFlow'
+import { useScheduleFlow, useScheduleReminder } from './workspace/useScheduleFlow'
 import { useWorkflowStarters } from './workspace/useWorkflowStarters'
 import { examNeedingWork, makeExamDeps } from './workspace/examTools'
 import { t } from '../../i18n'
@@ -301,6 +312,8 @@ const goalFocusByGoal = new Map<string, string>()
 const EMPTY_ESSAYS: EssayEntry[] = []
 /** 没有提交记录时的空数组：理由同上（同一个常量，避免每次渲染都换引用） */
 const EMPTY_COMMITS: EssayCommit[] = []
+/** 没有当前目标时的笔记表：同一个空数组，避免每次渲染都造新引用 */
+const EMPTY_DOCK_NOTES: DockNoteItem[] = []
 
 /**
  * 一枚页签当前归哪个目标（按页签 **id** 反查）。
@@ -468,20 +481,24 @@ export default function LearnWorkspace({
   const topbarGoalQuestion = hasTargetOutline ? (activeGoal?.question ?? '') : ''
 
   /*
-   * 记忆管理页（kind 'mind'）的写入口：**一枚目标一枚页签**，落点由页签自己携带的
-   * goalId 决定（ref.kind === 'mind' 时必带），不随活动目标漂移。
+   * 记忆的写入口（见 learn/memory）：**目标由调用方给**——工作记忆落进哪个目标，
+   * 由页签携带的 goalId 或设置页里的选择决定，不随活动目标漂移；长期记忆跨目标，
+   * 根本没有归属这回事。
+   *
+   * 四个回调都是「纯函数 + set」：校验、上限、作用域搬家全在 learn/memory 里，
+   * 界面只管把用户填的东西交下去（与 workflows / essays 同一套做法）。
    */
-  const mindWrite = (goalId: string, input: { key?: string; text: string }) => {
-    set(writeMind(getLatest(), goalId, input))
+  const memoryCreate = (input: MemoryInput) => {
+    set(createMemory(getLatest(), input))
   }
-  const mindUpdate = (goalId: string, id: string, text: string) => {
-    set(updateMind(getLatest(), goalId, id, text))
+  const memoryUpdate = (uuid: string, patch: MemoryPatch) => {
+    set(updateMemory(getLatest(), uuid, patch))
   }
-  const mindDelete = (goalId: string, idOrKey: string) => {
-    set(deleteMind(getLatest(), goalId, idOrKey))
+  const memoryDelete = (uuid: string) => {
+    set(deleteMemory(getLatest(), uuid))
   }
-  const mindClear = (goalId: string) => {
-    set(clearMinds(getLatest(), goalId))
+  const memoryClearWork = (goalId: string) => {
+    set(clearWorkMemories(getLatest(), goalId))
   }
 
   /*
@@ -661,6 +678,7 @@ export default function LearnWorkspace({
       ref.kind === 'report' ||
       ref.kind === 'settings' ||
       ref.kind === 'usage' ||
+      ref.kind === 'schedule' ||
       ref.kind === 'mind' ||
       ref.kind === 'agentSettings' ||
       ref.kind === 'newGoal' ||
@@ -1622,6 +1640,9 @@ export default function LearnWorkspace({
    */
   const onOpenUsage = useCallback(() => openTab({ kind: 'usage' }), [openTab])
 
+  /** 日程安排页签的入口（顶栏日程 tip 的「手动安排日程」与提醒弹层）。与用量页同样全局一枚 */
+  const onOpenSchedule = useCallback(() => openTab({ kind: 'schedule' }), [openTab])
+
   /**
    * api.ui.point：打开/切到某个节点的文档页签并定位。
    * path 已由工具层解析成节点 + 文档（还给了要在渲染结果里找的文字）；
@@ -2179,8 +2200,8 @@ export default function LearnWorkspace({
    * 上一次写入可能刚被别的动作（删一条、切目标）改过。
    */
   const essayCreate = useCallback(
-    (goalId: string, text: string): string | null => {
-      const created = createEssay(getLatest(), goalId, text, Date.now())
+    (goalId: string, title: string, text: string): string | null => {
+      const created = createEssay(getLatest(), goalId, text, Date.now(), title)
       if (!created) return null
       set(created.store)
       return created.entry.id
@@ -2188,8 +2209,8 @@ export default function LearnWorkspace({
     [getLatest, set],
   )
   const essayUpdate = useCallback(
-    (goalId: string, id: string, text: string) => {
-      set(updateEssay(getLatest(), goalId, id, text, Date.now()))
+    (goalId: string, id: string, patch: { text?: string; title?: string }) => {
+      set(updateEssay(getLatest(), goalId, id, patch, Date.now()))
     },
     [getLatest, set],
   )
@@ -2199,13 +2220,62 @@ export default function LearnWorkspace({
     },
     [getLatest, set],
   )
-  /** 窗口几何：纯界面状态，安静写盘就够（窗口自己已经摆好了，不必为它重渲染整棵学习区） */
+  /** 窗口几何与状态：纯界面状态，安静写盘就够（窗口自己已经摆好了，不必为它重渲染整棵学习区） */
   const essayGeometry = useCallback(
-    (rect: EssayDockRect) => {
-      patchQuiet((s) => ({ ...s, essayDock: rect }))
+    (state: EssayDockRect) => {
+      patchQuiet((s) => ({ ...s, essayDock: state }))
     },
     [patchQuiet],
   )
+
+  /**
+   * 随笔窗口中的笔记列表（跨目标/节点）：收集当前所有节点的笔记，
+   * 标明来自哪个目标的哪个节点（按修改时间倒序）。
+   */
+  /*
+   * 随笔窗口的「笔记」页签只列**当前目标**的笔记（需求定的）：随笔本身是目标级的，
+   * 笔记列表却跨目标的话，写着这门课却翻到另一门课的笔记，注意力与归属都会乱。
+   * 目标没选（没有 essayGoalId）时给空表——窗口本来也不会露脸。
+   */
+  const dockNotes = useMemo(() => {
+    if (!essayGoalId) return EMPTY_DOCK_NOTES
+    const goal = store.goals.find((g) => g.id === essayGoalId)
+    const rootNode = goal ? store.nodes.find((n) => n.id === goal.rootNodeId) : undefined
+    const goalTitle = rootNode?.title || goal?.question || ''
+    const list: DockNoteItem[] = []
+    for (const node of store.nodes) {
+      if (node.goalId !== essayGoalId) continue
+      for (const note of notesOf(node)) {
+        list.push({
+          goalId: node.goalId,
+          goalTitle,
+          nodeId: node.id,
+          nodeTitle: node.title,
+          name: note.name,
+          content: note.content,
+          updatedAt: note.updatedAt,
+          createdAt: note.createdAt,
+        })
+      }
+    }
+    list.sort((a, b) => b.updatedAt - a.updatedAt)
+    return list
+  }, [store.goals, store.nodes, essayGoalId])
+
+  const dockWriteNote = useCallback(
+    (nodeId: string, name: string, content: string) => {
+      set(writeNote(getLatest(), nodeId, name, content))
+    },
+    [getLatest, set],
+  )
+
+  const dockDeleteNote = useCallback(
+    (nodeId: string, name: string) => {
+      set(deleteNote(getLatest(), nodeId, name))
+    },
+    [getLatest, set],
+  )
+
 
   /* ---------- 随笔提交（见 learn/essayCommits） ---------- */
 
@@ -2259,7 +2329,25 @@ export default function LearnWorkspace({
           // 整理完成：对比前后两份指纹，把真正动过的笔记记到这次提交上
           const after = getLatest()
           const changes = diffNoteChanges(before, noteFingerprint(after, goalId))
-          set(updateEssayCommit(getLatest(), goalId, commit.id, { status: 'done', changes }))
+          // 提交评论：Agent 按约定格式写在回复末尾（见 essayCommits 的 parseEssayComment），
+          // 从这一轮对话最后一条回复里抠出来。解析不到就算了——评论是锦上添花，
+          // 不能因为它挡住整理结果本身（changes 由指纹对比得出，不靠模型自报，见上）。
+          const conv = conversationById(after, convId)
+          const lastReply = conv ? [...conv.messages].reverse().find((m) => m.role === 'assistant') : null
+          const replyText = lastReply
+            ? lastReply.parts
+                .filter((p) => p.type === 'text')
+                .map((p) => p.text)
+                .join('')
+            : ''
+          const comment = parseEssayComment(replyText)
+          set(
+            updateEssayCommit(getLatest(), goalId, commit.id, {
+              status: 'done',
+              changes,
+              ...(comment ? { comment } : {}),
+            }),
+          )
           onToast(t('随笔整理完成：{0}', changesSummary(changes)))
         })
         .catch((err: unknown) => {
@@ -2286,7 +2374,7 @@ export default function LearnWorkspace({
       if (!goalId) return null
       const created = createEssayCommit(getLatest(), goalId, message, Date.now())
       if (!created) {
-        onToast(t('没有新的随笔可以提交'))
+        onToast(t('还没有随笔可以提交'))
         return null
       }
       set(created.store)
@@ -2733,24 +2821,44 @@ export default function LearnWorkspace({
 
 
   /*
-   * 番茄钟动作在 usePomodoroFlow、导师工作流启动器在 useWorkflowStarters（都在 workspace/）。
-   * 守卫 agent（严格专注的监控，见 agent/guardRuntime）挂在这之后：
-   * 开始/停止/到点收尾三个入口都从这里转发，报告与守卫上下文才不会漏掉一场。
+   * 专注模式动作在 useFocusFlow、导师工作流启动器在 useWorkflowStarters（都在 workspace/）。
+   * 守卫 agent（见 agent/guardRuntime）挂在这之后：开始/结束两个入口都从这里转发，
+   * 报告与守卫上下文才不会漏掉一场。
    */
-  const { startFocus, stopFocus, pauseFocus, resumeFocus, tickFocus } = usePomodoroFlow({ getLatest, set, onToast })
+  const { startFocusMode, stopFocusMode, pauseFocusMode, resumeFocusMode } = useFocusFlow({ getLatest, set })
 
-  /* ---------- 严格专注：守卫 agent 与专注报告 ---------- */
+  /*
+   * 日程：写操作（页面与顶栏共用一套）与到点提醒（顶栏那一条呼吸 + 弹层）。
+   *
+   * 提醒引擎有自己的 1 秒节拍，但**只在「该响的那条换了」时 setState**——顶栏因此不会
+   * 每秒重渲染；这条边界写在 useScheduleFlow 的文件头，改动时别把 tick 挪进渲染。
+   */
+  const scheduleActions = useScheduleFlow({ getLatest, set })
+  const { ringing: scheduleRinging, complete: completeScheduleItem, snooze: snoozeScheduleItem } =
+    useScheduleReminder({ getLatest, set })
 
-  /** 这一场专注的参数：报告的账目（开始时刻、设的时长与组数）从它算；收场即清空 */
-  const focusMeta = useRef<{ startedAt: number; focusMinutes: number; groups: number } | null>(null)
+  /*
+   * 纯净阅读里顶栏是收起的（h-0 + invisible）：日程到点时如果还缩着，用户只听得见铃声、
+   * 看不见是哪一件事。响铃优先——先退出纯净阅读，让顶栏的呼吸与弹层真的出现在眼前。
+   */
+  useEffect(() => {
+    if (scheduleRinging && pure) setPure(false)
+  }, [scheduleRinging, pure, setPure])
+
+  /* ---------- 专注模式：守卫 agent 与专注报告 ---------- */
+
+  /** 这一场的账目：报告只从开始时刻算时段；收场即清空 */
+  const focusMeta = useRef<{ startedAt: number } | null>(null)
+  /** 正在申请媒体流：拿到画面才算开始（守卫是专注模式的准入条件） */
+  const [focusStarting, setFocusStarting] = useState(false)
   /** 守卫的分心警告弹窗（同一时间最多一条，新的顶掉旧的） */
   const [guardWarn, setGuardWarn] = useState<{ reason: string } | null>(null)
   /** 熔断弹窗：隐私底线被触发，这次专注已强制结束 */
   const [guardFuse, setGuardFuse] = useState<{ reason: string } | null>(null)
 
   /**
-   * 一场专注收场 → 写报告。正常跑完、开始三分钟后停止、熔断，各得一份；
-   * 更短的停止就是误触，不记账。守卫事实是可选的：普通专注的报告只有计时账目。
+   * 一场专注收场 → 写报告。停止与熔断各得一份；不到三分钟的停止就是误触，不记账。
+   * 守卫事实是可选的（理论上开不了无守卫的专注，这里只是防御）。
    */
   const finishFocus = useCallback(
     (outcome: FocusOutcome) => {
@@ -2759,14 +2867,10 @@ export default function LearnWorkspace({
       if (!meta) return
       const endedAt = Date.now()
       if (outcome === 'stopped' && endedAt - meta.startedAt < REPORT_MIN_MS) return
-      const s = getLatest()
       const facts = collectGuardFacts(endedAt)
       const report = buildFocusReport({
         startedAt: meta.startedAt,
         endedAt,
-        focusMinutes: meta.focusMinutes,
-        groups: meta.groups,
-        completedGroups: (s.pomodoro?.log ?? []).filter((r) => r.at >= meta.startedAt).length,
         monitors: facts?.monitors ?? { screen: false, camera: false },
         outcome,
         pausedMs: facts?.pausedMs ?? 0,
@@ -2779,19 +2883,19 @@ export default function LearnWorkspace({
       void writeFocusReport(report)
       onToast(t('专注报告已生成——资源管理器的「专注报告」里看'))
     },
-    [getLatest, onToast],
+    [onToast],
   )
 
-  /** 守卫的动作出口：判定翻译成番茄钟的暂停/恢复、界面上的警告与熔断弹窗 */
+  /** 守卫的动作出口：判定翻译成专注状态的暂停/恢复、界面上的警告与熔断弹窗 */
   const guardHooks = useMemo<GuardHooks>(
     () => ({
       onPause: (reason) => {
-        pauseFocus()
-        onToast(t('守卫：{0}——番茄钟已暂停，回到应用就继续', reason))
+        pauseFocusMode()
+        onToast(t('守卫：{0}——值守已暂停，回到应用就继续', reason))
       },
       onResume: () => {
-        resumeFocus()
-        onToast(t('守卫：欢迎回来，番茄钟继续'))
+        resumeFocusMode()
+        onToast(t('守卫：欢迎回来，值守继续'))
       },
       onWarn: (reason) => {
         setGuardWarn({ reason })
@@ -2809,71 +2913,68 @@ export default function LearnWorkspace({
         if (isElectron()) native().window.flashTop()
       },
       onFuse: (reason) => {
-        // 熔断：媒体流守卫那边已经停了，这里把表停掉、写报告、把话说明白
-        stopFocus()
+        // 熔断：媒体流守卫那边已经停了，这里把这一场收掉、写报告、把话说明白
+        stopFocusMode()
         finishFocus('fused')
         setGuardFuse({ reason })
         if (isElectron())
           void native()
-            .window.notify({ title: t('严格专注已熔断'), body: reason })
+            .window.notify({ title: t('专注模式已熔断'), body: reason })
             .then((r) => {
               if (!r.ok) console.warn('[guard] 熔断通知没有发出去：', r.error)
             })
       },
       onToast,
       contextLine: () => {
-        const st = pomodoroStatus(getLatest())
-        if (!st.session) return t('番茄钟没有在跑')
-        return t(
-          '番茄钟：第 {0}/{1} 组{2}，还剩 {3}',
-          st.session.index,
-          st.session.groups,
-          st.session.phase === 'rest' ? t('（休息）') : '',
-          formatClock(st.remainingMs ?? 0),
-        )
+        const cur = getLatest().focus?.current
+        if (!cur) return t('专注模式没有在跑')
+        const seen = [cur.monitors.screen ? t('屏幕') : '', cur.monitors.camera ? t('摄像头') : '']
+          .filter(Boolean)
+          .join(' + ')
+        return t('专注模式已持续 {0} 分钟（守卫：{1}）', Math.max(0, Math.round(sessionMsOf(cur) / 60_000)), seen)
       },
     }),
-    [pauseFocus, resumeFocus, stopFocus, finishFocus, onToast, getLatest],
+    [pauseFocusMode, resumeFocusMode, stopFocusMode, finishFocus, onToast, getLatest],
   )
-
-  /** 点「开始专注」：先把表跑起来；勾了监控就让守卫同一场开跑（媒体流拿不到会自动降级成普通专注） */
-  const handleStartFocus = useCallback(
-    (minutes: number, groups: number, monitors: GuardMonitors) => {
-      startFocus(minutes, groups)
-      focusMeta.current = { startedAt: Date.now(), focusMinutes: minutes, groups }
-      if (!monitors.screen && !monitors.camera) return
-      void startGuard(monitors, guardHooks)
-    },
-    [startFocus, guardHooks],
-  )
-
-  /** 点「停止」：守卫一并收摊（媒体流立即断），三分钟以上的场子写报告 */
-  const handleStopFocus = useCallback(() => {
-    stopGuard('user stopped')
-    stopFocus()
-    finishFocus('stopped')
-  }, [stopFocus, finishFocus])
-
-  /** 到点收尾（每秒的钟发现到点才调）：跑完的场子写「跑完了」的报告，守卫一起收 */
-  const handleTickFocus = useCallback(() => {
-    const out = tickFocus()
-    if (out.finished) {
-      stopGuard('completed')
-      finishFocus('completed')
-    } else if (out.dropped) {
-      // 应用不在的那段时间把整次会话丢了：守卫也一起收，账目照写（那一刻起早过了三分钟）
-      stopGuard('dropped')
-      finishFocus('stopped')
-    }
-  }, [tickFocus, finishFocus])
 
   /**
-   * 重启后没人守着的暂停：守卫上下文不跨重启活着，暂停中的番茄钟永远等不来
-   * 「回来了」的那一下——直接续上（暂停的那段时间本来就没在计时）。
+   * 点「开始专注」：**先把守卫开起来**，拿到画面才写会话。
+   * 守卫是专注模式的准入条件（见 learn/focus）：一路画面都拿不到就不开始，
+   * 而不是让用户面对一个「专注中」但没人值守的空壳。
    */
-  useEffect(() => {
-    if (getLatest().pomodoro?.current?.pausedAt) resumeFocus()
-  }, [getLatest, resumeFocus])
+  const handleStartFocus = useCallback(
+    (monitors: GuardMonitors) => {
+      if (focusStarting) return
+      if (!monitors.screen && !monitors.camera) {
+        onToast(t('至少开启一项守卫功能才能开始专注模式'))
+        return
+      }
+      setFocusStarting(true)
+      void startGuard(monitors, guardHooks)
+        .then((got) => {
+          if (!got) {
+            onToast(t('守卫没有开起来：屏幕与摄像头都没拿到画面，专注模式未开始'))
+            return
+          }
+          if (!startFocusMode(got)) {
+            // 守卫已经开起来了但会话没写成：把守卫收掉，别留一段没人认领的监控
+            stopGuard('focus start failed')
+            onToast(t('专注模式没能开始，请再试一次'))
+            return
+          }
+          focusMeta.current = { startedAt: Date.now() }
+        })
+        .finally(() => setFocusStarting(false))
+    },
+    [focusStarting, guardHooks, startFocusMode, onToast],
+  )
+
+  /** 点「结束专注」：守卫一并收摊（媒体流立即断），三分钟以上的场子写报告 */
+  const handleStopFocus = useCallback(() => {
+    stopGuard('user stopped')
+    stopFocusMode()
+    finishFocus('stopped')
+  }, [stopFocusMode, finishFocus])
 
   /** 守卫上下文页签（全局一份，见 GuardView）与专注报告页签的入口 */
   const openGuardTab = useCallback(() => openTab({ kind: 'guard' }), [openTab])
@@ -3895,8 +3996,6 @@ export default function LearnWorkspace({
     const gTab = g.tab
     /** 这一格显示的页签 id；回调里用（TS 的收窄穿不进闭包，见下面几处 onChange） */
     const gTabId = gTab?.id ?? ''
-    /** 记忆页签携带的目标 id：同上，闭包里用（goalId 缺省只在页签不是记忆页时发生） */
-    const gMindGoalId = gTab?.ref.kind === 'mind' ? gTab.ref.goalId : ''
     /** 网页页签携带的 URL：闭包里用（TS 的收窄穿不进闭包） */
     const gWebUrl = gTab?.ref.kind === 'web' ? gTab.ref.url : ''
     const isFocused = groupId === docs.focus
@@ -4138,6 +4237,18 @@ export default function LearnWorkspace({
                 onModelChanged={() => setSettingsEpoch((n) => n + 1)}
                 onSubmit={startGoal}
               />
+            ) : gTab?.ref.kind === 'schedule' ? (
+              /*
+                日程安排页：用户级的一张提醒清单（见 learn/schedule）。全局一枚页签，
+                入口在顶栏日程 tip 与到点提醒弹层；页面自己只管展示与编辑态，写操作
+                全部经 scheduleActions 交回这一层。
+              */
+              <SchedulePage
+                store={store}
+                actions={scheduleActions}
+                onToast={onToast}
+                ringingId={scheduleRinging?.id ?? null}
+              />
             ) : gTab?.ref.kind === 'usage' ? (
               /*
                 用量统计：独立的一枚页签（入口在顶栏用户菜单）。它读的是「台账」
@@ -4149,21 +4260,27 @@ export default function LearnWorkspace({
                 设置面板：文档区的一枚页签（不再是弹窗）。全局只有这一份（tabKey 恒定），
                 从任何入口打开都是切到它；分页与内容都在面板内部（见 settings/SettingsPanel）。
               */
-              <SettingsPanel onRootChanged={onRootChanged} onToast={onToast} />
+              <SettingsPanel
+                onRootChanged={onRootChanged}
+                onToast={onToast}
+                scheduleSound={store.schedule?.sound}
+                onScheduleSoundChange={scheduleActions.setSound}
+              />
             ) : gTab?.ref.kind === 'mind' ? (
               /*
-                记忆管理：导师长期记忆（learn/mind）的查看与编辑。**一枚目标一枚页签**
-                （tabKey = 'm:' + goalId），目标删掉时页签一起关（见 deleteGoal）。
-                gMindGoalId 是给下面几个闭包用的（TS 的收窄穿不进闭包，与 gTabId 同理）。
+                记忆管理：导师写下的记忆（learn/memory）的查看与编辑。**一枚目标一枚页签**
+                （tabKey = 'm:' + goalId），打开时默认筛到该目标的工作记忆；长期记忆跨目标，
+                这一页也看得到。目标删掉时页签一起关（见 deleteGoal）。
+                界面与设置页里的「记忆管理」是同一份实现（components/agent/MemoryManager）。
               */
               <MindPanel
                 goalId={gTab.ref.goalId}
-                goalTitle={store.goals.find((g) => g.id === gMindGoalId)?.question ?? ''}
-                entries={mindsOf(store, gTab.ref.goalId)}
-                onWrite={(input) => mindWrite(gMindGoalId, input)}
-                onUpdate={(id, text) => mindUpdate(gMindGoalId, id, text)}
-                onDelete={(idOrKey) => mindDelete(gMindGoalId, idOrKey)}
-                onClear={() => mindClear(gMindGoalId)}
+                goals={store.goals}
+                memory={store.memory ?? { long: [], work: {} }}
+                onCreate={memoryCreate}
+                onUpdate={memoryUpdate}
+                onDelete={memoryDelete}
+                onClearWork={memoryClearWork}
                 onToast={onToast}
               />
             ) : gTab?.ref.kind === 'agentSettings' ? (
@@ -4185,11 +4302,12 @@ export default function LearnWorkspace({
                 onRemoveWorkflow={removeWorkflowRow}
                 onWorkflowEffort={setWorkflowEffortRow}
                 goals={store.goals}
-                minds={store.minds ?? {}}
-                onMindWrite={mindWrite}
-                onMindUpdate={mindUpdate}
-                onMindDelete={mindDelete}
-                onMindClear={mindClear}
+                memory={store.memory ?? { long: [], work: {} }}
+                activeGoalId={activeGoalId}
+                onMemoryCreate={memoryCreate}
+                onMemoryUpdate={memoryUpdate}
+                onMemoryDelete={memoryDelete}
+                onMemoryClearWork={memoryClearWork}
                 onToast={onToast}
               />
             ) : gTab?.ref.kind === 'draft' ? (
@@ -4292,7 +4410,7 @@ export default function LearnWorkspace({
               )
             ) : gTab?.ref.kind === 'guard' ? (
               /*
-                守卫 agent 的上下文：严格专注期间每轮监控的图像、思考与判定。
+                守卫 agent 的上下文：专注模式期间每轮监控的图像、思考与判定。
                 会话活在 agent/guardRuntime 里，与页签开不开无关——这只是旁路观察窗，
                 页签没开守卫也照常工作；会话只活在内存里，重启后这里是空的占位。
               */
@@ -4497,6 +4615,7 @@ export default function LearnWorkspace({
             gTab.ref.kind !== 'web' &&
             gTab.ref.kind !== 'settings' &&
             gTab.ref.kind !== 'usage' &&
+            gTab.ref.kind !== 'schedule' &&
             gTab.ref.kind !== 'mind' &&
             gTab.ref.kind !== 'agentSettings' &&
             gTab.ref.kind !== 'outline' &&
@@ -4771,18 +4890,29 @@ export default function LearnWorkspace({
             onOpenUpdate={onOpenUpdate}
             onOpenNotice={onOpenNotice}
             onToast={onToast}
-            /* 番茄钟是「自给自足的小块」：时钟/倒计时只在这一块里每秒重渲染，
+            /* 专注模式是「自给自足的小块」：守卫状态只在这一块里更新，
                不会把整个学习区（正文 + 对话栏）一起带上 */
-            pomodoro={
-              <PomodoroDock
+            focus={
+              <FocusDock
                 store={store}
+                starting={focusStarting}
                 onStart={handleStartFocus}
                 onStop={handleStopFocus}
-                onTick={handleTickFocus}
                 onOpenGuard={openGuardTab}
               />
             }
             reading={<ReadingDock store={store} onOpenNode={selectNode} />}
+            /* 日程是「今天还剩什么」，与专注/阅读同属右侧那一簇；到点时的呼吸层挂在顶栏本体上 */
+            schedule={
+              <ScheduleDock
+                store={store}
+                ringing={scheduleRinging}
+                onOpen={onOpenSchedule}
+                onComplete={completeScheduleItem}
+                onSnooze={snoozeScheduleItem}
+              />
+            }
+            scheduleRinging={!!scheduleRinging}
           />
         </div>
 
@@ -4827,6 +4957,9 @@ export default function LearnWorkspace({
                     onCreate={essayCreate}
                     onUpdate={essayUpdate}
                     onDelete={essayDelete}
+                    allNotes={dockNotes}
+                    onWriteNote={dockWriteNote}
+                    onDeleteNote={dockDeleteNote}
                   />
                 )}
               </div>
@@ -5091,7 +5224,7 @@ export default function LearnWorkspace({
       )}
       {guardFuse && (
         <ConfirmDialog
-          title={t('严格专注已熔断')}
+          title={t('专注模式已熔断')}
           message={t('守卫在画面里看到了涉及隐私的内容（{0}），已立即停止监控并结束这次专注；看到的画面不会保存。', guardFuse.reason)}
           confirmLabel={t('知道了')}
           onConfirm={() => setGuardFuse(null)}

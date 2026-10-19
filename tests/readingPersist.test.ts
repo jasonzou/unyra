@@ -1,5 +1,5 @@
 /**
- * 阅读记录（以及番茄钟）的**落盘往返**。
+ * 阅读记录（以及专注记录）的**落盘往返**。
  *
  * 为什么值得单独一个文件：这三块整份存在 state.json 里，没有各自的磁盘镜像。
  * 于是「写」和「读」是两段分开的代码，任何一段漏掉一个字段，症状都一样——
@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { emptyDocs } from '../src/learn/groups'
 import { buildDocs, buildState, parseDocs } from '../src/learn/files'
 import { applyReadingDelta, emptyReading, studyDayOf } from '../src/learn/reading'
-import { emptyPomodoro, startPomodoro, tickPomodoro } from '../src/learn/pomodoro'
+import { emptyFocus, startFocus, stopFocus } from '../src/learn/focus'
 import type { LearnStore } from '../src/learn/types'
 
 const now = new Date(2026, 8, 23, 21, 0).getTime()
@@ -39,8 +39,9 @@ function fullStore(): LearnStore {
       { key: '三次方根', text: '三次方根', index: 1, level: 2, ms: 0, reach: 0.2, marks: [], firstAt: 0, lastAt: now },
     ],
   })
-  // 一段跑完的专注（在 log 里）+ 正在跑的休息（在 current 里）：两半都有东西可校验
-  const pomodoro = tickPomodoro(startPomodoro(emptyPomodoro(), { focusMinutes: 25, groups: 3 }, now - 25 * 60_000).store, now).store
+  // 一场刚结束的专注（在 log 里）：守卫不跨重启，所以只校验记录这一半
+  const started = startFocus(emptyFocus(), { screen: true, camera: false }, now - 25 * 60_000)
+  const focus = stopFocus(started!.store, now).store
   return {
     version: 2,
     nodes: [
@@ -74,7 +75,7 @@ function fullStore(): LearnStore {
     docScroll: {},
     localFiles: [],
     reading: { byGoal: { g1: reading } },
-    pomodoro,
+    focus,
   }
 }
 
@@ -100,19 +101,23 @@ describe('写盘 → 读回', () => {
     expect(back?.reading?.byGoal.g1?.days[day]?.nodes).toEqual(['n1'])
   })
 
-  it('番茄钟那一段与记录也回来（关掉应用再打开，计时接着走）', () => {
-    const back = parseDocs(buildDocs(fullStore()), buildState(fullStore()))
-    expect(back?.pomodoro?.current).toMatchObject({ phase: 'rest', index: 1, groups: 3, focusMinutes: 25 })
-    expect(back?.pomodoro?.log[0]).toMatchObject({ minutes: 25, index: 1, groups: 3 })
+  it('专注记录也回来；正在跑的那一场不跨重启（守卫上下文已经没了）', () => {
+    const store = fullStore()
+    const running = startFocus(store.focus!, { screen: true, camera: false }, now)!.store
+    const withRunning: LearnStore = { ...store, focus: running }
+    expect(withRunning.focus?.current).not.toBeNull()
+    const back = parseDocs(buildDocs(withRunning), buildState(withRunning))
+    expect(back?.focus?.log[0]).toMatchObject({ at: now, ms: 25 * 60_000 })
+    expect(back?.focus?.current).toBeNull()
   })
 
-  it('番茄钟仍旧整份存在 state.json 里：那个字段没了就读成空', () => {
+  it('专注整份存在 state.json 里：那个字段没了就读成空', () => {
     const store = fullStore()
     const state = buildState(store) as Record<string, unknown>
-    delete state.pomodoro
+    delete state.focus
     const back = parseDocs(buildDocs(store), state)
     expect(back).not.toBeNull()
-    expect(back?.pomodoro?.current).toBeNull()
+    expect(back?.focus?.log).toEqual([])
   })
 
   it('阅读改存目标目录：那份文件不在时视为空（跟 state.json 里有没有无关）', () => {
@@ -128,8 +133,8 @@ describe('写盘 → 读回', () => {
   })
 
   it('空记录不写进 state.json：省得每次保存都多写几百字节的空壳', () => {
-    const state = buildState({ ...fullStore(), reading: { byGoal: {} }, pomodoro: emptyPomodoro() })
+    const state = buildState({ ...fullStore(), reading: { byGoal: {} }, focus: emptyFocus() })
     expect('reading' in state).toBe(false)
-    expect('pomodoro' in state).toBe(false)
+    expect('focus' in state).toBe(false)
   })
 })

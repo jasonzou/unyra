@@ -77,7 +77,7 @@ describe('触发映射', () => {
     expect(promptModuleForApiName('ui.point')).toBe('ui')
     expect(promptModuleForApiName('reading.get')).toBe('learning-process')
     expect(promptModuleForApiName('attention.get')).toBe('learning-process')
-    expect(promptModuleForApiName('pomodoro.status')).toBe('learning-process')
+    expect(promptModuleForApiName('focus.status')).toBe('learning-process')
     // 每轮必用的组不触发——进了模块反而每轮都要注入一遍
     expect(promptModuleForApiName('doc.write')).toBeNull()
     expect(promptModuleForApiName('node.read')).toBeNull()
@@ -169,18 +169,24 @@ describe('模块消息', () => {
 describe('系统提示词确实瘦了（减负的验收线）', () => {
   const system = buildTeacherSystem({ goalQuestion: '我想弄懂微积分' })
 
-  it('搬走的域只剩一行索引，完整手册不再整段压在系统提示词里', () => {
-    // 索引行在场（模型必须知道能力存在）
-    expect(system).toContain('按需加载的能力')
-    expect(system).toContain('method.call')
-    expect(system).toContain('browser.*')
-    expect(system).toContain('subagent.*')
+  it('系统提示词只给 api 集：组索引在场，具体签名靠 __help 现查', () => {
+    // 组索引在场（模型必须知道能力存在）
+    expect(system).toContain('api.node — 知识点节点')
+    expect(system).toContain('api.doc — 教学文档与笔记')
+    expect(system).toContain('api.state — 学习状态')
+    expect(system).toContain('api.browser')
+    expect(system).toContain('api.subagent')
+    // 「先查再用」的纪律在场
+    expect(system).toContain('__help()')
     // 完整手册的标志性长文不在了
     expect(system).not.toContain('moji-demo-pulse')
     expect(system).not.toContain('repeatCount="indefinite"')
     expect(system).not.toContain('fnType": "parametric')
     expect(system).not.toContain('监督回路')
     expect(system).not.toContain('dom(tabId?')
+    // 具体 api 的签名不再压在系统提示词里——那是 __help() 的活
+    expect(system).not.toContain('node.read(path)')
+    expect(system).not.toContain('exam.create({')
     // 低频 api 的行为细节随模块走，系统提示词里不再逐条展开
     expect(system).not.toContain('api.res.refs(uuid)：谁在引用它')
     expect(system).not.toContain('reach ≥ 0.6')
@@ -189,10 +195,11 @@ describe('系统提示词确实瘦了（减负的验收线）', () => {
   it('每轮必用的语法与判断标准一条不丢', () => {
     expect(system).toContain('唯一的工具是 execute')
     expect(system).toContain('写操作的失败不抛异常')
-    expect(system).not.toContain('api.doc.readRange')
-    expect(system).toContain('api.files.read')
-    expect(system).toContain('数据资产与存储文件契约')
-    expect(system).toContain('api.ask')
+    expect(system).toContain('先查再用')
+    // 数据契约退役：应用数据走 api 组，files 被闸门拦住
+    expect(system).toContain('应用数据一律走 api 组')
+    expect(system).toContain('api.userInfo.get()')
+    expect(system).toContain('wait / ask / tiktok')
     expect(system).toContain('需求解耦')
     expect(system).toContain('api.ui.point')
   })

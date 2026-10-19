@@ -229,6 +229,7 @@ export function revealOfTab(
       return null
     case 'settings':
     case 'usage':
+    case 'schedule':
     case 'mind':
     case 'agentSettings':
     case 'newGoal':

@@ -57,8 +57,8 @@ const TIPS: Array<{ key: string; text: string }> = [
     text: '按 Ctrl + L 可在当前分栏快速开启内置网页浏览器标签页',
   },
   {
-    key: 'pomodoro',
-    text: '点击顶栏番茄钟开启专注计时，养成专注学习节奏',
+    key: 'focus',
+    text: '点击顶栏「专注」开启守卫：分心会提醒，隐私场面立即熔断',
   },
   {
     key: 'mind-map',

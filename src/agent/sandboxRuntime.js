@@ -11,6 +11,7 @@
  * 跑完发 { kind: 'done', ok, value/error }。
  */
 const API_NAMES = __API_NAMES__
+const API_HELP = __API_HELP__
 
 /**
  * 只给编排能力：网络与定时器统统收走。
@@ -73,6 +74,24 @@ function call(name, args) {
   })
 }
 
+function groupHelp(key) {
+  return API_HELP.groups[key] || '没有 api.' + key + ' 这一组。先 await api.__help() 看有哪些组。'
+}
+
+function apiHelp(full) {
+  return API_HELP.apis[full] || '没有登记 api.' + full + '。先 await api.<组>.__help() 看这一组有哪些 api。'
+}
+
+function attachGroupHelp(obj, key) {
+  if (obj && typeof obj.__help !== 'function') obj.__help = () => groupHelp(key)
+  return obj
+}
+
+function attachApiHelp(fn, full) {
+  fn.__help = () => apiHelp(full)
+  return fn
+}
+
 function makeApi() {
   const api = {}
   for (const full of API_NAMES) {
@@ -80,16 +99,19 @@ function makeApi() {
     if (full === 'ui.dom') continue
     const segs = full.split('.')
     if (segs.length === 1) {
-      // 不带点的顶层 api（wait / tiktok…）：直接挂在 api 上
-      api[full] = (...callArgs) => call(full, callArgs)
+      // 不带点的顶层 api（wait / ask / tiktok…）：直接挂在 api 上
+      api[full] = attachApiHelp((...callArgs) => call(full, callArgs), full)
       continue
     }
     let cur = api
     for (let i = 0; i < segs.length - 1; i++) {
       cur = cur[segs[i]] || (cur[segs[i]] = {})
     }
-    cur[segs[segs.length - 1]] = (...callArgs) => call(full, callArgs)
+    attachGroupHelp(api[segs[0]], segs[0])
+    cur[segs[segs.length - 1]] = attachApiHelp((...callArgs) => call(full, callArgs), full)
   }
+  // 根 help：组总览。api.<组>.__help() 与 api.<组>.<api>.__help() 都是同步返回的
+  api.__help = () => API_HELP.root
   // 暴露全局 files、process 与 skill 变量，使得 await files.read(...) 与 await api.files.read(...) 均可直接调用
   if (api.files) {
     globalThis.files = api.files
@@ -102,16 +124,16 @@ function makeApi() {
   }
   // 别名：api.web.fetch 指向 api.fetch
   if (api.fetch) {
-    api.web = api.web || {}
-    api.web.fetch = api.fetch
+    api.web = attachGroupHelp(api.web || {}, 'web')
+    api.web.fetch = attachApiHelp((...callArgs) => api.fetch(...callArgs), 'web.fetch')
   }
-  api.ui = api.ui || {}
+  api.ui = attachGroupHelp(api.ui || {}, 'ui')
   /**
    * api.ui.dom(fn)：宿主先建一个「会话」，回调拿到的是一层**门面**（facade）——
    * 它的每个方法都回到宿主去操作文档区根元素。只暴露选择器级别的读写与点击，
    * 因为 DOM 节点本身同样无法穿过 Worker 边界。
    */
-  api.ui.dom = async (fn) => {
+  api.ui.dom = attachApiHelp(async (fn) => {
     if (typeof fn !== 'function') {
       throw new Error('api.ui.dom 需要传入一个回调函数：await api.ui.dom(async (root) => { ... })')
     }
@@ -129,7 +151,7 @@ function makeApi() {
       click: (sel, i) => op('click', [sel, i]),
     }
     return await fn(facade)
-  }
+  }, 'ui.dom')
   api.log = (...args) => {
     const line = args
       .map((a) => {
@@ -147,26 +169,17 @@ function makeApi() {
 }
 
 const DEPRECATED_HINTS = {
-  doc: 'api.doc 已收敛为 api.files：读取教学文档请用 await api.files.read("docs/.../节点名.md")，写入用 await api.files.write("docs/.../节点名.md", 讲义内容)。',
-  docs: 'api.docs 已收敛为 api.files：文件读写请使用 api.files.*。',
-  outline: 'api.outline 已收敛为 api.files：大纲请用 await api.files.write("docs/.../节点名.outline.json", JSON.stringify(大纲对象))。',
-  description: 'api.description 不存在：修改节点描述请用 await api.node.update(path, { description })。',
-  userInfo: 'api.userInfo 已收敛为 api.files：画像请用 await api.files.read("user.yaml")。',
-  state: 'api.state 已收敛为 api.files：界面状态请用 await api.files.read("state.json") 或对应节点的 .meta.json。',
-  tmp: 'api.tmp 已收敛为 api.files：中间数据请存为真实文件，如 await api.files.write("docs/目标/tmp.json", ...)。',
-  exam: 'api.exam 已收敛为 api.files：试卷数据请直接读写相关数据文件。',
-  review: 'api.review 已收敛为 api.files：复习计划请直接读写对应目标下的数据文件。',
-  res: 'api.res 已收敛为 api.files：目标资源文件请直接使用 api.files.* 读写 static/ 目录。',
-  sdoc: 'api.sdoc 已收敛为 api.files：超级文档请使用 api.files.* 读写 superdocs/ 目录。',
-  workspace: 'api.workspace 已收敛为 api.files：工作区真实文件请直接使用 api.files.*。',
-  retrieval: 'api.retrieval 已收敛为 api.files：检索数据请读写相关索引文件。',
-  note: 'api.note 已收敛为 api.files：笔记请用 await api.files.read("docs/.../节点.notes/笔记名.md")，写入用 await api.files.write(...)。',
-  stats: 'api.stats 在本沙箱中不存在：阅读与打卡数据请使用 api.files 读写 docs/目标/reading.json 与 checkin.json。',
-  memory: 'api.memory 在本沙箱中不存在：状态与事实数据已收敛为真实数据文件。',
-  mind: 'api.mind 在本沙箱中不存在：知识图谱结构请通过 node.* 操作，文档内容通过 files.* 读写。',
-  checkin: 'api.checkin 已收敛为 api.files：打卡记录请使用 api.files 读写 docs/目标/checkin.json。',
-  plot: 'api.plot 已收敛为 api.files：绘图与静态资源请直接使用 api.files 读写 static/ 目录。',
-  methods: 'api.methods 不存在：方法调用请使用 api.method.call(name, ...args)。',
+  docs: '没有 api.docs 这一组：文档请用 api.doc.*（先 await api.doc.__help()）。',
+  description: 'api.description 已退役：修改节点描述请用 await api.node.update(path, { description })。',
+  review: '没有 api.review：复习计划用 api.outline.write / api.state.* 表达，不要自己找数据文件。',
+  retrieval: '没有 api.retrieval：联网检索请用 api.web.search。',
+  note: '没有 api.note 这一组：笔记请用 api.doc.read / api.doc.write，路径写「节点/笔记/名字」。',
+  stats: 'api.stats 不存在：阅读事实用 api.reading.*，注意力用 api.attention.get。',
+  memory: 'api.memory 不存在：长期事实用 api.doc.* / api.state.*，可执行逻辑用 api.method.*。',
+  mind: 'api.mind 不存在：知识结构用 api.node.*，文档用 api.doc.*。',
+  checkin: 'api.checkin 不存在：没有打卡数据这一组。',
+  plot: 'api.plot 不存在：图像请写进教学文档（```plot 围栏），静态素材用 api.res.*。',
+  methods: 'api.methods 不存在：方法调用请用 api.method.call(name, ...args)。',
 }
 
 async function run(body, timeoutMs) {

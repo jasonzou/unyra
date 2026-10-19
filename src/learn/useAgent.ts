@@ -43,7 +43,8 @@ import { conversationById, nodeById, resolveDisplayedConversation, addConversati
 import { currentNodeBlock, makeExamTool } from './agentOps'
 import { findWorkflow, renderWorkflowInstruction, resolveWorkflowEffort, workflowPrep, workflowModules } from './workflows'
 import { generateConversationTitle, namingSource } from './title'
-import { createMindOps } from './mind'
+import { createMemoryOps } from './memory'
+import { createScheduleOps } from './schedule'
 import { saveScreenshot } from './screenshots'
 import { makeBrowserOps, type BrowserDeps } from './web/browserOps'
 import { loadImagesById, loadImagesFor, releasePending } from './images'
@@ -420,7 +421,13 @@ export function useAgent(opts: {
         parts: [{ type: 'text', text: trimmed }],
         ts: Date.now(),
         hidden,
-        ...(hidden && mark ? { mark } : {}),
+        /*
+         * 带 mark 的隐藏轮就是**工作流指令**（runWorkflow 把工作流名当 mark 传下来，
+         * runHidden 那几个动作同理）：界面上画一条分界条，定位条给它一个锚点。
+         * 提示词注入（人格 / 格式 / 技能库 / 模块）自己带 inject: 'prompt'，不走这里——
+         * 两者从前混在一条分界条上，几条一起注入时那行字会被挤爆（见 agent/messageKind）。
+         */
+        ...(hidden && mark ? { mark, inject: 'instruction' as const } : {}),
         context: extraContext ? nodeContext + '\n\n' + extraContext : nodeContext,
         ...(quote ? { quote } : {}),
         ...(attached.images.length ? { images: attached.images } : {}),
@@ -654,8 +661,8 @@ export function useAgent(opts: {
           onPromptModule: (key) => moduleQueue.add(key),
           // 用户点「停止」时，正在等用户的 ask 与正在睡的 wait 要能立刻退场
           signal,
-          /** 长期记忆：按目标归档；绝不自动拼进上下文，agent 需要时主动读写 */
-          mind: createMindOps({ getLatest, set, goalId: () => target.goalId }),
+          /** 记忆：长期跨目标、工作按目标；绝不自动拼进上下文，agent 需要时主动读写 */
+          memory: createMemoryOps({ getLatest, set, goalId: () => target.goalId }),
           wait: (ms) =>
             new Promise<void>((resolve, reject) => {
               const t = setTimeout(() => {
@@ -1207,12 +1214,20 @@ export function useAgent(opts: {
               fetch: fetchForAgent,
               search: searchForAgent,
             },
-            apiAllow: ['web', 'fetch'],
+            /*
+             * 日程：聊天 agent 也排得了日程（需求明确）。它写的是**用户级**的那张表
+             * （state.json 的 schedule），与自由聊天没有目标这件事不冲突——goalId 只是
+             * 日程上的一个可选标记，这里给 FREE_GOAL_ID，界面按「自由聊天」显示。
+             */
+            schedule: createScheduleOps({ getLatest, set, goalId: () => FREE_GOAL_ID }),
+            apiAllow: ['web', 'fetch', 'schedule'],
             apiBrief:
               'DeepSeek 官方搜索与抓取服务：\n' +
               'api.web.search({ query, count?: 5, ori_question?, need_content? })：网络搜索并获取多维度权威检索结果；\n' +
               "api.fetch({ url: 'https://...' }) 或 api.fetch('https://...')：抓取网页正文并转为 Markdown 格式；\n" +
-              'api.web.fetch({ url })：抓取网页正文（api.fetch 别名）。',
+              'api.web.fetch({ url })：抓取网页正文（api.fetch 别名）；\n' +
+              'api.schedule.list({ days? }) / api.schedule.create({ title, date?, time, minutes?, remindBefore? })：' +
+              '看用户的日程、给他排一条提醒（到点由宿主响铃，用户自己确认或稍后提醒）。',
             signal: ctrl.signal,
           }
           const tools = [createExecuteTool(freeSandbox)]

@@ -689,11 +689,6 @@ body {
   background: color-mix(in srgb, var(--raw-paper) var(--ui-opacity, 70%), transparent) !important;
 }
 
-/* 全局图片背景模式下，隐藏 Agent 栏消息列表顶部的渐变头帘 */
-:root[data-has-custom-bg='true'] .agent-msg-fade-curtain {
-  display: none !important;
-}
-
 /* 文字描边特性：使用 text-shadow 实现硬描边、无扩散，厚度跟随 --text-stroke-width (0.0 - 1.0px) */
 :root[data-has-text-stroke='true'] body,
 :root[data-has-text-stroke='true'] .note-preview,

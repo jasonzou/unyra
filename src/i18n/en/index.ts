@@ -9,6 +9,7 @@ import focusUi from './focus-ui'
 import learnShell from './learn-shell'
 import learnViews from './learn-views'
 import libUi from './lib-ui'
+import scheduleUi from './schedule-ui'
 import shellUi from './shell-ui'
 import stores from './stores'
 import usageUi from './usage-ui'
@@ -20,6 +21,7 @@ export const en: Record<string, string> = {
   ...learnShell,
   ...learnViews,
   ...libUi,
+  ...scheduleUi,
   ...shellUi,
   ...stores,
   ...usageUi,

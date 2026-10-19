@@ -18,7 +18,7 @@ import { emptyDocs } from '../src/learn/groups'
 import { buildDocs, buildState, parseDocs } from '../src/learn/files'
 import { activeMessages } from '../src/learn/compact'
 import { upsertAssistantInFlight } from '../src/learn/agent/inflight'
-import { emptyPomodoro } from '../src/learn/pomodoro'
+import { emptyFocus } from '../src/learn/focus'
 import { createSession, withAssistantFlush, withRunOutcome, withTaskMessage } from '../src/agent/subagent/registry'
 import type { Conversation, ConversationMessage, ContextSummary } from '../src/agent/types'
 import type { LearnStore } from '../src/learn/types'
@@ -79,7 +79,7 @@ function storeWith(conv: Conversation): LearnStore {
     docScroll: {},
     localFiles: [],
     reading: { byGoal: {} },
-    pomodoro: emptyPomodoro(),
+    focus: emptyFocus(),
   }
 }
 
@@ -104,6 +104,16 @@ describe('对话写盘 → 读回', () => {
     // 面板那条判据（见 AgentPanel）：显示的是「非隐藏」+「带 mark 的隐藏」
     const shown = back.messages.filter((m) => !m.hidden || !!m.mark)
     expect(shown.map((m) => m.id)).toEqual(['u1', 'u2'])
+  })
+
+  it('注入类别活着回来：丢了它，重启后人格 / 格式这些提示词会被重新塞回分界条', () => {
+    const back = roundTrip(
+      convWith([
+        { ...msg('u1', 'user', '【人格】按 ADHD 导师来'), hidden: true, mark: '导师人格 · ADHD 导师', persona: 'adhd', inject: 'prompt' },
+        { ...msg('u2', 'user', '【开讲】把这个节点讲一遍'), hidden: true, mark: '开讲', inject: 'instruction' },
+      ]),
+    )
+    expect(back.messages.map((m) => m.inject)).toEqual(['prompt', 'instruction'])
   })
 
   it('提示词模块的标记活着回来：丢了它，重启后每次用到低频组都会重复注一遍（见 learn/ai/promptModules）', () => {

@@ -1,7 +1,8 @@
 /** 这个文件负责什么：界面状态（state.json）的形状与写出——「上次看到哪儿」、页签、暂存区与本地文件那一份。 */
 
 import type { Drafts } from '../drafts'
-import type { DocKind, DocScroll, FavoriteItem, LearnStore, LearnTab, LocalFile, WorkflowEffortSetting, WorkflowEntry } from '../types'
+import { DEFAULT_SCHEDULE_SOUND } from '../schedule'
+import type { DocKind, DocScroll, FavoriteItem, LearnStore, LearnTab, LocalFile, MemoryItem, WorkflowEffortSetting, WorkflowEntry } from '../types'
 
 /**
  * 界面状态（相对用户目录的 state.json）。
@@ -44,15 +45,29 @@ export interface LearnState {
    * 档位是「设置」不是学习数据，不随目标文件走。
    */
   workflows?: { global?: WorkflowEntry[]; efforts?: Record<string, WorkflowEffortSetting> }
+  /**
+   * 记忆库里的**长期**那一半（见 learn/memory）。
+   *
+   * 长期记忆跨目标、跟着用户走，不属于任何一个目标的目录，所以和全局工作流一样存在这里；
+   * 工作记忆按目标落在各自目录的 mind.json（见 buildDocs）。
+   */
+  memory?: { long?: MemoryItem[] }
   /*
-   * 番茄钟（见 learn/pomodoro）**整块**存在 state.json 里，没有磁盘镜像，
+   * 专注模式（见 learn/focus）**整块**存在 state.json 里，没有磁盘镜像，
    * 所以这里漏一个字段就等于「写下去了、读不回来」——曾经真漏过。
    *
    * 阅读记录与打卡曾经也在这儿，现在它们按目标落在各自目录（`{目标}/reading.json`、
    * 见 learn/reading 的 ReadingBook）。旧的那两个字段**不再读**：
    * 改口径不迁移数据，从前那份用户级的账直接丢掉（见 parseDocs 里的说明）。
    */
+  focus?: unknown
+  /** 旧字段（番茄钟那一版的数据）：只读，读回来后迁移成 focus 的新形状 */
   pomodoro?: unknown
+  /**
+   * 日程（见 learn/schedule）：提醒清单 + 铃声设置。同样**整块**存在这里——
+   * 它是用户级数据（不挂目标），漏一个字段就等于「写下去了、读不回来」。
+   */
+  schedule?: unknown
   /** 旧字段：页签之前，「文档区在看教学文档还是笔记」。保留只为读回旧文件 */
   activeDoc?: DocKind
   /** agent 栏的页签（见 learn/agentTabs）。原样落盘，校验交给 normalizeLearnStore */
@@ -71,7 +86,7 @@ export function buildState(store: LearnStore): Record<string, unknown> {
     // 写出的一律是新结构；旧文件由 groups 的 normalizeDocs 在读回来的路上折成单组
     docArea: store.docArea,
     drafts: store.drafts,
-    // 读到哪儿了：空表不写（与番茄钟同一条纪律——空字段只会让读代码的人以为这里存过东西）
+    // 读到哪儿了：空表不写（与专注同一条纪律——空字段只会让读代码的人以为这里存过东西）
     ...(Object.keys(store.docScroll ?? {}).length ? { docScroll: store.docScroll } : {}),
     localFiles: store.localFiles,
     // 收藏夹只在真有东西时写：空清单只会让人以为收藏过什么（与 workflows 同一条纪律）
@@ -91,14 +106,21 @@ export function buildState(store: LearnStore): Record<string, unknown> {
         }
       : {}),
     /*
-     * 番茄钟也只在真有东西时才写。
+     * 长期记忆：只在真有条目时写（与 workflows 同一条纪律——空清单只会让人以为存过什么）。
+     * 工作记忆不在这里：它按目标写在各自目录的 mind.json（见 buildDocs）。
+     */
+    ...(store.memory?.long?.length ? { memory: { long: store.memory.long } } : {}),
+    /*
+     * 专注模式也只在真有东西时才写。
      *
      * 这份 state.json 是**整份重写**的：一份空结构每次保存都要多写几百字节，
      * 而它承载的信息量是零。更实际的理由是——「这个字段存在」本身就是一种声明，
      * 空对象会让以后读代码的人以为这里存过什么。
      * （阅读与打卡不在这里：它们按目标写在各自目录里，见 buildDocs。）
      */
-    ...(hasPomodoro(store.pomodoro) ? { pomodoro: store.pomodoro } : {}),
+    ...(hasFocus(store.focus) ? { focus: store.focus } : {}),
+    // 日程：有条目、或铃声被改过才写（默认铃声不值得占字段；改过就得记住）
+    ...(hasSchedule(store.schedule) ? { schedule: store.schedule } : {}),
     /*
      * agent 栏的页签：只在真有页签时写（与 favorites 同一条纪律）。
      * 激活项跟着页签走——没有页签时的 null 是默认值，不值得占一个字段。
@@ -110,5 +132,17 @@ export function buildState(store: LearnStore): Record<string, unknown> {
   }
 }
 
-const hasPomodoro = (p?: { current: unknown; log: unknown[] }): boolean =>
+const hasFocus = (p?: { current: unknown; log: unknown[] }): boolean =>
   !!p && (!!p.current || p.log.length > 0)
+
+/**
+ * 日程要不要写进 state.json：有条目，或者铃声不是默认那一档。
+ *
+ * 与 hasFocus 同一条纪律（空结构不写），但多认一个条件：日程表可以是空的，
+ * 而「我把铃声换成了钟声」这件事必须记住——它只活在这份文件里。
+ */
+const hasSchedule = (s?: { items: unknown[]; sound?: { preset?: string; volume?: number } }): boolean =>
+  !!s &&
+  (s.items.length > 0 ||
+    (s.sound?.preset !== undefined && s.sound.preset !== DEFAULT_SCHEDULE_SOUND.preset) ||
+    (s.sound?.volume !== undefined && s.sound.volume !== DEFAULT_SCHEDULE_SOUND.volume))

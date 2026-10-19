@@ -48,13 +48,13 @@ function normalizeTabRef(raw: unknown, byId: Map<string, KnowledgeNode>): TabRef
     return { kind: 'web', url, key: typeof r.key === 'string' && r.key ? r.key : newWebKey() }
   }
   // 专注报告：id 就是全部身份（文件丢了由视图自己说「报告不见了」）。
-  // 守卫页签**故意没有分支**：上下文只活在会话里，重启读回来就丢（下一次严格专注再建）
+  // 守卫页签**故意没有分支**：上下文只活在会话里，重启读回来就丢（下一次专注再建）
   if (r.kind === 'report') {
     const reportId = typeof r.reportId === 'string' ? r.reportId : ''
     return reportId ? { kind: 'report', reportId } : null
   }
-  // 设置页与用量页：全局各只有一份，没有需要校验的「指向」，形状对就收下
-  if (r.kind === 'settings' || r.kind === 'usage') return { kind: r.kind }
+  // 设置页、用量页与日程表：全局各只有一份，没有需要校验的「指向」，形状对就收下
+  if (r.kind === 'settings' || r.kind === 'usage' || r.kind === 'schedule') return { kind: r.kind }
   // 记忆页签一枚目标一份：goalId 缺了（或不是字符串）就没法认领，丢弃
   if (r.kind === 'mind') {
     const goalId = typeof r.goalId === 'string' ? r.goalId : ''

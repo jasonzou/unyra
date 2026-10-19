@@ -101,6 +101,29 @@
 }
 
 /*
+ * 纵向可滚、滚动条**细**一档（思考过程那一块用它）。
+ *
+ * 与 moji-scroll-none 的区别：那里的滚动是「可有可无的溢出」，藏起来最好；
+ * 而思考过程展开后是**被限了高度**的正文，用户需要看见「下面还有」——
+ * 一条 6px 的淡槽比「什么都没提示、只是滚不动了」诚实得多。
+ * 颜色取 line-strong，压在纸面上刚好是一条安静的界线，不抢正文。
+ */
+.moji-scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+.moji-scroll-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.moji-scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 999px;
+}
+.moji-scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/*
  * 账号菜单：从右上角向左下展开、收起时缩回同一个角。
  *
  * 用 clip-path 而不是把 scale 缩到 0：scale(0) 会把里面的文字一起压扁，

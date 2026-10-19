@@ -1,5 +1,5 @@
 /**
- * 英文字典：store / 逻辑层产生的用户可见文案（useAgent 的过程提示、考试、番茄钟、
+ * 英文字典：store / 逻辑层产生的用户可见文案（useAgent 的过程提示、考试、专注模式、
  * 打卡、agent runtime 通知等）。发给模型的提示词不属于界面，不进这张表。
  *
  * 键 = 界面里的中文原文，逐字节一致（含全角标点）；插值用 {0} {1}。
@@ -209,14 +209,14 @@ const dict: Record<string, string> = {
   '学习者画像 · userInfo': 'Learner profile · userInfo',
   '昵称、年龄、性别、语言、教育程度、专业背景、当前身份、工作经验、已掌握技能，外加 filled / missing（还缺哪些）': 'Nickname, age, gender, language, education, major, current role, work experience, mastered skills, plus filled / missing (what is still absent)',
   '增量写（只改给的字段）；认不出的字段与写不进去的值会逐条说明，不会整单丢弃': 'Incremental write (only the given fields change); unrecognized fields and unwritable values are explained item by item, never dropping the whole batch',
-  '学习过程 · reading / attention / checkin / pomodoro': 'Learning process · reading / attention / checkin / pomodoro',
+  '学习过程 · reading / attention / checkin / focus': 'Learning process · reading / attention / checkin / focus',
   '该节点读到哪了：有效时长、打开次数、每份文档各节覆盖（reach<0.6 就是没读到）、最近会话': 'How far this node has been read: active time, open count, per-doc section coverage (reach<0.6 means not really read), recent sessions',
   '当前目标里每个有记录的节点一行：未读的节、最后阅读时间、时长、文档完成情况': 'One line per recorded node in the current goal: unread sections, last read time, duration, doc completion',
   '**当前目标**某个学习日（缺省今天，格式 2026-09-20）读了什么：有效时长、节点、交互印记': 'What was read on a study day of the **current goal** (defaults to today, format 2026-09-20): active time, nodes, interaction marks',
   '注意力评级：档位（focused/steady/fragmented/drifting/unknown）、五个维度、一句事实话、一句教学建议、建议的专注块长度 focusMinutes': 'Attention rating: level (focused/steady/fragmented/drifting/unknown), five dimensions, one factual sentence, one teaching suggestion, and the suggested focus block length focusMinutes',
   '**当前目标**今天能不能打卡：有效阅读与门槛、可出题的节（题源，来自今天真正读到的内容）、还剩几次机会、建议题数与通过线；该目标下试卷首次考试及格（卷面 ≥ 60%）会自动打卡': 'Whether the **current goal** can check in today: effective reading vs threshold, sections eligible for questions (sourced from what was really read today), attempts left, suggested question count and pass line; a first exam pass (score ≥ 60%) on the papers of this goal checks in automatically',
   '记一次**当前目标**的打卡结果：门槛与次数由系统复核（没到门槛一律不算过），note 写一句明天该补什么': 'Record a check-in result for the **current goal**: the system re-checks threshold and attempts (below the threshold never passes); note carries one sentence on what to catch up tomorrow',
-  '番茄钟记录（只读）：正在跑的是第几组/专注还是休息/还剩多久、今天几组多少分钟、最近七天与最近几条': 'Pomodoro records (read-only): which set is running / focus or rest / time left, sets and minutes today, the last seven days and recent entries',
+  '专注模式记录（只读）：在跑的这一场与守卫监控、今天几场多少分钟、最近七天与最近几条': 'Focus records (read-only): the running session and its monitors, sessions and minutes today, the last seven days and recent entries',
   '复习 · review': 'Review · review',
   '这个节点的复习计划：到期阶段（侧重与逾期天数）、下次到期、补充任务、合并组成员、可合并的候选（candidates，带相关关系）、历次记录与错误记忆（fixed: false 的才是活薄弱项）': 'The review plan of this node: due stage (focus and overdue days), next due, extra tasks, merge-group members, mergeable candidates (with relations), past records and mistake memory (fixed: false marks live weak points)',
   '落一次复习的账：完成当前（或 stage 指定的）阶段 / extraId 指定的补充任务；更早没做的阶段自动并入这一次；mistakes 记这次暴露的错法、fixed 标答对了的旧薄弱项、mastery 修正掌握度': 'Record one review: complete the current stage (or the one named by stage) / the extra task named by extraId; earlier undone stages merge into it automatically; mistakes logs the errors exposed this time, fixed marks old weak points answered correctly, mastery adjusts mastery',

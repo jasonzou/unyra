@@ -5,7 +5,7 @@ import { guardSystemPrompt } from '../../learn/focusGuard'
 import { t } from '../../i18n'
 
 /**
- * 守卫 agent 的上下文页签：严格专注期间「守卫看见了什么、怎么想、判了什么」的旁路观察窗。
+ * 守卫 agent 的上下文页签：专注模式期间「守卫看见了什么、怎么想、判了什么」的旁路观察窗。
  *
  * 守卫不在这里运行——它是模块级单例（agent/guardRuntime），不打开这个页签也照常
  * 周期抽帧、发模型、出判定；这里只是把它的上下文构建摊开给人看：系统提示词、
@@ -23,7 +23,7 @@ const ACTION_META: Record<string, { label: string; cls: string }> = {
 
 export default function GuardView() {
   const snap = useSyncExternalStore(subscribeGuard, guardSnapshot)
-  // 正在跑的优先；跑完的留到下一次严格专注开始前，供回看
+  // 正在跑的优先；跑完的留到下一次专注开始前，供回看
   const session = snap.session ?? snap.lastSession
   if (!session) {
     return (
@@ -31,7 +31,7 @@ export default function GuardView() {
         <ShieldCheck size={28} className="text-ink-faint" />
         <p className="text-[13px] text-ink-soft">{t('守卫还没有跑过。')}</p>
         <p className="max-w-[420px] text-[11.5px] leading-relaxed text-ink-faint">
-          {t('在顶栏番茄钟的 tip 里勾选「监控屏幕」或「监控摄像头」，开始专注后守卫就会在这里建起自己的上下文：每分钟看一眼画面，判断你在不在学、在不在屏幕前，涉及隐私会立即熔断。')}
+          {t('在顶栏专注模式的 tip 里勾选「监控屏幕」或「监控摄像头」，开始专注后守卫就会在这里建起自己的上下文：每分钟看一眼画面，判断你在不在学、在不在屏幕前，涉及隐私会立即熔断。')}
         </p>
       </div>
     )

@@ -1,7 +1,7 @@
 /**
  * 这个文件负责什么：**沙箱里能调到的全部 api 的定义**。buildApi 把 SandboxOptions 上的宿主能力
- * 逐个包成 api 方法（doc / node / state / tmp / exam / mind / method / sdoc / wf / code /
- * reading / attention / pomodoro / compact / web / userInfo / wait / ask /
+ * 逐个包成 api 方法（doc / node / state / tmp / exam / memory / method / sdoc / wf / code /
+ * reading / attention / focus / compact / web / userInfo / wait / ask /
  * tiktok / ui / res），wrapApi 负责记账与失败判定；每个 api 都是调用时才读 opts，不持有快照。
  */
 import { needleForDoc } from '../../lib/docDom'
@@ -11,6 +11,8 @@ import { normalizeAskForm } from './askForm'
 import { compileBody } from './body'
 import { MAX_LOGGED_CALLS, MAX_RESULT_CHARS } from './limits'
 import { asExamPayload, asIndex, asOptionalPath, asRecord, asText, type DocRef, type NodeRef } from './refs'
+import { apiDocOf, renderApiHelp, renderGroupHelp, renderRootHelp } from './apiRegistry'
+import { filesAccessError } from './dataPaths'
 import type { SandboxCall, SandboxOptions } from './types'
 import { getLoadedSkills, getActiveSkills } from '../skill/registry'
 import {
@@ -74,6 +76,13 @@ function markFailed(record: SandboxCall, value: unknown): void {
 
 /** 把工具动作包成 api 方法：每次调用记一笔，异常转为结构化失败返回值，防止炸掉整批编排 */
 function wrapApi(api: Record<string, unknown>, name: string, fn: (args: unknown[]) => unknown, log: SandboxCall[]) {
+  /*
+   * 注册表是唯一入口：没登记的名字不许出现在沙箱里。
+   * 这条检查在 buildApi 阶段就炸，而不是等模型调到一半才发现「有这个 api 但没人知道怎么用」。
+   */
+  if (!apiDocOf(name)) {
+    throw new Error('[sandbox] api 未在 apiRegistry 登记：' + name + '（先在 apiRegistry.ts 补签名、用法与示例）')
+  }
   const wrapped = (...args: unknown[]): unknown => {
     const record: SandboxCall = { name, ok: true }
     if (log.length < MAX_LOGGED_CALLS) log.push(record)
@@ -101,6 +110,8 @@ function wrapApi(api: Record<string, unknown>, name: string, fn: (args: unknown[
       return { ok: false, error: record.message }
     }
   }
+  // 宿主侧（测试 / 超级文档桥）也挂一份同步 help；真沙箱由 sandboxRuntime 再挂一次
+  ;(wrapped as unknown as { __help: () => string }).__help = () => renderApiHelp(name)
   const segs = name.split('.')
   if (segs.length === 1) {
     api[name] = wrapped
@@ -110,6 +121,11 @@ function wrapApi(api: Record<string, unknown>, name: string, fn: (args: unknown[
   for (let i = 0; i < segs.length - 1; i++) {
     const k = segs[i]
     cur = ((cur[k] as Record<string, unknown>) || (cur[k] = {})) as Record<string, unknown>
+  }
+  const groupKey = segs[0]
+  const group = api[groupKey] as Record<string, unknown>
+  if (group && typeof group.__help !== 'function') {
+    ;(group as unknown as { __help: () => string }).__help = () => renderGroupHelp(groupKey)
   }
   cur[segs[segs.length - 1]] = wrapped
 }
@@ -467,13 +483,26 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     wrapApi(api, 'exam.delete', (args) => exam.remove(asRecord(args[0])), log)
   }
 
-  if (opts.mind) {
-    const mind = opts.mind
-    wrapApi(api, 'mind.list', () => mind.list(), log)
-    wrapApi(api, 'mind.read', (args) => mind.read(asText(args[0]).trim()), log)
-    wrapApi(api, 'mind.write', (args) => mind.write(args.length && typeof args[0] === 'object' ? args[0] : args[0]), log)
-    wrapApi(api, 'mind.delete', (args) => mind.delete(asText(args[0]).trim()), log)
-    wrapApi(api, 'mind.clear', () => mind.clear(), log)
+  if (opts.memory) {
+    const memory = opts.memory
+    wrapApi(api, 'memory.list', (args) => memory.list(args.length && typeof args[0] === 'object' ? (args[0] as Record<string, unknown>) : undefined), log)
+    wrapApi(api, 'memory.get', (args) => memory.get(asText(args[0]).trim()), log)
+    wrapApi(api, 'memory.create', (args) => memory.create(asRecord(args[0])), log)
+    // 更新是 (uuid, patch)：两个位置参数，不合并成一个对象——uuid 是身份，patch 是内容
+    wrapApi(api, 'memory.update', (args) => memory.update(asText(args[0]).trim(), asRecord(args[1])), log)
+    // 删除带可选 { confirm }：长期记忆要它，工作记忆不需要（见 learn/memory）
+    wrapApi(api, 'memory.delete', (args) => memory.remove(asText(args[0]).trim(), args[1] && typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined), log)
+  }
+
+  // 日程：给用户排提醒（见 learn/schedule）。响铃与「确认」在宿主，agent 只写这张表
+  if (opts.schedule) {
+    const schedule = opts.schedule
+    wrapApi(api, 'schedule.list', (args) => schedule.list(args.length && typeof args[0] === 'object' ? (args[0] as Record<string, unknown>) : undefined), log)
+    wrapApi(api, 'schedule.create', (args) => schedule.create(asRecord(args[0])), log)
+    // 修改是 (id, patch)：与 memory.update 同一套位置参数写法
+    wrapApi(api, 'schedule.update', (args) => schedule.update(asText(args[0]).trim(), asRecord(args[1])), log)
+    wrapApi(api, 'schedule.complete', (args) => schedule.complete(asText(args[0]).trim()), log)
+    wrapApi(api, 'schedule.remove', (args) => schedule.remove(asText(args[0]).trim()), log)
   }
 
   if (opts.methods) {
@@ -566,7 +595,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     wrapApi(api, 'code.silent', (args) => code.silent(asRecord(args[0])), log)
   }
 
-  // 有效阅读 / 注意力 / 番茄钟：学习过程那一组（见 learn/reading 等）
+  // 有效阅读 / 注意力 / 专注模式：学习过程那一组（见 learn/reading 等）
   if (opts.reading) {
     const reading = opts.reading
     wrapApi(api, 'reading.get', (args) => reading.get(asOptionalPath(args[0])), log)
@@ -577,9 +606,9 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     const attention = opts.attention
     wrapApi(api, 'attention.get', (args) => attention.get(asOptionalPath(args[0])), log)
   }
-  if (opts.pomodoro) {
-    const pomodoro = opts.pomodoro
-    wrapApi(api, 'pomodoro.status', () => pomodoro.status(), log)
+  if (opts.focus) {
+    const focus = opts.focus
+    wrapApi(api, 'focus.status', () => focus.status(), log)
   }
   // 工作区目录：节点的真实系统目录（见 learn/workspace），只收文本
   if (opts.workspace) {
@@ -1150,6 +1179,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     const resolved = resolveSandboxedDocPath(rawP)
     if (!resolved.ok) return { ok: false, error: resolved.error }
     const p = resolved.path
+    const denied = filesAccessError(rawP || p, 'read')
+    if (denied) return denied
     const optArg = args[1]
     const opt = typeof optArg === 'string' ? { encoding: optArg } : asRecord(optArg)
     const nf = getNativeFiles()
@@ -1166,6 +1197,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     const resolved = resolveSandboxedDocPath(rawP)
     if (!resolved.ok) return { ok: false, error: resolved.error }
     const p = resolved.path
+    const denied = filesAccessError(rawP || p, 'write')
+    if (denied) return denied
     if (isProtectedChatFile(p)) {
       return { ok: false, error: 'chat.json 属于系统核心会话状态，禁止由脚本直接写入或修改' }
     }
@@ -1204,6 +1237,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     const resolved = resolveSandboxedDocPath(rawP)
     if (!resolved.ok) return { ok: false, error: resolved.error }
     const p = resolved.path
+    const denied = filesAccessError(rawP || p, 'edit')
+    if (denied) return denied
     if (isProtectedChatFile(p)) {
       return { ok: false, error: 'chat.json 属于系统核心会话状态，禁止由脚本直接修改' }
     }
@@ -1260,6 +1295,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
 
   wrapApi(api, 'files.list', async (args) => {
     const rawP = args.length ? asText(args[0]) : '.'
+    const denied = filesAccessError(rawP, 'list')
+    if (denied) return denied
     const p = resolveSandboxedPath(rawP)
     const nf = getNativeFiles()
     if (!nf) return { ok: true, path: p, entries: [] }
@@ -1275,6 +1312,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
 
   wrapApi(api, 'files.stat', async (args) => {
     const rawP = asText(args[0])
+    const denied = filesAccessError(rawP, 'stat')
+    if (denied) return denied
     const p = resolveSandboxedPath(rawP)
     const nf = getNativeFiles()
     if (!nf) return { ok: true, stat: { exists: true, isDirectory: false, isFile: true, size: 0, mtimeMs: 0, ctimeMs: 0 } }
@@ -1283,6 +1322,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
 
   wrapApi(api, 'files.mkdir', async (args) => {
     const rawP = asText(args[0])
+    const denied = filesAccessError(rawP, 'mkdir')
+    if (denied) return denied
     const p = resolveSandboxedPath(rawP)
     const nf = getNativeFiles()
     if (!nf) return { ok: true }
@@ -1293,6 +1334,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     const from = resolveSandboxedPath(asText(args[0]))
     const to = resolveSandboxedPath(asText(args[1]))
     const opt = asRecord(args[2])
+    const denied = filesAccessError(asText(args[0]) || from, 'copy') ?? filesAccessError(asText(args[1]) || to, 'copy')
+    if (denied) return denied
     const nf = getNativeFiles()
     if (!nf) return { ok: true }
     return await nf.copy(from, to, { overwrite: opt.overwrite !== false })
@@ -1301,6 +1344,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
   wrapApi(api, 'files.move', async (args) => {
     const from = resolveSandboxedPath(asText(args[0]))
     const to = resolveSandboxedPath(asText(args[1]))
+    const denied = filesAccessError(asText(args[0]) || from, 'move') ?? filesAccessError(asText(args[1]) || to, 'move')
+    if (denied) return denied
     const nf = getNativeFiles()
     if (!nf) return { ok: true }
     return await nf.move(from, to)
@@ -1308,6 +1353,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
 
   wrapApi(api, 'files.delete', async (args) => {
     const rawP = asText(args[0])
+    const denied = filesAccessError(rawP, 'delete')
+    if (denied) return denied
     const p = resolveSandboxedPath(rawP)
     if (isProtectedChatFile(p)) {
       return { ok: false, error: 'chat.json 属于系统核心会话状态，禁止由脚本删除' }
@@ -1324,25 +1371,9 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     return res
   }, log)
 
-  // 自描述 api.help()
+  // 自描述 api.help()：与 api.__help() 同义（注册表渲染，避免这里再抄一份组清单）
   wrapApi(api, 'help', () => {
-    return {
-      ok: true,
-      groups: [
-        'node', 'method', 'wf', 'code', 'web', 'browser', 'mcp',
-        'subagent', 'compact', 'chip', 'wait', 'ask', 'tiktok',
-        'ui', 'files', 'process', 'skill', 'permission', 'log',
-      ],
-      description: '当前沙箱提供 19 组核心能力。全量数据读写与状态管理已收敛为 files.*。',
-      files: 'api.files: read, write, edit, list, stat, mkdir, copy, move, delete（真实文件读写，相对路径默认解析到当前学习数据目录）',
-      permission: 'api.permission: list, revoke, request（外部路径放行：查看作用域 / 撤销放行 / 请求用户审批，批准由宿主直接落配置）',
-      node: 'api.node: list, read, paths, create, title, rename, update, annotate, delete, move（节点结构管理）',
-      browser: 'api.browser: open, tabs, activate, close, snapshot, point, dom, read, capture, logs, logDetail, fetch, waitFor, record, text, scroll（内置网页浏览器）',
-      mcp: 'api.mcp: list, discover, call（用户配置的外部 MCP 服务：先 list 看服务与工具，再 call 调用）',
-      web: 'fetch, api.web.search（DeepSeek 官方网页抓取与网络搜索）',
-      process: 'api.process: create, start, status, output, stop, list, get, delete（原生子进程管理）',
-      skill: 'api.skill: list, read, run（专业技能库：发现与按需查阅规范，受控执行专属脚本）',
-    }
+    return { ok: true, help: renderRootHelp() }
   }, log)
 
   wrapApi(api, 'process.create', async (args) => {
@@ -1595,6 +1626,9 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
       ...(exitCode !== 0 ? { error: `脚本退出异常，退出码: ${exitCode}` } : {}),
     }
   }, log)
+
+  // 根 help：顶层函数与各组的总览。真沙箱由 sandboxRuntime 再挂一次（同步、不花宿主往返）
+  ;(api as unknown as { __help: () => string }).__help = () => renderRootHelp()
 
   return { api, tmp }
 }

@@ -4,6 +4,7 @@
 
 import {
   AppWindow,
+  Bell,
   Bot,
   Database,
   HardDrive,
@@ -17,7 +18,7 @@ import {
 import { isDevUnlocked } from '../../lib/devMode'
 import { isWeb } from '../../lib/native'
 
-export type TabKey = 'ai' | 'appearance' | 'input' | 'window' | 'storage' | 'migration' | 'plugins' | 'update' | 'about' | 'dev'
+export type TabKey = 'ai' | 'appearance' | 'input' | 'reminder' | 'window' | 'storage' | 'migration' | 'plugins' | 'update' | 'about' | 'dev'
 
 export interface SubTab {
   key: string
@@ -43,8 +44,8 @@ export const loadSavedTab = (): TabKey => {
     if (v === 'dev') return isDevUnlocked() ? 'dev' : 'ai'
     if (isWeb() && (v === 'window' || v === 'update')) return 'ai'
     const keys: TabKey[] = isWeb()
-      ? ['ai', 'appearance', 'input', 'storage', 'migration', 'plugins', 'about']
-      : ['ai', 'appearance', 'input', 'window', 'storage', 'migration', 'plugins', 'update', 'about']
+      ? ['ai', 'appearance', 'input', 'reminder', 'storage', 'migration', 'plugins', 'about']
+      : ['ai', 'appearance', 'input', 'reminder', 'window', 'storage', 'migration', 'plugins', 'update', 'about']
     return keys.includes(v as TabKey) ? (v as TabKey) : 'ai'
   } catch {
     return 'ai'
@@ -84,6 +85,9 @@ const ALL_TABS: SettingsTabItem[] = [
   // 「输入」= 键盘与麦克风：改键、语音转文字。它们都是「怎么把话喂进这个应用」，
   // 放在一起才找得到（教学模式那个开关在外观里，它管的是显示）
   { key: 'input', label: '输入', icon: Keyboard },
+  // 「提醒」= 日程到点怎么叫人。它既不是外观也不是输入：声音是**约定被履行**的凭据，
+  // 与界面长什么样无关，所以单列一页（日程页底部还有一条紧凑入口，改的是同一份数据）
+  { key: 'reminder', label: '提醒', icon: Bell },
   // 「窗口」与「存储」都是**全局**设置：跟机器走、不属于任何用户，
   // 与前两项（跟着用户走、存在用户目录里）不是一回事，所以分开列在后面
   { key: 'window', label: '窗口', icon: AppWindow },

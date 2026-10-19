@@ -83,12 +83,12 @@ SubAgentBucket  一段对话的桶：{ defs, sessions }——住在 Conversation
   按组生成，不另写一份）。
 
 有几个组**永远不会**给子代理，白名单校验直接拒：`ask`（没有宿主表单通道，会永远阻塞）、
-`ui`（界面操作是导师与用户之间的事）、`exam` / `checkin` / `review` / `pomodoro`（学习状态的
+`ui`（界面操作是导师与用户之间的事）、`exam` / `checkin` / `review` / `focus`（学习状态的
 判断是导师的职责）、`userInfo`（画像）、`compact`、`wf`、`subagent`（不递归）。
 子代理可以选的白名单（`agent/subagent/groups.ts`）：
 
 `web`（检索 / 读网页）· `tmp`（大中间结果）· `res`（资源库）· `doc`（文档读写）·
-`node`（节点读写）· `outline` · `mind`（长期记忆）· `workspace`（工作区文件）·
+`node`（节点读写）· `outline` · `memory`（工作 / 长期记忆）· `workspace`（工作区文件）·
 `reading` / `attention`（学习事实，只读）。
 
 ## 网络检索类子代理（常用模板）

@@ -61,13 +61,19 @@ export function Topbar({
   onOpenUpdate,
   onOpenNotice,
   onToast: _onToast,
-  pomodoro,
+  focus,
   reading,
+  schedule,
+  scheduleRinging,
 }: {
-  /** 番茄钟入口（墙上时钟 + 进度条 + 倒计时，见下面的 PomodoroDock） */
-  pomodoro: ReactNode
+  /** 专注模式入口（守卫勾选 + 实时画面 + 状态，见 docks 的 FocusDock） */
+  focus: ReactNode
   /** 有效阅读入口（今天读了多久 + 节点清单 + 近七天，见下面的 ReadingDock） */
   reading: ReactNode
+  /** 日程入口（今天还有什么 + 手动安排；到点提醒的弹层也在这里，见 ScheduleButton） */
+  schedule: ReactNode
+  /** 有日程正在响：顶栏整体渐变呼吸（样式见 styles/workspace.css 的 .moji-schedule-glow） */
+  scheduleRinging?: boolean
   /** **当前文档指向的那个节点**（本地文件页签、或一个页签都没有时为 null） */
   activeNode: KnowledgeNode | null
   /** 面包屑点某一级 → 跳到那个祖先节点 */
@@ -115,10 +121,17 @@ export function Topbar({
       */}
       <div
         className={
-          'app-drag no-print relative z-20 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-gradient-to-b from-card/90 to-paper/70 px-3 ' +
+          'app-drag no-print relative isolate z-20 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-gradient-to-b from-card/90 to-paper/70 px-3 ' +
           (isElectron() && isMac() ? 'pl-[76px]' : '')
         }
       >
+      {/*
+        日程到点的呼吸层：铺在顶栏背景之上、所有按钮之下。负 z-index 的子孙只压在
+        父级背景与边框之上——前提是**父级自己成层叠上下文**（isolate 就是为了这个：
+        顶栏虽然有 backdrop-blur，但那是一条容易被后来改样式时弄丢的隐含依赖）。
+        pointer-events-none 保证它不吃任何点击——它是光，不是控件。
+      */}
+      {scheduleRinging && <div aria-hidden="true" className="moji-schedule-glow pointer-events-none absolute inset-0 -z-10" />}
       <button
         type="button"
         title={t('打开知识节点')}
@@ -195,10 +208,11 @@ export function Topbar({
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         {/* 更新入口：只有新版本**下载完成**之后它才存在，见 components/update/UpdateButton */}
         <UpdateButton onOpenUpdate={onOpenUpdate} />
-        {/* 两个入口都是「我今天的节奏」，与账号那一簇同属右侧。
-            番茄钟排在最前：它是唯一一个「开始之后不看也要一直在跑」的东西，
-            固定在最左边，开关它的时候手指不必每次都去找位置 */}
-        {pomodoro}
+        {/* 这三个入口都是「我今天的节奏」，与账号那一簇同属右侧。
+            顺序按「现在最该看什么」排：日程（几点做什么）→ 专注（守卫在不在当值）
+            → 有效阅读（今天读了多少）。日程排最前，因为它是唯一一个**到点会主动叫人**的。 */}
+        {schedule}
+        {focus}
         {reading}
         <UserMenu
           user={user}

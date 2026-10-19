@@ -1063,6 +1063,14 @@ export default function TabBar({
           const settling = settle?.id === tab.id
           const dirty = unsaved.has(tab.id)
           const lifted = dragging && !!drag?.lifted
+          /*
+           * 空白页签（保底的那一枚「新页签」）：它是一枚**页签**，不是新建按钮——
+           * 没被选中时给一圈缓慢呼吸的描边 + 图标微光（见 workspace.css 的 .moji-tab-attn），
+           * 提醒「这里还开着一个什么都没打开的页签」。选中它就没有提醒的必要了：
+           * 用户已经看着它了（那一页里写着怎么开始）。
+           */
+          const blank = isBlankTab(tab)
+          const idleBlank = blank && !on && !dragging && !settling && !exiting
           const shift = shiftOf(i)
           // 三种位移只会有一个生效：拖着的跟手（拖出栏后的影子模式里它留在槽位上）、
           // 刚落下的在归位、其余在让位
@@ -1125,7 +1133,8 @@ export default function TabBar({
              * 关掉的收拢淡出（moji-tab-out 是 transition，靠下一帧改宽度来补间）。
              */
             (entering ? ' moji-tab-in' : '') +
-            (exiting ? ' moji-tab-out' : '')
+            (exiting ? ' moji-tab-out' : '') +
+            (idleBlank ? ' moji-tab-attn' : '')
           return (
             <div
               key={tab.id}
@@ -1145,6 +1154,7 @@ export default function TabBar({
               title={
                 (trail ? trail + ' · ' + title : title) +
                 relationTooltip +
+                (blank ? t('（空白页签：还没有打开任何文档）') : '') +
                 (dirty ? t('（有未保存的改动，Ctrl+S 保存）') : '')
               }
               onClick={() => {

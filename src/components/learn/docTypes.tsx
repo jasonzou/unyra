@@ -1,4 +1,4 @@
-import { AppWindow, Bot, BookOpen, Brain, ChartColumn, FileClock, FilePlus, Folder, FolderOpen, Globe, GraduationCap, HardDrive, ListTree, Loader2, NotebookPen, Package, Plus, Settings2, ShieldCheck } from 'lucide-react'
+import { AppWindow, Bot, BookOpen, Brain, CalendarClock, ChartColumn, FileClock, FilePlus, Folder, FolderOpen, Globe, GraduationCap, HardDrive, ListTree, Loader2, NotebookPen, Package, Settings2, ShieldCheck } from 'lucide-react'
 import Bullseye from '../Bullseye'
 
 /**
@@ -23,6 +23,7 @@ export type DocKindKey =
   | 'report'
   | 'settings'
   | 'usage'
+  | 'schedule'
   | 'mind'
   | 'agentSettings'
   | 'newGoal'
@@ -42,11 +43,47 @@ const DOC_TYPE_COLOR: Record<DocKindKey, string> = {
   report: '#7a6a54', // 褐灰：专注模式报告（收场的凭据）
   settings: '#7c8698', // 蓝灰：系统页（设置）——与哪一类学习内容都不同族
   usage: '#7c8698', // 蓝灰：系统页（用量统计），与设置同族同色、图标不同
+  schedule: '#c47a3d', // 陶土橙：日程表（时间与约定，与朱红的试卷、琥珀的笔记都不撞）
   mind: '#7c8698', // 蓝灰：系统页（记忆管理），系统页同族
   agentSettings: '#7c8698', // 蓝灰：系统页（超级导师设置），系统页同族
   newGoal: '#a8432f', // 赭红：目标创建页（与 Bullseye 靶心同色）
   blank: '#8c8c8c', // 浅中性灰：空白页签
   draft: '#6f8fb0', // 雾蓝：新建文件（还没落定的那一份，与「外部文件的灰」分开）
+}
+
+/**
+ * 空白页签的图标：一张**空白的纸**（只有轮廓与右上折角，里面什么都不画）。
+ *
+ * 从前这里是一颗「+」——用户第一眼读成「新建按钮」，而它其实是一枚**页签**：
+ * 点它只是选中这一页，不会新建任何东西（新建是页签栏末尾那颗真的 +）。
+ * 「一张什么都没有的纸」表达的是「这一页还空着」，语义与行为对得上。
+ *
+ * 纸面里刻意**不画内容线**：试过两行虚线，11px 下会糊成几颗点，看着像「列表」
+ * 或「菜单」，反而更像一个动作按钮。留白本身就是这个图标要说的那句话。
+ *
+ * 手画而不是取图标库：lucide 的 File 系列都带内容线，没有「空白」这一枚，
+ * 而这一颗的线条要与页签里其它 11px 的类型图标同粗同重。
+ * class 交给页签栏做「未被选中」时的呼吸提醒（见 workspace.css 的 .moji-blank-glyph）。
+ */
+function BlankPageGlyph({ size }: { size: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.25}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="moji-blank-glyph"
+      aria-hidden="true"
+    >
+      {/* 纸张轮廓 + 右上折角 */}
+      <path d="M3.6 1.9h5l3.8 3.8v8.4H3.6z" />
+      <path d="M8.6 1.9v3.8h3.8" />
+    </svg>
+  )
 }
 
 /**
@@ -75,6 +112,8 @@ export function DocTypeIcon({ kind, size = 11 }: { kind: DocKindKey; size?: numb
       <Settings2 size={size} />
     ) : kind === 'usage' ? (
       <ChartColumn size={size} />
+    ) : kind === 'schedule' ? (
+      <CalendarClock size={size} />
     ) : kind === 'mind' ? (
       <Brain size={size} />
     ) : kind === 'agentSettings' ? (
@@ -82,7 +121,7 @@ export function DocTypeIcon({ kind, size = 11 }: { kind: DocKindKey; size?: numb
     ) : kind === 'newGoal' ? (
       <Bullseye size={size} />
     ) : kind === 'blank' ? (
-      <Plus size={size} />
+      <BlankPageGlyph size={size} />
     ) : kind === 'draft' ? (
       <FilePlus size={size} />
     ) : kind === 'ws' ? (

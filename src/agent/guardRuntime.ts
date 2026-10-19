@@ -1,12 +1,12 @@
 /**
- * 守卫 agent 的**运行时**（严格专注的监控回路）。
+ * 守卫 agent 的**运行时**（专注模式的监控回路）。
  *
  * 分工：判定怎么解析、策略怎么定是纯逻辑（learn/focusGuard）；这里管的是
  * 「周期性地看一眼」这件事本身——拿屏幕/摄像头的媒体流、抽帧、带历史发给模型、
  * 把判定翻译成动作（警告/暂停/熔断）交给宿主（LearnWorkspace 注入的 hooks）。
  *
  * 它是一个模块级单例，**不属于超级导师**：自己的系统提示词、自己的历史、
- * 自己的页签（TabRef kind 'guard'）。不打开页签它也在后台跑——每次严格专注开始
+ * 自己的页签（TabRef kind 'guard'）。不打开页签它也在后台跑——每次专注开始
  * 就自动建一份上下文；页签只是旁路观察它上下文构建的一个窗口。
  *
  * 隐私的三道闸（改这里之前先读一遍）：
@@ -54,7 +54,7 @@ export interface GuardRound {
   camera: boolean
   focusedApp?: string
   images: { mime: string; data: string }[]
-  /** 随图发给模型的现场说明（番茄钟走到哪了、距上次交互多久） */
+  /** 随图发给模型的现场说明（这一场专注多久了、距上次交互多久） */
   context: string
   /** 模型回复原文（解析失败时它就是唯一证据） */
   raw: string
@@ -80,14 +80,14 @@ export interface GuardSession {
   fuse?: { at: number; reason: string }
 }
 
-/** 宿主注入的动作出口：LearnWorkspace 用它把守卫的判定落到番茄钟与界面上 */
+/** 宿主注入的动作出口：LearnWorkspace 用它把守卫的判定落到专注状态与界面上 */
 export interface GuardHooks {
   onPause: (reason: string) => void
   onResume: () => void
   onWarn: (reason: string) => void
   onFuse: (reason: string) => void
   onToast: (msg: string) => void
-  /** 每一轮随图发给模型的现场说明（「第 2/3 组专注 · 还剩 12 分钟」这种） */
+  /** 每一轮随图发给模型的现场说明（「专注模式已持续 12 分钟」这种） */
   contextLine: () => string
 }
 
@@ -300,8 +300,8 @@ function unbindInteraction(): void {
 }
 
 /**
- * 开一次守卫会话。勾了监控才算严格专注：哪一路媒体流都没拿到（被拒/没有设备）就
- * 不开守卫，让调用方按纯番茄钟继续。已开的旧会话先收掉——重新开始是新的一段。
+ * 开一次守卫会话。**守卫是专注模式的准入条件**：哪一路媒体流都没拿到（被拒/没有设备）
+ * 就不开守卫，调用方据此不创建专注会话。已开的旧会话先收掉——重新开始是新的一场。
  * 实际拿到的媒体流可能比请求的少（某一路失败），会话里的 monitors 以实到为准。
  */
 export async function startGuard(requested: GuardMonitors, nextHooks: GuardHooks): Promise<GuardMonitors | null> {
@@ -312,7 +312,7 @@ export async function startGuard(requested: GuardMonitors, nextHooks: GuardHooks
   if (requested.camera) got.camera = !!(await ensureStream('camera'))
   if (!got.screen && !got.camera) {
     hooks = null
-    nextHooks.onToast(t('屏幕与摄像头都没拿到，严格专注没有开起来（普通番茄钟继续）'))
+    nextHooks.onToast(t('屏幕与摄像头都没拿到，守卫没有开起来'))
     return null
   }
   if (requested.screen !== got.screen || requested.camera !== got.camera) {
@@ -381,7 +381,7 @@ export function resumeGuard(): void {
   scheduleRound(GUARD_ROUND_MS)
 }
 
-/** 熔断：先停媒体流（晚一拍都是事故），再交给宿主停番茄钟、写报告、弹窗 */
+/** 熔断：先停媒体流（晚一拍都是事故），再交给宿主结束专注、写报告、弹窗 */
 function fuse(reason: string): void {
   if (!session) return
   const spans = session.pauseSpans.map((s) => (s.resumedAt === null ? { ...s, resumedAt: Date.now() } : s))

@@ -441,7 +441,9 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
                                     ? t('导师专用')
                                     : item.availability === 'mcp'
                                       ? t('已配置 MCP 时')
-                                      : t('窗口界面')}
+                                      : item.availability === 'conditional'
+                                        ? t('宿主注入时')
+                                        : t('窗口界面')}
                               </span>
                             )}
                           </div>

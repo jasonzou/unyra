@@ -164,6 +164,8 @@ export function skillsAnnounceMessage(
     hidden: true,
     mark: isUpdate ? '专业技能库已更新' : '可用专业技能库',
     skillsDigest: digest,
+    // 提示词注入，不是工作流指令：不画分界条，并进那一轮的过程组（见 agent/messageKind）
+    inject: 'prompt',
   }
 }
 

@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConversationMessage } from '../../../agent/types'
+import { isInstructionMark } from '../../../agent/messageKind'
 import { RAIL_MIN_WIDTH, RAIL_PAD, RAIL_PITCH } from './constants'
 import { layoutHeld, onLayoutRelease } from '../../../lib/layoutHold'
 import type { MsgAnchor } from './types'
@@ -89,14 +90,21 @@ export function useMsgRail(
     const rows: Array<{ id: string; text: string; top: number }> = []
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i]
-      // 锚点 = 用户说过的话 + 导师自己发起的那些动作（分界条）
+      // 锚点 = 用户说过的话 + 导师自己发起的那些**工作流指令**（分界条）
       if (m.role !== 'user') continue
+      /*
+        提示词注入（人格 / 格式 / 技能库 / 模块）不画分界条——它并进那一轮的过程组
+        （见 agent/messageKind），也就没有自己的横线可以指，自然不该占一个锚点。
+      */
+      if (m.hidden && !isInstructionMark(m)) continue
       /*
         相邻的导师动作在消息列表里已经融成**同一条**分界线（见 HiddenDivider），
         定位条也只落一个锚点：一簇里的第一条。要是每条 hidden 消息各占一个点，
         视觉上就是好几个锚点指着同一条横线。
+        判据认「前一条是不是**指令**」而不是「前一条是不是隐藏消息」：提示词注入夹在
+        两条指令之间时并不分割那条分界条，后一条指令仍是同一簇里的第二项。
       */
-      if (m.hidden && messages[i - 1]?.hidden) continue
+      if (m.hidden && messages[i - 1] && isInstructionMark(messages[i - 1])) continue
       // eslint-disable-next-line react/refs
       const el = msgRefs.current.get(m.id)
       if (!el) continue

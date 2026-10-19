@@ -154,11 +154,18 @@ export interface SandboxOptions {
     remove: (payload: Record<string, unknown>) => AgentToolResult
   }
   /**
-   * 长期记忆（mind.*，见 learn/mind）；未注入时沙箱里没有 mind 这一组。
-   * 记忆**不会**被拼进系统提示词——agent 需要时必须主动 read，这是这条边界的一半；
-   * 另一半（写入克制）写在提示词里。
+   * 记忆（memory.*，见 learn/memory）；未注入时沙箱里没有 memory 这一组。
+   * 记忆**不会**被拼进系统提示词——agent 需要时必须主动 list/get，这是这条边界的一半；
+   * 另一半（什么时候该记、记哪一类）写在提示词里。
    */
-  mind?: MindOps
+  memory?: MemoryOps
+  /**
+   * 日程（schedule.*，见 learn/schedule）：给用户排日程、改、删、标记完成。
+   *
+   * 边界：agent 负责**写**这张表，响铃与确认都在用户手里——它不能替用户「确认」。
+   * 与 memory 同一条纪律：日程绝不自动进上下文，需要时自己 list。
+   */
+  schedule?: ScheduleOps
   /**
    * 目标级持久化函数（method.*，见 learn/methods）；未注入就没有 method 这一组。
    *
@@ -181,7 +188,7 @@ export interface SandboxOptions {
   /**
    * 学习者画像（userInfo.*，见 user/fields 与 learn/agentOps）；未注入就没有这一组。
    *
-   * 与 mind 同一条边界：**画像不会被拼进系统提示词**——导师需要时自己 get。
+   * 与 memory 同一条边界：**画像不会被拼进系统提示词**——导师需要时自己 get。
    * 头像不走这条路（它是几百 KB 的 data URL，进上下文就是灾难）。
    */
   reading?: ReadingOps
@@ -189,8 +196,8 @@ export interface SandboxOptions {
   attention?: AttentionOps
   /** 工作区目录（workspace.*，见 learn/workspace）；未注入就没有这一组 */
   workspace?: WorkspaceOps
-  /** 番茄钟（pomodoro.*，见 learn/pomodoro）；未注入就没有这一组 */
-  pomodoro?: PomodoroOps
+  /** 专注模式（focus.*，见 learn/focus）；未注入就没有这一组 */
+  focus?: FocusOps
   /** 读网页（web.*，见 learn/webDocs）；未注入就没有这一组 */
   web?: WebOps
   /** 上下文压缩（compact，见 learn/compact）；未注入就没有它 */
@@ -441,17 +448,9 @@ export interface AskAnswer {
 /** 表单提交后的回答集（ask 的返回值里 answers 的形状） */
 export type AskAnswers = AskAnswer[]
 
-/* ---------- mind：长期记忆 ---------- */
+/* ---------- memory：记忆（工作 / 长期） ---------- */
 
-/**
- * 记忆那一组（沙箱里的 mind.*）的宿主实现（见 learn/mind）。
- *
- * 与 tmp 的分界：tmp 是一次编排里的大中间结果（按节点、会过期、不进上下文）；
- * mind 是**跨对话长期有效**的判断与偏好（按目标、不过期、也不自动进上下文——
- * 系统提示词不拼它，agent 需要时必须主动 read，这是需求明确的边界）。
- * 返回普通对象，失败用 { error }（与 res.* 同一约定）。
- */
-/* ---------- reading / attention / pomodoro：学习过程的那一组 ---------- */
+/* ---------- reading / attention / focus：学习过程的那一组 ---------- */
 
 /**
  * reading.*：文档有效阅读的事实（见 learn/reading）。
@@ -493,13 +492,14 @@ export interface WorkspaceOps {
 }
 
 /**
- * pomodoro.*：番茄钟（见 learn/pomodoro）。
+ * focus.*：专注模式（见 learn/focus）。
  *
- * **只有 status，而且是只读**：番茄钟是用户自己的计时器——一段多长、做几组、
- * 什么时候停，全在他按的那颗按钮上。agent 连「排计划」都没有了，能看的只有记录。
+ * **只有 status，而且是只读**：专注模式是用户自己开的一场「有守卫盯着的学习」——
+ * 什么时候开始、什么时候结束，全在他按的那颗按钮上。agent 连「排计划」都没有了，
+ * 能看的只有记录。
  */
-export interface PomodoroOps {
-  /** 现状与记录：正在跑的哪一段、今天几组多少分钟、最近几天、最近几条 */
+export interface FocusOps {
+  /** 现状与记录：在跑的这一场、今天几场多少分钟、最近几天、最近几条 */
   status: () => unknown
 }
 
@@ -517,17 +517,43 @@ export interface WebOps {
   search?: (queryOrArgs: unknown, opts?: Record<string, unknown>) => Promise<unknown>
 }
 
-export interface MindOps {
-  /** 清单：id、key、摘要、更新时间 */
-  list: () => unknown
-  /** 按 id 或 key 读一条的完整正文 */
-  read: (idOrKey: string) => unknown
-  /** 写入 / 覆盖（给了 key 且已存在同 key 条目时覆盖）；输入是 { key?, text } 或裸字符串 */
-  write: (input: unknown) => unknown
-  /** 删除一条；成功回 { ok: true, deleted }，没有就 { error } */
-  delete: (idOrKey: string) => unknown
-  /** 清空当前目标的全部记忆 */
-  clear: () => unknown
+/**
+ * memory.*：记忆（见 learn/memory）。
+ *
+ * 两类：**工作**（目标级，只有本目标的会话读得到，agent 觉得是负担就能删）与
+ * **长期**（跨目标，删除必须 `{ confirm: true }`）。返回普通对象，失败用 { error }
+ * （与 res.* 同一约定）。
+ */
+export interface MemoryOps {
+  /** 清单：type 可选过滤；工作记忆只回当前目标那一份 */
+  list: (query?: Record<string, unknown>) => unknown
+  /** 读一条全文（uuid）；看不见的条目按「没有」处理 */
+  get: (uuid: string) => unknown
+  /** 新建：{ type, title, keys?, content }（type 省略按 work） */
+  create: (payload: Record<string, unknown>) => unknown
+  /** 更新：只改给了的字段（title / keys / content / type） */
+  update: (uuid: string, patch: Record<string, unknown>) => unknown
+  /** 删除：长期记忆需要 { confirm: true } */
+  remove: (uuid: string, opts?: Record<string, unknown>) => unknown
+}
+
+/**
+ * schedule.*：日程安排（见 learn/schedule）。
+ *
+ * 时间用 `date`（YYYY-MM-DD）+ `time`（HH:mm）；`date` 省略=今天（时间已过则顺延到明天）。
+ * 失败一律回 `{ error }`（与 memory / res 同一约定）。
+ */
+export interface ScheduleOps {
+  /** 列日程：from / to / days 都可选，默认今天起 7 天 */
+  list: (query?: Record<string, unknown>) => unknown
+  /** 新建：{ title, date?, time, minutes?, remindBefore?, note? } */
+  create: (payload: Record<string, unknown>) => unknown
+  /** 修改：只改给了的字段；done 可标记完成 */
+  update: (id: string, patch: Record<string, unknown>) => unknown
+  /** 标记完成（用户确认过的落账） */
+  complete: (id: string) => unknown
+  /** 删除一条 */
+  remove: (id: string) => unknown
 }
 
 /**
@@ -561,7 +587,7 @@ export interface ChipOps {
 /**
  * method.* 的宿主实现（见 learn/methods）。
  *
- * 与 mind 的分界：mind 存的是「判断与偏好」（文本，给人与模型读）；
+ * 与 memory 的分界：memory 存的是「判断与事实」（文本，给人与模型读）；
  * method 存的是**可执行的函数源码**——它存在的意义是被调用（agent 的编排里、
  * 以及超级文档的按钮经 api.method.call）。name 就是身份，create 同名覆盖。
  */

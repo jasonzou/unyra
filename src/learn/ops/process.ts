@@ -1,11 +1,11 @@
 /**
- * 学习过程那一组 ops 的宿主实现：阅读事实、注意力、上下文压缩、番茄钟。
+ * 学习过程那一组 ops 的宿主实现：阅读事实、注意力、上下文压缩、专注模式。
  *
  * 从 learn/agentOps 拆出来（见 docs/refactor-plan.md 3.5）：它们都是「读事实 / 写账本」的
  * 纯 store 逻辑，与文档、资源那几组没有耦合，所以合成一处。
  */
 
-import type { AttentionOps, CompactOps, PomodoroOps, ReadingOps } from '../../agent/tools'
+import type { AttentionOps, CompactOps, FocusOps, ReadingOps } from '../../agent/tools'
 import type { AgentOpsDeps } from './deps'
 import type { LearnStore } from '../types'
 import { nodeById } from '../graph'
@@ -23,9 +23,9 @@ import {
 } from '../reading'
 import { ATTENTION_LABEL, attentionOf } from '../attention'
 import { buildSummary } from '../compact'
-import { formatClock, pomodoroDays, pomodoroStatus, restMsOf } from '../pomodoro'
+import { focusDays, focusStatus, sessionMsOf } from '../focus'
 
-/* ---------- reading / attention / pomodoro：学习过程那一组 ---------- */
+/* ---------- reading / attention / focus：学习过程那一组 ---------- */
 
 /** 回给模型的时间：ISO 前 16 位够读，也不用它解析毫秒 */
 const stampOf = (ts: number): string => new Date(ts).toISOString().slice(0, 16).replace('T', ' ')
@@ -214,38 +214,35 @@ export function createCompactOps(deps: AgentOpsDeps): CompactOps {
 }
 
 /**
- * pomodoro.*：**只读**。
+ * focus.*：**只读**。
  *
- * 需求定的边界：番茄钟是用户自己的计时器——一段多长、做几组、什么时候停，
- * 全在他顶栏那颗按钮上。agent 连「排计划」都没有了，能看的只有记录。
+ * 需求定的边界：专注模式是用户自己开的一场「有守卫盯着的学习」——什么时候开始、
+ * 什么时候结束，全在他顶栏那颗按钮上。agent 连排计划都没有，能看的只有记录。
  * 所以这里只有一个 status，而且它不改 store（deps.set 一次都不调）。
  */
-export function createPomodoroOps(deps: AgentOpsDeps): PomodoroOps {
+export function createFocusOps(deps: AgentOpsDeps): FocusOps {
   return {
     status: () => {
       const store = deps.getLatest()
       const now = Date.now()
-      const s = pomodoroStatus(store, now)
+      const s = focusStatus(store, now)
       const cur = s.session
       return {
         running: cur
           ? {
-              phase: cur.phase === 'focus' ? '专注' : '休息',
-              round: cur.index + '/' + cur.groups,
-              focusMinutes: cur.focusMinutes,
-              restMinutes: Math.round(restMsOf(cur.focusMinutes) / 60_000),
-              remaining: formatClock(s.remainingMs ?? 0),
               startedAt: stampOf(cur.startedAt),
+              minutes: minutesOf(sessionMsOf(cur, now)),
+              paused: s.paused,
+              monitors: { screen: cur.monitors.screen, camera: cur.monitors.camera },
             }
           : null,
-        today: { rounds: s.todayRounds, minutes: s.todayMinutes },
-        days: pomodoroDays(store, now, 7),
-        recent: (store.pomodoro?.log ?? []).slice(0, 10).map((r) => ({
+        today: { sessions: s.todaySessions, minutes: minutesOf(s.todayMs) },
+        days: focusDays(store, now, 7),
+        recent: (store.focus?.log ?? []).slice(0, 10).map((r) => ({
           at: stampOf(r.at),
-          minutes: r.minutes,
-          round: r.index + '/' + r.groups,
+          minutes: minutesOf(r.ms),
         })),
-        note: '番茄钟是用户自己按的计时器（只读）：开始、停止、改时长都在他那边，没有对应的 api。',
+        note: '专注模式只有守卫、没有倒计时（只读）：开始与结束都在用户那边，没有对应的写 api。',
       }
     },
   }

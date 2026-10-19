@@ -1,18 +1,20 @@
 /**
  * 随笔（learn/essays）的纯逻辑。
  *
- * 钉的四件事：
+ * 钉住的几件事：
  * - **空文本不是一条随笔**（窗口一开就是空白编辑器，第一个字才落一条）；
- * - 按日期归堆、新的在前（列表就照这个顺序画）；
- * - 改一条只动正文与 updatedAt，createdAt 是它归在哪一天的依据，不能跟着动；
- * - 读盘时坏数据丢掉、死目标整本丢掉、空文本条目丢掉，且读回来要重新排序。
+ * - **标题**：缺省取创建那天的日期，可改，改空了退回日期默认；随笔不再拿日期当唯一标识；
+ * - 新的在前（列表就照这个顺序画）；按日期归堆只是展示习惯，不再是身份；
+ * - 改一条只动 patch 里给的字段与 updatedAt，createdAt 不能跟着动；
+ * - 读盘时坏数据丢掉、死目标整本丢掉、空文本条目丢掉、缺标题补默认，且读回来要重新排序。
  */
 import { describe, expect, it } from 'vitest'
 
 import {
   createEssay,
-  deleteEssay,
   dayOfEssay,
+  defaultEssayTitle,
+  deleteEssay,
   essayPreview,
   ESSAY_DOCK_MIN_H,
   ESSAY_DOCK_MIN_W,
@@ -47,7 +49,7 @@ describe('随笔：写、改、删', () => {
   it('改一条：正文与 updatedAt 动，createdAt 不动（它决定归在哪一天）', () => {
     const created = createEssay(emptyLearnStore(), 'g1', '原样', AT)!
     const id = created.entry.id
-    const next = updateEssay(created.store, 'g1', id, '改过', AT + 60_000)
+    const next = updateEssay(created.store, 'g1', id, { text: '改过' }, AT + 60_000)
     const entry = essaysOf(next, 'g1')[0]
     expect(entry.text).toBe('改过')
     expect(entry.createdAt).toBe(AT)
@@ -56,7 +58,26 @@ describe('随笔：写、改、删', () => {
 
   it('改一条不存在的：原样返回（调用方不必先查）', () => {
     const store = emptyLearnStore()
-    expect(updateEssay(store, 'g1', 'nope', 'x', AT)).toBe(store)
+    expect(updateEssay(store, 'g1', 'nope', { text: 'x' }, AT)).toBe(store)
+  })
+
+  it('标题：缺省取创建那天的日期；给了就用给的；改空了退回日期默认', () => {
+    const plain = createEssay(emptyLearnStore(), 'g1', '没起名', AT)!
+    expect(plain.entry.title).toBe(defaultEssayTitle(AT))
+    expect(plain.entry.title).toBe('10 月 18 日')
+
+    const named = createEssay(plain.store, 'g1', '起了名', AT + 1000, '  函数的思想  ')!
+    expect(named.entry.title).toBe('函数的思想')
+
+    const id = named.entry.id
+    const renamed = updateEssay(named.store, 'g1', id, { title: '  改个名  ' }, AT + 2000)
+    expect(essaysOf(renamed, 'g1')[0].title).toBe('改个名')
+    // 只改标题、正文不动；updatedAt 照样前进（下次提交会带上这条改名）
+    expect(essaysOf(renamed, 'g1')[0].text).toBe('起了名')
+    expect(essaysOf(renamed, 'g1')[0].updatedAt).toBe(AT + 2000)
+
+    const cleared = updateEssay(renamed, 'g1', id, { title: '   ' }, AT + 3000)
+    expect(essaysOf(cleared, 'g1')[0].title).toBe(defaultEssayTitle(AT + 3000))
   })
 
   it('删一条：列表里没有了；删光了连这个目标的键都不留（不写空文件）', () => {
@@ -102,7 +123,7 @@ describe('随笔：读盘归一化', () => {
   const raw = {
     g1: [
       { id: 'a', text: '第二条', createdAt: AT + 1000, updatedAt: AT + 1000 },
-      { id: 'b', text: '第一条', createdAt: AT, updatedAt: AT },
+      { id: 'b', title: '  有名字的  ', text: '第一条', createdAt: AT, updatedAt: AT },
       // 空文本：手改文件留下的，丢掉
       { id: 'c', text: '   ', createdAt: AT, updatedAt: AT },
       // 没有 id：补一个（不能因为手改就丢内容）
@@ -111,10 +132,12 @@ describe('随笔：读盘归一化', () => {
     gDead: [{ id: 'd', text: '死目标的', createdAt: AT, updatedAt: AT }],
   }
 
-  it('死目标整本丢掉、空文本条目丢掉、没有 id 的补一个、读回来按时间倒序', () => {
+  it('死目标整本丢掉、空文本条目丢掉、没有 id 的补一个、缺标题补日期默认、读回来按时间倒序', () => {
     const out = normalizeEssays(raw, new Set(['g1']))
     expect(Object.keys(out)).toEqual(['g1'])
     expect(out.g1.map((e) => e.text)).toEqual(['第二条', '第一条', '手写的'])
+    expect(out.g1[0].title).toBe(defaultEssayTitle(AT + 1000))
+    expect(out.g1[1].title).toBe('有名字的')
     expect(out.g1[2].id).toBeTruthy()
   })
 
@@ -140,4 +163,49 @@ describe('随笔窗口几何的归一化', () => {
     expect(rect.w).toBe(ESSAY_DOCK_MIN_W)
     expect(rect.h).toBe(ESSAY_DOCK_MIN_H)
   })
+
+  it('保留合法的持久化状态字段（activeTab / essayEditingId / noteTarget / noteViewMode）', () => {
+    const res = normalizeEssayDock({
+      x: 100,
+      y: 100,
+      w: 500,
+      h: 600,
+      activeTab: 'note',
+      essayEditingId: 'essay-1',
+      noteTarget: { nodeId: 'node-1', noteName: '重点.md', goalId: 'goal-1' },
+      noteViewMode: 'preview',
+    })
+    expect(res).toEqual({
+      x: 100,
+      y: 100,
+      w: 500,
+      h: 600,
+      activeTab: 'note',
+      essayEditingId: 'essay-1',
+      noteTarget: { nodeId: 'node-1', noteName: '重点.md', goalId: 'goal-1' },
+      noteViewMode: 'preview',
+    })
+
+    const blankRes = normalizeEssayDock({
+      x: 100,
+      y: 100,
+      w: 500,
+      h: 600,
+      activeTab: 'essay',
+      essayEditingId: null,
+      noteTarget: null,
+      noteViewMode: 'edit',
+    })
+    expect(blankRes).toEqual({
+      x: 100,
+      y: 100,
+      w: 500,
+      h: 600,
+      activeTab: 'essay',
+      essayEditingId: null,
+      noteTarget: null,
+      noteViewMode: 'edit',
+    })
+  })
 })
+

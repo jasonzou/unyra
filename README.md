@@ -8,7 +8,7 @@
 [下载安装包](https://github.com/maplexrain/unyra/releases) · [项目文档](docs/README.md) · [问题反馈](https://github.com/maplexrain/unyra/issues)
 
 [![CI](https://github.com/maplexrain/unyra/actions/workflows/ci.yml/badge.svg)](https://github.com/maplexrain/unyra/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/release-v0.6.5-a8432f)](https://github.com/maplexrain/unyra/releases)
+[![Release](https://img.shields.io/badge/release-v0.6.6-a8432f)](https://github.com/maplexrain/unyra/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/maplexrain/unyra/releases)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB)](https://react.dev/)
@@ -107,7 +107,8 @@
 - **学习状态**：自评（掌握 / 了解但不熟 / 不会 / 不确定）、系统估计的掌握度、错误记忆
   （同一个错法再犯只累加次数）与考试的检验时间线。导师每次动笔前都读得到它。
 - **有效阅读**：只有「窗口在前台 + 页签在主位 + 没静坐超过 60 秒 + 看的是教学文档」的时间
-  才计入有效时长。番茄钟是一个纯计时器，只停不暂停，只有跑完的专注段才记一笔。
+  才计入有效时长。**专注模式只有守卫**：开一路屏幕 / 摄像头监控才能开始，没有倒计时与组数；
+  守卫每分钟看一眼，分心提醒、离开暂停、隐私画面立即熔断，结束时留下专注报告。
 
 ### 界面与效率
 
@@ -211,7 +212,7 @@ function-plot · vscode-textmate + oniguruma（按需加载的 TextMate 语法�
 | [文档渲染与插件](docs/rendering.md) | 插件接口与边界、正文文字规则、代码块高亮 |
 | [代码块的编译与运行](docs/code-run.md) | 伪编译工作流、运行沙箱、产物寻址 |
 | [考试](docs/exam.md) · [学习状态](docs/learning-state.md) | 试卷与考试窗口、掌握度、错误记忆 |
-| [有效阅读与注意力](docs/reading-and-attention.md) | 有效时长口径、节锚定、注意力评级、番茄钟、读网页 |
+| [有效阅读与注意力](docs/reading-and-attention.md) | 有效时长口径、节锚定、注意力评级、专注模式（守卫）、读网页 |
 | [快捷键与语音](docs/shortcuts-and-voice.md) | 改键与冲突拦截、whisper.cpp + WebGPU 语音输入 |
 | [桌面架构](docs/architecture.md) | 主进程与渲染层、窗口与原生能力、模块地图、扩展方式 |
 | [AI 提供商](docs/ai-providers.md) | 预设与兼容格式、配置结构、思考程度、Command Code Go |

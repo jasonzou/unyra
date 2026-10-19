@@ -9,7 +9,7 @@ import type { LearnStore, MethodEntry, MethodStore } from './types'
  * 函数体里照样能 await api.files.read(...)，于是「统计某文档有多少个句号」
  * 这类活写一次，任何一份超级文档都能调。
  *
- * 存储与 minds 同构：按目标归档、跟着 state.json 落盘。name 就是身份
+ * 存储与工作记忆同构：按目标归档、落在目标目录的 method.json。name 就是身份
  * （同目标内唯一，create 同名**覆盖**——那正是「更新一个函数」的语义）。
  */
 

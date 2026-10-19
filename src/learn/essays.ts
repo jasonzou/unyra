@@ -1,27 +1,51 @@
 /**
- * 随笔：**目标级**的随手记——没有标题、不按节点归属、按日期归堆的一条条短文本。
+ * 随笔：**目标级**的随手记——挂一条标题的短文本，想开几条就开几条。
  *
  * 与笔记的区别（见 learn/notes）：笔记是**某个节点的文档**，有名字、进文档树、要保存；
  * 随笔是「学着学着脑子里冒出来的一句话」，随手写、随手翻，不占文档区的页签。
  * 因此它不挂在任何节点上，只挂在目标上——「这门课我随手记过什么」。
  *
- * 为什么没有「新建」：随笔的粒度小到不值得一次确认。窗口一开就是一个空编辑器，
- * 写下第一个字的那一刻它就成了一条（见 components/learn/essay 的说明），
- * 清空之后再写就是下一条。空文本永远不落盘，所以也不会出现「一条空白随笔」。
+ * 身份靠 id，名字靠 title：**日期不再是随笔的唯一标识**（老机制是「一天一条」，
+ * 开窗口自动接今天那条）。标题默认取创建那天的日期（见 defaultEssayTitle），随时可改；
+ * 条数不设上限。没有随笔时窗口一开就**自动备好一条新的**（标题已填好今天的日期，
+ * 写下第一个字才真正落一条——空文本仍然不落盘，见 components/learn/essay 的说明）。
  *
  * 落盘：`{目标}/essay.json`（与 method.json / workflow.json / reading.json 同一层、
  * 同一条纪律——这个目标一条都没有就不写这个文件）。目标是它的生命周期：
  * 删掉目标，随笔跟着一起没。
  */
 
+import { t } from '../i18n'
 import type { EssayDockRect, EssayEntry, EssayStore, LearnStore } from './types'
 
 /** 单条随笔的字符上限：随笔是「一句话/一小段」，不是文档。超了按上限截断而不是拒绝 */
 export const ESSAY_TEXT_MAX = 20_000
+/** 标题的上限：标题是一行名字，不是第二篇正文 */
+export const ESSAY_TITLE_MAX = 120
 
 /** 这个目标的随笔：**新的在前**（列表与「最近一条」都靠这个顺序） */
 export function essaysOf(store: LearnStore, goalId: string): EssayEntry[] {
   return store.essays?.[goalId] ?? []
+}
+
+/**
+ * 默认标题：创建那天的日期（同年「10 月 19 日」，跨年带年份）。
+ * 标题不是唯一标识——同一天开几条就出几个同名默认标题，改不改随用户。
+ */
+export function defaultEssayTitle(at: number): string {
+  const d = new Date(at)
+  const y = String(d.getFullYear())
+  const m = String(d.getMonth() + 1)
+  const day = String(d.getDate())
+  return y === String(new Date().getFullYear())
+    ? t('{0} 月 {1} 日', m, day)
+    : t('{0} 年 {1} 月 {2} 日', y, m, day)
+}
+
+/** 标题落库前的清理：抹空白、截上限；空了退回日期默认（标题永远有值可显示） */
+function cleanTitle(raw: unknown, at: number): string {
+  const s = typeof raw === 'string' ? raw.trim().slice(0, ESSAY_TITLE_MAX) : ''
+  return s || defaultEssayTitle(at)
 }
 
 /** 按日期归堆用的一天：本地日历日（`2026-10-18`） */
@@ -80,16 +104,24 @@ function withList(store: LearnStore, goalId: string, list: EssayEntry[]): LearnS
 /**
  * 写一条新的。文本为空时**什么都不做**（返回 null）——空随笔不是一条随笔，
  * 它只是「编辑器还空着」（见文件头的说明）。
+ * title 缺省 / 空白时取创建那天的日期（见 defaultEssayTitle）。
  */
 export function createEssay(
   store: LearnStore,
   goalId: string,
   text: string,
   at: number,
+  title?: string,
 ): { store: LearnStore; entry: EssayEntry } | null {
   const body = text.slice(0, ESSAY_TEXT_MAX)
   if (!body.trim()) return null
-  const entry: EssayEntry = { id: crypto.randomUUID(), text: body, createdAt: at, updatedAt: at }
+  const entry: EssayEntry = {
+    id: crypto.randomUUID(),
+    title: cleanTitle(title, at),
+    text: body,
+    createdAt: at,
+    updatedAt: at,
+  }
   /*
    * 按 createdAt 插到该在的位置（平时就是最前面）。
    * 不无脑 unshift：时钟往回跳、或某条是从别处导入的旧时间戳时，
@@ -101,21 +133,35 @@ export function createEssay(
   return { store: withList(store, goalId, next), entry }
 }
 
-/** 改一条（只动正文与 updatedAt；createdAt 是它归在哪一天的依据，不改） */
+/**
+ * 改一条：patch 里给了谁就动谁（正文 / 标题），updatedAt 跟着变；
+ * createdAt 不动——它仍是这条随笔「哪天写的」的唯一凭证（排序与详情回退都用它）。
+ * 标题改空了退回日期默认，永远不给一条无名的随笔。
+ */
 export function updateEssay(
   store: LearnStore,
   goalId: string,
   id: string,
-  text: string,
+  patch: { text?: string; title?: string },
   at: number,
 ): LearnStore {
   const list = essaysOf(store, goalId)
   if (!list.some((e) => e.id === id)) return store
-  const body = text.slice(0, ESSAY_TEXT_MAX)
+  const text = typeof patch.text === 'string' ? patch.text.slice(0, ESSAY_TEXT_MAX) : undefined
+  const title = typeof patch.title === 'string' ? cleanTitle(patch.title, at) : undefined
   return withList(
     store,
     goalId,
-    list.map((e) => (e.id === id ? { ...e, text: body, updatedAt: at } : e)),
+    list.map((e) =>
+      e.id === id
+        ? {
+            ...e,
+            ...(text !== undefined ? { text } : {}),
+            ...(title !== undefined ? { title } : {}),
+            updatedAt: at,
+          }
+        : e,
+    ),
   )
 }
 
@@ -153,7 +199,37 @@ export function normalizeEssayDock(raw: unknown): EssayDockRect | undefined {
   const w = typeof r.w === 'number' && Number.isFinite(r.w) ? Math.round(r.w) : null
   const h = typeof r.h === 'number' && Number.isFinite(r.h) ? Math.round(r.h) : null
   if (x === null || y === null || w === null || h === null) return undefined
-  return { x, y, w: Math.max(ESSAY_DOCK_MIN_W, w), h: Math.max(ESSAY_DOCK_MIN_H, h) }
+
+  const activeTab = r.activeTab === 'note' || r.activeTab === 'essay' ? r.activeTab : undefined
+  const essayEditingId =
+    typeof r.essayEditingId === 'string' || r.essayEditingId === null ? r.essayEditingId : undefined
+
+  let noteTarget: EssayDockRect['noteTarget'] = undefined
+  if (r.noteTarget && typeof r.noteTarget === 'object') {
+    const nt = r.noteTarget as Record<string, unknown>
+    if (typeof nt.nodeId === 'string' && typeof nt.noteName === 'string') {
+      noteTarget = {
+        goalId: typeof nt.goalId === 'string' ? nt.goalId : undefined,
+        nodeId: nt.nodeId,
+        noteName: nt.noteName,
+      }
+    }
+  } else if (r.noteTarget === null) {
+    noteTarget = null
+  }
+
+  const noteViewMode = r.noteViewMode === 'preview' || r.noteViewMode === 'edit' ? r.noteViewMode : undefined
+
+  return {
+    x,
+    y,
+    w: Math.max(ESSAY_DOCK_MIN_W, w),
+    h: Math.max(ESSAY_DOCK_MIN_H, h),
+    ...(activeTab ? { activeTab } : {}),
+    ...(essayEditingId !== undefined ? { essayEditingId } : {}),
+    ...(noteTarget !== undefined ? { noteTarget } : {}),
+    ...(noteViewMode ? { noteViewMode } : {}),
+  }
 }
 
 /**
@@ -180,6 +256,8 @@ export function normalizeEssays(raw: unknown, aliveGoals: Set<string>): EssaySto
       const createdAt = isNum(r.createdAt) ? r.createdAt : Date.now()
       items.push({
         id,
+        // 标题是后加的字段：旧数据没有就按 createdAt 补一个日期默认
+        title: cleanTitle(r.title, createdAt),
         text: text.slice(0, ESSAY_TEXT_MAX),
         createdAt,
         updatedAt: isNum(r.updatedAt) ? r.updatedAt : createdAt,

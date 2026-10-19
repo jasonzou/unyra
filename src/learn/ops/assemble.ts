@@ -38,9 +38,10 @@ import { createCodeOps } from './code'
 import { createWorkflowOps } from './workflow'
 import { createUserInfoOps } from './userinfo'
 import { createResourceOps } from './resource'
-import { createAttentionOps, createCompactOps, createPomodoroOps, createReadingOps } from './process'
+import { createAttentionOps, createCompactOps, createFocusOps, createReadingOps } from './process'
 import { createWorkspaceOps } from './workspace'
 import { createChipOps } from './chip'
+import { createScheduleOps } from '../schedule'
 
 /**
  * 排版提醒：整篇写入教学文档、而正文里一处排版痕迹都没有时，在回执里点一句。
@@ -304,16 +305,11 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     }
     deps.set(finalStore)
 
-    const layout = nodeLayout(finalStore).get(r.node.id)
-    const docRelPath = layout
-      ? 'docs/' + layout.dir.join('/') + '/' + docFileName(layout.base)
-      : 'docs/.../' + r.node.title + '.md'
-
     return {
       ok: true,
       content:
         '已创建节点「' + r.node.title + '」（路径 ' + label + '，id #' + r.node.id +
-        '）。教学文档与大纲两份文件已同时就位（都还是空的），接着写：api.files.write(\'' + docRelPath + '\', 讲义内容)；修改描述用 api.node.update(\'#' + r.node.id + '\', { description })。',
+        '）。教学文档与大纲两份文件已同时就位（都还是空的），接着写：api.doc.write(\'' + label + '\', 讲义内容)（省略 path 就是这份教学文档）；大纲用 api.outline.write(\'' + label + '\', { intro, children })；修改描述用 api.node.update(\'#' + r.node.id + '\', { description })。用前先 api.doc.__help() 查用法。',
     }
   }
 
@@ -729,11 +725,13 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     workflows: createWorkflowOps(deps),
     // 代码块伪编译的交付口：纯渲染层逻辑（产物表 + 待编译登记），总是可用
     code: createCodeOps(),
-    // 学习过程：阅读事实、注意力评级、番茄钟——都是纯 store 逻辑，总是可用
-    // （见 learn/reading、learn/attention、learn/pomodoro）
+    // 学习过程：阅读事实、注意力评级、专注模式——都是纯 store 逻辑，总是可用
+    // （见 learn/reading、learn/attention、learn/focus）
     reading: createReadingOps(deps),
     attention: createAttentionOps(deps),
-    pomodoro: createPomodoroOps(deps),
+    focus: createFocusOps(deps),
+    // 日程：用户级的提醒清单（见 learn/schedule）——agent 能排、能改，响铃在宿主那边
+    schedule: createScheduleOps({ getLatest: deps.getLatest, set: deps.set, goalId: deps.goalId }),
     ...(deps.userInfo ? { userInfo: createUserInfoOps(deps.userInfo) } : {}),
     ...(deps.tmp ? { tmp: deps.tmp } : {}),
     ...(deps.exam ? { exam: deps.exam } : {}),

@@ -70,17 +70,18 @@ export interface WorkflowRow extends WorkflowEntry {
  */
 const TEACH_NODE_INSTRUCTION = [
   '这个节点刚被创建，标题、描述、文档多半还是占位或空的。你要为它创建教学文档，但**不许直接开写**——先摸底再动笔。严格按下面的顺序：',
-  '第一步｜整理前置知识与多源检索：结合节点标题、上级节点的文档（api.node.read / api.files.read 只读需要的部分）与你的学科判断，列出学会这个主题**绕不开的前置知识点**（一般 3~6 条：太少说明没拆开，太多说明没抓住主干）。**必须积极使用网络搜索（api.web.search）与网页抓取（api.fetch）**检索当前主题的权威讲义、官方文档或前沿实践进行比对提炼，收集真实权威的技术与事实依据，避免凭模型自身主观意志捏造教学内容。',
+  '第零步｜先查再用：本轮会用到 api.node.*、api.doc.*、api.outline.*、api.state.* 与 api.ask。动手前先 await api.<组>.__help() 把签名与示例查清楚，不要凭记忆猜参数。',
+  '第一步｜整理前置知识与多源检索：结合节点标题、上级节点的文档（api.node.read / api.doc.readRange 只读需要的部分）与你的学科判断，列出学会这个主题**绕不开的前置知识点**（一般 3~6 条：太少说明没拆开，太多说明没抓住主干）。**必须积极使用网络搜索（api.web.search）与网页抓取（api.web.fetch）**检索当前主题的权威讲义、官方文档或前沿实践进行比对提炼，收集真实权威的技术与事实依据，避免凭模型自身主观意志捏造教学内容。',
   '第二步｜摸底提问：用 api.ask 出一张表单，每条前置知识一道单选题「这个我已经掌握 / 会一点 / 完全不会」。表单会压在输入框上方，用户答完你才会继续——不要自问自答，也不要跳过这一步。（响铃提醒已由系统在你这一轮开始前做好，不必再调 tiktok。）',
   '第三步｜想清楚再动笔：按摸底结果定详略——「完全不会」的前置要先补讲，「会一点」的点到为止，「已掌握」的直接用；再想好文档结构：先讲什么、后讲什么、在哪衔接补讲的内容。',
   '第四步｜生成：',
   '1. 标题是用户选中的原词、不够准确的先 api.node.rename；描述空着就 api.node.update(path, { description }) 写 150~300 字。',
-  '2. 按第三步的构思并结合网络搜索比对提炼出的权威资料 api.files.write 教学文档（写入对应 docs/.../节点名.md）：循序渐进、先直觉与例子再定义与推导，对摸底暴露的盲点**正面讲解**。**排版以当前「文档格式」策略为准（Markdown 与 HTML 各占多少照它来），结构配方见「文档排版与图表」提示词模块**：至少落下两三处结构性元素（提示框 / 两栏 / 步骤 / 图表），不要交一篇只有标题与段落的纯文本。' +
-    '**来源引证规范（硬性）**：若本轮编写使用了网络检索（api.web.search / api.fetch），必须在教学文档末尾包含「## 📚 参考资料与权威来源」区块声明所有参考的真实网站网址与名称，并在最终对话回复中附带「### 🌐 参考与引证来源」，严禁遗漏来源。',
-  '3. 大纲：这个节点下面还会展开子层级的（教学路线里确实分阶段），用 api.files.write("docs/.../节点名.outline.json", JSON.stringify({ intro, children }, null, 2)) 把**直接子层级**列进大纲' +
+  '2. 按第三步的构思并结合网络搜索比对提炼出的权威资料，用 api.doc.write(path, 讲义) 写教学文档：循序渐进、先直觉与例子再定义与推导，对摸底暴露的盲点**正面讲解**。**排版以当前「文档格式」策略为准（Markdown 与 HTML 各占多少照它来），结构配方见「文档排版与图表」提示词模块**：至少落下两三处结构性元素（提示框 / 两栏 / 步骤 / 图表），不要交一篇只有标题与段落的纯文本。' +
+    '**来源引证规范（硬性）**：若本轮编写使用了网络检索（api.web.search / api.web.fetch），必须在教学文档末尾包含「## 📚 参考资料与权威来源」区块声明所有参考的真实网站网址与名称，并在最终对话回复中附带「### 🌐 参考与引证来源」，严禁遗漏来源。',
+  '3. 大纲：这个节点下面还会展开子层级的（教学路线里确实分阶段），用 api.outline.write(path, { intro, children }) 把**直接子层级**列进大纲' +
     '（children 每项 { title, summary }，一层为止——「爷爷知道儿子的存在，但不知道孙子的存在」，' +
     '孙辈的大纲由那些子目标自己的 outline 负责）；确定是叶子知识点的就不调它，大纲保持空白即可。',
-  '4. 用 api.files.read("docs/.../节点名.meta.json") 看学习状态：有错误记忆的，这次讲解要正面处理那个错法；把摸底结果记下——每条前置按用户的答案从「已掌握」到「完全不会」挑最接近的一档。',
+  '4. 用 api.state.read(path) 看学习状态：有错误记忆的，这次讲解要正面处理那个错法；把摸底结果记下——用 api.state.update / api.state.mistake 把每条前置按用户的答案记准。',
   '用户留空的题当作「会一点」处理，不要追问。先 api.node.read() 看一眼现状再开工，不要整篇读文档，也不要再找用户要确认。',
   '写完文档后用 api.ui.point() 把这份教学文档在文档区打开（已经开着就切到它），再请用户看刚生成的教学文档。若使用了网络检索，对话回复中必须声明参考资料链接。',
 ].join('\n')
@@ -119,12 +120,12 @@ const GOAL_OUTLINE_INSTRUCTION = [
   '1. **先把文档打开**：api.ui.point() 打开根节点文档——用户要看着它长出来，而不是盯着一个空大纲页等。',
   '2. api.node.rename：起一个准确的主题名（读项目就用项目名，读论文就用论文标题的短名）。',
   '3. api.node.update(path, { description })：100~200 字，说清这次要解决什么、材料是什么、边界在哪。',
-  '4. 把根节点文档写成**这次任务的交付物**（api.files.write 写 docs/.../目标名.md）：',
+  '4. 把根节点文档写成**这次任务的交付物**（api.doc.write(path, 内容)）：',
   '   - 读项目：先给项目定位与目录结构导读，再讲核心模块的职责与调用关系、关键数据结构、上手路径；引用**真实**文件路径与代码位置，不要泛泛而谈。',
   '   - 读论文：按「问题 → 方法 → 实验 → 结论 → 局限」精读，讲清作者为什么这么做、与已有工作差在哪；关键公式与术语要解释。',
   '   - 答疑 / 读文档：先给结论与依据，再补必要的背景。',
-  '   一律基于**真实读到的内容**（api.files.read / api.web.search / api.fetch），禁止凭印象编造；用到网络资料时按既有规范在末尾写「## 📚 参考资料与权威来源」，并用网页 chip 声明来源。',
-  '5. **不要**调用 api.node.createTree，**不要**写 outline.json 或 api.outline.write——大纲保持空白即可（界面显示「还没有大纲」是正常状态，不是你漏做了什么）。',
+  '   一律基于**真实读到的内容**（api.doc.read / api.web.search / api.web.fetch），禁止凭印象编造；用到网络资料时按既有规范在末尾写「## 📚 参考资料与权威来源」，并用网页 chip 声明来源。',
+  '5. **不要**调用 api.node.createTree，**不要**调 api.outline.write——大纲保持空白即可（界面显示「还没有大纲」是正常状态，不是你漏做了什么）。',
   '6. 收尾用一两句话告诉用户「读了什么、从哪开始看、接下来可以让我深入哪一块」。之后用户点名要深入某个模块或某一节时，再按需建**那一个**子节点，不要提前铺开。',
   '',
   '【学习型｜按创建模式执行（强制先 api.ask 确认模式）】',
@@ -146,11 +147,11 @@ const GOAL_OUTLINE_INSTRUCTION = [
   '【学习型第二步｜目标基础命名与描述更新】',
   '1. 用 api.node.rename(path, 新标题) 给这个目标起一个准确的主题名（长成数据目录名，去掉问句成分）。',
   '2. 用 api.node.update(path, { description }) 写一段 150~300 字的目标描述，阐明目标边界、核心技能与学习要求。',
-  '3. 用 api.files.write 编写根节点的教学文档总述（写入 docs/.../目标名.md）：概述知识体系与起步建议。若参考了网络资料，**末尾必须包含「## 📚 参考资料与权威来源」，且必须使用网页类 chip（#[{"type":"web","url":"...","title":"..."}]）声明，严禁普通 Markdown 超链接 [文字](url)**。注意 chip 宽度有限，title 请精炼（15~25 汉字以内）。',
+  '3. 用 api.doc.write(path, 总述) 编写根节点的教学文档：概述知识体系与起步建议。若参考了网络资料，**末尾必须包含「## 📚 参考资料与权威来源」，且必须使用网页类 chip（#[{"type":"web","url":"...","title":"..."}]）声明，严禁普通 Markdown 超链接 [文字](url)**。注意 chip 宽度有限，title 请精炼（15~25 汉字以内）。',
   '',
   '【学习型第三步｜按所选模式执行大纲树与文档生成】',
   '- **若为探索式**：',
-  '  用 api.files.write 写根节点大纲（docs/.../目标名.outline.json，或调 api.outline.write）：intro 一两段说明阶段划分，children 列出直接子层级（只写直接子层级一层），每项 { title, summary }。后续节点由用户在界面中逐步确认生成。',
+  '  用 api.outline.write(path, { intro, children }) 写根节点大纲：intro 一两段说明阶段划分，children 列出直接子层级（只写直接子层级一层），每项 { title, summary }。后续节点由用户在界面中逐步确认生成。',
   '- **若为规划式**：',
   '  必须积极调用 api.web.search 检索行业规范与权威学术大纲，**调用 api.node.createTree({ parent: rootId, tree: [...] }) 生成完整大纲树**（包含各层级分支与子节点，填充 title、description 与 outline），先规划完整棵知识树。',
   '- **若为完整式**：',
@@ -165,10 +166,11 @@ const GOAL_OUTLINE_INSTRUCTION = [
  * 这一条管所有节点（阶段目标要拆下一层、或者计划变了要重排）。
  */
 const OUTLINE_INSTRUCTION = [
-  '请为当前知识点**规划或重写它这一层的大纲**（写入 docs/.../节点名.outline.json，整份覆盖）。严格按顺序：',
-  '第一步｜先看现状：api.files.read("docs/.../节点名.outline.json") 看已有大纲（有就整份重写，不要追加），api.node.read() 看标题、描述与现有下级节点，api.files.read(docPath, { maxBytes: 2000 }) 扫一眼教学文档的开头与标题结构（不要整篇读）。',
-  '第二步｜多源检索与直接子层级规划：**多使用网络搜索（api.web.search）与抓取（api.fetch）**获取该知识分支的权威分类目录与行业标准脉络进行比对提炼，避免凭借主观臆造。这一层往下拆成哪几个**阶段目标**（一般 3~8 个，每个都能独立成篇、有明确的「学完会什么」）。已经有下级节点的，计划要与它们对齐——同一个人同一层不该有两套说法。',
-  '第三步｜api.files.write("docs/.../节点名.outline.json", JSON.stringify({ intro, children }, null, 2))：intro 一两段（这一层按什么路线走、为什么这么分）；children 每项 { title, summary }，summary 两三句——学什么、为什么排在这个位置。key 由标题自动生成，不要自己编。',
+  '请为当前知识点**规划或重写它这一层的大纲**（api.outline.write 整份覆盖）。严格按顺序：',
+  '第零步｜先查再用：await api.outline.__help() 与 api.doc.__help() 把签名查清楚，再动手。',
+  '第一步｜先看现状：api.outline.read(path) 看已有大纲（有就整份重写，不要追加），api.node.read() 看标题、描述与现有下级节点，api.doc.readRange(path, 0, 2000) 扫一眼教学文档的开头与标题结构（不要整篇读）。',
+  '第二步｜多源检索与直接子层级规划：**多使用网络搜索（api.web.search）与抓取（api.web.fetch）**获取该知识分支的权威分类目录与行业标准脉络进行比对提炼，避免凭借主观臆造。这一层往下拆成哪几个**阶段目标**（一般 3~8 个，每个都能独立成篇、有明确的「学完会什么」）。已经有下级节点的，计划要与它们对齐——同一个人同一层不该有两套说法。',
+  '第三步｜api.outline.write(path, { intro, children })：intro 一两段（这一层按什么路线走、为什么这么分）；children 每项 { title, summary }，summary 两三句——学什么、为什么排在这个位置。key 由标题自动生成，不要自己编。',
   '深度规矩（硬性）：只写**直接子层级**，一层为止——「爷爷知道儿子的存在，但不知道孙子的存在」。孙辈的大纲由那些子目标自己的 outline 负责；children 里不要出现「1.1.1」这类两层以下的东西，summary 里也不要替孙辈规划。',
   '写完用 api.ui.point() 把这份文档在文档区打开，让用户在大纲页里看这一层的路线。',
 ].join('\n')
@@ -178,10 +180,11 @@ const OUTLINE_INSTRUCTION = [
  */
 const EXAM_INSTRUCTION = [
   '用户要在这个知识点出一份试卷。**类型与难度由你问用户**，不要替他决定，也不要在问之前就出题。严格按顺序：',
-  '第一步｜摸底：先调 const p = await api.node.paths() 获取当前知识点的物理路径（含 dir, examsDir, doc, id 等），用 api.files.read(p.doc) 读教学文档与笔记，api.node.list() 看有哪些下级节点，试卷必须包含对核心知识的考察。',
+  '第零步｜先查再用：await api.exam.__help() 把 create 的参数与题目形状查清楚，再动手。',
+  '第一步｜摸底：先 api.doc.read(p.doc) 读教学文档与笔记（可用 api.doc.readRange 分段），api.node.list() 看有哪些下级节点，试卷必须包含对核心知识的考察。',
   '第二步｜问一次：用 api.ask 出一张表单，两道题——① 试卷类型（单选：随堂小测 / 小考 / 大考，选项里写清各自的题量规模）；② 难度（单选：简易 / 中等 / 难 / 极难）。最多再加一道「有没有特别想考的章节」。**不要多问**：响铃已由系统在你这一轮开始前做好，不必再调 tiktok。',
   '第三步｜定时限：除随堂小测（不限时，minutes: 0）外，按题量与难度认真估一个 minutes（分钟）。下限是题目数 × 2——要写过程、要计算的题多留时间；宁可宽一点，也别让用户做不完。',
-  '第四步｜检索查证与出题落盘：**积极使用网络搜索（api.web.search）**检索该知识点的权威考试真题、标准题型、规范公式与参考题解进行比对提炼，严禁单凭模型自身主观意志编造生硬题目或错误答案。生成试卷唯一 ID（examId，如 ex_xxxx），构造完整符合 Schema 的试卷 JSON 对象（含 id: examId, nodeId: p.id, goalId: p.goalId, title, kind, level, minutes, createdAt: Date.now(), questions, attempts: []），用 api.files.write(`${p.dir}/exams/${examId}.json`, JSON.stringify(exam, null, 2)) 保存到对应节点下的 exams/ 目录中。文件名强制为 `${examId}.json`，attempts 必须传空数组 []。',
+  '第四步｜检索查证与落卷：**积极使用网络搜索（api.web.search）**检索该知识点的权威考试真题、标准题型、规范公式与参考题解进行比对提炼，严禁单凭模型自身主观意志编造生硬题目或错误答案。然后用**一条 api.exam.create({ title, kind, level, minutes, questions })** 落卷——它自己生成试卷 id、归属与空的 attempts，不要手写 exams/*.json 文件（files.* 碰应用数据会被拒绝）。',
   '每道题写成 { id, type, stem, image, options, answer, rubric, points }：' +
     'type 取 \'single\'（单选）| \'multiple\'（多选）| \'truefalse\'（对错）| \'fill\'（填空）| \'short\'（简答）；' +
     'stem 是题干；options 写成 [{ id: \'A\', text: \'选项文字\' }, { id: \'B\', text: \'…\' }]（对错题为 true/false 两项）；' +
@@ -196,10 +199,11 @@ const EXAM_INSTRUCTION = [
  */
 const GRADE_INSTRUCTION = [
   '学习者刚交卷。这是一套完整的阅卷流程，**一次 execute 里连着做完**，不要分两轮：',
-  '第一步｜读取试卷与作答：先调 const p = await api.node.paths()，用 api.files.read(`${p.dir}/exams/${examId}.json`) 读取试卷。取出最新一次作答（exam.attempts[exam.attempts.length - 1]）。**注意严格边界**：用户的 answers、inputs、dwell、blurs 是真实客观作答事实，**严禁修改篡改任何字符或数据项**！',
-  '第二步｜判分与解析：对照参考答案逐题评判客观题，依据 rubric 评判填空题与简答题，更新最新 attempt 上的 status 为 "graded"、results 评分项列表 [{ questionId, correct, score, maxScore, comment, by: "agent" }]、passed、summary 评价以及 explanation 详尽步骤推导解析。',
-  '第三步｜写回试卷：将更新了最新 attempt 评价数据的完整 exam JSON，用 api.files.write(`${p.dir}/exams/${examId}.json`, JSON.stringify(exam, null, 2)) 写回磁盘。同时可写一份 Markdown 批改小结（如 `${p.dir}/exams/${examId}_批改.md`）。',
-  '第四步｜修正掌握度：用 api.node.update(p.path, { status: passed ? \'mastered\' : \'learning\' }) 更新掌握状态，并将高频薄弱错法写入当前节点的错题记录（如 `${p.notesDir}/错题.md`）。',
+  '第零步｜先查再用：await api.exam.__help() 把 grade / explain 的参数查清楚，再动手。',
+  '第一步｜读试卷与作答：api.exam.read() 读当前节点的试卷与历次 attempts（给了 attemptId 就读那一次）。取出最新一次作答。**注意严格边界**：用户的 answers、inputs、dwell、blurs 是真实客观作答事实，**严禁修改篡改任何字符或数据项**！',
+  '第二步｜判分：对照参考答案逐题评判客观题，依据 rubric 评判填空题与简答题，然后**一条 api.exam.grade({ attemptId, passed, summary, results }) 落账**——results 是 [{ questionId, correct, score, maxScore, comment, by: "agent" }]，passed 决定节点是否标记已掌握，summary 写综合评价。不要手写 exams/*.json 文件。',
+  '第三步｜写错题讲解：用 api.exam.explain({ content, attemptId }) 写详尽的步骤推导解析（Markdown），它落在同一次考试上并自动打开试卷副本。',
+  '第四步｜修正掌握度：用 api.node.update(p.path, { status: passed ? \'mastered\' : \'learning\' }) 更新掌握状态，并把高频薄弱错法用 api.state.mistake(p.path, { pattern, cause }) 记进错误记忆。',
 ].join('\n')
 
 /**
@@ -209,7 +213,7 @@ const SUPERLAB_INSTRUCTION = [
   '现在启动「超级实验室」：在当前节点做一份**超级文档**——可交互的实验或小工具，用户在页签里点、文档干活并显示结果。',
   '第一步｜问需求：用 api.ask 问用户想做什么实验 / 需要什么功能（一道简答题，给两三个贴合当前节点主题的示例选项帮他起意）。留空等于「你来定」：挑当前节点里最能帮助理解的一个知识点自拟实验，不必再问。',
   '第二步｜先想后写：确定这个实验演示什么规律或验证什么结论、用户怎么交互（按什么、改什么、看什么结果）、界面按什么顺序排。',
-  '第三步｜落盘 HTML：先调用 const p = await api.node.paths() 获取当前节点目录，使用 api.files.write 写入一份完整可运行的自包含 HTML 文件（路径必须为 `${p.dir}/superdocs/${实验名}.html`，样式变量使用 var(--color-*)，说明装进 <moji-markdown>）。若包含复杂的计算函数，可通过 api.method.create 保存并通过 window.api.method.call 调用。',
+  '第三步｜落盘 HTML：用 api.sdoc.write(p.path, 实验名, html) 写入一份完整可运行的自包含 HTML（样式变量使用 var(--color-*)，说明装进 <moji-markdown>；名字不含 .html 后缀）。若包含复杂的计算函数，可通过 api.method.create 保存并通过 window.api.method.call 调用。',
   '第四步｜用 api.ui.superdoc(p.path, \'实验名\') 打开该超级文档页签，再用一两句话告诉用户这个实验能玩什么。',
 ].join('\n')
 
@@ -236,8 +240,8 @@ const COMPACT_INSTRUCTION = [
  */
 const EXPLAIN_INSTRUCTION = [
   '用户在文档里选中了「{{term}}」，点了「了解」——他想要一句能挂在这段文字旁边的解释。严格按顺序做：',
-  '第一步｜先看它在讲什么：先调用 api.node.paths() 得到当前教学文档路径，用 api.files.read(doc, { maxBytes: 2000 }) 读**这一段所在的上下文**。解释要贴着这篇文档讲——它在这里是什么意思、为什么这么说，而不是给一段百科式的通解。',
-  '第二步｜写注解：调用 api.node.annotate（兼容 api.doc.annotate）({ term: \'{{term}}\', occurrence: {{occurrence}}, body: \'注解内容\' }) 将注解标在正文对应位置；同时可用 api.files.write 把词条解释记录进笔记（如 docs/.../节点.notes/词条解释.md）。',
+  '第一步｜先看它在讲什么：先调用 api.node.paths() 得到当前教学文档路径，用 api.doc.readRange(doc, 0, 2000) 读**这一段所在的上下文**。解释要贴着这篇文档讲——它在这里是什么意思、为什么这么说，而不是给一段百科式的通解。',
+  '第二步｜写注解：调用 api.node.annotate（兼容 api.doc.annotate）({ term: \'{{term}}\', occurrence: {{occurrence}}, body: \'注解内容\' }) 将注解标在正文对应位置；同时可用 api.doc.write 把词条解释记录进笔记（path 写「节点/笔记/词条解释」）。',
   '第三步｜回话：一句话就够（例如「已把 {{term}} 的注解标在正文上」）。不要把那段解释再在对话中抄一遍。',
   '',
   '词条：{{term}}',
@@ -249,7 +253,7 @@ const EXPLAIN_INSTRUCTION = [
 const CODE_COMPILE_INSTRUCTION = [
   '用户点了文档里那段代码块上的「编译」。请把这段代码**伪编译**成一段能在本应用里直接跑起来的 JavaScript。严格按顺序做：',
   '第零步｜先判它有没有输出（**这一步不通过就直接结束，不要往下做**）：扫一眼这段代码——如果它从头到尾只有定义（类型、接口、函数、类、常量），没有任何会被执行的语句、也不会打印任何东西，那它转译出来照样什么都不产出。这时**立刻停止编译**：调 api.code.silent({ key, reason })（reason 一句话说清为什么，如「只有类型与函数定义，没有被调用的语句」），然后在对话里用一句话告诉用户，**不要再写 js、也不要再调 code.save**。注意分寸：只要有哪怕一句会被执行的语句（一次调用、一个 print、一段循环、一次赋值后使用），就往下走，别把能跑的代码判成无输出。',
-  '第一步｜看代码与它的上下文：下面那段代码很可能是个**残缺片段**（上面少一个函数定义、少两个变量、少一行 import）。用 api.files.read(docPath) 读**这篇文档**，从上下文里把缺的东西补齐——这段代码就是从这篇文档里摘出来的。',
+  '第一步｜看代码与它的上下文：下面那段代码很可能是个**残缺片段**（上面少一个函数定义、少两个变量、少一行 import）。用 api.doc.read(docPath) 读**这篇文档**，从上下文里把缺的东西补齐——这段代码就是从这篇文档里摘出来的。',
   '第二步｜能补就补，补不上就假设：文档里也找不到的，按代码里的用法**模拟一份合理的假上下文**（假数据、假函数都行），让整段代码能跑出可见结果。**绝不要**因为片段不完整就回一句「无法编译」。',
   '第三步｜写 JavaScript。运行环境必须按这个来：一个 Web Worker——没有 window / document / DOM，没有 require / import / export，装不了 npm 包；可以用 console.log、await、Promise、setTimeout、Math / JSON / Date / 正则、TextEncoder / TextDecoder、crypto、URL；顶层可以直接写 await（宿主会把整段代码包在 async 函数里执行）；fetch 能用，但每次运行都要用户点一次同意。要让用户看见结果就必须 console.log（对象会被结构化显示）。',
   '第四步｜交货：调 **api.code.save({ key, js, note })**：',
@@ -327,24 +331,30 @@ type BuiltinDef = Omit<WorkflowRow, 'tier' | 'runnable' | 'createdAt' | 'updated
 
 /** 内置工作流的定义：id 稳定（触发与校验都靠它），名字就是对话里的分界条文案。 */
 /**
- * 「随笔整理」：一次随笔提交之后，把快照整理进知识树对应节点的笔记。
- * 提交方（EssayDock 的提交按钮）已经把「提交历史 + 本次新增 / 改动」渲染进 {{feed}}——
- * 它不面向工作流列表。
+ * 「随笔整理」：一次随笔提交之后，把**全部随笔**（按与上次的差异）统一整理进知识树的笔记。
+ * 提交方（EssayDock 的提交按钮）已经把「提交历史 + 全部随笔相对上次的新增 / 修改 / 删除 /
+ * 未变化清单」渲染进 {{feed}}——它不面向工作流列表。
  */
 const ESSAY_COMMIT_INSTRUCTION = [
-  '用户提交了一批随笔（提交说明：{{message}}）。这是一次**增量整理**：之前的提交已经整理过一部分内容，这次只处理新增与改动，别把旧内容重做一遍。',
+  '用户提交了**当前的全部随笔**（提交说明：{{message}}）。快照是完整的，但之前的提交已经整理过其中大部分内容：这次只处理与上次相比**新增、修改、删除**的部分，别把未变化的内容重做一遍。',
   '',
   '【提交内容与历史】',
   '{{feed}}',
   '',
   '要求：',
   '1. 先看知识树（api.node.list 拿全部节点与层级），并读一读【已有整理记录】里提到的那几份笔记，弄清上次整理到哪儿了、内容是什么。',
-  '2. **只处理【本次新增的随笔】与【本次修改的随笔】**；【已有整理记录】里的内容已经写进笔记，不要再写一遍。',
+  '2. **只处理【本次新增的随笔】【本次修改的随笔】【本次删除的随笔（只剩标题）】**；【本次未变化的随笔】只用来理解上下文，**不要再写一遍**；【已有整理记录】里的内容已经进过笔记。',
   '3. 修改类随笔只给出了改动处（>>> 新增 / 改动 <<< 之间）：把这段改动**合并进上次对应的笔记**，保留其余段落；确实需要整篇写回时，先 api.doc.read 读全文，再在原文基础上改，不要整篇重写。',
   '4. 新增内容若与某份已有笔记主题相同，合并进那份笔记的相应位置；该节点还没有合适笔记时才新建「随笔整理」：api.doc.write("节点路径/笔记/随笔整理", 内容)。路径必须带节点（例如 "微积分/极限/笔记/随笔整理"），只写「笔记/…」会落到目标根节点上。',
   '5. 归不进任何已有节点的：并进最合适上级节点的「随笔整理」笔记；只有内容足够独立、值得单独成节时才 api.node.create({ title, parent: "父节点路径" }) 建子节点，再给它写笔记。',
-  '6. 只保留有长期价值的知识、结论、疑问与例子；合并重复内容，不要逐句照抄，不要编造快照里没有的东西。整理后的笔记要能独立读懂。',
-  '7. 每改完一处，在回复里用一行列出「节点路径 → 笔记名（新建/更新）」；最后用两三句话总结这次增量整理。',
+  '6. 删除类随笔：只在对应笔记里**清理只来自它的段落**，或把它改写进更合适的位置；不要因为一条随笔被删就删掉整份笔记。',
+  '7. 只保留有长期价值的知识、结论、疑问与例子；合并重复内容，不要逐句照抄，不要编造材料里没有的东西。整理后的笔记要能独立读懂。',
+  '8. 每改完一处，在回复里用一行列出「节点路径 → 笔记名（新建/更新）」。',
+  '9. 最后，为这次提交写一条**提交评论**，放在下面这对标记之间（两行标记必须原样保留，一个字都不能改；标记之间是 Markdown，**第一行是标题**——一句话概括这次整理，之后用两三句正文说明把哪些内容归到了哪些节点、留下了什么疑问）。',
+  '<!-- essay-commit-comment',
+  '## （标题）',
+  '（正文）',
+  '-->',
 ].join('\n')
 
 const BUILTIN_DEFS: BuiltinDef[] = [  {
@@ -461,7 +471,7 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
   {
     id: 'essay-commit',
     name: '随笔整理',
-    description: '按提交历史把这次新增 / 改动的随笔增量整理进知识树对应节点的笔记',
+    description: '每次带上全部随笔，按与上次的差异（新增 / 修改 / 删除）统一整理进知识树对应节点的笔记',
     instruction: ESSAY_COMMIT_INSTRUCTION,
     // 历史与本次材料由「随笔」窗口的提交按钮补齐；从工作流列表空跑没有意义
     params: ['message', 'feed'],

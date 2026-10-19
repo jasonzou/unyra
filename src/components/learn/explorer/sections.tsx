@@ -699,7 +699,7 @@ export function LocalRow({
 }
 
 /**
- * 专注报告：一次次严格/普通专注收场后的凭据清单（见 learn/focusReports）。
+ * 专注报告：一场场专注收场后的凭据清单（见 learn/focusReports）。
  *
  * 报告不进 store——它们是「历史凭证」，一份一个 JSON 文件住在用户目录的 focus/ 里。
  * 列表在挂载与写完新报告的广播（REPORTS_CHANGED）时现读；坏掉的文件安静地缺席。
@@ -735,9 +735,8 @@ export function FocusReportsSection({
   )
 }
 
-/** 报告的收场方式：行首的小圆点用颜色把「跑完了/停了/熔断了」说清 */
+/** 报告的收场方式：行首的小圆点用颜色把「结束/熔断」说清 */
 const OUTCOME_DOT: Record<FocusReportMeta['outcome'], string> = {
-  completed: 'bg-ok',
   stopped: 'bg-ink-faint',
   fused: 'bg-seal-deep',
 }

@@ -83,6 +83,56 @@ export const isMissing = (err: unknown): boolean =>
 /* ---------- 全局设置 ---------- */
 
 const globalPath = (): string => path.join(getUserDataDir(), GLOBAL_FILE)
+/** 上一份写成功的内容。主文件被外部弄坏时退到它 */
+const globalBackupPath = (): string => globalPath() + '.bak'
+/**
+ * 主文件在、但读不出来时它的原文（半截 / 编码坏 / 权限）。
+ *
+ * 为什么要留着：这份文件里 root 是「用户的数据到底在哪」的唯一线索。读不出来不等于没配过，
+ * 一旦按默认值继续跑并写回去，用户的目录设置就永久消失了——issue #143 报的正是这个。
+ */
+let globalUnreadable = ''
+/** 这一轮是从 .bak 读出来的：那就绝不能用坏掉的主文件去覆盖那份好备份 */
+let globalFromBackup = false
+
+/**
+ * 读全局设置文件，主文件读不出来时退到 .bak。
+ *
+ * 「空文件」也算坏：writeFileSync 被杀在中途时留下的正是 0 字节，parseYaml('') 不报错、
+ * 只返回 null——这正是它以前能一路静默回落的原因。
+ */
+function readGlobalFile(): Partial<GlobalSettings> | null {
+  let text: string
+  try {
+    text = fs.readFileSync(globalPath(), 'utf-8')
+  } catch (err) {
+    // 文件不存在（第一次运行）不算坏。读不出来（权限 / 坏扇区）要留证据
+    if (!isMissing(err)) globalUnreadable = '[无法读取] ' + errText(err)
+    return readGlobalBackup()
+  }
+  if (!text.trim()) {
+    globalUnreadable = text
+    return readGlobalBackup()
+  }
+  try {
+    return parseYaml(text) as Partial<GlobalSettings> | null
+  } catch {
+    globalUnreadable = text
+    return readGlobalBackup()
+  }
+}
+
+function readGlobalBackup(): Partial<GlobalSettings> | null {
+  try {
+    const text = fs.readFileSync(globalBackupPath(), 'utf-8')
+    if (!text.trim()) return null
+    const raw = parseYaml(text) as Partial<GlobalSettings> | null
+    if (raw) globalFromBackup = true
+    return raw
+  } catch {
+    return null
+  }
+}
 export const sessionPath = (): string => path.join(getUserDataDir(), SESSION_FILE)
 
 /** 默认根目录：appdata 中的应用数据目录 */
@@ -152,21 +202,17 @@ export function loadGlobal(): GlobalSettings {
   const plugins: Record<string, boolean> = {}
   // 公告状态：认不出来的字段一律回落到默认（每次打开都弹、没读过任何一条）
   let notice: NoticeSettings = { ...DEFAULT_NOTICE }
-  try {
-    const raw = parseYaml(fs.readFileSync(globalPath(), 'utf-8')) as Partial<GlobalSettings> | null
-    if (raw && typeof raw.root === 'string') root = raw.root.trim()
-    // 认不出来的值一律回落到默认：这份文件是给人看的，改坏了也不该弄得关不掉窗口
-    if (raw && isCloseBehavior(raw.closeBehavior)) closeBehavior = raw.closeBehavior
-    if (raw && (raw.uiLocale === 'zh' || raw.uiLocale === 'en')) uiLocale = raw.uiLocale
-    if (raw && typeof raw.autoUpdate === 'boolean') autoUpdate = raw.autoUpdate
-    if (raw && isUpdateChannel(raw.updateChannel)) updateChannel = raw.updateChannel
-    if (raw && raw.plugins && typeof raw.plugins === 'object') {
-      for (const [id, on] of Object.entries(raw.plugins)) if (typeof on === 'boolean') plugins[id] = on
-    }
-    if (raw && raw.notice && typeof raw.notice === 'object') notice = normalizeNotice(raw.notice)
-  } catch {
-    // 文件不存在或损坏：用默认值，不算错误
+  const raw = readGlobalFile()
+  if (raw && typeof raw.root === 'string') root = raw.root.trim()
+  // 认不出来的值一律回落到默认：这份文件是给人看的，改坏了也不该弄得关不掉窗口
+  if (raw && isCloseBehavior(raw.closeBehavior)) closeBehavior = raw.closeBehavior
+  if (raw && (raw.uiLocale === 'zh' || raw.uiLocale === 'en')) uiLocale = raw.uiLocale
+  if (raw && typeof raw.autoUpdate === 'boolean') autoUpdate = raw.autoUpdate
+  if (raw && isUpdateChannel(raw.updateChannel)) updateChannel = raw.updateChannel
+  if (raw && raw.plugins && typeof raw.plugins === 'object') {
+    for (const [id, on] of Object.entries(raw.plugins)) if (typeof on === 'boolean') plugins[id] = on
   }
+  if (raw && raw.notice && typeof raw.notice === 'object') notice = normalizeNotice(raw.notice)
   globalCache = { version: 1, root, closeBehavior, uiLocale, autoUpdate, updateChannel, plugins, notice }
   return globalCache
 }
@@ -188,8 +234,38 @@ function normalizeNotice(raw: Partial<NoticeSettings> | null | undefined): Notic
 
 function persistGlobal(): void {
   const data = loadGlobal()
-  fs.mkdirSync(path.dirname(globalPath()), { recursive: true })
-  fs.writeFileSync(globalPath(), stringifyYaml(data, { lineWidth: 0 }), 'utf-8')
+  const target = globalPath()
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  /*
+    主文件是坏的那一份：先原样留一份证据再覆盖。用户还能把它发过来，我们也还能从里面
+    用肉眼捞出 root 那一行（这正是 #143 里最要紧、却已经找不回来的信息）。
+  */
+  if (globalUnreadable) {
+    try {
+      fs.writeFileSync(target + '.corrupt-' + Date.now() + '.txt', globalUnreadable, 'utf-8')
+    } catch {
+      // 留不下证据也不该挡住这次正常写入
+    }
+    globalUnreadable = ''
+  }
+  const text = stringifyYaml(data, { lineWidth: 0 })
+  /*
+    先写 .tmp 再改名：中途被杀（更新时 quitAndInstall、任务管理器、断电）只会留下一个
+    没人认的 tmp，主文件仍是上一份完整内容。直接 writeFileSync 被截断的后果是整份设置
+    ——含 root——读不出来，而下一次保存会把默认值写回去，用户的数据目录设置就此永久消失。
+  */
+  const tmp = target + '.tmp'
+  fs.writeFileSync(tmp, text, 'utf-8')
+  // 上一份留成 .bak。从备份恢复的这一轮不覆盖它：那会把唯一一份好的副本换成坏的
+  if (!globalFromBackup) {
+    try {
+      fs.copyFileSync(target, globalBackupPath())
+    } catch {
+      // 第一次写：还没有旧文件
+    }
+  }
+  fs.renameSync(tmp, target)
+  globalFromBackup = false
 }
 
 /** 当前生效的根目录 */

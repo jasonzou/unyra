@@ -2,7 +2,7 @@ import { useEffect, useRef, type RefObject } from 'react'
 import { usePresence } from './presence'
 
 /**
- * 顶栏那几个入口（用户菜单 / 打卡 / 番茄钟 / 有效阅读）与导师人格、模型选择器
+ * 顶栏那几个入口（用户菜单 / 打卡 / 专注模式 / 有效阅读）与导师人格、模型选择器
  * 共用的一套「指针悬停即展开」时序。
  *
  * 为什么收在一起：这六处的开合时机本来是各抄一份的——指针进来就展开、
