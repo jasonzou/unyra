@@ -51,6 +51,8 @@ describe('注册表形状', () => {
       'wf.list', 'wf.get', 'wf.create', 'wf.remove', 'wf.invoke',
       // 记忆：五条全进名单（工作 / 长期两类都靠它读写）
       'memory.list', 'memory.get', 'memory.create', 'memory.update', 'memory.delete',
+      // 日程：agent 能排、能改、能标完成（响铃与确认在宿主，见 learn/schedule）
+      'schedule.list', 'schedule.create', 'schedule.update', 'schedule.complete', 'schedule.remove',
     ]) {
       expect(names, name).toContain(name)
     }

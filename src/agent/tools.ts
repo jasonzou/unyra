@@ -36,6 +36,7 @@ export type {
   PomodoroOps,
   ReadingOps,
   ResourceOps,
+  ScheduleOps,
   SandboxCall,
   SandboxDocKind,
   SandboxOptions,

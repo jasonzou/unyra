@@ -3,6 +3,7 @@
 import type { LearnStore } from '../types'
 import { emptyDocs } from '../groups'
 import { emptyPomodoro } from '../pomodoro'
+import { emptySchedule } from '../schedule'
 
 export function emptyLearnStore(): LearnStore {
   return {
@@ -29,5 +30,7 @@ export function emptyLearnStore(): LearnStore {
     // 阅读按目标分开存（见 learn/reading 的 ReadingBook）：空库就是空账本
     reading: { byGoal: {} },
     pomodoro: emptyPomodoro(),
+    // 日程：空清单 + 默认铃声（见 learn/schedule）
+    schedule: emptySchedule(),
   }
 }

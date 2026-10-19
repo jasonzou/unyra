@@ -70,6 +70,8 @@ export function tabKey(ref: TabRef): string {
   // 设置页与用量页同样全局只有一份：从哪个入口打开都是切到它，不会开出第二枚
   if (ref.kind === 'settings') return 'set:settings'
   if (ref.kind === 'usage') return 'u:usage'
+  // 日程表全局只有一份：从顶栏 tip、提醒弹层还是设置里打开，都是切到同一枚页签
+  if (ref.kind === 'schedule') return 'sc:schedule'
   // 超级导师设置全局一份；记忆按目标归档，页签也一枚目标一份
   if (ref.kind === 'mind') return 'm:' + ref.goalId
   if (ref.kind === 'agentSettings') return 'set:agent'
@@ -131,6 +133,7 @@ export function tabNodeId(ref: TabRef): string | null {
     ref.kind === 'report' ||
     ref.kind === 'settings' ||
     ref.kind === 'usage' ||
+    ref.kind === 'schedule' ||
     ref.kind === 'mind' ||
     ref.kind === 'agentSettings' ||
     ref.kind === 'newGoal' ||
@@ -198,6 +201,7 @@ export function tabTitle(
   if (ref.kind === 'report') return t('专注报告')
   if (ref.kind === 'settings') return t('设置')
   if (ref.kind === 'usage') return t('用量统计')
+  if (ref.kind === 'schedule') return t('日程安排')
   if (ref.kind === 'mind') return t('记忆管理')
   if (ref.kind === 'agentSettings') return t('超级导师设置')
   if (ref.kind === 'newGoal') return t('新建目标')
@@ -232,6 +236,7 @@ export function tabTrail(
     ref.kind === 'report' ||
     ref.kind === 'settings' ||
     ref.kind === 'usage' ||
+    ref.kind === 'schedule' ||
     ref.kind === 'agentSettings' ||
     ref.kind === 'newGoal' ||
     ref.kind === 'blank' ||

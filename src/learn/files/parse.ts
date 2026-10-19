@@ -294,6 +294,8 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
     // 随笔窗口的几何是界面状态：跟着 state.json 走（与 docScroll / docArea 同一类）
     essayDock: s.essayDock ?? null,
     pomodoro: s.pomodoro ?? null,
+    // 日程整块跟着 state.json 走（见 learn/schedule）
+    schedule: s.schedule ?? null,
     // agent 栏页签原样交给 normalizeLearnStore：对着「目标/会话/子代理会话还活着吗」校验
     agentTabs: s.agentTabs ?? null,
     agentActiveTab: s.agentActiveTab ?? null,

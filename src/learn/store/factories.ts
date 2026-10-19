@@ -116,6 +116,8 @@ export function mergeLearnStore(base: LearnStore, incoming: LearnStore): LearnSt
     workflows: base.workflows,
     reading: base.reading,
     pomodoro: base.pomodoro,
+    // 日程同样是「我排给自己的」：导入别人的备份不该把这张表换掉
+    schedule: base.schedule,
     // agent 栏的页签同样是「这台机器上开着什么」：不跟着别人的备份走（与 docArea 同一条道理）
     agentTabs: base.agentTabs,
     agentActiveTab: base.agentActiveTab,

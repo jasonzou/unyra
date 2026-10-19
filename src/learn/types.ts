@@ -4,6 +4,7 @@ import type { Drafts } from './drafts'
 import type { Exam } from './exam'
 import type { DocWorkspace } from './groups'
 import type { PomodoroStore } from './pomodoro'
+import type { ScheduleStore } from './schedule'
 import type { ReadingBook } from './reading'
 import type { StaticResource } from './static'
 
@@ -488,6 +489,12 @@ export type TabRef =
    */
   | { kind: 'usage' }
   /**
+   * 日程安排页：同样全局一枚页签（入口在顶栏日历按钮的悬停 tip，以及提醒弹层）。
+   * 数据是用户级的 schedule（state.json，见 learn/schedule），不挂任何节点；
+   * 它跟着 docArea 持久化——重启后还开在那儿，与「上次开着哪些页签」同一句话。
+   */
+  | { kind: 'schedule' }
+  /**
    * 记忆管理页：导师写下的记忆（learn/memory 的 store.memory）的查看与编辑，
    * 入口在 agent 栏输入框的「+」菜单。**页签也按目标一枚**（tabKey = 'm:' + goalId）：
    * 打开时默认筛到该目标的工作记忆；长期记忆跨目标，这一页同样看得到。
@@ -670,6 +677,13 @@ export interface LearnStore {
   reading?: ReadingBook
   /** 番茄钟（见 learn/pomodoro）：正在跑的那一段 + 跑完的专注记录。可选，理由同上 */
   pomodoro?: PomodoroStore
+  /**
+   * 日程（见 learn/schedule）：用户级的提醒清单 + 铃声设置。
+   *
+   * 与番茄钟同一档：整块存在 state.json 里，不挂任何目标——「今天 19:30 复习」
+   * 与「在学哪门课」无关，删掉目标也不该带走它。可选，理由同上（旧数据没有这个字段）。
+   */
+  schedule?: ScheduleStore
   /**
    * 目标级资源库的清单：目标 id → 资源列表（见 learn/static）。
    * 只放元数据，文件本体在 `{目标}/static/` 下——与图片引用一样的取舍：

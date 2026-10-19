@@ -20,6 +20,7 @@ import { normalizeReadingBook } from '../../reading'
 import { normalizeEssayDock, normalizeEssays } from '../../essays'
 import { normalizeEssayCommits } from '../../essayCommits'
 import { normalizePomodoro } from '../../pomodoro'
+import { normalizeSchedule } from '../../schedule'
 import { normalizeMemoryStore } from '../../memory'
 import { normalizeResourceList, retargetStaticRefs, type StaticResource } from '../../static'
 import { normalizeTmpStore, pruneTmpToNodes } from '../../../lib/tmpStore'
@@ -283,6 +284,8 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
        */
       reading: normalizeReadingBook(d.reading, ids, goalIds),
       pomodoro: normalizePomodoro(d.pomodoro),
+      // 日程是用户级数据（见 learn/schedule）：不按目标过滤，坏条目逐条丢
+      schedule: normalizeSchedule(d.schedule),
       activeGoalId,
       activeNodeId: nextActiveNodeId,
       activeConversationId,

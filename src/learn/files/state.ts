@@ -1,6 +1,7 @@
 /** 这个文件负责什么：界面状态（state.json）的形状与写出——「上次看到哪儿」、页签、暂存区与本地文件那一份。 */
 
 import type { Drafts } from '../drafts'
+import { DEFAULT_SCHEDULE_SOUND } from '../schedule'
 import type { DocKind, DocScroll, FavoriteItem, LearnStore, LearnTab, LocalFile, MemoryItem, WorkflowEffortSetting, WorkflowEntry } from '../types'
 
 /**
@@ -60,6 +61,11 @@ export interface LearnState {
    * 改口径不迁移数据，从前那份用户级的账直接丢掉（见 parseDocs 里的说明）。
    */
   pomodoro?: unknown
+  /**
+   * 日程（见 learn/schedule）：提醒清单 + 铃声设置。同样**整块**存在这里——
+   * 它是用户级数据（不挂目标），漏一个字段就等于「写下去了、读不回来」。
+   */
+  schedule?: unknown
   /** 旧字段：页签之前，「文档区在看教学文档还是笔记」。保留只为读回旧文件 */
   activeDoc?: DocKind
   /** agent 栏的页签（见 learn/agentTabs）。原样落盘，校验交给 normalizeLearnStore */
@@ -111,6 +117,8 @@ export function buildState(store: LearnStore): Record<string, unknown> {
      * （阅读与打卡不在这里：它们按目标写在各自目录里，见 buildDocs。）
      */
     ...(hasPomodoro(store.pomodoro) ? { pomodoro: store.pomodoro } : {}),
+    // 日程：有条目、或铃声被改过才写（默认铃声不值得占字段；改过就得记住）
+    ...(hasSchedule(store.schedule) ? { schedule: store.schedule } : {}),
     /*
      * agent 栏的页签：只在真有页签时写（与 favorites 同一条纪律）。
      * 激活项跟着页签走——没有页签时的 null 是默认值，不值得占一个字段。
@@ -124,3 +132,15 @@ export function buildState(store: LearnStore): Record<string, unknown> {
 
 const hasPomodoro = (p?: { current: unknown; log: unknown[] }): boolean =>
   !!p && (!!p.current || p.log.length > 0)
+
+/**
+ * 日程要不要写进 state.json：有条目，或者铃声不是默认那一档。
+ *
+ * 与 hasPomodoro 同一条纪律（空结构不写），但多认一个条件：日程表可以是空的，
+ * 而「我把铃声换成了钟声」这件事必须记住——它只活在这份文件里。
+ */
+const hasSchedule = (s?: { items: unknown[]; sound?: { preset?: string; volume?: number } }): boolean =>
+  !!s &&
+  (s.items.length > 0 ||
+    (s.sound?.preset !== undefined && s.sound.preset !== DEFAULT_SCHEDULE_SOUND.preset) ||
+    (s.sound?.volume !== undefined && s.sound.volume !== DEFAULT_SCHEDULE_SOUND.volume))

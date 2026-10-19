@@ -95,6 +95,7 @@ export function useExportFlow(deps: ExportFlowDeps) {
       if (
         tab.ref.kind === 'settings' ||
         tab.ref.kind === 'usage' ||
+        tab.ref.kind === 'schedule' ||
         tab.ref.kind === 'mind' ||
         tab.ref.kind === 'agentSettings' ||
         tab.ref.kind === 'newGoal' ||

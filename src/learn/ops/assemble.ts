@@ -41,6 +41,7 @@ import { createResourceOps } from './resource'
 import { createAttentionOps, createCompactOps, createPomodoroOps, createReadingOps } from './process'
 import { createWorkspaceOps } from './workspace'
 import { createChipOps } from './chip'
+import { createScheduleOps } from '../schedule'
 
 /**
  * 排版提醒：整篇写入教学文档、而正文里一处排版痕迹都没有时，在回执里点一句。
@@ -729,6 +730,8 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     reading: createReadingOps(deps),
     attention: createAttentionOps(deps),
     pomodoro: createPomodoroOps(deps),
+    // 日程：用户级的提醒清单（见 learn/schedule）——agent 能排、能改，响铃在宿主那边
+    schedule: createScheduleOps({ getLatest: deps.getLatest, set: deps.set, goalId: deps.goalId }),
     ...(deps.userInfo ? { userInfo: createUserInfoOps(deps.userInfo) } : {}),
     ...(deps.tmp ? { tmp: deps.tmp } : {}),
     ...(deps.exam ? { exam: deps.exam } : {}),

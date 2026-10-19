@@ -11,7 +11,8 @@ import { createAgentOps } from '../../src/learn/agentOps'
 import { loadAgentSettings, saveAgentSettings } from '../../src/agent/settings'
 import { createExecuteTool, plainLineOf } from '../../src/agent/tools'
 import { makePermissionOps } from '../../src/agent/permissions'
-import { createMemoryOps } from '../../src/learn/memory'
+import { createMemory, createMemoryOps } from '../../src/learn/memory'
+import { emptySchedule } from '../../src/learn/schedule'
 import { SANDBOX_API_NAMES } from '../../src/agent/sandboxWorker'
 import { SANDBOX_API_CATALOG } from '../../src/agent/apiCatalog'
 import { emptyProfile } from '../../src/user/types'
@@ -326,8 +327,35 @@ export async function apiNameTests() {
     'wf.create': "{ name: '探针流程', instruction: '第一步' }",
     'wf.remove': "'探针流程'",
     'web.fetch': "{ url: 'https://example.com/a' }",
+    // 记忆：名单检查按注册表顺序跑（list / get 排在 create 之前），所以 store 里先种了一条
+    // uuid 固定的工作记忆（见下面的 seedMemory）；这里只问「这五条真的注册了吗」
+    'memory.list': '',
+    'memory.get': "'probe-memory'",
+    'memory.create': "{ type: 'work', title: '探针记忆二', content: '探针：再记一条' }",
+    'memory.update': "'probe-memory', { content: '探针：改过的记忆' }",
+    'memory.delete': "'probe-memory'",
+    // 日程：同样先种一条 id 固定的（见 seedSchedule），create 之外的几条才有真对象可改
+    'schedule.list': '',
+    'schedule.create': "{ title: '探针新日程', time: '23:30', remindBefore: 5 }",
+    'schedule.update': "'probe-schedule', { time: '22:00' }",
+    'schedule.complete': "'probe-schedule'",
+    'schedule.remove': "'probe-schedule'",
   }
   let s = staticStore()
+  /*
+   * 名单检查是按**注册表顺序**跑的（list → get → create → update → delete），
+   * 而 memory.get / schedule.update 排在自己的 create 之前。先各料一条 uuid / id 固定的，
+   * 这几条才真的读到、改到东西，而不是只证明「名字注册了」。
+   */
+  const seedAt = Date.now() + 3_600_000
+  s = createMemory(s, { type: 'work', goalId, title: '探针记忆', content: '探针：极限讲完了' }, 'probe-memory')
+  s = {
+    ...s,
+    schedule: {
+      ...emptySchedule(),
+      items: [{ id: 'probe-schedule', title: '探针日程', startAt: seedAt, remindAt: seedAt, createAt: Date.now(), updateAt: Date.now() }],
+    },
+  }
   let tmpStore: Record<string, unknown> = {}
   let sawTmpWrite = false
   /** wf.invoke 的落点：真宿主是 useAgent 的队列（本轮收口后另起一轮），这里只记下交给它的是哪一条 */

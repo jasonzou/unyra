@@ -255,6 +255,7 @@ import ConfirmDialog from '../ConfirmDialog'
 import { AgentTabPane } from './workspace/AgentTabPane'
 import SettingsPanel from '../settings/SettingsPanel'
 import UsagePanel from '../settings/UsagePanel'
+import { SchedulePage } from '../schedule/SchedulePage'
 import AgentTabStrip from '../agent/AgentTabStrip'
 import ContextDebugger from '../agent/ContextDebugger'
 import { resetPrefixGate } from '../../agent/prefixGate'
@@ -272,7 +273,7 @@ import { ZONE_BOX } from './workspace/drag'
 import { examDeleteWarn } from './workspace/labels'
 import { conceptKeysOf, emptyNote, examCopyOf, paneInfo, paneOf } from './workspace/panes'
 import { DocPane } from './workspace/DocPane'
-import { PomodoroDock, ReadingDock } from './workspace/docks'
+import { PomodoroDock, ReadingDock, ScheduleDock } from './workspace/docks'
 import { EmptyDoc, GoalInput, Topbar } from './workspace/chrome'
 import { useSideColumns } from './workspace/useSideColumns'
 import SplitRow from './workspace/SplitRow'
@@ -284,6 +285,7 @@ import { useLibraryActions } from './workspace/useLibraryActions'
 import { useExplorerUndo } from './workspace/useExplorerUndo'
 import { useConceptActions } from './workspace/useConceptActions'
 import { usePomodoroFlow } from './workspace/usePomodoroFlow'
+import { useScheduleFlow, useScheduleReminder } from './workspace/useScheduleFlow'
 import { useWorkflowStarters } from './workspace/useWorkflowStarters'
 import { examNeedingWork, makeExamDeps } from './workspace/examTools'
 import { t } from '../../i18n'
@@ -669,6 +671,7 @@ export default function LearnWorkspace({
       ref.kind === 'report' ||
       ref.kind === 'settings' ||
       ref.kind === 'usage' ||
+      ref.kind === 'schedule' ||
       ref.kind === 'mind' ||
       ref.kind === 'agentSettings' ||
       ref.kind === 'newGoal' ||
@@ -1629,6 +1632,9 @@ export default function LearnWorkspace({
    * 不需要晚绑定把手——直接依赖 openTab 即可。
    */
   const onOpenUsage = useCallback(() => openTab({ kind: 'usage' }), [openTab])
+
+  /** 日程安排页签的入口（顶栏日程 tip 的「手动安排日程」与提醒弹层）。与用量页同样全局一枚 */
+  const onOpenSchedule = useCallback(() => openTab({ kind: 'schedule' }), [openTab])
 
   /**
    * api.ui.point：打开/切到某个节点的文档页签并定位。
@@ -2811,6 +2817,24 @@ export default function LearnWorkspace({
    * 开始/停止/到点收尾三个入口都从这里转发，报告与守卫上下文才不会漏掉一场。
    */
   const { startFocus, stopFocus, pauseFocus, resumeFocus, tickFocus } = usePomodoroFlow({ getLatest, set, onToast })
+
+  /*
+   * 日程：写操作（页面与顶栏共用一套）与到点提醒（顶栏那一条呼吸 + 弹层）。
+   *
+   * 提醒引擎有自己的 1 秒节拍，但**只在「该响的那条换了」时 setState**——顶栏因此不会
+   * 每秒重渲染；这条边界写在 useScheduleFlow 的文件头，改动时别把 tick 挪进渲染。
+   */
+  const scheduleActions = useScheduleFlow({ getLatest, set })
+  const { ringing: scheduleRinging, complete: completeScheduleItem, snooze: snoozeScheduleItem } =
+    useScheduleReminder({ getLatest, set })
+
+  /*
+   * 纯净阅读里顶栏是收起的（h-0 + invisible）：日程到点时如果还缩着，用户只听得见铃声、
+   * 看不见是哪一件事。响铃优先——先退出纯净阅读，让顶栏的呼吸与弹层真的出现在眼前。
+   */
+  useEffect(() => {
+    if (scheduleRinging && pure) setPure(false)
+  }, [scheduleRinging, pure, setPure])
 
   /* ---------- 严格专注：守卫 agent 与专注报告 ---------- */
 
@@ -4209,6 +4233,18 @@ export default function LearnWorkspace({
                 onModelChanged={() => setSettingsEpoch((n) => n + 1)}
                 onSubmit={startGoal}
               />
+            ) : gTab?.ref.kind === 'schedule' ? (
+              /*
+                日程安排页：用户级的一张提醒清单（见 learn/schedule）。全局一枚页签，
+                入口在顶栏日程 tip 与到点提醒弹层；页面自己只管展示与编辑态，写操作
+                全部经 scheduleActions 交回这一层。
+              */
+              <SchedulePage
+                store={store}
+                actions={scheduleActions}
+                onToast={onToast}
+                ringingId={scheduleRinging?.id ?? null}
+              />
             ) : gTab?.ref.kind === 'usage' ? (
               /*
                 用量统计：独立的一枚页签（入口在顶栏用户菜单）。它读的是「台账」
@@ -4220,7 +4256,12 @@ export default function LearnWorkspace({
                 设置面板：文档区的一枚页签（不再是弹窗）。全局只有这一份（tabKey 恒定），
                 从任何入口打开都是切到它；分页与内容都在面板内部（见 settings/SettingsPanel）。
               */
-              <SettingsPanel onRootChanged={onRootChanged} onToast={onToast} />
+              <SettingsPanel
+                onRootChanged={onRootChanged}
+                onToast={onToast}
+                scheduleSound={store.schedule?.sound}
+                onScheduleSoundChange={scheduleActions.setSound}
+              />
             ) : gTab?.ref.kind === 'mind' ? (
               /*
                 记忆管理：导师写下的记忆（learn/memory）的查看与编辑。**一枚目标一枚页签**
@@ -4570,6 +4611,7 @@ export default function LearnWorkspace({
             gTab.ref.kind !== 'web' &&
             gTab.ref.kind !== 'settings' &&
             gTab.ref.kind !== 'usage' &&
+            gTab.ref.kind !== 'schedule' &&
             gTab.ref.kind !== 'mind' &&
             gTab.ref.kind !== 'agentSettings' &&
             gTab.ref.kind !== 'outline' &&
@@ -4856,6 +4898,17 @@ export default function LearnWorkspace({
               />
             }
             reading={<ReadingDock store={store} onOpenNode={selectNode} />}
+            /* 日程是「今天还剩什么」，与番茄钟/阅读同属右侧那一簇；到点时的呼吸层挂在顶栏本体上 */
+            schedule={
+              <ScheduleDock
+                store={store}
+                ringing={scheduleRinging}
+                onOpen={onOpenSchedule}
+                onComplete={completeScheduleItem}
+                onSnooze={snoozeScheduleItem}
+              />
+            }
+            scheduleRinging={!!scheduleRinging}
           />
         </div>
 

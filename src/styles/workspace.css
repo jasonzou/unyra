@@ -322,3 +322,45 @@
     animation: none;
   }
 }
+
+/*
+ * 日程到点的「顶栏呼吸」。
+ *
+ * 铺在顶栏里的一层绝对定位光带（见 chrome.tsx）：从印章色到警告色再回来，
+ * 背景横向缓慢推移 + 整体透明度呼吸。负 z-index 让它只压在顶栏背景之上、
+ * 所有按钮之下——顶栏是 backdrop-blur 建立的层叠上下文，负值不会漏到外面去。
+ *
+ * 为什么是「光」而不是直接给顶栏换背景：顶栏本身带着 from-card/90 到 paper/70 的
+ * 渐变，改它就得在两个渐变之间插值，主题一换还得再调一次；叠一层光只要一个 color-mix，
+ * 深浅主题都成立。指针穿透由调用点上的 pointer-events-none 保证。
+ */
+@keyframes moji-schedule-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+    background-position: 0% 50%;
+  }
+  50% {
+    opacity: 0.95;
+    background-position: 100% 50%;
+  }
+}
+
+.moji-schedule-glow {
+  background-image: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--color-seal) 30%, transparent) 0%,
+    color-mix(in srgb, var(--color-warn) 22%, transparent) 32%,
+    color-mix(in srgb, var(--color-seal) 8%, transparent) 58%,
+    color-mix(in srgb, var(--color-warn) 20%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  animation: moji-schedule-glow 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moji-schedule-glow {
+    animation: none;
+    opacity: 0.6;
+  }
+}

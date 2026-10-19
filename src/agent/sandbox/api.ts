@@ -494,6 +494,17 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     wrapApi(api, 'memory.delete', (args) => memory.remove(asText(args[0]).trim(), args[1] && typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined), log)
   }
 
+  // 日程：给用户排提醒（见 learn/schedule）。响铃与「确认」在宿主，agent 只写这张表
+  if (opts.schedule) {
+    const schedule = opts.schedule
+    wrapApi(api, 'schedule.list', (args) => schedule.list(args.length && typeof args[0] === 'object' ? (args[0] as Record<string, unknown>) : undefined), log)
+    wrapApi(api, 'schedule.create', (args) => schedule.create(asRecord(args[0])), log)
+    // 修改是 (id, patch)：与 memory.update 同一套位置参数写法
+    wrapApi(api, 'schedule.update', (args) => schedule.update(asText(args[0]).trim(), asRecord(args[1])), log)
+    wrapApi(api, 'schedule.complete', (args) => schedule.complete(asText(args[0]).trim()), log)
+    wrapApi(api, 'schedule.remove', (args) => schedule.remove(asText(args[0]).trim()), log)
+  }
+
   if (opts.methods) {
     const m = opts.methods
     wrapApi(api, 'method.list', () => m.list(), log)

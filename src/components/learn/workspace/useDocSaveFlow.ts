@@ -447,6 +447,7 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
         tab.ref.kind === 'report' ||
         tab.ref.kind === 'settings' ||
         tab.ref.kind === 'usage' ||
+        tab.ref.kind === 'schedule' ||
         tab.ref.kind === 'mind' ||
         tab.ref.kind === 'agentSettings' ||
         tab.ref.kind === 'newGoal' ||

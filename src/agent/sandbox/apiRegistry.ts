@@ -229,6 +229,28 @@ if (!mem.items.some((x) => x.title === '用户的作息')) {
 }`,
   ),
   g(
+    'schedule',
+    '日程安排',
+    '给用户排日程：列、新建、修改、完成、删除；到点由宿主响铃提醒。',
+    `日程是**给用户的提醒**，不是你自己要执行的计划：写进去之后到点由宿主响铃、在顶栏弹出事项，
+用户自己确认或让它隔一阵再提醒——你既不要替用户确认，也不要 sleep 等着它到点。
+时间用 "HH:mm"，date 用 "YYYY-MM-DD"；date 省略就是今天（那个时间今天已过就顺延到明天，回执会说明）。
+remindBefore 是提前多少分钟提醒，默认 0（准点）。
+排之前先 api.schedule.list() 看今天已经有什么，同一件事别排两遍；一次别排一大堆。`,
+    [
+      a('list', 'schedule.list({ from?, to?, days? }?)', '列出一段日期里的日程', '默认今天起 7 天；回每条的 id / 日期 / 时间 / 标题 / 是否完成 / 提醒方式。', `const s = await api.schedule.list({ days: 3 })`),
+      a('create', 'schedule.create({ title, date?, time, minutes?, remindBefore?, note? })', '安排一条日程', 'title 与 time 必填；date 省略=今天。minutes 是时长（只用于展示），remindBefore 默认 0。回 id 与提醒时刻。', `await api.schedule.create({ title: '复习夹逼定理', date: '2026-10-20', time: '19:30', minutes: 45, remindBefore: 10 })`),
+      a('update', 'schedule.update(id, { title?, date?, time?, minutes?, remindBefore?, note?, done? })', '改一条日程', '只改给了的字段；done:true 等于标记完成（不再提醒）。', `await api.schedule.update(id, { time: '20:00' })`),
+      a('complete', 'schedule.complete(id)', '标记完成', '完成之后不再提醒；这是「这件事办完了」的落账。', `await api.schedule.complete(id)`),
+      a('remove', 'schedule.remove(id)', '删除一条日程', '不可逆；用户明确不要了才删。', `await api.schedule.remove(id)`),
+    ],
+    `// 排一条之前先看看今天已经有什么
+const today = await api.schedule.list({ days: 1 })
+if (!today.items.some((x) => x.title.includes('复习'))) {
+  await api.schedule.create({ title: '复习夹逼定理', time: '19:30', minutes: 45, remindBefore: 10 })
+}`,
+  ),
+  g(
     'tmp',
     '临时变量',
     '当前节点作用域的临时数据：大块中间结果、跨调用传递。',

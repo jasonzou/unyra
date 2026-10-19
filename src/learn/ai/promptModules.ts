@@ -263,6 +263,8 @@ export const PROMPT_MODULES: PromptModule[] = [
     text: `学习过程记录（api.reading.* / api.attention.* / api.pomodoro.*）：
 - 有效阅读事实走 api.reading.get / api.reading.list / api.reading.day；
 - 注意力评级走 api.attention.get，番茄钟状态走 api.pomodoro.status（只读）；
+- 日程走 api.schedule.*（list / create / update / complete / remove）：给用户排提醒，
+  到点由宿主响铃、用户自己确认或稍后提醒——不要替用户确认，也不要 sleep 等它到点；
 - 学习状态的写（掌握度/错题/检验）走 api.state.*，不要用 api.files.* 碰 reading.json 或 meta.json。`,
   },
   {
@@ -552,6 +554,7 @@ const GROUP_MODULE: Record<string, string> = {
   reading: 'learning-process',
   attention: 'learning-process',
   pomodoro: 'learning-process',
+  schedule: 'learning-process',
   workspace: 'workspace',
   method: 'method',
   code: 'code',

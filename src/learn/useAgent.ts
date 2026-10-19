@@ -44,6 +44,7 @@ import { currentNodeBlock, makeExamTool } from './agentOps'
 import { findWorkflow, renderWorkflowInstruction, resolveWorkflowEffort, workflowPrep, workflowModules } from './workflows'
 import { generateConversationTitle, namingSource } from './title'
 import { createMemoryOps } from './memory'
+import { createScheduleOps } from './schedule'
 import { saveScreenshot } from './screenshots'
 import { makeBrowserOps, type BrowserDeps } from './web/browserOps'
 import { loadImagesById, loadImagesFor, releasePending } from './images'
@@ -1213,12 +1214,20 @@ export function useAgent(opts: {
               fetch: fetchForAgent,
               search: searchForAgent,
             },
-            apiAllow: ['web', 'fetch'],
+            /*
+             * 日程：聊天 agent 也排得了日程（需求明确）。它写的是**用户级**的那张表
+             * （state.json 的 schedule），与自由聊天没有目标这件事不冲突——goalId 只是
+             * 日程上的一个可选标记，这里给 FREE_GOAL_ID，界面按「自由聊天」显示。
+             */
+            schedule: createScheduleOps({ getLatest, set, goalId: () => FREE_GOAL_ID }),
+            apiAllow: ['web', 'fetch', 'schedule'],
             apiBrief:
               'DeepSeek 官方搜索与抓取服务：\n' +
               'api.web.search({ query, count?: 5, ori_question?, need_content? })：网络搜索并获取多维度权威检索结果；\n' +
               "api.fetch({ url: 'https://...' }) 或 api.fetch('https://...')：抓取网页正文并转为 Markdown 格式；\n" +
-              'api.web.fetch({ url })：抓取网页正文（api.fetch 别名）。',
+              'api.web.fetch({ url })：抓取网页正文（api.fetch 别名）；\n' +
+              'api.schedule.list({ days? }) / api.schedule.create({ title, date?, time, minutes?, remindBefore? })：' +
+              '看用户的日程、给他排一条提醒（到点由宿主响铃，用户自己确认或稍后提醒）。',
             signal: ctrl.signal,
           }
           const tools = [createExecuteTool(freeSandbox)]

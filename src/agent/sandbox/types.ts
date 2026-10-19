@@ -160,6 +160,13 @@ export interface SandboxOptions {
    */
   memory?: MemoryOps
   /**
+   * 日程（schedule.*，见 learn/schedule）：给用户排日程、改、删、标记完成。
+   *
+   * 边界：agent 负责**写**这张表，响铃与确认都在用户手里——它不能替用户「确认」。
+   * 与 memory 同一条纪律：日程绝不自动进上下文，需要时自己 list。
+   */
+  schedule?: ScheduleOps
+  /**
    * 目标级持久化函数（method.*，见 learn/methods）；未注入就没有 method 这一组。
    *
    * find 返回的是**源码**而不是执行结果：执行发生在 buildApi 的 method.call 里——
@@ -527,6 +534,25 @@ export interface MemoryOps {
   update: (uuid: string, patch: Record<string, unknown>) => unknown
   /** 删除：长期记忆需要 { confirm: true } */
   remove: (uuid: string, opts?: Record<string, unknown>) => unknown
+}
+
+/**
+ * schedule.*：日程安排（见 learn/schedule）。
+ *
+ * 时间用 `date`（YYYY-MM-DD）+ `time`（HH:mm）；`date` 省略=今天（时间已过则顺延到明天）。
+ * 失败一律回 `{ error }`（与 memory / res 同一约定）。
+ */
+export interface ScheduleOps {
+  /** 列日程：from / to / days 都可选，默认今天起 7 天 */
+  list: (query?: Record<string, unknown>) => unknown
+  /** 新建：{ title, date?, time, minutes?, remindBefore?, note? } */
+  create: (payload: Record<string, unknown>) => unknown
+  /** 修改：只改给了的字段；done 可标记完成 */
+  update: (id: string, patch: Record<string, unknown>) => unknown
+  /** 标记完成（用户确认过的落账） */
+  complete: (id: string) => unknown
+  /** 删除一条 */
+  remove: (id: string) => unknown
 }
 
 /**
