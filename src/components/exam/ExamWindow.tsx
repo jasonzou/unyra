@@ -27,6 +27,7 @@ import {
 import type { ExamWindowState } from '../../learn/useExamBridge'
 import { isElectron, isMac } from '../../lib/native'
 import { t } from '../../i18n'
+import { nearestScrollTop } from './scroll'
 
 /**
  * 考试窗口：一个独立的 Electron 窗口。
@@ -41,6 +42,8 @@ const PAD_X = 20
 const PAD_TOP = 16
 const PAD_BOTTOM = 24
 const PAPER_MAX_W = 768
+/** 滚到某一题时上下各留一点呼吸位（跟卡片边框的圆角对齐，不贴边） */
+const QUESTION_SCROLL_GAP = 12
 
 const EMPTY_QUESTIONS: ExamQuestion[] = []
 
@@ -161,8 +164,22 @@ export default function ExamWindow() {
   const scrollToQuestion = useCallback(
     (questionId: string, smooth = true) => {
       const el = itemRefs.current.get(questionId)
-      if (!el) return
-      el.scrollIntoView({ block: 'nearest', behavior: smooth ? 'smooth' : 'auto' })
+      const box = scrollRef.current
+      if (!el || !box) return
+      /*
+        只滚题目流自己，不用 el.scrollIntoView：那会连 html/body 一起滚，
+        答到最后几题时整页被顶上去，底下留一片空白（见本文件顶部与 ./scroll 的说明）。
+        先换算成「滚动内容坐标系」，再交给纯函数算目标位置。
+      */
+      const boxRect = box.getBoundingClientRect()
+      const rect = el.getBoundingClientRect()
+      const top = nearestScrollTop(
+        { scrollTop: box.scrollTop, clientHeight: box.clientHeight, scrollHeight: box.scrollHeight },
+        { contentTop: rect.top - boxRect.top + box.scrollTop, height: rect.height },
+        QUESTION_SCROLL_GAP,
+      )
+      if (top === box.scrollTop) return
+      box.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' })
     },
     [],
   )
@@ -259,7 +276,12 @@ export default function ExamWindow() {
   }
 
   return (
-    <div className="flex h-full min-h-screen flex-col bg-paper text-ink select-none">
+    /*
+      整页固定为窗口高度并且裁掉溢出：考试窗口是独立窗口，页面本身永远不该滚动。
+      曾经这里是 `h-full min-h-screen`——一旦有东西把根滚动元素撑高（例如 scrollIntoView
+      顺手滚了 html），整页会被顶上去，底下空一大块。见 ./scroll 的说明。
+    */
+    <div className="flex h-screen flex-col overflow-hidden bg-paper text-ink select-none">
       {/* 紧凑顶栏 HUD */}
       <header
         className={
@@ -390,7 +412,7 @@ export default function ExamWindow() {
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div
             ref={scrollRef}
-            className="min-h-0 flex-1 overflow-y-auto"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
             style={{ padding: `${PAD_TOP}px ${PAD_X}px ${PAD_BOTTOM}px` }}
           >
             <div className="mx-auto flex w-full flex-col gap-4" style={{ maxWidth: PAPER_MAX_W }}>
@@ -716,10 +738,17 @@ function QuestionBlock({
   }
 
   return (
+    /*
+      `relative` 不是装饰：对错题的 radio 用了 sr-only（绝对定位），题卡若不定为
+      定位祖先，它们的包含块会一路找到下面那个 `relative` 的答题栏容器——于是
+      输入框停在题目流的「原始位置」不随滚动移动，把页面撑高几千像素；点选项聚焦到
+      它时浏览器又把整页滚过去，卷面被顶上去、底下空一大块（已复现）。
+      所以题卡必须是定位元素，任何绝对定位的零件都留在题卡里。
+    */
     <div
       ref={register}
       className={
-        'rounded-lg border transition-colors duration-150 scroll-mt-16 p-4 ' +
+        'relative rounded-lg border transition-colors duration-150 p-4 ' +
         (current
           ? 'border-seal/60 bg-card shadow-2xs ring-1 ring-seal/25'
           : 'border-line/70 bg-card/90 hover:border-line-strong')
