@@ -8,6 +8,7 @@ import { loadAgentSettings } from '../settings'
 import { promptModuleForApiName, promptModuleForContent, writableContentOf } from '../../learn/ai/promptModules'
 import { MAX_TOOL_IMAGES, type MessageImage } from '../types'
 import { buildApi, clip, imagesOf } from './api'
+import { renderApiHelp, renderGroupHelp, renderRootHelp } from './apiRegistry'
 import { safeJson } from './askForm'
 import { compileBody } from './body'
 import { asText } from './refs'
@@ -32,11 +33,10 @@ const EXECUTE_PARAMETERS = {
         '返回值会被回给你（超过 3.2 万字符会截断）。' +
         '**写操作的失败不抛异常**：回 { ok:false, content:"哪一步没做成、该怎么改" }，并汇总在结果最前面' +
         '那份「没有生效」清单里——判断成败看清单，不要用 try/catch，也不要追加读接口确认。' +
-        '所有数据与真实文件读写统一使用 api.files.*（省略路径或传空字符串缺省为当前节点的教学文档）；' +
-        '原生系统进程任务使用 api.process.*；' +
-        '专业技能管理与脚本执行使用 api.skill.*（api.skill.paths / api.skill.list / api.skill.read / api.skill.run / api.skill.write / api.skill.delete），亦可使用 api.files.* 直接读写 skills/ 目录；' +
-        'api 上有什么、各组的完整签名与使用时机，全部见系统提示词的 execute 一节；' +
-        '按需组（browser / web / method / code / subagent / ui 等）的规范会在你第一次调用该组时自动注入。' +
+        '**先查再用**：每个组、每条 api 都挂着 __help()——await api.<组>.__help() 看这一组有哪些 api，' +
+        'await api.<组>.<api>.__help() 看这一条的参数、返回与示例；不要凭记忆猜 api 名或参数。' +
+        '应用数据（文档/笔记/大纲/状态/试卷/超级文档/工作流/画像/阅读）一律走对应 api 组；' +
+        'api.files.* 只用于 workspace/、static/、skills/ 与外部文件，碰应用数据会被拒绝并提示该用哪一组。' +
         '调试用 api.log(...)，输出随结果一起回给你。' +
         '沙箱里没有 window / document / fetch。',
     },
@@ -85,13 +85,14 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
   return {
     name: 'execute',
     description: opts.apiBrief
-      ? '执行一段 JS 来完成任务：api 按本会话的授权开放（完整签名见参数说明）。' +
+      ? '执行一段 JS 来完成任务：api 按本会话的授权开放（完整签名见参数说明，也可用 api.<组>.__help() 现查）。' +
         '多步、批量、需要判断或循环的活用代码一次做完，不要把中间结果写进对话；' +
-        '体量大的中间数据用 api.files.write 存为真实文件，只把文件名或结论带回来。'
-      : '执行一段 JS 来操作学习数据与专业技能——**唯一的工具**：文档读写、节点增删改、' +
-        '专业技能查阅与脚本执行（api.skill.*）、人机协作与界面操作都只能通过这里调用。多步、批量、需要判断或循环的活用代码一次做完，' +
-        '不要把中间结果写进对话；体量大的用 api.files.write 存为真实文件，只把文件名或结论带回来。' +
-        '各 api 组的签名与使用时机见系统提示词的 execute 一节（低频组的完整规范在首次调用时自动注入）。',
+        '体量大的中间数据用 api.tmp.set 暂存或 api.workspace.write 落盘，只把结论带回来。'
+      : '执行一段 JS 来操作学习数据——**唯一的工具**：文档与笔记（api.doc.*）、节点（api.node.*）、' +
+        '大纲（api.outline.*）、学习状态（api.state.*）、试卷（api.exam.*）、超级文档（api.sdoc.*）、' +
+        '工作流（api.wf.*）、人机协作与界面操作都只能通过这里调用。多步、批量、需要判断或循环的活用代码一次做完，' +
+        '不要把中间结果写进对话。**每个组、每条 api 都有 __help()**：先用 api.<组>.__help() 查签名与示例再动手。' +
+        '应用数据不走 api.files.*——它只用于工作区、静态资源、技能与外部文件。',
     parameters: executeParameters(opts.apiBrief),
     run: async (args) => {
       const description = asText(args.description).trim()
@@ -127,6 +128,16 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
         body: compiled.body,
         timeoutMs,
         callApi: async (name, callArgs) => {
+          /**
+           * `__help()` 的宿主兜底：真沙箱由 sandboxRuntime 同步返回（不走到这里），
+           * 测试的 fakeRunner / 超级文档桥会把它当成一次普通 api 调用转回来。
+           * 放在白名单之前：查帮助不该被 apiAllow 拦掉，否则子代理连「自己有什么」都看不到。
+           */
+          if (name === '__help') return renderRootHelp()
+          if (name.endsWith('.__help')) {
+            const target = name.slice(0, -'.__help'.length)
+            return target.includes('.') ? renderApiHelp(target) : renderGroupHelp(target)
+          }
           /**
            * api 组白名单（子代理专用）的硬闸：名单外的组当场拒绝。
            * apiAllow 是「execute 按需开放」的承诺，这里才是让它算数的地方——

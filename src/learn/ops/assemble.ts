@@ -304,16 +304,11 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     }
     deps.set(finalStore)
 
-    const layout = nodeLayout(finalStore).get(r.node.id)
-    const docRelPath = layout
-      ? 'docs/' + layout.dir.join('/') + '/' + docFileName(layout.base)
-      : 'docs/.../' + r.node.title + '.md'
-
     return {
       ok: true,
       content:
         '已创建节点「' + r.node.title + '」（路径 ' + label + '，id #' + r.node.id +
-        '）。教学文档与大纲两份文件已同时就位（都还是空的），接着写：api.files.write(\'' + docRelPath + '\', 讲义内容)；修改描述用 api.node.update(\'#' + r.node.id + '\', { description })。',
+        '）。教学文档与大纲两份文件已同时就位（都还是空的），接着写：api.doc.write(\'' + label + '\', 讲义内容)（省略 path 就是这份教学文档）；大纲用 api.outline.write(\'' + label + '\', { intro, children })；修改描述用 api.node.update(\'#' + r.node.id + '\', { description })。用前先 api.doc.__help() 查用法。',
     }
   }
 

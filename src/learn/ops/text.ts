@@ -42,7 +42,7 @@ export function currentNodeBlock(store: LearnStore, goalId: string, nodeId: stri
      * 自己要编写的是哪一份文档（用户点名的规矩）。措辞是「写的就是这份」而不是
      * 「默认是这份」：动别的文档必须显式写 path，没有含糊的余地。
      */
-    '【写入目标】这一轮 doc.write / doc.append / doc.replace 省略 path 时，写的就是这份教学文档：「' +
+    '【写入目标】这一轮 api.doc.write / api.doc.append / api.doc.replace 省略 path 时，写的就是这份教学文档：「' +
       docPathOf(store, goalId, node.id, 'teaching') +
       '」；要写其他节点的文档或任何笔记，必须写明 path。',
     '它的描述：' + (node.description.trim() ? clipText(node.description, 400) : '（还没写）'),
