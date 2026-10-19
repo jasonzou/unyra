@@ -13,7 +13,7 @@
  */
 
 import { t } from '../i18n'
-import { essaysOf } from './essays'
+import { essaysOf, ESSAY_TITLE_MAX } from './essays'
 import type {
   EssayCommit,
   EssayCommitChange,
@@ -106,6 +106,8 @@ export function createEssayCommit(
     message: (message.trim() || t('随笔整理')).slice(0, ESSAY_COMMIT_MESSAGE_MAX),
     snapshot: pending.map((e) => ({
       id: e.id,
+      // 标题一并封存：提交之后随笔改了名、删了，回看仍是当时的原样
+      title: e.title.slice(0, ESSAY_TITLE_MAX),
       createdAt: e.createdAt,
       text: e.text.slice(0, SNAPSHOT_TEXT_MAX),
     })),
@@ -324,6 +326,10 @@ export function normalizeEssayCommits(raw: unknown, aliveGoals: Set<string>): Es
           if (!text.trim()) continue
           snapshot.push({
             id: typeof e.id === 'string' && e.id ? e.id : crypto.randomUUID(),
+            // 旧提交没有 title：不硬补，界面按提交日期回退显示
+            ...(typeof e.title === 'string' && e.title.trim()
+              ? { title: e.title.trim().slice(0, ESSAY_TITLE_MAX) }
+              : {}),
             createdAt: isNum(e.createdAt) ? e.createdAt : at,
             text,
           })

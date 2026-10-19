@@ -26,6 +26,7 @@ const AT = 1_700_000_000_000
 
 const essay = (id: string, updatedAt: number, text = '内容' + id): EssayEntry => ({
   id,
+  title: '随笔' + id,
   text,
   createdAt: AT - 1000,
   updatedAt,
@@ -55,6 +56,8 @@ describe('随笔提交的快照边界', () => {
     expect(commit.status).toBe('running')
     expect(commit.snapshot.map((x) => x.id)).toEqual(['a', 'b'])
     expect(commit.snapshot[0].text).toBe('内容a')
+    // 标题一并封进快照：之后随笔改了名、删了，回看仍是当时的原样
+    expect(commit.snapshot[0].title).toBe('随笔a')
     expect(commitsOf(created!.store, 'g1')).toHaveLength(1)
     expect(lastCommitAt(created!.store, 'g1')).toBe(AT)
   })

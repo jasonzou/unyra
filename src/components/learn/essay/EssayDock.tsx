@@ -7,11 +7,14 @@
  *    点开的那一刻它不再是「消失 + 另弹一块」：窗口从按钮的位置与尺寸出发，圆角从正圆
  *    过渡到方角，边长大到窗口大小（动的是 left / top / width / height / border-radius，
  *    不是等比缩放——那会把字拉变形）。收起时原路缩回按钮，动画播完才卸载（见 lib/presence）。
- * 2. **没有「新建」**。随笔的粒度小到不值得一次确认：写下第一个字，它当场成一条
+ * 2. **没有「新建」按钮**。随笔的粒度小到不值得一次确认：写下第一个字，它当场成一条
  *    （去抖 400ms 之后落库，见 learn/essays）。清空再写就是下一条；空文本永远不落盘。
- *    打开窗口时**自动接上今天那条**（今天已经写过就继续写它），没有才是一张白纸。
+ *    随笔**不再拿日期当唯一标识**：每条有 id 与可改的 title（默认取当天日期），
+ *    想开几条开几条；打开窗口时接着**最近的一条**写，一条都没有就自动备好一条新的
+ *    （标题已填今天的日期，写下第一个字才真正落一条）。
  * 3. **顶部下拉选随笔**（用户定的）：不再在左边占一列列表——窗口只有一扇，正文才是主角。
- *    下拉里按日期列（同一天有多条时带序号），另有一项「空白（新的一条）」。
+ *    下拉里按标题列，正文上方有一行标题输入框，随时改名；另有一项「空白（新的一条）」。
+ *    提交页与提交详情里同理：摆的是标题，旧的提交快照没有标题才按日期回退。
  * 4. **提交像 git**（见 learn/essayCommits）：把这一批随笔封成快照，交给 Agent 整理进
  *    知识树对应节点的笔记；整理结果（新建 / 更新了哪几份笔记）与 Agent 的**提交评论**
  *    （Markdown，首行是标题）记在这次提交上。提交记录按随笔划界：历史只列**当前正在
@@ -154,9 +157,10 @@ interface Props {
   /** 上次存下来的窗口几何（没有就用默认位置） */
   geometry: EssayDockRect | null
   onGeometry: (rect: EssayDockRect) => void
-  /** 写下第一个字时落一条；返回新条目的 id（空文本返回 null，什么都不做） */
-  onCreate: (goalId: string, text: string) => string | null
-  onUpdate: (goalId: string, id: string, text: string) => void
+  /** 写下第一个字时落一条（标题缺省取当天日期）；返回新条目的 id（空文本返回 null，什么都不做） */
+  onCreate: (goalId: string, title: string, text: string) => string | null
+  /** 改一条：给了谁改谁（正文 / 标题），去抖后调 */
+  onUpdate: (goalId: string, id: string, patch: { text?: string; title?: string }) => void
   onDelete: (goalId: string, id: string) => void
 }
 
@@ -219,9 +223,15 @@ export default function EssayDock({
   const editingRef = useRef<string | null>(null)
   const [text, setText] = useState('')
   const textRef = useRef('')
+  /**
+   * 标题（随笔不再拿日期当唯一标识，见 learn/essays）：正在编辑的那条的标题；
+   * 空白编辑器时是「下一条」的预备标题（默认今天日期），落条时跟着一起写进去。
+   */
+  const [title, setTitle] = useState('')
+  const titleRef = useRef('')
 
-  /** 还没落库的那一次改动 */
-  const pendingRef = useRef<{ id: string | null; text: string } | null>(null)
+  /** 还没落库的那一次改动（正文与标题一起带：400ms 里两头都可能动） */
+  const pendingRef = useRef<{ id: string | null; text: string; title: string } | null>(null)
   const timerRef = useRef<number | null>(null)
 
   const flush = useCallback(() => {
@@ -234,11 +244,11 @@ export default function EssayDock({
     if (!p) return
     if (p.id) {
       // 改成空 = 这条随笔被擦干净了：不写空文本，留给 settle 去删（见下）
-      if (p.text.trim()) onUpdate(goalId, p.id, p.text)
+      if (p.text.trim()) onUpdate(goalId, p.id, { text: p.text, title: p.title })
       return
     }
     if (!p.text.trim()) return
-    const id = onCreate(goalId, p.text)
+    const id = onCreate(goalId, p.title, p.text)
     if (id) {
       editingRef.current = id
       setEditingId(id)
@@ -259,8 +269,9 @@ export default function EssayDock({
     }
   }, [flush, goalId, onDelete])
 
-  const queue = useCallback((next: string) => {
-    pendingRef.current = { id: editingRef.current, text: next }
+  /** 去抖排队：正文与标题各自改了什么都以 ref 里的最新值为准 */
+  const queue = useCallback(() => {
+    pendingRef.current = { id: editingRef.current, text: textRef.current, title: titleRef.current }
     if (timerRef.current !== null) return
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null
@@ -272,18 +283,31 @@ export default function EssayDock({
     (next: string) => {
       textRef.current = next
       setText(next)
-      queue(next)
+      queue()
     },
     [queue],
   )
 
-  /** 空白编辑器：下一条随笔从这儿开始 */
+  /** 改标题：当场显示，落库跟正文同一条去抖队列 */
+  const rename = useCallback(
+    (next: string) => {
+      titleRef.current = next
+      setTitle(next)
+      queue()
+    },
+    [queue],
+  )
+
+  /** 空白编辑器：下一条随笔从这儿开始，标题先备好今天的日期（可改） */
   const startBlank = useCallback(() => {
     settle()
     editingRef.current = null
     setEditingId(null)
     textRef.current = ''
     setText('')
+    const fresh = dateLabelOfEssay(Date.now())
+    titleRef.current = fresh
+    setTitle(fresh)
     setPanel('edit')
   }, [settle])
 
@@ -295,6 +319,8 @@ export default function EssayDock({
         setEditingId(essay.id)
         textRef.current = essay.text
         setText(essay.text)
+        titleRef.current = essay.title
+        setTitle(essay.title)
       }
       setPanel('edit')
     },
@@ -315,14 +341,18 @@ export default function EssayDock({
         setEditingId(null)
         textRef.current = ''
         setText('')
+        const fresh = dateLabelOfEssay(Date.now())
+        titleRef.current = fresh
+        setTitle(fresh)
       }
     },
     [goalId, onDelete],
   )
 
   /**
-   * 打开那一刻接上**今天那条**：今天已经写过，就接着写它（一条随笔是一天的流水账，
-   * 不该每开一次窗口就另起一条）；今天还没写，才给一张白纸。
+   * 打开那一刻接上**最近的一条**：随笔不再按日期归属（想开几条开几条，见 learn/essays），
+   * 继续写最近在写的那份最合常理；一条都没有时自动备好一条新的——标题已经填好
+   * 今天的日期，写下第一个字它就落成一条（空文本仍然不落盘）。
    * 用 ref 读最新清单：把 essays 写进下面的依赖会让「写一个字」就重跑一次打开逻辑。
    */
   const essaysRef = useRef(essays)
@@ -333,21 +363,23 @@ export default function EssayDock({
   const openInitial = useCallback(() => {
     setPanel('edit')
     setDetailId(null)
-    const today = dayOfEssay(Date.now())
-    const hit = essaysRef.current.find((e) => dayOfEssay(e.createdAt) === today)
-    if (!hit) {
+    const latest = essaysRef.current[0]
+    if (!latest) {
       startBlank()
       return
     }
     settle()
-    editingRef.current = hit.id
-    setEditingId(hit.id)
-    textRef.current = hit.text
-    setText(hit.text)
+    editingRef.current = latest.id
+    setEditingId(latest.id)
+    textRef.current = latest.text
+    setText(latest.text)
+    titleRef.current = latest.title
+    setTitle(latest.title)
   }, [settle, startBlank])
 
   /*
-   * 打开：接上今天那条，然后**从按钮那颗圆长出来**；关掉时收尾并缩回按钮。
+   * 打开：接上最近的一条（没有就备好一条新的），然后**从按钮那颗圆长出来**；
+   * 关掉时收尾并缩回按钮。
    */
   const wasOpen = useRef(false)
   useEffect(() => {
@@ -560,13 +592,8 @@ export default function EssayDock({
 
   const panelTitle = panel === 'commit' ? t('提交随笔') : panel === 'history' ? t('提交记录') : activeCommit?.message ?? t('提交详情')
 
-  /** 下拉里的那一行：日期；同一天有多条时带个序号，免得选不清 */
-  const optionLabel = (essay: EssayEntry): string => {
-    const day = dayOfEssay(essay.createdAt)
-    const same = essays.filter((x) => dayOfEssay(x.createdAt) === day)
-    if (same.length <= 1) return dateLabelOfEssay(essay.createdAt)
-    return dateLabelOfEssay(essay.createdAt) + ' · ' + (same.findIndex((x) => x.id === essay.id) + 1)
-  }
+  /** 下拉里的那一行：标题（旧数据没标题时按日期回退——normalize 会补，这里只是保险） */
+  const titleOf = (essay: EssayEntry): string => essay.title || dateLabelOfEssay(essay.createdAt)
 
   const box: Box = morph ?? { x: rect.x, y: rect.y, w: rect.w, h: rect.h, r: PANEL_RADIUS }
   /**
@@ -652,7 +679,7 @@ export default function EssayDock({
                       <option value="">{t('空白（新的一条）')}</option>
                       {essays.map((essay) => (
                         <option key={essay.id} value={essay.id}>
-                          {optionLabel(essay)}
+                          {titleOf(essay)}
                         </option>
                       ))}
                     </select>
@@ -726,6 +753,14 @@ export default function EssayDock({
               {panel === 'edit' && (
                 <>
                   <div className="flex min-h-0 flex-1 flex-col bg-card">
+                    {/* 标题：随笔不再拿日期当唯一标识（见 learn/essays），默认日期、随时可改 */}
+                    <input
+                      value={title}
+                      onChange={(e) => rename(e.target.value)}
+                      placeholder={t('标题（默认为日期，可改）')}
+                      aria-label={t('随笔标题')}
+                      className="shrink-0 border-b border-line bg-transparent px-3.5 py-2 text-[13px] font-medium text-ink-strong outline-none transition placeholder:font-normal placeholder:text-ink-faint focus:border-seal/40"
+                    />
                     <EssayEditor
                       value={text}
                       onChange={change}
@@ -765,7 +800,7 @@ export default function EssayDock({
                       ) : (
                         pending.map((essay) => (
                           <div key={essay.id} className="rounded-lg border border-line bg-paper/60 px-2.5 py-2">
-                            <div className="text-[10.5px] text-ink-faint">{dateLabelOfEssay(essay.createdAt)}</div>
+                            <div className="truncate text-[10.5px] text-ink-faint">{titleOf(essay)}</div>
                             <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-relaxed text-ink-soft">
                               {essayPreview(essay.text, 140)}
                             </p>
@@ -929,7 +964,10 @@ export default function EssayDock({
                           ) : (
                             scopedSnapshot.map((essay) => (
                               <div key={essay.id} className="rounded-lg border border-line bg-paper/50 px-2.5 py-2">
-                                <div className="text-[10px] text-ink-faint">{dateLabelOfEssay(essay.createdAt)}</div>
+                                {/* 旧提交的快照没有标题：按提交日期回退（见 types 的 EssayCommit.snapshot） */}
+                                <div className="truncate text-[10px] text-ink-faint">
+                                  {essay.title || dateLabelOfEssay(essay.createdAt)}
+                                </div>
                                 <p className="mt-1 whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-ink-soft">
                                   {essay.text}
                                 </p>

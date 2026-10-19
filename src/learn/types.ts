@@ -772,9 +772,14 @@ export type MindStore = Record<string, MindEntry[]>
  */
 export interface EssayEntry {
   id: string
-  /** 正文（Markdown）。随笔没有标题——列表里的那一行是它抹平后的预览 */
+  /**
+   * 标题：随笔**不再按日期当唯一标识**（想开几条就开几条），认这条随笔靠 id，认名字靠标题。
+   * 默认取创建那天的日期（见 learn/essays 的 defaultEssayTitle），随时可改。
+   */
+  title: string
+  /** 正文（Markdown）。列表与下拉里摆在标题后面的是它抹平后的预览 */
   text: string
-  /** 写下的时刻：列表按它归到哪一天，也是排序依据 */
+  /** 写下的时刻：排序依据（新的在前），不再承担「归到哪一天」的身份作用 */
   createdAt: number
   updatedAt: number
 }
@@ -810,8 +815,11 @@ export interface EssayCommit {
   at: number
   /** 提交说明（用户写，或默认的「随笔整理 · 日期」） */
   message: string
-  /** 快照：提交那一刻的随笔（正文即全部内容，随笔本来就没有标题） */
-  snapshot: Array<{ id: string; createdAt: number; text: string }>
+  /**
+   * 快照：提交那一刻的随笔（标题 + 正文，都是当时的原样）。
+   * title 是后加的：旧提交里没有，界面按提交日期回退显示。
+   */
+  snapshot: Array<{ id: string; createdAt: number; text: string; title?: string }>
   status: 'running' | 'done' | 'error'
   /** Agent 整理后实际动过的节点笔记 */
   changes: EssayCommitChange[]

@@ -645,6 +645,8 @@ const dict: Record<string, string> = {
   '按提交历史把这次新增 / 改动的随笔增量整理进知识树对应节点的笔记':
     'Incrementally file the new or changed jottings into notes on the matching knowledge nodes, using the commit history',
   '选择要编辑的随笔': 'Choose a jotting to edit',
+  '随笔标题': 'Jotting title',
+  '标题（默认为日期，可改）': 'Title (defaults to the date — editable)',
   '空白（新的一条）': 'Blank (new jotting)',
   '提交…': 'Commit…',
   '提交这批随笔：封存快照，交给 AI 整理进对应节点的笔记':

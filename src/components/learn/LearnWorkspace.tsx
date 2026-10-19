@@ -2180,8 +2180,8 @@ export default function LearnWorkspace({
    * 上一次写入可能刚被别的动作（删一条、切目标）改过。
    */
   const essayCreate = useCallback(
-    (goalId: string, text: string): string | null => {
-      const created = createEssay(getLatest(), goalId, text, Date.now())
+    (goalId: string, title: string, text: string): string | null => {
+      const created = createEssay(getLatest(), goalId, text, Date.now(), title)
       if (!created) return null
       set(created.store)
       return created.entry.id
@@ -2189,8 +2189,8 @@ export default function LearnWorkspace({
     [getLatest, set],
   )
   const essayUpdate = useCallback(
-    (goalId: string, id: string, text: string) => {
-      set(updateEssay(getLatest(), goalId, id, text, Date.now()))
+    (goalId: string, id: string, patch: { text?: string; title?: string }) => {
+      set(updateEssay(getLatest(), goalId, id, patch, Date.now()))
     },
     [getLatest, set],
   )
