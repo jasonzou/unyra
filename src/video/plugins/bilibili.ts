@@ -103,6 +103,21 @@ async function getJson<T>(ctx: VideoPluginCtx, url: string, opts: VideoResolveOp
   return json
 }
 
+/** view → 选定分 P：resolve 与 resolveTranscript 共用的前半段（cid 是后面一切的钥匙） */
+async function fetchViewPage(ctx: VideoPluginCtx, m: BiliMatch, opts: VideoResolveOptions) {
+  const view = await getJson<BiliViewData>(
+    ctx,
+    `https://api.bilibili.com/x/web-interface/view?bvid=${m.bvid}`,
+    opts,
+  )
+  const data = view.data
+  const pages = (data?.pages ?? []).filter((p) => typeof p.cid === 'number')
+  const page = pages.find((p) => p.page === m.page) ?? pages[0]
+  if (!page?.cid) throw new Error(t('视频信息里没有分 P（cid）'))
+  // 展开收窄：调用方拿到的 page.cid 是确定的 number（上面已经拦过 undefined）
+  return { data, page: { ...page, cid: page.cid } }
+}
+
 async function fetchTranscript(
   ctx: VideoPluginCtx,
   bvid: string,
@@ -153,15 +168,7 @@ export const bilibiliPlugin: VideoSourcePlugin = {
     if (!m) throw new Error(t('B 站插件认不出这个输入'))
 
     // 1. 视频信息：标题、时长、分 P 的 cid（后面 playurl 与字幕都要它）
-    const view = await getJson<BiliViewData>(
-      ctx,
-      `https://api.bilibili.com/x/web-interface/view?bvid=${m.bvid}`,
-      opts,
-    )
-    const data = view.data
-    const pages = (data?.pages ?? []).filter((p) => typeof p.cid === 'number')
-    const page = pages.find((p) => p.page === m.page) ?? pages[0]
-    if (!page?.cid) throw new Error(t('视频信息里没有分 P（cid）'))
+    const { data, page } = await fetchViewPage(ctx, m, opts)
 
     // 2. 播放地址：html5 通道的合流 mp4（qn 64 = 480p；high_quality 是这一档的开关）
     const play = await getJson<BiliPlayData>(
@@ -236,5 +243,15 @@ export const bilibiliPlugin: VideoSourcePlugin = {
       ...(transcriptError ? { transcriptError } : {}),
       ...(collection ? { collection } : {}),
     }
+  },
+
+  /** 批量导出的专用路径：view 拿 cid → 字幕，跳过播放地址（每条少一次 playurl 往返） */
+  async resolveTranscript(matched, ctx, opts) {
+    const m = matchBili(matched.input)
+    if (!m) throw new Error(t('B 站插件认不出这个输入'))
+    const { page } = await fetchViewPage(ctx, m, opts)
+    const transcript = await fetchTranscript(ctx, m.bvid, page.cid, opts)
+    if (!transcript) throw new Error(t('这条来源没有可用字幕'))
+    return transcript
   },
 }

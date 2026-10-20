@@ -46,6 +46,16 @@ const dict: Record<string, string> = {
   'AI 中文字幕': 'AI Chinese',
   '中文字幕': 'Chinese CC',
   '合集': 'Collection',
+  '收起合集列表': 'Collapse collection list',
+  '展开合集列表': 'Expand collection list',
+  '导出合集字幕': 'Export collection subtitles',
+  '导出合集字幕（全部视频的转录合并为一个 Markdown）':
+    'Export collection subtitles (merge every video’s transcript into one Markdown)',
+  '导出中 {0}/{1}': 'Exporting {0}/{1}',
+  '导出失败': 'Export failed',
+  '{0} 个视频': '{0} videos',
+  '导出于 {0}': 'exported on {0}',
+  '字幕缺失：{0}': 'Subtitles missing: {0}',
 
   /* ---------- 转录校验（src/video/transcript） ---------- */
   '转录稿不是合法对象': 'Transcript is not a valid object',

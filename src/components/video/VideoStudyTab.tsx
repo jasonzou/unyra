@@ -13,11 +13,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Clapperboard, Loader2, MonitorPlay, Settings2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Clapperboard, Download, Loader2, MonitorPlay, Settings2 } from 'lucide-react'
 import { t } from '../../i18n'
-import { isWeb } from '../../lib/native'
+import { isWeb, native } from '../../lib/native'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
-import { openRelayStream, resolveSource } from '../../video/registry'
+import { openRelayStream, resolveSource, resolveTranscriptOnly } from '../../video/registry'
+import { buildCollectionMarkdown, type CollectionExportEntry } from '../../video/export'
 import { formatClock, segmentIndexAt } from '../../video/transcript'
 import type { Transcript, VideoSource } from '../../video/types'
 
@@ -25,6 +26,8 @@ import type { Transcript, VideoSource } from '../../video/types'
 const SESSDATA_KEY = 'moji.video.sessdata'
 /** 上次解析的输入：页签持久化后（normalizeTab 认 video），重启把它填回输入框，一键重新解析 */
 const INPUT_KEY = 'moji.video.input'
+/** 合集列表收起与否：跟输入一样落在 localStorage，重启后保持上次的选择 */
+const COLLAPSED_KEY = 'moji.video.collapsed'
 
 const readSessdata = (): string => {
   try {
@@ -39,6 +42,14 @@ const readLastInput = (): string => {
     return localStorage.getItem(INPUT_KEY) ?? ''
   } catch {
     return ''
+  }
+}
+
+const readCollapsed = (): boolean => {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === '1'
+  } catch {
+    return false
   }
 }
 
@@ -57,6 +68,20 @@ export default function VideoStudyTab() {
   const [sessOpen, setSessOpen] = useState(false)
   const [sessDraft, setSessDraft] = useState(readSessdata)
   const [sessSaved, setSessSaved] = useState(false)
+  /** 合集列表收起与否（用户可收起；选择落 localStorage，重启保持） */
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((v) => {
+      try {
+        localStorage.setItem(COLLAPSED_KEY, v ? '0' : '1')
+      } catch {
+        // 会话内生效即可
+      }
+      return !v
+    })
+  }, [])
+  /** 合集字幕批量导出进度；null = 没在导出 */
+  const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -101,6 +126,40 @@ export default function VideoStudyTab() {
   )
 
   const resolve = useCallback(() => void runResolve(input.trim()), [runResolve, input])
+
+  /**
+   * 批量导出合集字幕：逐条只取转录（专用通道，跳过播放地址）→ 拼一个 Markdown →
+   * 原生保存对话框落盘。一条失败不炸全局（那一节写「字幕缺失：原因」）；
+   * 一条条来并留 150ms 间隙，别把 B 站风控招来（86 条约一分钟，进度在动就不觉得慢）。
+   */
+  const exportCollection = useCallback(async () => {
+    const col = source?.collection
+    if (!col || exportProgress) return
+    setExportProgress({ done: 0, total: col.items.length })
+    const entries: CollectionExportEntry[] = []
+    try {
+      for (let i = 0; i < col.items.length; i++) {
+        const item = col.items[i]
+        const entry: CollectionExportEntry = { title: item.title, durationMs: item.durationMs, source: item.source }
+        try {
+          entry.transcript = await resolveTranscriptOnly(item.source, { sessdata: readSessdata() })
+        } catch (err) {
+          entry.error = err instanceof Error ? err.message : String(err)
+        }
+        entries.push(entry)
+        setExportProgress({ done: i + 1, total: col.items.length })
+        if (i < col.items.length - 1) await new Promise((r) => window.setTimeout(r, 150))
+      }
+      const md = buildCollectionMarkdown(col.name, entries)
+      const safeName = col.name.replace(/[\\/:*?"<>|]/g, '_')
+      const res = await native().saveText({ suggestedName: `${safeName}.md`, content: md, title: t('导出合集字幕') })
+      if (!res.ok && !res.canceled) setError(res.error ?? t('导出失败'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExportProgress(null)
+    }
+  }, [source, exportProgress])
 
   /** 点转录段 → 播放器 seek 到段首并起播 */
   const seekMs = useCallback((ms: number) => {
@@ -281,44 +340,91 @@ export default function VideoStudyTab() {
               />
             </div>
             {source.collection && (
-              <div className="flex w-[320px] shrink-0 flex-col border-l border-line bg-card/40">
-                <div className="shrink-0 truncate border-b border-line/60 px-2 py-1 text-[11px] font-medium text-ink-soft">
-                  {t('合集')} · {source.collection.name}
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto py-0.5">
-                  {source.collection.items.map((item) => (
-                    <button
-                      key={item.source}
-                      type="button"
-                      title={item.title}
-                      disabled={busy}
-                      onClick={() => void runResolve(item.source)}
-                      className={
-                        'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition disabled:opacity-50 ' +
-                        (item.current ? 'bg-seal/10' : 'hover:bg-line/50')
-                      }
-                    >
-                      {/* 标题在前（12px），时长缀在后面——用户定的顺序 */}
-                      <span
-                        className={
-                          'min-w-0 flex-1 truncate text-[12px] ' +
-                          (item.current ? 'font-medium text-ink-strong' : 'text-ink')
-                        }
-                      >
-                        {item.title}
+              <>
+                {/*
+                  收起/展开的开关条：常驻（收起后它是唯一入口）。图标方向 = 点击后
+                  面板的去向：展开时点它收起（向右滑出 → ChevronRight），收起时点它
+                  展开（向左滑回 → ChevronLeft）。
+                */}
+                <button
+                  type="button"
+                  title={collapsed ? t('展开合集列表') : t('收起合集列表')}
+                  aria-expanded={!collapsed}
+                  onClick={toggleCollapsed}
+                  className="flex w-6 shrink-0 items-center justify-center border-l border-line bg-card/40 text-ink-soft transition hover:bg-line/60 hover:text-ink"
+                >
+                  {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+                </button>
+                {/*
+                  宽度过渡（w-0 ↔ w-320）+ overflow-hidden：面板滑出/滑入。
+                  内容层钉死 320px——宽度动画期间文字不许跟着重排，只许被裁掉。
+                */}
+                <div
+                  className={
+                    'shrink-0 overflow-hidden transition-[width] duration-200 ease-out ' +
+                    (collapsed ? 'w-0' : 'w-[320px]')
+                  }
+                >
+                  <div className="flex h-full w-[320px] flex-col border-l border-line bg-card/40">
+                    <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-2 py-1">
+                      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-ink-soft">
+                        {t('合集')} · {source.collection.name}
                       </span>
-                      <span
-                        className={
-                          'shrink-0 font-mono text-[10.5px] ' +
-                          (item.current ? 'text-seal' : 'text-ink-faint')
+                      <button
+                        type="button"
+                        title={
+                          exportProgress
+                            ? t('导出中 {0}/{1}', String(exportProgress.done), String(exportProgress.total))
+                            : t('导出合集字幕（全部视频的转录合并为一个 Markdown）')
                         }
+                        disabled={!!exportProgress || busy}
+                        onClick={() => void exportCollection()}
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-faint transition hover:bg-line/60 hover:text-ink disabled:opacity-50"
                       >
-                        {item.durationMs ? formatClock(item.durationMs) : '--:--'}
-                      </span>
-                    </button>
-                  ))}
+                        {exportProgress ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                      </button>
+                    </div>
+                    {exportProgress && (
+                      <div className="shrink-0 border-b border-line/60 px-2 py-0.5 text-[10.5px] text-ink-faint">
+                        {t('导出中 {0}/{1}', String(exportProgress.done), String(exportProgress.total))}
+                      </div>
+                    )}
+                    <div className="min-h-0 flex-1 overflow-y-auto py-0.5">
+                      {source.collection.items.map((item) => (
+                        <button
+                          key={item.source}
+                          type="button"
+                          title={item.title}
+                          disabled={busy}
+                          onClick={() => void runResolve(item.source)}
+                          className={
+                            'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition disabled:opacity-50 ' +
+                            (item.current ? 'bg-seal/10' : 'hover:bg-line/50')
+                          }
+                        >
+                          {/* 标题在前（12px），时长缀在后面——用户定的顺序 */}
+                          <span
+                            className={
+                              'min-w-0 flex-1 truncate text-[12px] ' +
+                              (item.current ? 'font-medium text-ink-strong' : 'text-ink')
+                            }
+                          >
+                            {item.title}
+                          </span>
+                          <span
+                            className={
+                              'shrink-0 font-mono text-[10.5px] ' +
+                              (item.current ? 'text-seal' : 'text-ink-faint')
+                            }
+                          >
+                            {item.durationMs ? formatClock(item.durationMs) : '--:--'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </>
             )}
           </div>
           {/* 字幕条：高度 = 30%（用户定的）；标题行 + 列表的可视区就这么多 */}

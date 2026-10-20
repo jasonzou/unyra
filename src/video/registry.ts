@@ -15,7 +15,7 @@ import { t } from '../i18n'
 import { native } from '../lib/native'
 import { formatClock, normalizeTranscript } from './transcript'
 import { bilibiliPlugin } from './plugins/bilibili'
-import type { VideoPluginCtx, VideoResolveOptions, VideoSource, VideoSourcePlugin } from './types'
+import type { Transcript, VideoPluginCtx, VideoResolveOptions, VideoSource, VideoSourcePlugin } from './types'
 
 /** 注册表：按声明顺序匹配，先到先得 */
 const VIDEO_PLUGINS: VideoSourcePlugin[] = [bilibiliPlugin]
@@ -81,4 +81,19 @@ export async function openRelayStream(source: VideoSource): Promise<string> {
   const res = await native().video.openStream(stream.url, stream.headers)
   if (!res.ok) throw new Error(res.error)
   return res.relayUrl
+}
+
+/**
+ * 只取一份转录（合集批量导出用）：插件有专用路径走专用，没有就完整解析后挑
+ * transcript。同样过归一校验——批量导出的脏数据比单条更难发现，收口必须一致。
+ */
+export async function resolveTranscriptOnly(input: string, opts: VideoResolveOptions): Promise<Transcript> {
+  const plugin = matchPlugin(input)
+  const matched = plugin.match(input)
+  if (!matched) throw new Error(t('没有插件支持这个输入：{0}', input.slice(0, 80)))
+  const transcript = plugin.resolveTranscript
+    ? await plugin.resolveTranscript(matched, pluginCtx(), opts)
+    : (await plugin.resolve(matched, pluginCtx(), opts)).transcript
+  if (!transcript) throw new Error(t('这条来源没有可用字幕'))
+  return normalizeTranscript(transcript)
 }

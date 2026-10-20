@@ -106,6 +106,15 @@ export interface VideoSourcePlugin {
   match(input: string): { input: string } | null
   /** 解析：拿到流与转录。失败就抛 Error（错误原话直达界面，不做预判文案） */
   resolve(matched: { input: string }, ctx: VideoPluginCtx, opts: VideoResolveOptions): Promise<VideoSource>
+  /**
+   * 只取转录（合集批量导出用）：跳过播放地址那一步，直接拿字幕。省略时注册表
+   * 回退到完整 resolve 再挑 transcript（能跑，只是多做一些无用功）。
+   */
+  resolveTranscript?(
+    matched: { input: string },
+    ctx: VideoPluginCtx,
+    opts: VideoResolveOptions,
+  ): Promise<Transcript>
 }
 
 /** 解析入参里与插件有关的部分（MVP 只有 B 站登录态一项） */
