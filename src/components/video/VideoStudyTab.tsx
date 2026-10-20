@@ -17,6 +17,7 @@ import { Clapperboard, Loader2, MonitorPlay, Settings2 } from 'lucide-react'
 import { t } from '../../i18n'
 import { isWeb } from '../../lib/native'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
+import { nearestScrollTop } from '../exam/scroll'
 import { openRelayStream, resolveSource } from '../../video/registry'
 import { formatClock, segmentIndexAt } from '../../video/transcript'
 import type { Transcript, VideoSource } from '../../video/types'
@@ -97,12 +98,21 @@ export default function VideoStudyTab() {
     const list = listRef.current
     const row = activeIdx >= 0 ? rowRefs.current[activeIdx] : null
     if (!list || !row) return
-    const top = row.offsetTop
-    const bottom = top + row.offsetHeight
-    if (top < list.scrollTop + 8 || bottom > list.scrollTop + list.clientHeight - 8) {
-      list.scrollTo({ top: Math.max(0, top - list.clientHeight / 3), behavior: 'smooth' })
-    }
-  }, [activeIdx])
+    /*
+     * contentTop 必须是「行顶在滚动内容坐标系里的位置」：用 rect 差值现算，
+     * 不用 offsetTop——那是相对 offsetParent（最近的定位祖先）量的，滚动容器
+     * 自己没定位时量出来的是相对更外层的偏移，滚动落点整个错掉（实测：自动
+     * 滚动了，但当前段不在可视区）。语义与落点交给 exam/scroll 的纯函数，
+     * 「可见就不动 / 上方顶对齐 / 下方底对齐」它都有，还夹在内容范围内。
+     */
+    const contentTop = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
+    const target = nearestScrollTop(
+      { scrollTop: list.scrollTop, clientHeight: list.clientHeight, scrollHeight: list.scrollHeight },
+      { contentTop, height: row.offsetHeight },
+      8,
+    )
+    if (target !== list.scrollTop) list.scrollTo({ top: target, behavior: 'smooth' })
+  }, [activeIdx, transcript])
 
   const saveSessdata = useCallback(() => {
     // 容错：从浏览器复制时容易连「SESSDATA=」前缀或引号一起带上——剥掉再存，
