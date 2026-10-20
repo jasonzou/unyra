@@ -419,14 +419,31 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
     ],
   ),
   g(
+    'delivery',
+    '交付登记',
+    '把这一轮的文件变动与参考引证登记到消息底部（一行一条，溢出省略）。',
+    `只在**确实交付了东西**时调：写完或改完文档、讲义、大纲、试卷、工作区文件之后登记一次。
+没有交付物就不要调——空记录不显示，乱登记只会给用户添噪音。
+同一轮分几次登记会合并去重（路径 / URL 各自唯一）。
+这是给**界面**看的账，不是给正文复述用的：正文里不必再抄一遍文件清单与参考来源。`,
+    [
+      a('submit', 'delivery.submit({ files?, sources? })', '登记本轮交付',
+        'files: [{ path, action?: created|updated|deleted, note? }]；sources: [{ title, url }]（只收 http/https）。**path 要写数据树里的节点路径原样**（如「微积分/极限」，不要自己拼 /教学、/讲义 之类后缀），或工作区文件的相对路径（带扩展名）——界面点它时按这两种形态分别打开文档与文件。回 { ok, files, sources, error? }。',
+        `await api.delivery.submit({ files: [{ path: '微积分/极限', action: 'updated', note: '补了夹逼定理一节' }], sources: [{ title: '同济高等数学第七版', url: 'https://example.com/book' }] })`),
+    ],
+  ),
+  g(
     'web',
     '网页抓取与搜索',
-    '抓网页转 Markdown、联网搜索并提炼摘要。',
-    `抓取失败不抛异常（{ ok:false, error }）；搜索默认 5 条，每条约 1.5k~2k 字符。
+    '抓网页转 Markdown、联网搜索并提炼摘要（创作类交付要查证，写代码与调试不用）。',
+    `先想清楚该不该搜：创建目标 / 规划大纲 / 写讲义 / 出试卷这类创作**要查证**权威资料；
+写代码、调试、格式转换、计算与整理这类确定性工作**不要搜**，用户明确要求查的除外。一次够用就停。
+查证要真读原文：search 之后挑 1~3 篇最权威的用 fetch 读正文，只看着摘要下笔等于走个形式。
+抓取失败不抛异常（{ ok:false, error }）；搜索默认 5 条，每条约 1.5k~2k 字符。
 严禁把多个 query 的原始结果整段塞回上下文——先筛选字段再返回。`,
     [
-      a('fetch', 'web.fetch(url | { url })', '抓网页转 Markdown', '与 api.fetch 同义；失败先判 ok，不要对同一 URL 死循环重试。', `const page = await api.web.fetch('https://example.com/spec')`),
-      a('search', 'web.search({ query, count?, need_content? } | query, opts?)', '联网搜索', '回 { ok, results: [{ title, url, snippet, summary, rerank_score, authority?, content? }] }。宽泛词加领域限定词。', `const r = await api.web.search({ query: '夹逼定理 教材 讲解', count: 5 })`),
+      a('fetch', 'web.fetch(url | { url })', '抓网页转 Markdown', '与 api.fetch 同义；**5 秒硬超时**，超时或失败就换来源，不要对同一 URL 重试。创作类调研用它读权威原文（摘要不算依据）。', `const page = await api.web.fetch('https://example.com/spec')`),
+      a('search', 'web.search({ query, count?, need_content? } | query, opts?)', '联网搜索', '回 { ok, results: [{ title, url, snippet, summary, rerank_score, authority?, content? }] }。宽泛词加领域限定词。**创作类交付（目标 / 大纲 / 讲义 / 试卷）要调**；写代码、调试、计算、格式转换不要调。', `const r = await api.web.search({ query: '夹逼定理 教材 讲解', count: 5 })`),
     ],
   ),
   g(

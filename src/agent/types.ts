@@ -7,6 +7,7 @@
  * - AgentTool：可注册的工具；新增能力只需实现一个工具并注册进 ToolRegistry
  */
 import type { ChatUsage } from '../ai/types'
+import type { DeliveryRecord } from './delivery'
 
 /** 会话里一条消息的组成片段：思考过程、正文回复、一次工具调用、一条运行时提示 */
 export type AgentPart =
@@ -139,6 +140,11 @@ export interface ConversationMessage {
   parts: AgentPart[]
   /** 该条回复的 token 账；旧数据没有，界面上不显示 */
   usage?: MessageUsage
+  /**
+   * 这一轮交付了什么（文件变动 / 参考引证），由 api.delivery.submit 登记。
+   * 有它时消息底部固定展示一个交付组件，一行一条；没有就整块不渲染（见 learn/delivery）。
+   */
+  delivery?: DeliveryRecord
   ts: number
   /** 内部指令（如自动开讲），参与模型上下文但不展示给用户 */
   hidden?: boolean

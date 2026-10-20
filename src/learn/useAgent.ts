@@ -20,6 +20,7 @@ import {
   type PendingImage,
 } from '../agent/types'
 import { runAgent } from '../agent/runtime'
+import { emptyDelivery, hasDelivery, mergeDelivery, normalizeDelivery } from '../agent/delivery'
 import { createExecuteTool, type AskAnswers, type AskFormPayload, type ExamToolDeps } from '../agent/tools'
 import { ASK_IDLE_TIMEOUT_MS } from '../agent/sandbox/limits'
 import { ensureActivityListeners, userIdleMs } from '../lib/userActivity'
@@ -642,9 +643,34 @@ export function useAgent(opts: {
             }
           }, 5_000)
         })
+      /*
+        这一轮的交付账（文件变动 / 参考引证）。用局部变量而不是 state：它是这一轮的副作用，
+        不该触发渲染；收口时挂到消息上，组件自然就出来了（见 agent/delivery）。
+      */
+      const turnDelivery = emptyDelivery()
       const tools = [
         createExecuteTool({
           ...sandboxBase,
+          /*
+           * 交付登记：只收结构化数据。正文里不用再复述文件清单与参考来源——
+           * 界面在消息底部按「一行一条」统一展示（见 DeliveryBlock）。
+           */
+          delivery: {
+            submit: (input) => {
+              const rec = normalizeDelivery(input)
+              if (!rec) {
+                return {
+                  ok: false,
+                  files: 0,
+                  sources: 0,
+                  error:
+                    '至少要给 files 或 sources 里的一项：files: [{ path, action?: created|updated|deleted, note? }]，sources: [{ title, url }]（只收 http/https）',
+                }
+              }
+              mergeDelivery(turnDelivery, rec)
+              return { ok: true, files: turnDelivery.files.length, sources: turnDelivery.sources.length }
+            },
+          },
           /*
            * 考试工具：作用对象是这一轮冲着来的那个节点（target.nodeId），
            * 不是「此刻界面上选中的那个」——一轮可能跑好几十秒，期间用户切了节点
@@ -933,6 +959,8 @@ export function useAgent(opts: {
                     },
                   }
                 : {}),
+              // 这一轮登记过交付才带上：空记录不写盘，界面上也就不会出现一个空组件
+              ...(hasDelivery(turnDelivery) ? { delivery: turnDelivery } : {}),
               ts: Date.now(),
             }
             persist(upsertAssistantInFlight(stored, assistantMsg, true))

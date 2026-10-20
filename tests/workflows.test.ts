@@ -49,7 +49,7 @@ const store = (workflows?: LearnStore['workflows']): LearnStore => ({
 })
 
 describe('内置工作流', () => {
-  it('十一个内置都在：开讲、学习大纲、生成大纲、出卷、阅卷、了解、超级实验室、伪编译、压缩上下文、浏览器操作、随笔整理', () => {
+  it('十二个内置都在：开讲、学习大纲、生成大纲、出卷、阅卷、了解、超级实验室、伪编译、修复函数图像、压缩上下文、浏览器操作、随笔整理', () => {
     const rows = builtinWorkflowRows()
     expect(rows.map((r) => r.id)).toEqual([
       'teach-node',
@@ -60,6 +60,7 @@ describe('内置工作流', () => {
       'explain',
       'superlab',
       'code-compile',
+      'plot-fix',
       'compact',
       'browser-use',
       'essay-commit',
@@ -119,6 +120,11 @@ describe('内置工作流', () => {
     expect(byId.get('code-compile')?.runnable).toBe(false)
     expect(byId.get('code-compile')?.prep).toBe('show')
     expect(byId.get('code-compile')?.params).toEqual(['language', 'key', 'code'])
+    // 修复函数图像由错误卡片触发（报错、区间、原文都由触发方算好），同样不可空跑；
+    // 修复结果直接落在文档里，'show' 响一声即可
+    expect(byId.get('plot-fix')?.runnable).toBe(false)
+    expect(byId.get('plot-fix')?.prep).toBe('show')
+    expect(byId.get('plot-fix')?.params).toEqual(['nodeTitle', 'reason', 'path', 'range', 'start', 'end', 'source'])
   })
 
   it('触发前只做响铃：带 prep 的响，没带的不响；主栏一概不动', () => {
@@ -139,6 +145,7 @@ describe('内置工作流', () => {
       'explain',
       'superlab',
       'code-compile',
+      'plot-fix',
     ])
     // 切主位那一条规矩随 api.ui.switchMain 一起撤了：谁都不许动用户的主栏
     expect(builtinWorkflowRows().some((r) => 'takeMain' in workflowPrep(r.prep))).toBe(false)

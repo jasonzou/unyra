@@ -223,6 +223,8 @@ export async function apiNameTests() {
     // 引用 chip：生成（当场对 store 验证可定位）与交付前自查（见 learn/ops/chip）
     'chip.build': "{ type: 'doc' }",
     'chip.check': "'看：#[{type:\"doc\", path:\"微积分\"}]'",
+    // 交付账：只查「名字真的注册了吗」，登记与落库由宿主管（见 useAgent 的 turnDelivery）
+    'delivery.submit': "{ files: [{ path: '探针/文档', action: 'updated' }], sources: [{ title: '示例规范', url: 'https://example.com/spec' }] }",
     // 内置浏览器：webview 元素在真实渲染层，探针给一份假的宿主（见下面 browser 桩）
     'browser.open': "'https://example.com'",
     'browser.tabs': '',
@@ -417,6 +419,8 @@ export async function apiNameTests() {
     wait: async () => {},
     ask: async () => ({ ok: true, cancelled: false, answers: [] }),
     tiktok: async () => {},
+    // 交付账：桩——名单检查只问「这个 api 在不在」，真正的登记与落库在宿主（useAgent 收口）
+    delivery: { submit: () => ({ ok: true, files: 0, sources: 0 }) },
     ui: {
       toast: (msg) => { sawToast = msg },
       point: () => ({ located: false }),

@@ -33,6 +33,7 @@ import { renderNote } from '../../../lib/markdown'
 import { focusQuote } from '../../../lib/quoteFocus'
 import { NO_AUTOFILL } from '../../../lib/autofill'
 import { BubbleFile, BubbleImage } from './Images'
+import { DeliveryBlock } from './DeliveryBlock'
 import { ToolCard } from './ToolCard'
 import { lastLineOf } from './preview'
 import { toolLabel } from './toolLabel'
@@ -197,6 +198,8 @@ export const MessageRow = memo(function MessageRow({
       className={'group relative mb-4' + fadedCls}
     >
       <Parts parts={m.parts} prelude={prelude} onResumeNotice={onResumeNotice} />
+      {/* 这一轮的交付账：有登记才出现，一行一条（见 DeliveryBlock） */}
+      {m.delivery && <DeliveryBlock delivery={m.delivery} onOpenFile={onOpenFile} />}
       {m.usage && (
         <div className="mt-1">
           <UsageLine usage={m.usage} />
