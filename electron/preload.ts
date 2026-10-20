@@ -29,7 +29,7 @@ import type {
   PluginSourceResult, PluginTogglesResult, SaveFilter, SilentMark, StorageEntry, StorageFail,
   NoticeSettings,
   StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail, UpdatePhase, UpdateState,
-  VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
+  VideoApiFetchResult, VideoStreamOpenResult, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
   VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult,
   WebFetchResult, WebLogDetailResult, WebLogsOpts, WebLogsResult, WebPageFetchReq,
   WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult, WebScrollReq,
@@ -563,6 +563,19 @@ const api = {
    */
   web: {
     fetch: (url: string): Promise<WebFetchResult> => ipcRenderer.invoke('web:fetch', url),
+  },
+
+  /**
+   * 视频学习（实验）：来源插件的两条通道（见 electron/video-net）。
+   * fetch —— 插件的 API 请求（只读 GET，允许 Referer/Cookie 这类防盗链头）；
+   * openStream —— 把媒体流地址与请求头登记进主进程，换回 media-relay:// 中转地址
+   * 给 `<video>` 用。**每次播放前都要重新 openStream**：平台流地址带签名、会过期。
+   */
+  video: {
+    fetch: (url: string, headers?: Record<string, string>): Promise<VideoApiFetchResult> =>
+      ipcRenderer.invoke('video:fetch', url, headers ?? {}),
+    openStream: (url: string, headers?: Record<string, string>): Promise<VideoStreamOpenResult> =>
+      ipcRenderer.invoke('video:openStream', url, headers ?? {}),
   },
 
   /**

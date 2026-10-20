@@ -219,6 +219,7 @@ import { tabRefFromChip } from '../../learn/chipRef'
 import { CHIP_MIME, parseChipJson } from '../../lib/chipSyntax'
 import TabBar from './TabBar'
 import WebTabLayer, { type WebTab } from './web/WebTabLayer'
+import VideoStudyTab from '../video/VideoStudyTab'
 import { focusWebAddress } from './web/addressFocus'
 import FindBar from './FindBar'
 import SuperDocView from './SuperDocView'
@@ -676,6 +677,7 @@ export default function LearnWorkspace({
     // 新建文件页签同样没有——它还没有落点，引用一个「还不存在的文件」没有意义
     if (
       ref.kind === 'guard' ||
+      ref.kind === 'video' ||
       ref.kind === 'report' ||
       ref.kind === 'settings' ||
       ref.kind === 'usage' ||
@@ -1640,6 +1642,8 @@ export default function LearnWorkspace({
    * 不需要晚绑定把手——直接依赖 openTab 即可。
    */
   const onOpenUsage = useCallback(() => openTab({ kind: 'usage' }), [openTab])
+  // 视频学习（实验）入口：页签全局一枚，重复点击只是切回去（与设置/用量同一句话）
+  const onOpenVideo = useCallback(() => openTab({ kind: 'video' }), [openTab])
 
   /** 日程安排页签的入口（顶栏日程 tip 的「手动安排日程」与提醒弹层）。与用量页同样全局一枚 */
   const onOpenSchedule = useCallback(() => openTab({ kind: 'schedule' }), [openTab])
@@ -4326,6 +4330,13 @@ export default function LearnWorkspace({
                 （ai/usageLog）而不是配置，所以不挤在设置里；页面自己订阅台账重渲染。
               */
               <UsagePanel />
+            ) : gTab?.ref.kind === 'video' ? (
+              /*
+                视频学习（实验）：通用播放器 + 转录段面板 + 时间戳跳转（见
+                components/video/VideoStudyTab）。流与转录全部由来源插件解析，
+                状态是纯会话态（normalizeTab 不认 video 页签，重启即空）。
+              */
+              <VideoStudyTab />
             ) : gTab?.ref.kind === 'settings' ? (
               /*
                 设置面板：文档区的一枚页签（不再是弹窗）。全局只有这一份（tabKey 恒定），
@@ -4958,6 +4969,7 @@ export default function LearnWorkspace({
             onSignOut={onSignOut}
             onOpenSettings={onOpenSettings}
             onOpenUsage={onOpenUsage}
+            onOpenVideo={onOpenVideo}
             onOpenUpdate={onOpenUpdate}
             onOpenNotice={onOpenNotice}
             onToast={onToast}

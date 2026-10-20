@@ -475,6 +475,12 @@ export type TabRef =
    * 下一次专注开始时会再建一份。
    */
   | { kind: 'guard' }
+  /**
+   * 视频学习页签（实验，见 components/video/VideoStudyTab）：通用播放器 + 转录段面板，
+   * 流与转录都由来源插件解析（契约见 src/video/types）。与守卫页签同一句话：
+   * **会话级、不落盘**——流地址带签名会过期，重启后留一枚空页签反而误导。
+   */
+  | { kind: 'video' }
   /** 一份专注模式报告（只读，见 learn/focusGuard 的 FocusReport 与 FocusReportView） */
   | { kind: 'report'; reportId: string }
   /**

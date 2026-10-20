@@ -289,6 +289,12 @@ export function createWebNativeBridge(): NativeBridge {
       fetch: (url: string) => apiFetch('/api/web/fetch', { method: 'POST', body: JSON.stringify({ url }) }),
     },
 
+    // 视频学习（实验）在 Web 模式不可用：媒体中转协议只存在于桌面端主进程里
+    video: {
+      fetch: async () => ({ ok: false as const, error: '视频学习仅桌面端可用' }),
+      openStream: async () => ({ ok: false as const, error: '视频学习仅桌面端可用' }),
+    },
+
     browser: {
       onOpenTab: () => () => {},
       onShortcut: () => () => {},

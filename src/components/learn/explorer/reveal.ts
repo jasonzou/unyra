@@ -116,6 +116,9 @@ export function revealOfTab(
   const favs = store.favorites ?? []
 
   switch (tab.kind) {
+    // 视频页签（实验）不进侧栏：没有对应行，不定位
+    case 'video':
+      return null
     case 'teach':
       return {
         keys: [`row:doc:teach:${tab.nodeId}`],

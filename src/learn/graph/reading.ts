@@ -133,6 +133,7 @@ function tabNodeIdOf(ref: TabRef): string {
     ref.kind === 'guard' ||
     ref.kind === 'report' ||
     ref.kind === 'settings' ||
+    ref.kind === 'video' ||
     ref.kind === 'usage' ||
     ref.kind === 'schedule' ||
     ref.kind === 'mind' ||

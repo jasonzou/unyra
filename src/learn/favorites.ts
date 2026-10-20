@@ -35,6 +35,7 @@ export function favoriteKey(ref: FavoriteRef): string {
 export function favoriteKeyOfTab(ref: TabRef): string | null {
   if (
     ref.kind === 'guard' ||
+    ref.kind === 'video' ||
     ref.kind === 'report' ||
     ref.kind === 'settings' ||
     ref.kind === 'usage' ||
@@ -56,6 +57,7 @@ export function favoriteRefOfTab(ref: TabRef): FavoriteRef | null {
   if (ref.kind === 'web') return ref.url ? { kind: 'web', url: ref.url } : null
   if (
     ref.kind === 'guard' ||
+    ref.kind === 'video' ||
     ref.kind === 'report' ||
     ref.kind === 'settings' ||
     ref.kind === 'usage' ||

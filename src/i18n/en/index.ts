@@ -13,6 +13,7 @@ import scheduleUi from './schedule-ui'
 import shellUi from './shell-ui'
 import stores from './stores'
 import usageUi from './usage-ui'
+import videoUi from './video-ui'
 import webUi from './web-ui'
 
 export const en: Record<string, string> = {
@@ -25,5 +26,6 @@ export const en: Record<string, string> = {
   ...shellUi,
   ...stores,
   ...usageUi,
+  ...videoUi,
   ...webUi,
 }

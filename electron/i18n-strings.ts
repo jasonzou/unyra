@@ -159,6 +159,10 @@ const dict: Record<string, string> = {
   '还没下载语音模型': 'The speech model has not been downloaded yet',
   '这段录音是空的': 'That recording is empty',
   '识别失败：{0}': 'Recognition failed: {0}',
+  /* ---------- video-net.ts：视频学习（实验） ---------- */
+  '这不是可请求的地址：只支持 http(s)': 'This is not a requestable address: only http(s) is allowed',
+  '请求超时（{0} 秒）：{1}': 'Request timed out ({0} s): {1}',
+  '这不是可播放的地址：只支持 http(s)': 'This is not a playable address: only http(s) is allowed',
 }
 
 export default dict

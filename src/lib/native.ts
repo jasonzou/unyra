@@ -17,7 +17,7 @@ import type {
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
   NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
-  UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
+  UpdatePhase, UpdateState, VideoApiFetchResult, VideoStreamOpenResult, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
   VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebLogDetailResult,
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
@@ -32,7 +32,7 @@ export type {
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
   NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
-  UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
+  UpdatePhase, UpdateState, VideoApiFetchResult, VideoStreamOpenResult, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
   VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebLogDetailResult,
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
@@ -371,6 +371,15 @@ export interface NativeBridge {
     fetch(url: string): Promise<WebFetchResult>
   }
   /**
+   * 视频学习（实验）：来源插件的两条通道（见 shared/ipc 的说明与 electron/video-net）。
+   * fetch 是插件 API 请求（只读 GET + 防盗链头）；openStream 把媒体流登记进主进程
+   * 换回 media-relay:// 中转地址——每次播放前都要重新登记（流地址带签名会过期）。
+   */
+  video: {
+    fetch(url: string, headers?: Record<string, string>): Promise<VideoApiFetchResult>
+    openStream(url: string, headers?: Record<string, string>): Promise<VideoStreamOpenResult>
+  }
+  /**
    * 内置浏览器页签（见 src/components/learn/web 与 electron/app/webSession）。
    * 三条都是主进程推、渲染层收：onOpenTab —— 网页弹窗 / target=_blank 要开的新页签
    * （拦截与协议判定在主进程）；onShortcut —— 焦点在网页里时按下的应用快捷键，
@@ -505,4 +514,4 @@ export const isMac = (): boolean => {
     return window.mojiNative?.platform === 'darwin'
   }
   return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
-}
+}

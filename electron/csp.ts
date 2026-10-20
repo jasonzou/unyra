@@ -20,6 +20,10 @@
  * 远程图片是正经内容——图片是被动资源，不执行任何脚本，script-src / connect-src 的收紧
  * 不受影响。本地图片不走这条：它们由 lib/docImages 读字节贴成 data URL（file: 来源连
  * 'self' 都匹配不上，放行 file: 反而等于给文档开一个读任意本地文件的口子）。
+ *
+ * media-src 放行 media-relay: 是视频学习（实验）加的：`<video>` 的 src 指向本地中转
+ * 协议（真实上游由主进程带头转发，见 electron/media-relay），不带它打包版里视频
+ * 直接黑屏。API 请求不走这里——它们经 IPC（video:fetch），不进 CSP 的视野。
  */
 export const LOCAL_FILE_CSP =
   "default-src 'self'; " +
@@ -27,5 +31,6 @@ export const LOCAL_FILE_CSP =
   "worker-src 'self' blob:; " +
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data: blob: https: http:; " +
+  "media-src 'self' media-relay:; " +
   "font-src 'self' data:; " +
   "connect-src 'self' llm-proxy:;"
