@@ -23,6 +23,8 @@ import type { Transcript, VideoSource } from '../../video/types'
 
 /** SESSDATA 存放键：实验期存 localStorage（跟浏览器 profile 走），正式形态挪进设置页 */
 const SESSDATA_KEY = 'moji.video.sessdata'
+/** 上次解析的输入：页签持久化后（normalizeTab 认 video），重启把它填回输入框，一键重新解析 */
+const INPUT_KEY = 'moji.video.input'
 
 const readSessdata = (): string => {
   try {
@@ -32,8 +34,16 @@ const readSessdata = (): string => {
   }
 }
 
+const readLastInput = (): string => {
+  try {
+    return localStorage.getItem(INPUT_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
 export default function VideoStudyTab() {
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(readLastInput)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /** 解析结果：流地址（media-relay）+ 转录稿 + 元信息；null = 还没解析过（空态） */
@@ -65,6 +75,11 @@ export default function VideoStudyTab() {
       setBusy(true)
       setError(null)
       setTranscriptNote(null)
+      try {
+        localStorage.setItem(INPUT_KEY, text)
+      } catch {
+        // localStorage 不可用就只当会话内的输入，无碍
+      }
       try {
         const src = await resolveSource(text, { sessdata: readSessdata() })
         const url = await openRelayStream(src)
@@ -266,8 +281,8 @@ export default function VideoStudyTab() {
               />
             </div>
             {source.collection && (
-              <div className="flex w-[248px] shrink-0 flex-col border-l border-line bg-card/40">
-                <div className="shrink-0 truncate border-b border-line/60 px-2 py-1 text-[10.5px] font-medium text-ink-soft">
+              <div className="flex w-[320px] shrink-0 flex-col border-l border-line bg-card/40">
+                <div className="shrink-0 truncate border-b border-line/60 px-2 py-1 text-[11px] font-medium text-ink-soft">
                   {t('合集')} · {source.collection.name}
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto py-0.5">
@@ -279,25 +294,26 @@ export default function VideoStudyTab() {
                       disabled={busy}
                       onClick={() => void runResolve(item.source)}
                       className={
-                        'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition disabled:opacity-50 ' +
+                        'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition disabled:opacity-50 ' +
                         (item.current ? 'bg-seal/10' : 'hover:bg-line/50')
                       }
                     >
+                      {/* 标题在前（12px），时长缀在后面——用户定的顺序 */}
                       <span
                         className={
-                          'w-10 shrink-0 text-right font-mono text-[10px] ' +
-                          (item.current ? 'text-seal' : 'text-ink-faint')
-                        }
-                      >
-                        {item.durationMs ? formatClock(item.durationMs) : '--:--'}
-                      </span>
-                      <span
-                        className={
-                          'min-w-0 flex-1 truncate text-[11px] ' +
+                          'min-w-0 flex-1 truncate text-[12px] ' +
                           (item.current ? 'font-medium text-ink-strong' : 'text-ink')
                         }
                       >
                         {item.title}
+                      </span>
+                      <span
+                        className={
+                          'shrink-0 font-mono text-[10.5px] ' +
+                          (item.current ? 'text-seal' : 'text-ink-faint')
+                        }
+                      >
+                        {item.durationMs ? formatClock(item.durationMs) : '--:--'}
                       </span>
                     </button>
                   ))}
@@ -305,8 +321,8 @@ export default function VideoStudyTab() {
               </div>
             )}
           </div>
-          {/* 字幕条：固定 200px（标题行 + 列表的可视区就这么多，用户定的） */}
-          <div className="flex h-[200px] shrink-0 flex-col border-t border-line">
+          {/* 字幕条：高度 = 30%（用户定的）；标题行 + 列表的可视区就这么多 */}
+          <div className="flex h-[30%] shrink-0 flex-col border-t border-line">
           <div className="flex shrink-0 items-center gap-2 border-b border-line bg-card/40 px-3 py-1.5">
             <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">{source.title}</span>
             {source.durationMs ? (

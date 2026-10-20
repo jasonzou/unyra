@@ -477,8 +477,8 @@ export type TabRef =
   | { kind: 'guard' }
   /**
    * 视频学习页签（实验，见 components/video/VideoStudyTab）：通用播放器 + 转录段面板，
-   * 流与转录都由来源插件解析（契约见 src/video/types）。与守卫页签同一句话：
-   * **会话级、不落盘**——流地址带签名会过期，重启后留一枚空页签反而误导。
+   * 流与转录都由来源插件解析（契约见 src/video/types）。**页签持久化**（normalizeTab
+   * 认它）；但解析结果不落盘——流地址带签名会过期，重启后是空页等重新解析。
    */
   | { kind: 'video' }
   /** 一份专注模式报告（只读，见 learn/focusGuard 的 FocusReport 与 FocusReportView） */

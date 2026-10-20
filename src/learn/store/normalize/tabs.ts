@@ -55,6 +55,9 @@ function normalizeTabRef(raw: unknown, byId: Map<string, KnowledgeNode>): TabRef
   }
   // 设置页、用量页与日程表：全局各只有一份，没有需要校验的「指向」，形状对就收下
   if (r.kind === 'settings' || r.kind === 'usage' || r.kind === 'schedule') return { kind: r.kind }
+  // 视频学习（实验）：同样全局一份、没有「指向」可校验。页签持久化（用户定的），
+  // 里面的流地址与转录本来就不落盘（会过期），重启后是空页等重新解析
+  if (r.kind === 'video') return { kind: r.kind }
   // 记忆页签一枚目标一份：goalId 缺了（或不是字符串）就没法认领，丢弃
   if (r.kind === 'mind') {
     const goalId = typeof r.goalId === 'string' ? r.goalId : ''

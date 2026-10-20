@@ -4333,8 +4333,9 @@ export default function LearnWorkspace({
             ) : gTab?.ref.kind === 'video' ? (
               /*
                 视频学习（实验）：通用播放器 + 转录段面板 + 时间戳跳转（见
-                components/video/VideoStudyTab）。流与转录全部由来源插件解析，
-                状态是纯会话态（normalizeTab 不认 video 页签，重启即空）。
+                components/video/VideoStudyTab）。流与转录全部由来源插件解析；
+                页签持久化（normalizeTab 认 video），但解析结果不落盘——重启后
+                空页 + 上次的输入还在输入框里，一键重新解析。
               */
               <VideoStudyTab />
             ) : gTab?.ref.kind === 'settings' ? (
