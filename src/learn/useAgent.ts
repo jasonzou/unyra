@@ -372,7 +372,8 @@ export function useAgent(opts: {
       modules?: PromptModule[],
     ) => {
       const trimmed = text.trim()
-      if (!trimmed) return
+      // 与 runTurn 同一道门：纯图片/纯文件（无字）放行——图片转存与消息组装都在后面
+      if (!trimmed && !(pending?.length || files?.length)) return
       const settings = loadAiSettings()
       const before = getLatest()
       if (!nodeById(before, target.nodeId)) return
@@ -1081,7 +1082,12 @@ export function useAgent(opts: {
       /** 工作流触发时随指令注入的提示词模块（见 runTurnUnchecked 同名参数） */
       modules?: PromptModule[],
     ) => {
-      if (!text.trim()) return
+      /*
+       * 空文本 + 带附件（纯图片 / 纯文件）也是合法消息：气泡（MessageBubble 只在
+       * 有字时才画文字泡）与历史组装（agent/history 的 nodeContext 恒在正文里，
+       * 不会发出空块）都为「只发图」留好了位置——门只拦「什么都没有」的那条。
+       */
+      if (!text.trim() && !(pending?.length || files?.length)) return
       if (!hasApiKey(loadAiSettings())) {
         if (!hidden) onNeedKeyRef.current()
         return
@@ -1174,14 +1180,15 @@ export function useAgent(opts: {
    */
   const sendFree = useCallback(
     (conversationId: string, text: string, opts?: { files?: PendingFile[]; images?: PendingImage[] }) => {
+      // 图片附件在这里没有去处（static 资源库按目标目录落盘，自由聊天没有目标目录）：
+      // 有图就先说一声——纯图片那条在自由聊天里没有可发的东西（下面会拦），不能闷声吞掉
+      if (opts?.images?.length) onNoticeRef.current?.(t('自由聊天暂不支持图片，图片已去掉'))
       if (!text.trim()) return
       if (!freeConversationById(conversationId)) return
       if (!hasApiKey(loadAiSettings())) {
         onNeedKeyRef.current()
         return
       }
-      // 图片附件在这里没有去处（static 资源库按目标目录落盘，自由聊天没有目标目录）
-      if (opts?.images?.length) onNoticeRef.current?.(t('自由聊天暂不支持图片，图片已去掉'))
       const chain = turnChainRef.current
       const prev = chain.get(conversationId)
       let release!: () => void
