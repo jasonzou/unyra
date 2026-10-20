@@ -17,7 +17,6 @@ import { Clapperboard, Loader2, MonitorPlay, Settings2 } from 'lucide-react'
 import { t } from '../../i18n'
 import { isWeb } from '../../lib/native'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
-import { nearestScrollTop } from '../exam/scroll'
 import { openRelayStream, resolveSource } from '../../video/registry'
 import { formatClock, segmentIndexAt } from '../../video/transcript'
 import type { Transcript, VideoSource } from '../../video/types'
@@ -99,18 +98,15 @@ export default function VideoStudyTab() {
     const row = activeIdx >= 0 ? rowRefs.current[activeIdx] : null
     if (!list || !row) return
     /*
-     * contentTop 必须是「行顶在滚动内容坐标系里的位置」：用 rect 差值现算，
-     * 不用 offsetTop——那是相对 offsetParent（最近的定位祖先）量的，滚动容器
-     * 自己没定位时量出来的是相对更外层的偏移，滚动落点整个错掉（实测：自动
-     * 滚动了，但当前段不在可视区）。语义与落点交给 exam/scroll 的纯函数，
-     * 「可见就不动 / 上方顶对齐 / 下方底对齐」它都有，还夹在内容范围内。
+     * 跟随定位：当前段钉在可视区 20% 高度处（歌词式跟随，用户定的）。
+     * contentTop 必须是「行顶在滚动内容坐标系里的位置」——用 rect 差值现算，
+     * 不用 offsetTop：那是相对 offsetParent（最近的定位祖先）量的，滚动容器
+     * 自己没定位时量出来的是相对更外层的偏移，落点整个错掉（踩过）。
+     * 平滑滚 + 夹在内容范围内；段与段间隔几秒，每次只挪一行的量，不抖。
      */
     const contentTop = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
-    const target = nearestScrollTop(
-      { scrollTop: list.scrollTop, clientHeight: list.clientHeight, scrollHeight: list.scrollHeight },
-      { contentTop, height: row.offsetHeight },
-      8,
-    )
+    const max = Math.max(0, list.scrollHeight - list.clientHeight)
+    const target = Math.max(0, Math.min(max, Math.round(contentTop - list.clientHeight * 0.2)))
     if (target !== list.scrollTop) list.scrollTo({ top: target, behavior: 'smooth' })
   }, [activeIdx, transcript])
 
