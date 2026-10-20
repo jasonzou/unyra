@@ -306,23 +306,49 @@ export async function callDeepSeekFetch(
   }
 
   const controller = new AbortController()
-  const timer = setTimeout(() => {
-    controller.abort(new Error('DeepSeek 抓取请求超时（超过 20 秒）'))
-  }, 20000)
+  /*
+    8 秒硬超时。抓正文是调研链路上最容易卡住的一环：站点慢、反爬、超时重试都会把一轮
+    对话拖进几十秒的干等。窗口期缩短之后失败要快——agent 拿到 ok:false 就换来源或降级
+    用摘要，而不是原地等。8 秒是实测的折中：DeepSeek 要现场抓取并转 Markdown，5 秒对
+    慢站失败率偏高，再长又失去「快速失败」的意义。
+
+    为什么还要再 race 一层：abort 只是「请求侧取消」，经自定义协议转发出去时不一定
+    立刻兑现（取消信号在代理那一端未必透传）。race 保证时间一到这个函数就返回，
+    不会让调用方卡在等正文上。
+  */
+  const TIMEOUT_MS = 8000
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const stopTimer = () => {
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+  }
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`抓取超过 ${TIMEOUT_MS / 1000} 秒`, { cause: 'timeout' })
+      controller.abort(err)
+      reject(err)
+    }, TIMEOUT_MS)
+  })
 
   try {
-    const res = await httpFetch(DEEPSEEK_FETCH_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify({ url }),
-      signal: controller.signal,
-    })
-    clearTimeout(timer)
-
-    const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
+    const res = await Promise.race([
+      httpFetch(DEEPSEEK_FETCH_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({ url }),
+        signal: controller.signal,
+      }),
+      timeout,
+    ])
+    // 正文也落在同一个 5 秒窗口里：头回来了、body 卡住同样等于没抓到
+    const json = (await Promise.race([res.json().catch(() => null), timeout])) as Record<
+      string,
+      unknown
+    > | null
+    stopTimer()
     if (!res.ok) {
       const msg =
         (json?.error as { message?: string })?.message ||
@@ -347,13 +373,23 @@ export async function callDeepSeekFetch(
       content: String(json?.content ?? ''),
     }
   } catch (err) {
-    clearTimeout(timer)
+    stopTimer()
+    const msg = err instanceof Error ? err.message : String(err)
+    // 超时单独说清楚：让 agent 直接换来源，而不是当成网络故障去重试同一页
+    if ((err as { cause?: unknown } | null)?.cause === 'timeout' || msg.includes('抓取超过')) {
+      return {
+        ok: false,
+        title: '',
+        content: '',
+        error: `抓取超时（${TIMEOUT_MS / 1000} 秒）：这一页没能及时返回。换一个来源，或降级用搜索结果里的摘要；不要重试同一 URL。`,
+      }
+    }
     return {
       ok: false,
       title: '',
       content: '',
       error:
-        'DeepSeek 抓取网络请求失败：' + (err instanceof Error ? err.message : String(err)),
+        'DeepSeek 抓取网络请求失败：' + msg,
     }
   }
 }
