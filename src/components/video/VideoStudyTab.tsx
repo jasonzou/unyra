@@ -70,10 +70,10 @@ export default function VideoStudyTab() {
       setSource(src)
       setRelayUrl(url)
       setTranscript(src.transcript ?? null)
-      // 字幕没拿到不算失败——把原因说清楚，视频照常播
-      if (!src.transcript) {
-        setTranscriptNote(t('这条来源没有字幕：AI 字幕通常需要登录——点右上角齿轮填入 SESSDATA 后重试。'))
-      }
+      // 三种状态说三种话：拿到了 / 试过但失败（原话上屏）/ 真没有
+      if (src.transcript) setTranscriptNote(null)
+      else if (src.transcriptError) setTranscriptNote(t('字幕获取失败：{0}', src.transcriptError))
+      else setTranscriptNote(t('这条来源没有字幕：AI 字幕通常需要登录——点右上角齿轮填入 SESSDATA 后重试。'))
       setCurrentMs(0)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

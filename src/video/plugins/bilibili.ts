@@ -101,8 +101,12 @@ async function fetchTranscript(
     opts,
   )
   const subs = player.data?.subtitle?.subtitles ?? []
-  // 多语言时优先中文（CC 列表一般按优先级排，这里只再偏一次心）
-  const sub = subs.find((s) => (s.lan ?? '').startsWith('zh')) ?? subs[0]
+  // 语言偏好：UP 传的中文 CC（zh-Hans / zh-CN）→ AI 字幕（lan 是 ai-zh，startsWith('zh')
+  // 摸不到它）→ 兜底取列表第一条。多语言视频里别让英文 CC 抢了 AI 中文字幕的位子
+  const sub =
+    subs.find((s) => /^(zh-Hans|zh-CN)$/i.test(s.lan ?? '')) ??
+    subs.find((s) => (s.lan ?? '').startsWith('ai-zh')) ??
+    subs[0]
   if (!sub?.subtitle_url) return undefined
   const subUrl = sub.subtitle_url.startsWith('//') ? `https:${sub.subtitle_url}` : sub.subtitle_url
   const json = await getJson<{ body?: Array<{ from?: number; to?: number; content?: string }> }>(ctx, subUrl, opts)
@@ -150,12 +154,16 @@ export const bilibiliPlugin: VideoSourcePlugin = {
     if (durls.length > 1) throw new Error(t('这个视频返回了 {0} 段流，实验通道暂不支持', String(durls.length)))
     const streamUrl = raw.replace(/^http:\/\//, 'https://')
 
-    // 3. 转录（可选产出）：失败不挡播放，错误留给面板自己显示
+    // 3. 转录（可选产出）：失败不挡播放，但**原话要带回去**——面板据此区分
+    //    「真没有字幕」与「试过但失败了」，配了登录态的用户不再被一句
+    //    「需要登录」误导
     let transcript: Transcript | undefined
+    let transcriptError: string | undefined
     try {
       transcript = await fetchTranscript(ctx, m.bvid, page.cid, opts)
-    } catch {
+    } catch (err) {
       transcript = undefined
+      transcriptError = err instanceof Error ? err.message : String(err)
     }
 
     return {
@@ -169,6 +177,7 @@ export const bilibiliPlugin: VideoSourcePlugin = {
         headers: apiHeaders(opts),
       },
       transcript,
+      ...(transcriptError ? { transcriptError } : {}),
     }
   },
 }
