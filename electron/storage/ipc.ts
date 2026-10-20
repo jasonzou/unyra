@@ -22,7 +22,7 @@ import {
 import { flushSync } from './flush'
 import { pickLocal, readLocal, readLocalMedia, revealLocal, setLocalWatchList, writeLocal } from './local'
 import { setWsWatchList } from './ws'
-import { closeBehavior, currentRoot, defaultRoot, loadGlobal, noticeSettings, pickRoot, setCloseBehavior, setNoticeSettings, setRoot } from './settings'
+import { closeBehavior, currentRoot, dataRootRiskOf, defaultRoot, loadGlobal, noticeSettings, pickRoot, setCloseBehavior, setNoticeSettings, setRoot } from './settings'
 import type { NoticeSettings } from '../../shared/ipc'
 
 /* ---------- IPC 注册 ---------- */
@@ -32,6 +32,7 @@ export function registerStorageIpc(): void {
     root: currentRoot(),
     defaultRoot: defaultRoot(),
     isDefault: !loadGlobal().root,
+    rootRisk: dataRootRiskOf(currentRoot()),
   }))
 
   ipcMain.handle('storage:setRoot', (_e, dir: unknown) => setRoot(dir))

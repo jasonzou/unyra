@@ -117,6 +117,12 @@ export function StoragePanel({ onRootChanged, onToast }: Props) {
           )}
         </div>
 
+        {info?.rootRisk && (
+          <div className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] leading-relaxed text-red-600 dark:text-red-300">
+            {t('警告：数据目录在软件安装目录内（或与其互相包含）。更新软件时安装目录会被整个清空，数据会一并删除——请立即在下方更换数据目录到安装目录之外，迁移完成前不要更新软件。')}
+          </div>
+        )}
+
         {/* 路径展示条 */}
         <div className="mt-2.5 flex items-center justify-between gap-2 rounded-lg border border-line bg-paper-deep/70 px-3 py-2">
           <span className="min-w-0 flex-1 break-all font-mono text-[11.5px] text-ink-strong">

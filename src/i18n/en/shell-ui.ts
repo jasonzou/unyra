@@ -734,6 +734,8 @@ const dict: Record<string, string> = {
   '本地优先 · 离线安全': 'Local-first · Offline safe',
   '当前存储目录': 'Current storage directory',
   '系统默认位置': 'System default location',
+  '警告：数据目录在软件安装目录内（或与其互相包含）。更新软件时安装目录会被整个清空，数据会一并删除——请立即在下方更换数据目录到安装目录之外，迁移完成前不要更新软件。':
+    'Warning: your data directory is inside the installation folder (or contains it). Updates wipe that folder and your data with it — move the data directory outside it below, and do not update until migrated.',
   '自定义工作空间': 'Custom workspace',
   '正在读取存储路径…': 'Reading storage path...',
   '复制路径': 'Copy path',

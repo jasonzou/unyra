@@ -160,6 +160,12 @@ const dict: Record<string, string> = {
   '这段录音是空的': 'That recording is empty',
   '识别失败：{0}': 'Recognition failed: {0}',
   /* ---------- video-net.ts：视频学习（实验） ---------- */
+  '数据目录不能放在软件安装目录里：更新软件时安装目录会被整个清空，数据会一并删除。请选择安装目录之外的位置。':
+    'The data directory cannot be inside the installation folder: updates wipe that folder and your data with it. Pick a location outside it.',
+  '数据目录不能包含软件安装目录：更新时安装目录会被整个清空，数据同样危在旦夕。请把两者分开存放。':
+    'The data directory cannot contain the installation folder: updates wipe that folder. Keep them separate.',
+  '数据目录在软件安装目录内，更新会把它一并删除。请先到「设置 → 存储」把数据目录迁出安装目录，再回来更新。':
+    'Your data directory is inside the installation folder and an update would delete it. Move it out (Settings → Storage) first, then update.',
   '这不是可请求的地址：只支持 http(s)': 'This is not a requestable address: only http(s) is allowed',
   '请求超时（{0} 秒）：{1}': 'Request timed out ({0} s): {1}',
   '这不是可播放的地址：只支持 http(s)': 'This is not a playable address: only http(s) is allowed',

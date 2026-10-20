@@ -194,7 +194,20 @@ export interface StorageInfo {
   defaultRoot: string
   /** 当前是否用的就是默认根目录 */
   isDefault: boolean
+  /**
+   * 数据根与**软件安装目录**的包含关系风险。更新走 NSIS 静默安装，会先静默卸载
+   * 旧版本——卸载器清整个安装目录，数据根只要与它有包含关系，数据就会在更新时
+   * 被一并删除（用户实测踩过）。非空时设置页要挂警告、更新安装要拦截。
+   */
+  rootRisk?: RootRisk
 }
+
+/** 数据根 × 安装目录的风险类型（判定见 electron/storage/settings 的 dataRootRiskOf） */
+export type RootRisk =
+  /** 数据根在安装目录里面：更新必删 */
+  | 'inside-install-dir'
+  /** 数据根包含安装目录：安装目录那棵子树必删（数据可能幸存，但同样不可接受） */
+  | 'contains-install-dir'
 
 /** 数据目录里的一项（文件或目录）。
  *  谁在用：preload 的 storage.list（见下面 preload 侧那份 StorageListResult），

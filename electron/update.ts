@@ -47,11 +47,14 @@
  */
 
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { t } from './i18n'
 import { autoUpdater } from 'electron-updater'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
   autoUpdate as autoUpdateSetting,
+  currentRoot,
+  dataRootRiskOf,
   setAutoUpdate as persistAutoUpdate,
   setUpdateChannel as persistChannel,
   updateChannel as channelSetting,
@@ -442,6 +445,21 @@ export function setUpdateChannel(value: unknown): UpdateChannel {
 export function installNow(): { ok: boolean } {
   configureUpdater()
   if (state.phase !== 'ready') return { ok: false }
+  /*
+   * 数据根在安装目录里时，更新（NSIS 静默卸载会清整个安装目录）会把它一并删掉。
+   * 这一次安装必须拦下来——丢全部数据比停留在旧版本严重得多；提示用户先迁移，
+   * 迁完（设置页会同时挂着警告）再回来更新。
+   */
+  const rootRisk = dataRootRiskOf(currentRoot())
+  if (rootRisk) {
+    setState({
+      phase: 'error',
+      reason: 'install',
+      detail: t('数据目录在软件安装目录内，更新会把它一并删除。请先到「设置 → 存储」把数据目录迁出安装目录，再回来更新。'),
+      checkedAt: Date.now(),
+    })
+    return { ok: false }
+  }
   setState({ phase: 'installing' })
   try {
     autoUpdater.quitAndInstall(true, true)
