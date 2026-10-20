@@ -245,12 +245,13 @@ export default function VideoStudyTab() {
         </div>
       )}
 
-      {/* 正文：上播放器、下转录面板；没解析过时整片是引导空态 */}
+      {/* 正文：上播放器（吃满剩余高度）、下 200px 字幕条；没解析过时整片是引导空态。
+          「200 高」指的是**字幕列表的可视区**（用户定的），不是视频 */}
       {source && relayUrl ? (
         <>
-          {/* 视频与合集同一排（用户定的）：200px 高度够看清画面，省下的高度给转录面板；
-              有合集时列表贴在视频右侧同高，点一项就地切换（重走一遍 resolve） */}
-          <div className="flex h-[200px] shrink-0">
+          {/* 视频与合集同一排：视频吃剩余高度，合集列表贴右侧同高——
+              点一项就地切换（重走一遍 resolve） */}
+          <div className="flex min-h-0 flex-1">
             <div className="min-h-0 min-w-0 flex-1 bg-black">
               {/* key 绑流地址：重新解析换一条流时整只元素重建，播放状态清零是最诚实的表现 */}
               <video
@@ -304,6 +305,8 @@ export default function VideoStudyTab() {
               </div>
             )}
           </div>
+          {/* 字幕条：固定 200px（标题行 + 列表的可视区就这么多，用户定的） */}
+          <div className="flex h-[200px] shrink-0 flex-col border-t border-line">
           <div className="flex shrink-0 items-center gap-2 border-b border-line bg-card/40 px-3 py-1.5">
             <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">{source.title}</span>
             {source.durationMs ? (
@@ -367,6 +370,7 @@ export default function VideoStudyTab() {
                 </div>
               )}
             </div>
+          </div>
           </div>
         </>
       ) : (
