@@ -14,6 +14,7 @@
 
 import { t } from '../../i18n'
 import { normalizeTranscript } from '../transcript'
+import { wbiSignedQuery } from './wbi'
 import type { Transcript, VideoPluginCtx, VideoResolveOptions, VideoSource, VideoSourcePlugin } from '../types'
 
 const UA =
@@ -95,9 +96,13 @@ async function fetchTranscript(
   cid: number,
   opts: VideoResolveOptions,
 ): Promise<Transcript | undefined> {
+  // 字幕一律走带 WBI 签名的 wbi/v2：无签名的旧 player/v2 在风控降级时会 HTTP 200
+  // 假成功、返回随机其他视频的 AI 字幕（「张冠李戴」的根因，社区 2026-08 查明，
+  // BBDown 同坑同修）——降级数据比失败更毒，宁可拿不到也不走无签名路径
+  const query = await wbiSignedQuery(ctx, apiHeaders(opts), { bvid, cid: String(cid) })
   const player = await getJson<BiliPlayerData>(
     ctx,
-    `https://api.bilibili.com/x/player/v2?bvid=${bvid}&cid=${cid}`,
+    `https://api.bilibili.com/x/player/wbi/v2?${query}`,
     opts,
   )
   const subs = player.data?.subtitle?.subtitles ?? []
