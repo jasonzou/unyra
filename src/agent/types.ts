@@ -199,6 +199,12 @@ export interface ConversationMessage {
    */
   skillsDigest?: string
   /**
+   * 这是「可用外部 MCP 服务」那条隐藏指令的指纹（见 agent/mcp/announce）。
+   * 与 skillsDigest 同一套机制：服务启停 / 工具清单变化时重注入（hosted 会话不落盘，
+   * 重启后自然重注入——那一刻前缀缓存本来就是冷的）。
+   */
+  mcpDigest?: string
+  /**
    * 附加上下文（如「询问」的选段位置），随消息一起送给模型但不展示。
    * 与 hidden 的区别：hidden 连正文都不显示，context 只补充说明、正文照常显示。
    */

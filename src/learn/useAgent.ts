@@ -33,6 +33,7 @@ import { loadAgentSettings } from '../agent/settings'
 import { makeMcpOps } from '../agent/mcp/ops'
 import { makePermissionOps } from '../agent/permissions'
 import { getActiveSkills, getSkillsDigest, needsSkillsAnnounce, skillsAnnounceMessage } from '../agent/skill/registry'
+import { getMcpDigest, mcpAnnounceMessage, needsMcpAnnounce } from '../agent/mcp/announce'
 import type { LearnStore } from './types'
 import { buildFreeChatSystem, buildTeacherSystem } from './ai'
 import { fetchForAgent, searchForAgent } from './webSearch'
@@ -474,6 +475,22 @@ export function useAgent(opts: {
           ]
         : []
 
+      // MCP 感知注入：与技能发现层同一套机制（隐藏消息 + digest 变更重注入）。
+      // 主观能动性的前提是知情——agent 不知道有哪些外部服务，就不会在任务需要时想到它们
+      const currentMcpDigest = getMcpDigest(agentSettings.mcp)
+      const hasPreviousMcpAnnounce = conv.messages.some((m) => !m.retired && m.mcpDigest !== undefined)
+      const mcpAnnouncer = needsMcpAnnounce(conv.messages, currentMcpDigest)
+        ? [
+            mcpAnnounceMessage(
+              agentSettings.mcp,
+              Date.now(),
+              crypto.randomUUID(),
+              currentMcpDigest,
+              hasPreviousMcpAnnounce,
+            ),
+          ]
+        : []
+
       // 提示词模块与技能 Slash 命令检测：支持用户以 /<skill-id> 显式指定，提前将技能注入上下文
       //
       // 工作流指定的模块同样要过格式策略过滤（「开讲」「学习大纲」会强制带上 doc-html）：
@@ -504,7 +521,7 @@ export function useAgent(opts: {
         : []
       conv = {
         ...conv,
-        messages: [...conv.messages, ...announcer, ...formatAnnouncer, ...skillsAnnouncer, ...moduleMsgs, userMsg],
+        messages: [...conv.messages, ...announcer, ...formatAnnouncer, ...skillsAnnouncer, ...mcpAnnouncer, ...moduleMsgs, userMsg],
         updatedAt: Date.now(),
         // 在途标记：这一轮没收口（进程被杀）时，载入恢复据此找到这条回复（见 learn/agent/inflight）
         inflight: { messageId: assistantId, startedAt: Date.now() },

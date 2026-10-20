@@ -6,6 +6,7 @@ import {
   getEffectiveSkills,
 } from '../src/agent/skill/registry'
 import { MCP_PRESETS, type McpSettings } from '../src/agent/mcp/types'
+import { formatMcpDiscoveryPrompt, getMcpDigest, mcpAnnounceMessage, needsMcpAnnounce } from '../src/agent/mcp/announce'
 import { makeMcpOps } from '../src/agent/mcp/ops'
 import { normalizeAgentSettings } from '../src/agent/settings'
 
@@ -361,5 +362,62 @@ enabled: true
       expect(sanitizeSkillId('---test---')).toBe('test')
     })
   })
-})
 
+  describe('MCP 感知注入（announce）', () => {
+    const settings: McpSettings = {
+      enabled: true,
+      servers: [
+        {
+          id: 'search',
+          name: '搜索服务',
+          transport: 'sse',
+          enabled: true,
+          tools: [
+            { name: 'web_search', description: '搜网页' },
+            { name: 'fetch_page', description: '抓页面' },
+          ],
+        },
+        { id: 'off', name: '关停服务', transport: 'stdio', enabled: false, tools: [{ name: 'x' }] },
+      ],
+    }
+
+    it('digest 只含启用服务，全部关停 / 总开关关闭时为空', () => {
+      const digest = getMcpDigest(settings)
+      expect(digest).toContain('search@fetch_page,web_search')
+      expect(digest).not.toContain('off@')
+
+      expect(getMcpDigest({ enabled: true, servers: [{ ...settings.servers[0], enabled: false }] })).toBe('')
+      expect(getMcpDigest({ enabled: false, servers: settings.servers })).toBe('')
+      expect(getMcpDigest(null)).toBe('')
+    })
+
+    it('感知正文列出服务与工具，引导先 list/discover 再 call', () => {
+      const text = formatMcpDiscoveryPrompt(settings)
+      expect(text).toContain('[search] 搜索服务')
+      expect(text).toContain('web_search')
+      expect(text).not.toContain('关停服务')
+      expect(text).toContain('api.mcp.call')
+    })
+
+    it('needsMcpAnnounce：无指纹 / 指纹变化 / 指纹一致 三种判定', () => {
+      const digest = getMcpDigest(settings)
+      expect(needsMcpAnnounce([], digest)).toBe(true)
+      const msg = mcpAnnounceMessage(settings, 0, 'm1', digest)
+      expect(needsMcpAnnounce([msg], digest)).toBe(false)
+      expect(needsMcpAnnounce([msg], digest + ';more')).toBe(true)
+      // 失活消息不算数：压缩后要重新注入
+      expect(needsMcpAnnounce([{ ...msg, retired: true }], digest)).toBe(true)
+      // digest 为空（全关停）时永不注入
+      expect(needsMcpAnnounce([msg], '')).toBe(false)
+    })
+
+    it('announce 消息是隐藏的过程注入，并携带指纹', () => {
+      const digest = getMcpDigest(settings)
+      const msg = mcpAnnounceMessage(settings, 0, 'm1', digest, true)
+      expect(msg.hidden).toBe(true)
+      expect(msg.inject).toBe('prompt')
+      expect(msg.mark).toBe('可用 MCP 服务已更新')
+      expect(msg.mcpDigest).toBe(digest)
+    })
+  })
+})
