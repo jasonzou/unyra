@@ -31,6 +31,10 @@ const dict: Record<string, string> = {
     'AI subtitles usually require login. The value stays on this machine (browser storage) and is sent to Bilibili with requests.',
   '这条来源没有字幕：AI 字幕通常需要登录——点右上角齿轮填入 SESSDATA 后重试。':
     'No subtitles for this source: AI subtitles usually require login — open the gear in the top right, fill in SESSDATA and retry.',
+  '获取：浏览器登录 B 站 → F12 → 应用（Application）→ Cookies → www.bilibili.com → 复制「SESSDATA」的值粘贴到这里。':
+    'How to get it: log in to bilibili.com in your browser → F12 → Application → Cookies → www.bilibili.com → copy the value of "SESSDATA" and paste it here.',
+  '只粘贴 Value 本身（带 SESSDATA= 前缀也能存，会自动剥掉）':
+    'Paste the value only (a "SESSDATA=" prefix is stripped automatically)',
   '已保存': 'Saved',
 
   /* ---------- 转录段面板 ---------- */

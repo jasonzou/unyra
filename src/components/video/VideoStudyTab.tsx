@@ -105,8 +105,15 @@ export default function VideoStudyTab() {
   }, [activeIdx])
 
   const saveSessdata = useCallback(() => {
+    // 容错：从浏览器复制时容易连「SESSDATA=」前缀或引号一起带上——剥掉再存，
+    // 插件那边拼的是 `SESSDATA=${值}`，前缀混进去 cookie 就废了
+    const value = sessDraft
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .replace(/^SESSDATA=/i, '')
+      .trim()
     try {
-      localStorage.setItem(SESSDATA_KEY, sessDraft.trim())
+      localStorage.setItem(SESSDATA_KEY, value)
     } catch {
       // localStorage 不可用（隐私模式之类）就只在会话里生效：draft 还在内存里
     }
@@ -188,6 +195,8 @@ export default function VideoStudyTab() {
         <div className="shrink-0 border-b border-line bg-card/40 px-3 py-2">
           <div className="text-[12px] font-medium text-ink-strong">{t('B 站登录态（SESSDATA，可选）')}</div>
           <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+            {t('获取：浏览器登录 B 站 → F12 → 应用（Application）→ Cookies → www.bilibili.com → 复制「SESSDATA」的值粘贴到这里。')}
+            <br />
             {t('AI 字幕通常要登录后才拿得到。值只存本机（浏览器存储），随请求发给 B 站。')}
           </p>
           <div className="mt-2 flex items-center gap-2">
@@ -197,7 +206,7 @@ export default function VideoStudyTab() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') saveSessdata()
               }}
-              placeholder="SESSDATA=…"
+              placeholder={t('只粘贴 Value 本身（带 SESSDATA= 前缀也能存，会自动剥掉）')}
               className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-2.5 py-1.5 font-mono text-[11.5px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/50 focus:ring-2 focus:ring-seal/10"
             />
             <button
