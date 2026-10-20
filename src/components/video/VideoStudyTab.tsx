@@ -255,11 +255,21 @@ export default function VideoStudyTab() {
             {source.durationMs ? (
               <span className="shrink-0 font-mono text-[10.5px] text-ink-faint">{formatClock(source.durationMs)}</span>
             ) : null}
-            {transcript ? (
-              <span className="shrink-0 rounded border border-line bg-paper px-1.5 py-px text-[10px] text-ink-faint">
-                {transcript.origin === 'subtitle' ? t('字幕') : t('语音识别')}
-              </span>
-            ) : null}
+                {transcript ? (
+                  <span className="shrink-0 rounded border border-line bg-paper px-1.5 py-px text-[10px] text-ink-faint">
+                    {(transcript.origin === 'subtitle' ? t('字幕') : t('语音识别')) +
+                      // 语言来源跟着字幕走（ai-zh = B 站 AI 生成；zh-Hans 等是 UP 传的 CC）：
+                      // 「对不上视频」这类报告，先看这一格说的是哪个来源
+                      (transcript.language
+                        ? ' · ' +
+                          (transcript.language === 'ai-zh'
+                            ? t('AI 中文字幕')
+                            : /^(zh-Hans|zh-CN)$/i.test(transcript.language)
+                              ? t('中文字幕')
+                              : transcript.language)
+                        : '')}
+                  </span>
+                ) : null}
           </div>
           {/* 转录面板：mask 挂外层、滚动留内层（见 scrollFade 的说明），点击行 seek 播放器 */}
           <div

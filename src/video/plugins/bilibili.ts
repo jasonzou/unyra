@@ -168,7 +168,12 @@ export const bilibiliPlugin: VideoSourcePlugin = {
 
     return {
       mediaId: `bili:${m.bvid}:p${page.page ?? 1}`,
-      title: data?.title || page.part || m.bvid,
+      // 多 P 视频标题必须带 P 号与分 P 名：字幕与 mp4 都按 cid 取，不会串 P，
+      // 但「用户想看 P3、链接里却没带 p=」时会默默落到 P1——标题不写明，
+      // 「字幕和视频对不上」这种报告就没法一眼定位是哪一边错了
+      title:
+        (data?.title || page.part || m.bvid) +
+        ((page.page ?? 1) > 1 ? ` · P${page.page} ${page.part ?? ''}`.trimEnd() : ''),
       durationMs: Math.round((page.duration ?? data?.duration ?? 0) * 1000) || undefined,
       stream: {
         kind: 'url',

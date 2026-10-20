@@ -41,6 +41,8 @@ const dict: Record<string, string> = {
   /* ---------- 转录段面板 ---------- */
   '字幕': 'Subtitles',
   '语音识别': 'Speech-to-text',
+  'AI 中文字幕': 'AI Chinese',
+  '中文字幕': 'Chinese CC',
 
   /* ---------- 转录校验（src/video/transcript） ---------- */
   '转录稿不是合法对象': 'Transcript is not a valid object',
