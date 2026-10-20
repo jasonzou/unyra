@@ -13,7 +13,7 @@
 
 import { t } from '../i18n'
 import { native } from '../lib/native'
-import { normalizeTranscript } from './transcript'
+import { formatClock, normalizeTranscript } from './transcript'
 import { bilibiliPlugin } from './plugins/bilibili'
 import type { VideoPluginCtx, VideoResolveOptions, VideoSource, VideoSourcePlugin } from './types'
 
@@ -37,13 +37,40 @@ export function matchPlugin(input: string): VideoSourcePlugin {
   return plugin
 }
 
-/** 解析一次：匹配 → 插件 resolve → 转录统一归一校验。抛出的错误原样传给界面显示 */
+/**
+ * 字幕与视频的**时长对账**：字幕末段超出视频时长明显（余量 5 秒之外还超 10%）时
+ * 判为平台侧错配，拒之门外。实测确实存在——B 站 AI 字幕给过一条 13:20 的转写，
+ * 配的却是 7:39 的视频（字幕与 mp4 各自按 cid 取，错在平台侧的生成/缓存）。
+ * 脏字幕不进面板，transcriptError 带上两边的时长当证据。
+ */
+function vetTranscript(source: VideoSource): VideoSource {
+  if (!source.transcript || !source.durationMs) return source
+  const last = source.transcript.segments[source.transcript.segments.length - 1]
+  if (!last) return source
+  if (last.endMs > source.durationMs + 5_000 && last.endMs > source.durationMs * 1.1) {
+    return {
+      ...source,
+      transcript: undefined,
+      transcriptError: t(
+        '字幕时间轴到 {0}，视频只有 {1}——平台侧字幕错配，已拦截不显示',
+        formatClock(last.endMs),
+        formatClock(source.durationMs),
+      ),
+    }
+  }
+  return source
+}
+
+/** 解析一次：匹配 → 插件 resolve → 转录统一归一校验 + 时长对账。抛出的错误原样传给界面显示 */
 export async function resolveSource(input: string, opts: VideoResolveOptions): Promise<VideoSource> {
   const plugin = matchPlugin(input)
   const matched = plugin.match(input)
   if (!matched) throw new Error(t('没有插件支持这个输入：{0}', input.slice(0, 80)))
   const source = await plugin.resolve(matched, pluginCtx(), opts)
-  return source.transcript ? { ...source, transcript: normalizeTranscript(source.transcript) } : source
+  const normalized = source.transcript
+    ? { ...source, transcript: normalizeTranscript(source.transcript) }
+    : source
+  return vetTranscript(normalized)
 }
 
 /** 把插件的流地址登记成 media-relay 中转地址（每次播放前调用；见 shared/ipc 的说明） */

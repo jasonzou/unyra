@@ -109,6 +109,9 @@ async function fetchTranscript(
     subs[0]
   if (!sub?.subtitle_url) return undefined
   const subUrl = sub.subtitle_url.startsWith('//') ? `https:${sub.subtitle_url}` : sub.subtitle_url
+  // 平台侧出过「字幕与视频错配」（13 分钟的转写配 7 分钟的视频）：把选中的字幕条目
+  // 打到控制台留证据，devtools 里搜 [video] 就能拿到 subtitle_url 对质
+  console.debug('[video] B 站字幕条目：', sub.lan, sub.lan_doc, subUrl)
   const json = await getJson<{ body?: Array<{ from?: number; to?: number; content?: string }> }>(ctx, subUrl, opts)
   const segments = (json.body ?? []).map((cue) => ({
     startMs: Math.round((cue.from ?? 0) * 1000),

@@ -32,6 +32,8 @@ const dict: Record<string, string> = {
   '这条来源没有字幕：AI 字幕通常需要登录——点右上角齿轮填入 SESSDATA 后重试。':
     'No subtitles for this source: AI subtitles usually require login — open the gear in the top right, fill in SESSDATA and retry.',
   '字幕获取失败：{0}': 'Failed to fetch subtitles: {0}',
+  '字幕时间轴到 {0}，视频只有 {1}——平台侧字幕错配，已拦截不显示':
+    'Subtitles run to {0} but the video is only {1} — a platform-side subtitle mismatch; blocked from display',
   '获取：浏览器登录 B 站 → F12 → 应用（Application）→ Cookies → www.bilibili.com → 复制「SESSDATA」的值粘贴到这里。':
     'How to get it: log in to bilibili.com in your browser → F12 → Application → Cookies → www.bilibili.com → copy the value of "SESSDATA" and paste it here.',
   '只粘贴 Value 本身（带 SESSDATA= 前缀也能存，会自动剥掉）':
