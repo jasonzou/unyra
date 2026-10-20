@@ -4702,7 +4702,10 @@ export default function LearnWorkspace({
             gTab.ref.kind !== 'agentSettings' &&
             gTab.ref.kind !== 'outline' &&
             gTab.ref.kind !== 'newGoal' &&
-            gTab.ref.kind !== 'draft' && (
+            gTab.ref.kind !== 'draft' &&
+            // 视频学习页（实验）也不画：大纲/视图切换对播放器没有意义，纯净阅读
+            // 仍可用 F11（用户定的：这一页右上角不要按钮组）
+            gTab.ref.kind !== 'video' && (
             <DocFloat
               /*
                * key 绑「格 + 节点」：换节点时重挂，各块 tip 的展开状态自然回到收起；

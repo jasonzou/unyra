@@ -53,6 +53,9 @@ interface BiliViewData {
   data?: {
     title?: string
     duration?: number
+    /** 视频所属合集（UGC 合集）：有它才去拉 seasons_archives_list */
+    season_id?: number
+    owner?: { mid?: number }
     pages?: Array<{ page?: number; cid?: number; duration?: number; part?: string }>
   }
 }
@@ -70,6 +73,16 @@ interface BiliPlayerData {
     subtitle?: {
       subtitles?: Array<{ lan?: string; lan_doc?: string; subtitle_url?: string }>
     }
+  }
+}
+
+/** 合集列表（seasons_archives_list）：meta 带合集名，archives 是合集里的全部视频 */
+interface BiliSeasonData {
+  code: number
+  message?: string
+  data?: {
+    meta?: { name?: string; total?: number }
+    archives?: Array<{ bvid?: string; title?: string; duration?: number }>
   }
 }
 
@@ -174,6 +187,36 @@ export const bilibiliPlugin: VideoSourcePlugin = {
       transcriptError = err instanceof Error ? err.message : String(err)
     }
 
+    // 4. 合集（可选产出）：视频带 season_id 时拉一次合集列表（一次 100 条，缺
+    //    page_num 接口会回 -400）。取不到不挡播放——合集只是切换的便利，不是必须
+    let collection: VideoSource['collection']
+    try {
+      const seasonId = data?.season_id
+      const mid = data?.owner?.mid
+      if (seasonId && mid) {
+        const list = await getJson<BiliSeasonData>(
+          ctx,
+          `https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=${mid}&season_id=${seasonId}&page_num=1&page_size=100&sort_reverse=false`,
+          opts,
+        )
+        const meta = list.data?.meta
+        const archives = (list.data?.archives ?? []).filter((a) => typeof a.bvid === 'string' && a.bvid)
+        if (meta?.name && archives.length) {
+          collection = {
+            name: String(meta.name),
+            items: archives.map((a) => ({
+              source: `https://www.bilibili.com/video/${a.bvid}`,
+              title: String(a.title ?? ''),
+              durationMs: Math.round((a.duration ?? 0) * 1000) || undefined,
+              current: a.bvid === m.bvid,
+            })),
+          }
+        }
+      }
+    } catch {
+      collection = undefined
+    }
+
     return {
       mediaId: `bili:${m.bvid}:p${page.page ?? 1}`,
       // 多 P 视频标题必须带 P 号与分 P 名：字幕与 mp4 都按 cid 取，不会串 P，
@@ -191,6 +234,7 @@ export const bilibiliPlugin: VideoSourcePlugin = {
       },
       transcript,
       ...(transcriptError ? { transcriptError } : {}),
+      ...(collection ? { collection } : {}),
     }
   },
 }

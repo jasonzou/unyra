@@ -57,30 +57,35 @@ export default function VideoStudyTab() {
   /** 播放推进到哪一段：段间空隙（-1）时全部行保持素净 */
   const activeIdx = segments.length ? segmentIndexAt(segments, currentMs) : -1
 
-  /** 解析 → 登记流 → 更新整页状态。错误原话进横幅（库抛什么显示什么，不做预判文案） */
-  const resolve = useCallback(async () => {
-    const text = input.trim()
-    if (!text || busy) return
-    setBusy(true)
-    setError(null)
-    setTranscriptNote(null)
-    try {
-      const src = await resolveSource(text, { sessdata: readSessdata() })
-      const url = await openRelayStream(src)
-      setSource(src)
-      setRelayUrl(url)
-      setTranscript(src.transcript ?? null)
-      // 三种状态说三种话：拿到了 / 试过但失败（原话上屏）/ 真没有
-      if (src.transcript) setTranscriptNote(null)
-      else if (src.transcriptError) setTranscriptNote(t('字幕获取失败：{0}', src.transcriptError))
-      else setTranscriptNote(t('这条来源没有字幕：AI 字幕通常需要登录——点右上角齿轮填入 SESSDATA 后重试。'))
-      setCurrentMs(0)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }, [busy, input])
+  /** 解析 → 登记流 → 更新整页状态。错误原话进横幅（库抛什么显示什么，不做预判文案）。
+   *  收一个显式入参：工具条吃输入框的值，合集列表点切换时吃那一项的来源串。 */
+  const runResolve = useCallback(
+    async (text: string) => {
+      if (!text || busy) return
+      setBusy(true)
+      setError(null)
+      setTranscriptNote(null)
+      try {
+        const src = await resolveSource(text, { sessdata: readSessdata() })
+        const url = await openRelayStream(src)
+        setSource(src)
+        setRelayUrl(url)
+        setTranscript(src.transcript ?? null)
+        // 三种状态说三种话：拿到了 / 试过但失败（原话上屏）/ 真没有
+        if (src.transcript) setTranscriptNote(null)
+        else if (src.transcriptError) setTranscriptNote(t('字幕获取失败：{0}', src.transcriptError))
+        else setTranscriptNote(t('这条来源没有字幕：AI 字幕通常需要登录——点右上角齿轮填入 SESSDATA 后重试。'))
+        setCurrentMs(0)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [busy],
+  )
+
+  const resolve = useCallback(() => void runResolve(input.trim()), [runResolve, input])
 
   /** 点转录段 → 播放器 seek 到段首并起播 */
   const seekMs = useCallback((ms: number) => {
@@ -243,18 +248,61 @@ export default function VideoStudyTab() {
       {/* 正文：上播放器、下转录面板；没解析过时整片是引导空态 */}
       {source && relayUrl ? (
         <>
-          <div className="flex h-[46%] shrink-0 items-center justify-center bg-black">
-            {/* key 绑流地址：重新解析换一条流时整只元素重建，播放状态清零是最诚实的表现 */}
-            <video
-              key={relayUrl}
-              ref={videoRef}
-              src={relayUrl}
-              controls
-              autoPlay
-              onTimeUpdate={(e) => setCurrentMs(e.currentTarget.currentTime * 1000)}
-              onSeeked={(e) => setCurrentMs(e.currentTarget.currentTime * 1000)}
-              className="h-full w-full object-contain"
-            />
+          {/* 视频与合集同一排（用户定的）：200px 高度够看清画面，省下的高度给转录面板；
+              有合集时列表贴在视频右侧同高，点一项就地切换（重走一遍 resolve） */}
+          <div className="flex h-[200px] shrink-0">
+            <div className="min-h-0 min-w-0 flex-1 bg-black">
+              {/* key 绑流地址：重新解析换一条流时整只元素重建，播放状态清零是最诚实的表现 */}
+              <video
+                key={relayUrl}
+                ref={videoRef}
+                src={relayUrl}
+                controls
+                autoPlay
+                onTimeUpdate={(e) => setCurrentMs(e.currentTarget.currentTime * 1000)}
+                onSeeked={(e) => setCurrentMs(e.currentTarget.currentTime * 1000)}
+                className="h-full w-full object-contain"
+              />
+            </div>
+            {source.collection && (
+              <div className="flex w-[248px] shrink-0 flex-col border-l border-line bg-card/40">
+                <div className="shrink-0 truncate border-b border-line/60 px-2 py-1 text-[10.5px] font-medium text-ink-soft">
+                  {t('合集')} · {source.collection.name}
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto py-0.5">
+                  {source.collection.items.map((item) => (
+                    <button
+                      key={item.source}
+                      type="button"
+                      title={item.title}
+                      disabled={busy}
+                      onClick={() => void runResolve(item.source)}
+                      className={
+                        'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition disabled:opacity-50 ' +
+                        (item.current ? 'bg-seal/10' : 'hover:bg-line/50')
+                      }
+                    >
+                      <span
+                        className={
+                          'w-10 shrink-0 text-right font-mono text-[10px] ' +
+                          (item.current ? 'text-seal' : 'text-ink-faint')
+                        }
+                      >
+                        {item.durationMs ? formatClock(item.durationMs) : '--:--'}
+                      </span>
+                      <span
+                        className={
+                          'min-w-0 flex-1 truncate text-[11px] ' +
+                          (item.current ? 'font-medium text-ink-strong' : 'text-ink')
+                        }
+                      >
+                        {item.title}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2 border-b border-line bg-card/40 px-3 py-1.5">
             <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">{source.title}</span>

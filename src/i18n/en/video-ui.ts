@@ -45,6 +45,7 @@ const dict: Record<string, string> = {
   '语音识别': 'Speech-to-text',
   'AI 中文字幕': 'AI Chinese',
   '中文字幕': 'Chinese CC',
+  '合集': 'Collection',
 
   /* ---------- 转录校验（src/video/transcript） ---------- */
   '转录稿不是合法对象': 'Transcript is not a valid object',

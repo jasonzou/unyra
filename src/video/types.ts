@@ -66,6 +66,21 @@ export interface VideoSource {
    * 失败原因吞掉的话，配了登录态的用户只会看到一句误导的「需要登录」。
    */
   transcriptError?: string
+  /**
+   * 视频所属的**合集/列表**（拿得到就给，拿不到就省略——不算失败）：
+   * UI 据此做「与视频同排」的快速切换。items 的 source 是**能被同一个插件
+   * 再解析**的输入串（B 站就是视频链接），切换 = 拿它重走一遍 resolve。
+   */
+  collection?: {
+    name: string
+    items: Array<{
+      source: string
+      title: string
+      durationMs?: number
+      /** 是不是当前解析到的这一条 */
+      current?: boolean
+    }>
+  }
 }
 
 /** 插件解析时能用的宿主能力：API 请求走主进程通道（渲染层发不出防盗链头） */
