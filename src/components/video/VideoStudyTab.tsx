@@ -16,7 +16,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clapperboard, Loader2, MonitorPlay, Settings2 } from 'lucide-react'
 import { t } from '../../i18n'
 import { isWeb } from '../../lib/native'
-import { useDismissOn } from '../../lib/useDismiss'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
 import { openRelayStream, resolveSource } from '../../video/registry'
 import { formatClock, segmentIndexAt } from '../../video/transcript'
@@ -171,9 +170,6 @@ export default function VideoStudyTab() {
           >
             <Settings2 size={15} />
           </button>
-          {sessOpen && (
-            <SessPopover draft={sessDraft} onDraft={setSessDraft} onSave={saveSessdata} onClose={() => setSessOpen(false)} />
-          )}
           {sessSaved && !sessOpen && (
             <span className="absolute right-0 top-full mt-1 whitespace-nowrap rounded-md border border-line bg-card px-2 py-1 text-[10.5px] text-ink-soft shadow-sm">
               {t('已保存')}
@@ -181,6 +177,46 @@ export default function VideoStudyTab() {
           )}
         </div>
       </div>
+
+      {/*
+        登录设置做成**工具条下方的内联展开行**，而不是浮层：文档区页签容器带
+        transform / overflow 裁剪，浮层的 fixed 定位会被劫持成「相对那个容器」，
+        弹出来就是一条被裁剩的缝盖在按钮上（实测）。内联行躺在正常文档流里，
+        谁也挡不住它。
+      */}
+      {sessOpen && (
+        <div className="shrink-0 border-b border-line bg-card/40 px-3 py-2">
+          <div className="text-[12px] font-medium text-ink-strong">{t('B 站登录态（SESSDATA，可选）')}</div>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+            {t('AI 字幕通常要登录后才拿得到。值只存本机（浏览器存储），随请求发给 B 站。')}
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              value={sessDraft}
+              onChange={(e) => setSessDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveSessdata()
+              }}
+              placeholder="SESSDATA=…"
+              className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-2.5 py-1.5 font-mono text-[11.5px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/50 focus:ring-2 focus:ring-seal/10"
+            />
+            <button
+              type="button"
+              onClick={() => setSessOpen(false)}
+              className="shrink-0 rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-soft transition hover:bg-line/60"
+            >
+              {t('取消')}
+            </button>
+            <button
+              type="button"
+              onClick={saveSessdata}
+              className="shrink-0 rounded-lg bg-seal px-2.5 py-1.5 text-[11.5px] font-medium text-white transition hover:bg-seal-deep"
+            >
+              {t('保存')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 错误横幅：解析或登记流的失败原话 */}
       {error && (
@@ -272,62 +308,6 @@ export default function VideoStudyTab() {
           </p>
         </div>
       )}
-    </div>
-  )
-}
-
-/**
- * SESSDATA 小弹层：实验期的登录态入口。
- * 正式形态是设置页的一块（插件凭据统一管理）；先就地放着，链路通了再挪。
- */
-function SessPopover({
-  draft,
-  onDraft,
-  onSave,
-  onClose,
-}: {
-  draft: string
-  onDraft: (v: string) => void
-  onSave: () => void
-  onClose: () => void
-}) {
-  const ref = useRef<HTMLDivElement | null>(null)
-  useDismissOn({ onClose })
-  return (
-    <div
-      ref={ref}
-      onMouseDown={(e) => e.stopPropagation()}
-      className="moji-in-soft fixed z-[70] w-[300px] rounded-xl border border-line-strong bg-card p-3 shadow-[0_12px_36px_rgba(31,27,23,0.24)]"
-    >
-      <div className="text-[12px] font-medium text-ink-strong">{t('B 站登录态（SESSDATA，可选）')}</div>
-      <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-        {t('AI 字幕通常要登录后才拿得到。值只存本机（浏览器存储），随请求发给 B 站。')}
-      </p>
-      <input
-        value={draft}
-        onChange={(e) => onDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') onSave()
-        }}
-        placeholder="SESSDATA=…"
-        className="mt-2 w-full rounded-lg border border-line bg-transparent px-2.5 py-1.5 font-mono text-[11.5px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/50 focus:ring-2 focus:ring-seal/10"
-      />
-      <div className="mt-2 flex items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-soft transition hover:bg-line/60"
-        >
-          {t('取消')}
-        </button>
-        <button
-          type="button"
-          onClick={onSave}
-          className="rounded-lg bg-seal px-2.5 py-1.5 text-[11.5px] font-medium text-white transition hover:bg-seal-deep"
-        >
-          {t('保存')}
-        </button>
-      </div>
     </div>
   )
 }
