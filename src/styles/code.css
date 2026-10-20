@@ -324,6 +324,44 @@
 .moji-plot-error {
   border-color: color-mix(in srgb, var(--color-seal) 35%, transparent);
 }
+/* 图标按钮与报错文案同一行：图标无底无边，纯靠颜色示意可点（用户定的样式） */
+.moji-plot-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.moji-plot-row .moji-plot-msg {
+  flex: 1;
+  min-width: 0;
+  /* 行高定死，图标的对齐偏移才算得准（见 .moji-plot-fix 的 margin） */
+  line-height: 20px;
+}
+.moji-plot-fix {
+  flex-shrink: 0;
+  /* 与第一行文字垂直居中：msg 顶部内边距 6px + (20-16)/2 */
+  margin: 8px 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-seal-deep);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.moji-plot-fix svg {
+  width: 14px;
+  height: 14px;
+}
+.moji-plot-fix:hover:not(:disabled) {
+  color: var(--color-seal);
+}
+.moji-plot-fix:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .moji-plot-msg {
   padding: 6px 2px;
   font-size: 12.5px;

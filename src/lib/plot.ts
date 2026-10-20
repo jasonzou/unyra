@@ -170,6 +170,15 @@ function hydrateOne(el: HTMLElement): (() => void) | null {
       // function-plot 是追加式渲染，重绘前先清空，避免叠出多张图
       stage.replaceChildren()
       plot({ ...opts, data, target: stage, width, height, disableZoom: opts.disableZoom ?? true })
+      /*
+        画完了，也可能是**一张什么都没有的图**：表达式在区间内无取值时（定义域外、
+        分母为零、变量名不是 x），区间采样器返回空集——plot() 不抛错，SVG 里只剩坐标轴。
+        这种静默留白用户看不出任何原因，所以在这里补一句。
+      */
+      if (!hasDrawableLine(stage)) {
+        fail(el, stage, t('函数图像没有画出可见曲线：表达式在绘图区间内没有取值（定义域外、分母为零，或变量名不是 x）。请检查表达式与 xAxis / yAxis 的区间'), raw)
+        return
+      }
       // 占位期那一行是**估算**（见 lib/markdown 的 plotReserve）：画完就换成真实高度。
       // 换的是一个 0.x 像素级的修正，肉眼看不见，但从此这个坑的深度就是确定的
       stage.style.aspectRatio = 'auto'
@@ -182,9 +191,15 @@ function hydrateOne(el: HTMLElement): (() => void) | null {
       if (opts.disableZoom !== false) guardScroll(stage, detach)
       lastWidth = width
     } catch (err) {
-      // 给用户看的是「检查表达式与参数」这句，原始异常只进控制台——排查全靠它
+      /*
+        真实异常要**显示给用户**，不能只丢控制台：绘图库抛出来的类型错误（例如
+        "Cannot create property 'type' on string 'x'"）本身就是最准确的排查线索，
+        一句「请检查表达式与参数」等于什么都没说。
+        控制台仍然留一份（带堆栈），卡片上给一句人话 + 原始报错。
+      */
       console.warn('函数图像绘制失败', err)
-      fail(el, stage, t('函数图像绘制失败，请检查表达式与参数'), raw)
+      const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      fail(el, stage, t('函数图像绘制失败：{0}', detail), raw)
     }
   }
 
@@ -306,6 +321,62 @@ function guardScroll(stage: HTMLElement, detach: Array<() => void>): void {
   }
 }
 
+/**
+ * 图上到底有没有画出线。
+ *
+ * 判据看 function-plot 的产物而不是表达式本身：区间采样器对每条 series 都会建一个
+ * `path.line`，采不出点时这个元素仍在、只是 `d` 是空串——所以「有元素但没有可画的 d」
+ * 正是「表达式在这段区间里没有取值」。散点走 `circle`（没有 path.line），这条判据管不到，
+ * 直接放过，免得把一张正常的散点图误判成失败。
+ */
+function hasDrawableLine(stage: HTMLElement): boolean {
+  const lines = stage.querySelectorAll('path.line')
+  if (!lines.length) return true
+  for (const p of Array.from(lines)) {
+    const d = p.getAttribute('d') ?? ''
+    // 至少两个绘制命令才算一条线；只有一个 M 的点画不出来
+    if (d.length > 4 && (d.match(/[ML]/g)?.length ?? 0) >= 2) return true
+  }
+  return false
+}
+
+/* ---------- 修复入口：把报错交回给导师 ---------- */
+
+/**
+ * 「让导师修复」按钮的落点，由宿主（LearnWorkspace）挂载时登记——与 chip 的
+ * opener 同一套模式：lib 只管把报错打包递出去，发给谁、怎么发它不认识。
+ * 没登记（静态导出、独立预览）就不出按钮。
+ */
+type PlotFixHandler = (p: { reason: string; source: string }) => void
+
+let plotFixHandler: PlotFixHandler | null = null
+
+export function setPlotFixHandler(fn: PlotFixHandler | null): void {
+  plotFixHandler = fn
+}
+
+function fixButton(reason: string, source: string): HTMLButtonElement | null {
+  if (!plotFixHandler) return null
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'moji-plot-fix'
+  // 无文字：图标就是全部，说明放 title / aria-label
+  btn.title = t('让导师修复')
+  btn.setAttribute('aria-label', btn.title)
+  // 扳手（lucide 的 wrench 路径，同 stroke 口径）：手绘内联，lib 层不引 React
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94' +
+    'l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>'
+  btn.addEventListener('click', () => {
+    btn.disabled = true
+    btn.title = t('已把报错发给导师')
+    plotFixHandler?.({ reason, source })
+  })
+  return btn
+}
+
 function fail(el: HTMLElement, stage: HTMLElement, message: string, source: string): void {
   el.classList.add('moji-plot-error')
   el.querySelector('.moji-plot-hint')?.remove()
@@ -319,7 +390,16 @@ function fail(el: HTMLElement, stage: HTMLElement, message: string, source: stri
   const code = document.createElement('code')
   code.textContent = source
   pre.appendChild(code)
-  stage.replaceChildren(box, pre)
+  /*
+    图标按钮与报错文案**同一行**：图标在前、无底无边，纯靠颜色示意可点
+    （用户定的样式）。没有宿主登记时按钮缺席，文案单独一行。
+  */
+  const row = document.createElement('div')
+  row.className = 'moji-plot-row'
+  const btn = fixButton(message, source)
+  if (btn) row.appendChild(btn)
+  row.appendChild(box)
+  stage.replaceChildren(row, pre)
 }
 
 /**
@@ -336,4 +416,5 @@ function fail(el: HTMLElement, stage: HTMLElement, message: string, source: stri
  */
 export const PLOT_SYNTAX_GUIDE = `函数图像：用三个反引号 + plot 包一段 JSON 插入可交互图像（如 \`\`\`plot { "data": [{ "fn": "x^2" }] } \`\`\`）。
 - 支持 title, xAxis, yAxis, data, annotations；支持 LaTeX 公式。
+- **xAxis / yAxis 是设置对象，不是变量名**：想控制显示范围就写 { "xAxis": { "domain": [-5, 5] } }；写成 "xAxis": "x" 会直接报错。函数变量固定用 x（参数方程用 t，极坐标用 theta），不需要声明。
 - 表达式写明乘号 (*)，开方写 sqrt(x) 或 nthRoot(x, 3)，避免分数指数。极坐标/参数方程等高级形态写出图像时由 \`plot-forms\` 自动注入。`

@@ -628,6 +628,11 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     wrapApi(api, 'chip.build', (args) => chipOps.build(asRecord(args[0])), log)
     wrapApi(api, 'chip.check', (args) => chipOps.check(asText(args[0])), log)
   }
+  // 这一轮的交付账（文件变动 / 参考引证）：宿主收在本轮消息上，见 agent/delivery
+  if (opts.delivery) {
+    const delivery = opts.delivery
+    wrapApi(api, 'delivery.submit', (args) => delivery.submit(asRecord(args[0])), log)
+  }
   // 网络搜索与网页抓取（基于 DeepSeek 官方 Search API 与 Fetch API）
   if (opts.web) {
     const web = opts.web

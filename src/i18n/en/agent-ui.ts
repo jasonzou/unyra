@@ -154,6 +154,8 @@ const dict: Record<string, string> = {
   '（只有附件）': '(attachments only)',
   '{0} 张图': '{0} image(s)',
   '{0} 个文件': '{0} file(s)',
+  '本轮交付': 'Delivered',
+  '参考来源': 'Sources',
   '撤回': 'Withdraw',
   '撤回：这条不再发送': 'Withdraw: this message will not be sent',
   '立即发送': 'Send now',

@@ -174,7 +174,8 @@ import {
   revealResource,
   subscribeResources,
 } from '../../learn/static'
-import { nodePathOf } from '../../learn/paths'
+import { nodePathOf, resolveNode } from '../../learn/paths'
+import { setPlotFixHandler } from '../../lib/plot'
 import { nodeDocPath } from '../../learn/files'
 import { createNodeDocImageResolver, type LocalImageResolver } from '../../lib/docImages'
 import { revealLocalFile, revealPath, revealUserPath, userAbsPath, listUserDir, mkdirUserPath, moveUserPath, copyUserPath, writeUserText } from '../../lib/storage'
@@ -3296,11 +3297,42 @@ export default function LearnWorkspace({
         return
       }
       const ref = tabRefFromChip(s, p)
-      if (!ref) {
-        onToast(t('这条引用对应的文档已经不在了'))
+      if (ref) {
+        openTab(ref)
         return
       }
-      openTab(ref)
+      /*
+        打开失败先别报「已经不在了」——**路径写法可能不一样**。
+        chip 的 path 认的是磁盘文件路径（docs/…/教学.md），而交付登记
+        （api.delivery.submit 的 files[].path）与手写 chip 常写「目标/节点」这种
+        **节点路径**，末尾还可能跟着「/教学」「/讲义」这类文档类型词。两者对不上，
+        文档明明在也会被误报成失效。
+
+        退一步按节点路径解析一次：剥掉末尾的类型词，逐目标试（节点量级几十个，
+        点击时跑一次无所谓）。解析到了就打开它的教学文档。
+      */
+      if (p.type === 'doc' && p.path) {
+        const wanted = p.path.replace(/\/(教学|讲义|笔记|大纲|试卷)$/, '')
+        const norm = (v: string): string => v.replace(/\\/g, '/').trim().replace(/\/+$/, '')
+        // 先按「节点树路径原样」对一次：api.node.list 回的就是这种，模型多半直接抄
+        const exact = s.nodes.find(
+          (n) => !!n.goalId && norm(nodePathOf(s, n.goalId, n.id)) === norm(wanted),
+        )
+        if (exact) {
+          openTab({ kind: 'teach', nodeId: exact.id })
+          return
+        }
+        // 再按宽容口径解析（标题 / #id / 别名都认）
+        for (const g of s.goals) {
+          const got = resolveNode(s, { goalId: g.id, currentNodeId: null }, wanted)
+          if (got.ok) {
+            openTab({ kind: 'teach', nodeId: got.value.id })
+            return
+          }
+        }
+      }
+      onToast(t('这条引用对应的文档已经不在了'))
+      return
     },
     [getLatest, openTab, openWebTab, activateTab, selectNode, exam, onToast],
   )
@@ -3310,6 +3342,45 @@ export default function LearnWorkspace({
     setChipOpener(openChip)
     return () => setChipOpener(null)
   }, [openChip])
+
+  /*
+    plot 错误卡片上的「让导师修复」：以**工作流**（learn/workflows 的 plot-fix）注入——
+    隐藏指令、分界条一条，不是一条普通用户消息。报错原因、字符区间与围栏原文都算好
+    塞进 {{占位符}}；区间与 doc.replace 的参数同语义，agent 一轮就能改完。
+    目标是当前文档的节点——不是界面上此刻激活的那个导师页签（用户可能正看着 A 课的
+    文档，agent 栏开着 B 课）。登记模式与上面的 setChipOpener 相同。
+  */
+  useEffect(() => {
+    setPlotFixHandler(({ reason, source }) => {
+      const node = docNode
+      const convId = node ? resolveDisplayedConversation(getLatest(), node.goalId) : null
+      if (!node || !convId) {
+        onToast(t('这一页没有对应的导师会话，无法自动发送'))
+        return
+      }
+      /*
+        在当前文档源码里找这段围栏的 [start, end)：start 指向 ```plot 行首，
+        end 越过收尾的 ```。找不到（文档刚被改过、或这一页不是纯文本源）就如实给
+        [0, 0)，指令里会让 agent 先用 doc.find 定位——别给一个看似对的错区间。
+      */
+      const content = docSource?.content ?? ''
+      const range = findPlotFenceRange(content, source)
+      agent.runWorkflow('plot-fix', {
+        target: { goalId: node.goalId, nodeId: node.id, conversationId: convId },
+        params: {
+          nodeTitle: node.title,
+          reason,
+          path: nodePathOf(getLatest(), node.goalId, node.id),
+          range: range ? `[${range.start}, ${range.end})` : '[0, 0)（未能自动定位，文档可能刚被改过）',
+          start: range ? range.start : 0,
+          end: range ? range.end : 0,
+          source,
+        },
+      })
+      onToast(t('已把报错发给导师，请看对话栏'))
+    })
+    return () => setPlotFixHandler(null)
+  }, [docNode, getLatest, agent, onToast])
 
   /** 在资源管理器中定位某个目标的大纲文件（{节点}.outline.json，大纲行右键菜单用） */
   const revealOutlineFile = async (nodeId: string) => {
@@ -5233,4 +5304,22 @@ export default function LearnWorkspace({
       )}
     </div>
   )
+}
+
+/** 在文档源码里找包含 raw 的 ```plot 围栏：回 [start, end)，含首尾两行围栏标记 */
+function findPlotFenceRange(content: string, raw: string): { start: number; end: number } | null {
+  const body = raw.trim()
+  if (!body) return null
+  const marker = '```plot'
+  let from = 0
+  for (;;) {
+    const start = content.indexOf(marker, from)
+    if (start < 0) return null
+    const lineEnd = content.indexOf('\n', start + marker.length)
+    if (lineEnd < 0) return null
+    const close = content.indexOf('```', lineEnd)
+    if (close < 0) return null
+    if (content.slice(lineEnd + 1, close).trim() === body) return { start, end: close + 3 }
+    from = close + 3
+  }
 }

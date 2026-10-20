@@ -205,6 +205,8 @@ export interface SandboxOptions {
   userInfo?: UserInfoOps
   /** 引用 chip 的生成与校验（chip.build / chip.check，见 learn/ops/chip）；未注入就没有这一组 */
   chip?: ChipOps
+  /** 交付账（delivery.submit，见 agent/delivery）；由当轮宿主注入，未注入就没有这一组 */
+  delivery?: DeliveryOps
   /** 阻塞等待（wait，毫秒）；未注入就没有 wait */
   wait?: (ms: number) => Promise<void>
   /** 结构化表单询问（ask）：显示表单并阻塞到用户提交/取消；未注入就没有 ask */
@@ -580,6 +582,19 @@ export interface ChipOps {
   build: (input: Record<string, unknown>) => unknown
   /** 任意文本 → 逐颗解析其中的 #[{…}] 并验证定位 → { total, valid, invalid, problems? } */
   check: (text: string) => unknown
+}
+
+/* ---------- delivery：这一轮的交付账 ---------- */
+
+/**
+ * api.delivery.submit 的宿主实现：把「这轮交付了什么」记到本轮消息上。
+ *
+ * 为什么不让模型在正文里复述：正文写法每次都不同，界面没法统一展示，也留不下来
+ * （见 agent/delivery 的说明）。这里只收结构化数据，宿主按路径 / URL 去重合并。
+ */
+export interface DeliveryOps {
+  /** { files?: [{ path, action?, note? }], sources?: [{ title, url }] } → { ok, files, sources, error? } */
+  submit: (input: Record<string, unknown>) => unknown
 }
 
 /* ---------- method：目标级持久化函数 ---------- */

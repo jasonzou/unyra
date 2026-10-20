@@ -135,7 +135,13 @@ const dict: Record<string, string> = {
   '函数图像格式不正确（需要一段含 data 的 JSON）': 'The plot is malformed (a JSON object with data is required)',
   '函数图像组件加载失败：{0}': 'Failed to load the plot library: {0}',
   '函数图像组件加载失败': 'Failed to load the plot library',
-  '函数图像绘制失败，请检查表达式与参数': 'Plotting failed; please check the expression and parameters',
+  '函数图像绘制失败：{0}': 'Plotting failed: {0}',
+  /* ---------- plot 错误卡片上的「让导师修复」 ---------- */
+  '让导师修复': 'Ask the tutor to fix it',
+  '已把报错发给导师': 'Sent to the tutor',
+  '已把报错发给导师，请看对话栏': 'Sent to the tutor — see the chat panel',
+  '这一页没有对应的导师会话，无法自动发送': 'This page has no matching tutor conversation, so it cannot be sent automatically',
+  '函数图像没有画出可见曲线：表达式在绘图区间内没有取值（定义域外、分母为零，或变量名不是 x）。请检查表达式与 xAxis / yAxis 的区间': 'The plot drew no visible curve: the expression has no value over the plotted range (outside its domain, division by zero, or the variable is not x). Check the expression and the xAxis / yAxis range',
 
   /* ---------- lib/builtinPlugins.ts：plot 占位与回退 ---------- */
   '函数图像内容为空': 'The plot is empty',

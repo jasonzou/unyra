@@ -10,6 +10,7 @@ import type {
   MessageQuote,
   MessageUsage,
 } from '../../../agent/types'
+import { normalizeDelivery } from '../../../agent/delivery'
 import { applyCompaction } from '../../compact'
 import { recoverInterruptedTurn } from '../../agent/inflight'
 import { normalizeSubBucket } from '../../../agent/subagent/registry'
@@ -209,6 +210,8 @@ export function normalizeConversation(
       const usage = normalizeUsage(mr.usage)
       const images = normalizeImages(mr.images)
       const files = normalizeFiles(mr.files)
+      // 这一轮交付了什么（文件变动 / 参考引证）：形状钉死、去重、截断，见 agent/delivery
+      const delivery = normalizeDelivery(mr.delivery)
       /*
        * 失活是**相对摘要**才成立的：没有摘要（手改掉了，或老数据里那段正文已经没了）
        * 就不认这个标记——否则 toChatHistory 会把整段历史都当成「已经折进摘要」而一条都不发，
@@ -220,6 +223,7 @@ export function normalizeConversation(
         role: mr.role,
         parts,
         ...(usage ? { usage } : {}),
+        ...(delivery ? { delivery } : {}),
         ts: typeof mr.ts === 'number' ? mr.ts : now,
         ...(mr.hidden === true ? { hidden: true } : {}),
         /*
