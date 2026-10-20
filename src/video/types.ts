@@ -81,6 +81,19 @@ export interface VideoSource {
       current?: boolean
     }>
   }
+  /**
+   * 当前视频的**分 P（选集）列表**：与合集同构，层级是 合集 > 视频 > 选集。
+   * 每项的 source 带 `?p=N`（插件认这个参数切分 P），批量导出按它逐 P 拿字幕。
+   * 单 P 视频省略（一节的「选集列表」是噪音）。
+   */
+  pages?: Array<{
+    source: string
+    page: number
+    title: string
+    durationMs?: number
+    /** 是不是当前解析到的这一 P */
+    current?: boolean
+  }>
 }
 
 /** 插件解析时能用的宿主能力：API 请求走主进程通道（渲染层发不出防盗链头） */

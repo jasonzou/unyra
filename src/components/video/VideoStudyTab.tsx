@@ -18,7 +18,7 @@ import { t } from '../../i18n'
 import { isWeb, native } from '../../lib/native'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
 import { openRelayStream, resolveSource, resolveTranscriptOnly } from '../../video/registry'
-import { buildCollectionMarkdown, type CollectionExportEntry } from '../../video/export'
+import { buildPagesMarkdown, type PagesExportEntry } from '../../video/export'
 import { formatClock, segmentIndexAt } from '../../video/transcript'
 import type { Transcript, VideoSource } from '../../video/types'
 
@@ -128,38 +128,52 @@ export default function VideoStudyTab() {
   const resolve = useCallback(() => void runResolve(input.trim()), [runResolve, input])
 
   /**
-   * 批量导出合集字幕：逐条只取转录（专用通道，跳过播放地址）→ 拼一个 Markdown →
-   * 原生保存对话框落盘。一条失败不炸全局（那一节写「字幕缺失：原因」）；
-   * 一条条来并留 150ms 间隙，别把 B 站风控招来（86 条约一分钟，进度在动就不觉得慢）。
+   * 批量导出**当前视频全部分 P** 的选集字幕：逐 P 只取转录（专用通道，跳过播放地址）
+   * → 拼一个 Markdown → 原生保存对话框落盘。一 P 失败不炸全局（那一节写
+   * 「字幕缺失：原因」）；一条条来并留 150ms 间隙，别把 B 站风控招来。
    */
-  const exportCollection = useCallback(async () => {
-    const col = source?.collection
-    if (!col || exportProgress) return
-    setExportProgress({ done: 0, total: col.items.length })
-    const entries: CollectionExportEntry[] = []
+  const exportPages = useCallback(async () => {
+    const pages = source?.pages
+    if (!pages || !source || exportProgress) return
+    setExportProgress({ done: 0, total: pages.length })
+    const entries: PagesExportEntry[] = []
     try {
-      for (let i = 0; i < col.items.length; i++) {
-        const item = col.items[i]
-        const entry: CollectionExportEntry = { title: item.title, durationMs: item.durationMs, source: item.source }
+      for (let i = 0; i < pages.length; i++) {
+        const item = pages[i]
+        const entry: PagesExportEntry = {
+          page: item.page,
+          title: item.title,
+          durationMs: item.durationMs,
+          source: item.source,
+        }
         try {
           entry.transcript = await resolveTranscriptOnly(item.source, { sessdata: readSessdata() })
         } catch (err) {
           entry.error = err instanceof Error ? err.message : String(err)
         }
         entries.push(entry)
-        setExportProgress({ done: i + 1, total: col.items.length })
-        if (i < col.items.length - 1) await new Promise((r) => window.setTimeout(r, 150))
+        setExportProgress({ done: i + 1, total: pages.length })
+        if (i < pages.length - 1) await new Promise((r) => window.setTimeout(r, 150))
       }
-      const md = buildCollectionMarkdown(col.name, entries)
-      const safeName = col.name.replace(/[\\/:*?"<>|]/g, '_')
-      const res = await native().saveText({ suggestedName: `${safeName}.md`, content: md, title: t('导出合集字幕') })
+      // 视频级来源链接从任一分 P 的 source 里抠 BV 号拼回（分 P 的 source 都带 ?p=N）
+      const bvid = /BV[0-9A-Za-z]{10}/.exec(pages[0]?.source ?? '')?.[0]
+      const md = buildPagesMarkdown(
+        {
+          title: source.title,
+          durationMs: source.durationMs,
+          source: bvid ? `https://www.bilibili.com/video/${bvid}` : (input.trim() || source.mediaId),
+        },
+        entries,
+      )
+      const safeName = source.title.replace(/[\\/:*?"<>|]/g, '_')
+      const res = await native().saveText({ suggestedName: `${safeName}.md`, content: md, title: t('导出选集字幕') })
       if (!res.ok && !res.canceled) setError(res.error ?? t('导出失败'))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setExportProgress(null)
     }
-  }, [source, exportProgress])
+  }, [source, exportProgress, input])
 
   /** 点转录段 → 播放器 seek 到段首并起播 */
   const seekMs = useCallback((ms: number) => {
@@ -339,7 +353,7 @@ export default function VideoStudyTab() {
                 className="h-full w-full object-contain"
               />
             </div>
-            {source.collection && (
+            {(source.collection || source.pages) && (
               <>
                 {/*
                   收起/展开的开关条：常驻（收起后它是唯一入口）。图标方向 = 点击后
@@ -356,8 +370,10 @@ export default function VideoStudyTab() {
                   {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
                 </button>
                 {/*
-                  宽度过渡（w-0 ↔ w-320）+ overflow-hidden：面板滑出/滑入。
+                  宽度过渡（w-0 ↔ 320px）+ overflow-hidden：面板滑出/滑入。
                   内容层钉死 320px——宽度动画期间文字不许跟着重排，只许被裁掉。
+                  列表是**三级树**（合集 > 视频 > 选集）：合集一段、选集一段，
+                  共用一个滚动容器；导出挂在选集段头上（导出的单位是视频的全部分 P）。
                 */}
                 <div
                   className={
@@ -366,61 +382,103 @@ export default function VideoStudyTab() {
                   }
                 >
                   <div className="flex h-full w-[320px] flex-col border-l border-line bg-card/40">
-                    <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-2 py-1">
-                      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-ink-soft">
-                        {t('合集')} · {source.collection.name}
-                      </span>
-                      <button
-                        type="button"
-                        title={
-                          exportProgress
-                            ? t('导出中 {0}/{1}', String(exportProgress.done), String(exportProgress.total))
-                            : t('导出合集字幕（全部视频的转录合并为一个 Markdown）')
-                        }
-                        disabled={!!exportProgress || busy}
-                        onClick={() => void exportCollection()}
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-faint transition hover:bg-line/60 hover:text-ink disabled:opacity-50"
-                      >
-                        {exportProgress ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                      </button>
-                    </div>
-                    {exportProgress && (
-                      <div className="shrink-0 border-b border-line/60 px-2 py-0.5 text-[10.5px] text-ink-faint">
-                        {t('导出中 {0}/{1}', String(exportProgress.done), String(exportProgress.total))}
-                      </div>
-                    )}
-                    <div className="min-h-0 flex-1 overflow-y-auto py-0.5">
-                      {source.collection.items.map((item) => (
-                        <button
-                          key={item.source}
-                          type="button"
-                          title={item.title}
-                          disabled={busy}
-                          onClick={() => void runResolve(item.source)}
-                          className={
-                            'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition disabled:opacity-50 ' +
-                            (item.current ? 'bg-seal/10' : 'hover:bg-line/50')
-                          }
-                        >
-                          {/* 标题在前（12px），时长缀在后面——用户定的顺序 */}
-                          <span
-                            className={
-                              'min-w-0 flex-1 truncate text-[12px] ' +
-                              (item.current ? 'font-medium text-ink-strong' : 'text-ink')
-                            }
-                          >
-                            {item.title}
-                          </span>
-                          <span
-                            className={
-                              'shrink-0 font-mono text-[10.5px] ' +
-                              (item.current ? 'text-seal' : 'text-ink-faint')
-                            }
-                          >
-                            {item.durationMs ? formatClock(item.durationMs) : '--:--'}
-                          </span>
-                        </button>
-                      ))}
+                    <div className="min-h-0 flex-1 overflow-y-auto">
+                      {source.collection && (
+                        <>
+                          <div className="px-2 pb-0.5 pt-1.5 text-[10.5px] font-medium text-ink-faint">
+                            {t('合集')} · {source.collection.name}
+                          </div>
+                          {source.collection.items.map((item) => (
+                            <button
+                              key={item.source}
+                              type="button"
+                              title={item.title}
+                              disabled={busy}
+                              onClick={() => void runResolve(item.source)}
+                              className={
+                                'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition disabled:opacity-50 ' +
+                                (item.current ? 'bg-seal/10' : 'hover:bg-line/50')
+                              }
+                            >
+                              <span
+                                className={
+                                  'min-w-0 flex-1 truncate text-[12px] ' +
+                                  (item.current ? 'font-medium text-ink-strong' : 'text-ink')
+                                }
+                              >
+                                {item.title}
+                              </span>
+                              <span
+                                className={
+                                  'shrink-0 font-mono text-[10.5px] ' +
+                                  (item.current ? 'text-seal' : 'text-ink-faint')
+                                }
+                              >
+                                {item.durationMs ? formatClock(item.durationMs) : '--:--'}
+                              </span>
+                            </button>
+                          ))}
+                        </>
+                      )}
+                      {source.pages && (
+                        <>
+                          <div className="flex items-center gap-1 px-2 pb-0.5 pt-1.5">
+                            <span className="min-w-0 flex-1 truncate text-[10.5px] font-medium text-ink-faint">
+                              {t('选集')} · {source.pages.length}
+                            </span>
+                            <button
+                              type="button"
+                              title={
+                                exportProgress
+                                  ? t('导出中 {0}/{1}', String(exportProgress.done), String(exportProgress.total))
+                                  : t('导出选集字幕（全部分 P 的转录合并为一个 Markdown）')
+                              }
+                              disabled={!!exportProgress || busy}
+                              onClick={() => void exportPages()}
+                              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-faint transition hover:bg-line/60 hover:text-ink disabled:opacity-50"
+                            >
+                              {exportProgress ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                            </button>
+                          </div>
+                          {exportProgress && (
+                            <div className="px-2 pb-0.5 text-[10.5px] text-ink-faint">
+                              {t('导出中 {0}/{1}', String(exportProgress.done), String(exportProgress.total))}
+                            </div>
+                          )}
+                          {source.pages.map((item) => (
+                            <button
+                              key={item.source}
+                              type="button"
+                              title={item.title}
+                              disabled={busy}
+                              onClick={() => void runResolve(item.source)}
+                              className={
+                                'flex w-full items-center gap-2 rounded-md py-1 pl-4 pr-2 text-left transition disabled:opacity-50 ' +
+                                (item.current ? 'bg-seal/10' : 'hover:bg-line/50')
+                              }
+                            >
+                              {/* 选集缩进一格（树里的第三层），时长缀在标题后面 */}
+                              <span className="shrink-0 font-mono text-[10.5px] text-ink-faint">p{item.page}</span>
+                              <span
+                                className={
+                                  'min-w-0 flex-1 truncate text-[12px] ' +
+                                  (item.current ? 'font-medium text-ink-strong' : 'text-ink')
+                                }
+                              >
+                                {item.title}
+                              </span>
+                              <span
+                                className={
+                                  'shrink-0 font-mono text-[10.5px] ' +
+                                  (item.current ? 'text-seal' : 'text-ink-faint')
+                                }
+                              >
+                                {item.durationMs ? formatClock(item.durationMs) : '--:--'}
+                              </span>
+                            </button>
+                          ))}
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

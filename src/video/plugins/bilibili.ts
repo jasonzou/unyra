@@ -224,6 +224,22 @@ export const bilibiliPlugin: VideoSourcePlugin = {
       collection = undefined
     }
 
+    // 5. 分 P（选集）列表：多 P 才给（一节的「选集列表」是噪音）。每项的 source
+    //    带 ?p=N——插件认这个参数，点它/批量导出都靠它重新解析到对应分 P
+    const pageItems = (data?.pages ?? []).filter(
+      (p) => typeof p.page === 'number' && typeof p.cid === 'number',
+    )
+    const pages =
+      pageItems.length > 1
+        ? pageItems.map((p) => ({
+            source: `https://www.bilibili.com/video/${m.bvid}?p=${p.page}`,
+            page: p.page as number,
+            title: String(p.part || `P${p.page}`),
+            durationMs: Math.round((p.duration ?? 0) * 1000) || undefined,
+            current: p.page === page.page,
+          }))
+        : undefined
+
     return {
       mediaId: `bili:${m.bvid}:p${page.page ?? 1}`,
       // 多 P 视频标题必须带 P 号与分 P 名：字幕与 mp4 都按 cid 取，不会串 P，
@@ -242,6 +258,7 @@ export const bilibiliPlugin: VideoSourcePlugin = {
       transcript,
       ...(transcriptError ? { transcriptError } : {}),
       ...(collection ? { collection } : {}),
+      ...(pages ? { pages } : {}),
     }
   },
 
