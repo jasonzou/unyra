@@ -30,9 +30,11 @@ interface Props {
   onCreate: (tabId: string, draft: VideoCreateDraft) => void
   /** 解析成功回写标题 */
   onResolved: (videoId: string, title: string) => void
+  /** 播放进度（毫秒，已节流）：工作区写进视频资源，下次打开跳回 */
+  onProgress: (videoId: string, positionMs: number) => void
 }
 
-export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onResolved }: Props) {
+export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onResolved, onProgress }: Props) {
   return (
     <>
       {tabs.map((tab) => {
@@ -59,6 +61,9 @@ export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onReso
                 onCreate={videoId ? undefined : (draft) => onCreate(tab.id, draft)}
                 onResolved={(title) => {
                   if (videoId) onResolved(videoId, title)
+                }}
+                onProgress={(positionMs) => {
+                  if (videoId) onProgress(videoId, positionMs)
                 }}
               />
             )}

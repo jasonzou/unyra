@@ -4692,12 +4692,26 @@ export default function LearnWorkspace({
                 closeTab(groupId, tabId, 'self')
               }}
               onResolved={(videoId, title) => {
-                const list = store.videos ?? []
+                // 取最新一份再合并：进度写入是高频的，闭包里的 store 可能落后一拍
+                const latest = getLatest()
+                const list = latest.videos ?? []
                 const cur = list.find((v) => v.id === videoId)
                 if (!cur || cur.title === title) return
                 set({
-                  ...store,
+                  ...latest,
                   videos: list.map((v) => (v.id === videoId ? { ...v, title, updatedAt: Date.now() } : v)),
+                })
+              }}
+              onProgress={(videoId, positionMs) => {
+                const latest = getLatest()
+                const list = latest.videos ?? []
+                const cur = list.find((v) => v.id === videoId)
+                if (!cur) return
+                set({
+                  ...latest,
+                  videos: list.map((v) =>
+                    v.id === videoId ? { ...v, progress: { positionMs: Math.round(positionMs), updatedAt: Date.now() } } : v,
+                  ),
                 })
               }}
             />

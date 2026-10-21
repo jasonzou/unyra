@@ -62,9 +62,11 @@ interface Props {
   onCreate?: (draft: VideoCreateDraft) => void
   /** 解析成功回写标题（资源列表显示真实标题） */
   onResolved?: (title: string) => void
+  /** 播放进度（毫秒，节流后上报）：工作区写进视频资源，下次打开自动跳回 */
+  onProgress?: (positionMs: number) => void
 }
 
-export default function VideoStudyTab({ video = null, onCreate, onResolved }: Props) {
+export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress }: Props) {
   const bound = !!video
   /** 创建态输入（绑定态不用它——页里没有输入组件） */
   const [input, setInput] = useState(() => video?.input ?? readLastInput())
@@ -118,6 +120,8 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved }: Pr
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null)
 
   const playerRef = useRef<VideoPlayerHandle | null>(null)
+  /** 上次上报进度时的位置：节流用（每 5 秒最多写一次存档） */
+  const lastProgressRef = useRef(0)
   const listRef = useRef<HTMLDivElement | null>(null)
   const rowRefs = useRef<Array<HTMLDivElement | null>>([])
   const edges = useScrollEdges(listRef)
@@ -165,6 +169,43 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved }: Pr
     autoResolvedRef.current = video.id
     void runResolve(video.input, video.fields)
   }, [video, runResolve])
+
+  /**
+   * 进度落盘的两条路：
+   * - timeupdate 每 5 秒最多上报一次（节流在下面播放器回调里）；
+   * - 暂停 / 播完立刻补一次——这两个时刻用户「走了」，最后 5 秒不能丢。
+   */
+  useEffect(() => {
+    const el = playerRef.current?.getVideoElement()
+    if (!el || !onProgress) return
+    const flush = () => {
+      const ms = el.currentTime * 1000
+      lastProgressRef.current = ms
+      onProgress(ms)
+    }
+    el.addEventListener('pause', flush)
+    el.addEventListener('ended', flush)
+    return () => {
+      el.removeEventListener('pause', flush)
+      el.removeEventListener('ended', flush)
+    }
+  }, [relayUrl, onProgress])
+
+  /** 续播：解析出流之后跳回上次位置（太靠前 / 已到片尾就不折腾） */
+  const resumedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!relayUrl || !video) return
+    if (resumedRef.current === video.id) return
+    resumedRef.current = video.id
+    const saved = video.progress?.positionMs ?? 0
+    if (saved < 5000) return
+    if (source?.durationMs && saved > source.durationMs - 5000) return
+    const timer = window.setTimeout(() => {
+      playerRef.current?.seekMs(saved)
+      lastProgressRef.current = saved
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [relayUrl, video, source?.durationMs])
 
   /** 创建：把「插件 + 输入 + 专属字段」交给工作区落库 */
   const create = useCallback(() => {
@@ -356,9 +397,9 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved }: Pr
 
       {source && relayUrl ? (
         <>
-          {/* 视频与合集同一排：视频吃剩余高度，合集列表贴右侧同高——点一项就地切换 */}
-          <div className="flex min-h-0 flex-1">
-            <div className="min-h-0 min-w-0 flex-1 bg-black">
+          {/* 播放器铺满整格；合集/选集改成**浮在画面上的右侧悬浮窗**（用户定的） */}
+          <div className="relative min-h-0 flex-1">
+            <div className="absolute inset-0 bg-black">
               {/* key 绑流地址：重新解析换一条流时整只元素重建，播放状态清零是最诚实的表现 */}
               <VideoPlayer
                 key={relayUrl}
@@ -367,8 +408,19 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved }: Pr
                 title={source.title}
                 durationMs={source.durationMs}
                 transcript={transcript}
-                onTimeUpdate={(ms) => setCurrentMs(ms)}
-                onSeeked={(ms) => setCurrentMs(ms)}
+                onTimeUpdate={(ms) => {
+                  setCurrentMs(ms)
+                  // 节流：每 5 秒最多存一次；暂停/播完另有即时落盘（见上面的 effect）
+                  if (Math.abs(ms - lastProgressRef.current) >= 5000) {
+                    lastProgressRef.current = ms
+                    onProgress?.(ms)
+                  }
+                }}
+                onSeeked={(ms) => {
+                  setCurrentMs(ms)
+                  lastProgressRef.current = ms
+                  onProgress?.(ms)
+                }}
                 onExternalSubtitleLoaded={(extTranscript) => {
                   setTranscript(extTranscript)
                   setTranscriptNote(null)
@@ -377,24 +429,31 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved }: Pr
             </div>
             {(source.collection || source.pages) && (
               <>
-                {/* 收起/展开开关条：常驻（收起后它是唯一入口） */}
+                {/* 悬浮窗开关：贴在悬浮窗左缘（收起时贴右缘），竖向居中 */}
                 <button
                   type="button"
                   title={collapsed ? t('展开合集列表') : t('收起合集列表')}
                   aria-expanded={!collapsed}
                   onClick={toggleCollapsed}
-                  className="flex w-6 shrink-0 items-center justify-center border-l border-line bg-card/40 text-ink-soft transition hover:bg-line/60 hover:text-ink"
+                  className={
+                    'absolute top-1/2 z-20 -translate-y-1/2 rounded-l-lg border border-r-0 border-line/60 bg-card/85 py-3 pl-0.5 pr-1 text-ink-soft shadow-sm backdrop-blur-md transition-all hover:bg-card hover:text-ink ' +
+                    (collapsed ? 'right-0' : 'right-[320px]')
+                  }
                 >
                   {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
                 </button>
-                {/* 宽度过渡 + 内容层钉死 320px：动画期间文字只裁不重排 */}
+                {/*
+                  悬浮窗本体：贴右沿浮在画面上（半透明 + 背景模糊），宽度过渡；
+                  内容层钉死 320px——动画期间文字只裁不重排。
+                  不挤占画面宽度：收起/展开都不影响播放器的尺寸。
+                */}
                 <div
                   className={
-                    'shrink-0 overflow-hidden transition-[width] duration-200 ease-out ' +
+                    'absolute right-0 top-0 z-10 h-full overflow-hidden transition-[width] duration-200 ease-out ' +
                     (collapsed ? 'w-0' : 'w-[320px]')
                   }
                 >
-                  <div className="flex h-full w-[320px] flex-col border-l border-line bg-card/40">
+                  <div className="ml-auto flex h-full w-[320px] flex-col border-l border-line/60 bg-card/85 shadow-[-10px_0_28px_rgba(20,16,12,0.22)] backdrop-blur-md">
                     <div className="min-h-0 flex-1 overflow-y-auto">
                       {source.collection && (
                         <>

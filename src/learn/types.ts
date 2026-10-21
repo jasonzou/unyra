@@ -663,6 +663,12 @@ export interface VideoResource {
   fields?: Record<string, string | number | boolean>
   /** 列表显示名：创建时取输入截断，解析成功后由插件给的标题覆盖 */
   title: string
+  /**
+   * 播放进度（**通用状态归宿主**）：上次播放到哪儿，打开绑定页签时自动跳回。
+   * 播放器自身的偏好（音量 / 倍速 / 静音）属于本机，不在这里（见 VideoPlayer 的
+   * localStorage）；插件专属的状态放 fields。
+   */
+  progress?: { positionMs: number; updatedAt: number }
   createdAt: number
   updatedAt?: number
 }
