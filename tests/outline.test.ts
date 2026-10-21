@@ -190,10 +190,12 @@ describe('大纲：写入、对上号与落盘往返', () => {
     expect(normalizeOutline({ intro: '' })).toBeNull()
   })
 
-  it('大纲页签的身份：o: 前缀、标题带「· 大纲」', () => {
+  it('结构页签的身份：o: 前缀、标题带「· 结构」', () => {
+    // 页签内部 kind 仍叫 'outline'（改它要牵动资源管理器、右键菜单、api.outline 几十处），
+    // 变的只是给人看的那个后缀：这一页已经不是「大纲树」而是「节点图」了。
     const ref = { kind: 'outline', nodeId: 'n2' } as const
     expect(tabKey(ref)).toBe('o:n2')
-    expect(tabTitle(ref, (id) => (id === 'n2' ? '极限' : undefined))).toBe('极限 · 大纲')
+    expect(tabTitle(ref, (id) => (id === 'n2' ? '极限' : undefined))).toBe('极限 · 结构')
   })
 
   it('nodeDocPath 能指到大纲文件（资源管理器里定位用，与教学文档同一套口径）', () => {

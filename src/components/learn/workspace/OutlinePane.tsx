@@ -1,17 +1,16 @@
 /*
- * 这个文件负责：**一片常驻的大纲页（思维导图）**。
+ * 这个文件负责：**一片常驻的结构页（无限画布节点图）**。
  *
- * 为什么要常驻：导图页面包含庞大的节点树、SVG 贝塞尔曲线、卡片 DOM 以及相机视角。
- * 切页签时切勿每次销毁与重建，而是通过 hidden（display:none）保持在 DOM 中。
+ * 为什么要常驻：画布里有相机（平移 / 缩放）、节点卡片与连线，切页签时销毁重建会让
+ * 「我刚刚看到哪一块」丢掉。切走只藏不卸，切回时零延迟复原。
  *
- * 为什么要 memo + sameOutlinePane 冻结：
- * 未激活时彻底冻结，不跟随父级 LearnWorkspace 的频繁 store/state 变化重新排版和重绘；
- * 当 active 变为 true 时才解除冻结并渲染最新状态。
+ * 为什么要 memo + sameOutlinePane 冻结：未激活时彻底冻结，不跟随父级 LearnWorkspace
+ * 的频繁 store/state 变化重新排版；当 active 变为 true 时才解除冻结并渲染最新状态。
  */
 
 import { memo } from 'react'
-import type { KnowledgeNode, LearnStore, OutlineEntry, TabRef } from '../../../learn/types'
-import type { ExamActions, NodeDocActions } from '../explorer/types'
+import type { KnowledgeNode, LearnStore } from '../../../learn/types'
+import type { StructureMap } from '../../../learn/structure'
 import OutlineView from '../OutlineView'
 
 export interface OutlinePaneProps {
@@ -19,13 +18,9 @@ export interface OutlinePaneProps {
   tabId: string
   store: LearnStore
   node: KnowledgeNode
+  onChangeStructure: (goalId: string, next: StructureMap) => void
   onOpenNode: (nodeId: string) => void
-  onCreateChild: (parentNode: KnowledgeNode, entry: OutlineEntry) => void
-  onGenerate: (node: KnowledgeNode) => void
-  onSetTint: (nodeId: string, tint: string | null) => void
-  docs: NodeDocActions
-  exams: ExamActions
-  activeTab: TabRef | null
+  onToast?: (msg: string) => void
   focusTarget?: { nodeId: string; nonce: number } | null
   onFocusHandled?: () => void
 }
@@ -34,16 +29,17 @@ function sameOutlinePane(prev: OutlinePaneProps, next: OutlinePaneProps): boolea
   // 激活状态变化（显示/隐藏切换）：必须重渲染以切换 className 和 hidden 属性
   if (prev.active !== next.active || prev.tabId !== next.tabId) return false
 
-  // 隐藏状态下：彻底冻结！不跟随任何 store/node 改动重算导图和贝塞尔曲线
+  // 隐藏状态下：彻底冻结！不跟随任何 store/node 改动重算图与连线
   if (!next.active) {
     if (next.focusTarget && next.focusTarget !== prev.focusTarget) return false
     return true
   }
 
-  // 激活状态下：仅当外部关注节点、导图节点树、结构边或外部操作有变时才重渲染
+  // 激活状态下：仅当外部关注节点、结构图或节点数据有变时才重渲染
   if (prev.focusTarget !== next.focusTarget) return false
   if (prev.node !== next.node) return false
-  if (prev.store.nodes !== next.store.nodes || prev.store.edges !== next.store.edges) return false
+  if (prev.store.structure !== next.store.structure) return false
+  if (prev.store.nodes !== next.store.nodes || prev.store.exams !== next.store.exams) return false
   return true
 }
 
@@ -52,13 +48,9 @@ export const OutlinePane = memo(function OutlinePane({
   tabId: _tabId,
   store,
   node,
+  onChangeStructure,
   onOpenNode,
-  onCreateChild,
-  onGenerate,
-  onSetTint,
-  docs,
-  exams,
-  activeTab,
+  onToast,
   focusTarget,
   onFocusHandled,
 }: OutlinePaneProps) {
@@ -71,13 +63,9 @@ export const OutlinePane = memo(function OutlinePane({
       <OutlineView
         store={store}
         node={node}
+        onChangeStructure={onChangeStructure}
         onOpenNode={onOpenNode}
-        onCreateChild={onCreateChild}
-        onGenerate={onGenerate}
-        onSetTint={onSetTint}
-        docs={docs}
-        exams={exams}
-        activeTab={activeTab}
+        onToast={onToast}
         focusTarget={focusTarget}
         onFocusHandled={onFocusHandled}
       />

@@ -30,7 +30,7 @@
  */
 
 import type { MigrationContext, MigrationScript, MigrationStepResult } from './types'
-import { seedLayout, type GraphKind, type StructureMap } from '../../learn/structure'
+import { seedFromSource, type SeedSourceNode } from '../../learn/structure'
 
 /** meta.json 里迁移用得到的部分（其余字段搬不过来也不影响结构图） */
 interface MetaLike {
@@ -46,8 +46,8 @@ interface Collected {
   /** 文件名主干（`{base}.meta.json` 的 base） */
   base: string
   id: string
-  /** 依赖指向的节点 id（旧树就是靠它表达的） */
-  deps: string[]
+  /** 旧树里「我 → 下游」的节点 id（依赖边的 to 侧） */
+  downstream: string[]
   notes: string[]
   superdocs: string[]
 }
@@ -101,7 +101,7 @@ async function collectMetas(ctx: MigrationContext, goalDir: string): Promise<Col
         dir,
         base,
         id,
-        deps: asArray(meta.dependencies)
+        downstream: asArray(meta.dependencies)
           .map((d) => str((d as { to?: unknown } | null)?.to))
           .filter(Boolean),
         notes: [...new Set([...metaNotes, ...diskNotes])],
@@ -127,49 +127,20 @@ async function examIds(ctx: MigrationContext, item: Collected): Promise<string[]
   return entries.filter((e) => !e.dir && e.name.endsWith('.json')).map((e) => e.name.slice(0, -'.json'.length))
 }
 
-/** 把一批节点铺成图（节点 id 与 ref 都用确定性写法，重跑得到同一张图） */
-function buildGraph(items: Collected[], docsWithBody: Set<string>, examsOf: Map<string, string[]>): StructureMap {
-  const seedNodes: Array<{ id: string; kind: GraphKind; ref?: string }> = []
-  const seedEdges: Array<{ from: string; to: string }> = []
-  const outlineId = (id: string) => `o:${id}`
-  const docId = (id: string) => `d:${id}`
-  const known = new Set(items.map((i) => i.id))
-
-  for (const item of items) {
-    seedNodes.push({ id: outlineId(item.id), kind: 'outline', ref: item.id })
-
-    // 文档节点：有正文，或者下面挂着笔记/试卷/超级文档（它们是文档的下游，没有文档就无处可挂）
-    const exams = examsOf.get(item.id) ?? []
-    const needDoc = docsWithBody.has(item.id) || item.notes.length > 0 || item.superdocs.length > 0 || exams.length > 0
-    if (!needDoc) continue
-
-    seedNodes.push({ id: docId(item.id), kind: 'doc', ref: item.id })
-    seedEdges.push({ from: outlineId(item.id), to: docId(item.id) })
-
-    // ref 指回现有实体：内容永远只存一份，图里只存引用（见 learn/structure 的不变量 2）
-    for (const name of item.notes) {
-      seedNodes.push({ id: `n:${item.id}:${name}`, kind: 'note', ref: `${item.id}:${name}` })
-      seedEdges.push({ from: docId(item.id), to: `n:${item.id}:${name}` })
-    }
-    for (const name of item.superdocs) {
-      seedNodes.push({ id: `s:${item.id}:${name}`, kind: 'superdoc', ref: `${item.id}:${name}` })
-      seedEdges.push({ from: docId(item.id), to: `s:${item.id}:${name}` })
-    }
-    for (const examId of exams) {
-      seedNodes.push({ id: `e:${examId}`, kind: 'exam', ref: examId })
-      seedEdges.push({ from: docId(item.id), to: `e:${examId}` })
-    }
-  }
-
-  // 旧树的父子关系：依赖边 → 大纲 → 大纲（指向已删节点的边在 seedLayout 里会被丢掉）
-  for (const item of items) {
-    for (const dep of item.deps) {
-      if (!known.has(dep)) continue
-      seedEdges.push({ from: outlineId(item.id), to: outlineId(dep) })
-    }
-  }
-
-  return seedLayout({ nodes: seedNodes, edges: seedEdges })
+/** 把收集到的文件信息拼成装配输入（装配规则在 learn/structure 的 seedFromSource，不在这里） */
+function toSource(
+  items: readonly Collected[],
+  docsWithBody: ReadonlySet<string>,
+  examsOf: ReadonlyMap<string, string[]>,
+): SeedSourceNode[] {
+  return items.map((item) => ({
+    id: item.id,
+    hasDoc: docsWithBody.has(item.id),
+    downstream: item.downstream,
+    notes: item.notes,
+    superdocs: item.superdocs,
+    exams: examsOf.get(item.id) ?? [],
+  }))
 }
 
 export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<MigrationStepResult> {
@@ -203,7 +174,7 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
       if (ids.length) examsOf.set(item.id, ids)
     }
 
-    const map = buildGraph(items, docsWithBody, examsOf)
+    const map = seedFromSource(toSource(items, docsWithBody, examsOf))
     if (!map.nodes.length) {
       ctx.log(`跳过「${goal.name}」：铺出来是空的`)
       continue

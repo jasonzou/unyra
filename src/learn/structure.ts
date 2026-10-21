@@ -250,6 +250,84 @@ export interface SeedGraph {
   edges: Array<{ from: string; to: string }>
 }
 
+/* ---------- 旧结构 → 图（迁移与「第一次打开结构页」共用一份装配） ---------- */
+
+/**
+ * 一个学习节点在旧模型里带着的东西。**这是唯一的装配输入**：
+ * 数据迁移从磁盘文件拼它（见 lib/migration/outlineStructure），
+ * 界面第一次打开结构页时从内存里的 store 拼它（见 structureFromStore）。
+ *
+ * 两处各自拼输入、共用下面的 seedFromSource——装配规则只有一份，
+ * 不会出现「迁移铺出来的图」和「新目标铺出来的图」长得不一样。
+ */
+export interface SeedSourceNode {
+  /** 学习节点的 id */
+  id: string
+  /** 教学文档有没有正文（没有正文、也没有下游时不建文档节点） */
+  hasDoc: boolean
+  /** 旧树里「我 → 下游」的那些边（依赖边 from=我、to=下游） */
+  downstream: string[]
+  /** 笔记名 */
+  notes: string[]
+  /** 超级文档名 */
+  superdocs: string[]
+  /** 试卷 id */
+  exams: string[]
+}
+
+/** 合成 id 的写法：确定性、可读、重跑得到同一张图（见文件头的说明） */
+export const outlineGid = (id: string): string => `o:${id}`
+export const docGid = (id: string): string => `d:${id}`
+export const noteGid = (nodeId: string, name: string): string => `n:${nodeId}:${name}`
+export const superdocGid = (nodeId: string, name: string): string => `s:${nodeId}:${name}`
+export const examGid = (examId: string): string => `e:${examId}`
+
+/**
+ * 把一批学习节点铺成图：每个节点拆成大纲节点 + 文档节点，笔记/试卷/超级文档挂在文档下游。
+ *
+ * 为什么「空的文档不建节点」：旧模型每个节点都有一个空 `.md`，全建出来画布上一半是空盒子。
+ * 想要就拖一个——这正是新架构的用法。
+ */
+export function seedFromSource(source: readonly SeedSourceNode[]): StructureMap {
+  const seedNodes: SeedGraph['nodes'] = []
+  const seedEdges: GraphEdge[] = []
+  const known = new Set(source.map((n) => n.id))
+
+  for (const item of source) {
+    seedNodes.push({ id: outlineGid(item.id), kind: 'outline', ref: item.id })
+
+    const needDoc = item.hasDoc || item.notes.length > 0 || item.superdocs.length > 0 || item.exams.length > 0
+    if (!needDoc) continue
+
+    seedNodes.push({ id: docGid(item.id), kind: 'doc', ref: item.id })
+    seedEdges.push({ from: outlineGid(item.id), to: docGid(item.id) })
+
+    // ref 指回现有实体：内容永远只存一份，图里只存引用（见不变量 2）
+    for (const name of item.notes) {
+      seedNodes.push({ id: noteGid(item.id, name), kind: 'note', ref: `${item.id}:${name}` })
+      seedEdges.push({ from: docGid(item.id), to: noteGid(item.id, name) })
+    }
+    for (const name of item.superdocs) {
+      seedNodes.push({ id: superdocGid(item.id, name), kind: 'superdoc', ref: `${item.id}:${name}` })
+      seedEdges.push({ from: docGid(item.id), to: superdocGid(item.id, name) })
+    }
+    for (const examId of item.exams) {
+      seedNodes.push({ id: examGid(examId), kind: 'exam', ref: examId })
+      seedEdges.push({ from: docGid(item.id), to: examGid(examId) })
+    }
+  }
+
+  // 旧树的父子关系：依赖边 → 大纲 → 大纲（指向已删节点的边在 seedLayout 里会被丢掉）
+  for (const item of source) {
+    for (const dep of item.downstream) {
+      if (!known.has(dep)) continue
+      seedEdges.push({ from: outlineGid(item.id), to: outlineGid(dep) })
+    }
+  }
+
+  return seedLayout({ nodes: seedNodes, edges: seedEdges })
+}
+
 /**
  * 给一张只有拓扑的图算一套初始坐标：**列 = 层级深度，行 = 同列内的顺序**。
  *

@@ -153,7 +153,7 @@ export function RowMenu({
             className={MENU_ITEM + ' text-ink hover:bg-line/60'}
           >
             <DocTypeIcon kind="outline" size={13} />
-            {t('打开大纲')}
+            {t('打开结构')}
           </button>
           <button
             type="button"
@@ -194,7 +194,7 @@ export function RowMenu({
             className={MENU_ITEM + ' text-ink hover:bg-line/60'}
           >
             <DocTypeIcon kind="outline" size={13} />
-            {t('打开大纲')}
+            {t('打开结构')}
           </button>
           <button
             type="button"
@@ -237,7 +237,7 @@ export function RowMenu({
             className={MENU_ITEM + ' text-ink hover:bg-line/60'}
           >
             <DocTypeIcon kind="outline" size={13} />
-            {t('打开大纲')}
+            {t('打开结构')}
           </button>
           <button
             type="button"
@@ -352,7 +352,7 @@ export function RowMenu({
             className={MENU_ITEM + ' text-ink hover:bg-line/60'}
           >
             <DocTypeIcon kind="outline" size={13} />
-            {t('打开大纲')}
+            {t('打开结构')}
           </button>
           <button
             type="button"

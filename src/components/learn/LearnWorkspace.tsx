@@ -43,7 +43,6 @@ import type {
   KnowledgeNode,
   LearnStore,
   LearnTab,
-  OutlineEntry,
   TabRef,
   WebTabMeta,
 } from '../../learn/types'
@@ -120,7 +119,6 @@ import {
   removeExam,
   touchNode,
   updateMessageText,
-  updateNode,
   deleteNote,
   writeNote,
 } from '../../learn/graph'
@@ -137,6 +135,7 @@ import {
   type AgentTabCloseBlock,
 } from '../../learn/agentTabs'
 import type { AgentTabRef } from '../../learn/types'
+import type { StructureMap } from '../../learn/structure'
 import type { TabCloseMode } from '../../learn/tabs'
 import { attemptBrief, examAttempted, examTotalPoints } from '../../learn/exam'
 import type { Exam } from '../../learn/exam'
@@ -3578,32 +3577,11 @@ export default function LearnWorkspace({
     onToast(pending.isRoot ? t('已删除该学习目标，可按 Ctrl+Z 撤回') : t('已删除该节点，可按 Ctrl+Z 撤回'))
   }
 
-  /**
-   * 大纲页里「创建并开讲」：把大纲条目真的建成子目标。
-   *
-   * 复用 openConcept 的整条路径（建点、补描述、开教学文档页签、交给导师开讲），
-   * 只是不改写父文档的链接——大纲条目不是正文里的词，没有可替换的链接。
-   * 建出来的节点 key 与条目一致（都来自标题），大纲页靠它对上号。
-   */
-  const createOutlineChild = useCallback(
-    (parentNode: KnowledgeNode, entry: OutlineEntry) => {
-      openConcept(parentNode.id, entry.title, { hint: entry.summary, rewriteLink: false })
-    },
-    [openConcept],
-  )
-
   const handleOpenOutlineNode = useCallback(
     (id: string) => {
       openTab({ kind: 'teach', nodeId: id })
     },
     [openTab],
-  )
-
-  const handleGenerateOutline = useCallback(
-    (n: KnowledgeNode) => {
-      startOutline(n.id)
-    },
-    [startOutline],
   )
 
   const generateTeachingDoc = useCallback(
@@ -3645,6 +3623,24 @@ export default function LearnWorkspace({
   const handleOutlineFocusHandled = useCallback(() => {
     setOutlineFocus(null)
   }, [])
+
+  /**
+   * 结构图变了：整张换上去。
+   *
+   * 与其它写操作同一条路子——先在最新快照上算好，再整体替换（图是不可变数据，
+   * 拖动、连线、加节点都返回一份新图）。空图不留在 store 里：`structure.json`
+   * 的空壳没有意义，读盘那一侧也按「空 = 还没铺过」处理。
+   */
+  const updateStructure = useCallback(
+    (goalId: string, next: StructureMap) => {
+      const s = getLatest()
+      const structure = { ...(s.structure ?? {}) }
+      if (next.nodes.length) structure[goalId] = next
+      else delete structure[goalId]
+      set({ ...s, structure: Object.keys(structure).length ? structure : undefined })
+    },
+    [getLatest, set],
+  )
 
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
   const getNoteActions = useCallback(
@@ -4648,13 +4644,9 @@ export default function LearnWorkspace({
                   active={isActive}
                   store={store}
                   node={oNode}
+                  onChangeStructure={updateStructure}
                   onOpenNode={handleOpenOutlineNode}
-                  onCreateChild={createOutlineChild}
-                  onGenerate={handleGenerateOutline}
-                  onSetTint={setNodeTint}
-                  docs={explorerDocs}
-                  exams={explorerExams}
-                  activeTab={gTab?.ref ?? null}
+                  onToast={onToast}
                   focusTarget={outlineFocus}
                   onFocusHandled={handleOutlineFocusHandled}
                 />
@@ -4945,23 +4937,6 @@ export default function LearnWorkspace({
       grading,
     }),
     [exam.openExam, exam.reveal, exam.live, selectNode, onToast, requestGrading, grading],
-  )
-
-  /**
-   * 改某个节点在思维导图上的自定义颜色（右键节点改色）。
-   *
-   * 只是节点上的一笔（KnowledgeNode.tint），走 updateNode 那条正规写路径：跟着
-   * store 一起落盘，因此刷新、重启、换设备都还在。传 null = 回到「随分支走」，
-   * 这时写回空串——updateNode 的对象展开会留一个值为 undefined 的键，落盘（JSON）
-   * 时它自己会消失，读盘那一侧也把空串当「没有」，两头都不留一个悬空的值。
-   */
-  const setNodeTint = useCallback(
-    (nodeId: string, tint: string | null) => {
-      const s = getLatest()
-      if (!nodeById(s, nodeId)) return
-      set(updateNode(s, nodeId, { tint: tint ?? '' }))
-    },
-    [getLatest, set],
   )
 
   const explorerState = useMemo<NodeStateActions>(
