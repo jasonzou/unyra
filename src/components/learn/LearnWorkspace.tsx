@@ -136,6 +136,7 @@ import {
 } from '../../learn/agentTabs'
 import type { AgentTabRef } from '../../learn/types'
 import type { StructureMap } from '../../learn/structure'
+import { createNote } from '../../learn/graph'
 import type { TabCloseMode } from '../../learn/tabs'
 import { attemptBrief, examAttempted, examTotalPoints } from '../../learn/exam'
 import type { Exam } from '../../learn/exam'
@@ -3635,6 +3636,23 @@ export default function LearnWorkspace({
     [getLatest, set],
   )
 
+  /**
+   * 结构画布拖出一张笔记节点时用：建一份**真实的空笔记**，把名字交回去。
+   *
+   * 与侧栏的「新建笔记」不同，这里**不打开页签**——用户要的是先在图上有这张卡，
+   * 想写的时候点标题再打开。笔记不需要上下文，所以这一步是纯本地的、同步的。
+   */
+  const createStructureNote = useCallback(
+    (nodeId: string): string | null => {
+      const s = getLatest()
+      const r = createNote(s, nodeId)
+      if (!r.name) return null
+      set(r.store)
+      return r.name
+    },
+    [getLatest, set],
+  )
+
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
   const getNoteActions = useCallback(
     (tabId: string, node: KnowledgeNode, source: DocSource): ComponentProps<typeof DocPane>['note'] => {
@@ -4640,6 +4658,8 @@ export default function LearnWorkspace({
                   onChangeStructure={updateStructure}
                   docs={explorerDocs}
                   exams={explorerExams}
+                  onCreateNote={createStructureNote}
+                  onRenameNote={renameNodeNote}
                   onToast={onToast}
                   focusTarget={outlineFocus}
                   onFocusHandled={handleOutlineFocusHandled}

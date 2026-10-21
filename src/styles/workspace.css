@@ -364,3 +364,46 @@
     opacity: 0.6;
   }
 }
+
+/* ---------- 结构画布 ---------- */
+
+/*
+ * 跳转之后目标节点亮一下边框：从「有一圈亮边」衰减到没有。
+ *
+ * 用 box-shadow 而不是 border：border 会改盒模型、把卡片挤动一像素，
+ * 而这圈光只是提示「你被带到这儿了」，不该让画面抖。
+ */
+@keyframes moji-structure-flash {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-seal) 70%, transparent);
+  }
+  35% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-seal) 42%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+
+.moji-structure-flash {
+  animation: moji-structure-flash 0.9s ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moji-structure-flash {
+    animation: none;
+  }
+}
+
+/*
+ * 被拖起来的节点：阴影拉开、亮度提一点。
+ *
+ * 画布是固定视角的 3D 平面，拖动时这张卡 translateZ 抬起来——透视里「抬高」只表现为
+ * 往上飘一点，真正让人看出它浮在别人上面的是**影子**。
+ */
+.moji-structure-lifted {
+  box-shadow:
+    0 18px 40px -12px rgba(0, 0, 0, 0.45),
+    0 2px 6px -2px rgba(0, 0, 0, 0.25);
+  filter: brightness(1.04);
+}

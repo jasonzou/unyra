@@ -22,6 +22,8 @@ export interface OutlinePaneProps {
   onChangeStructure: (goalId: string, next: StructureMap) => void
   docs: NodeDocActions
   exams: ExamActions
+  onCreateNote?: (nodeId: string) => string | null
+  onRenameNote?: (nodeId: string, from: string, to: string) => void
   onToast?: (msg: string) => void
   focusTarget?: { nodeId: string; nonce: number } | null
   onFocusHandled?: () => void
@@ -53,6 +55,8 @@ export const OutlinePane = memo(function OutlinePane({
   onChangeStructure,
   docs,
   exams,
+  onCreateNote,
+  onRenameNote,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -69,6 +73,8 @@ export const OutlinePane = memo(function OutlinePane({
         onChangeStructure={onChangeStructure}
         docs={docs}
         exams={exams}
+        onCreateNote={onCreateNote}
+        onRenameNote={onRenameNote}
         onToast={onToast}
         focusTarget={focusTarget}
         onFocusHandled={onFocusHandled}

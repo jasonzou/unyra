@@ -120,6 +120,8 @@ export function outlineSlots(store: LearnStore, node: StructureNode, nodes: read
 export const OUTLINE_HEAD = 44
 /** 每一行目标项的高度 */
 export const SLOT_ROW = 22
+/** 卡片底部那条注释标签的高度 */
+export const NOTE_ROW = 20
 
 /**
  * 一张卡有多高：大纲节点按目标项条数长高，其余一律 CARD_H。
@@ -128,11 +130,13 @@ export const SLOT_ROW = 22
  * 「点目标项生成子大纲」这个主要入口就有一半是点不到的。
  */
 export function cardHeight(store: LearnStore, node: StructureNode): number {
-  if (node.kind !== 'outline') return CARD_H
+  /** 注释标签占的一行：贴在卡片最下面 */
+  const noteRow = node.note ? NOTE_ROW : 0
+  if (node.kind !== 'outline') return CARD_H + noteRow
   const owner = node.ref ? nodeById(store, node.ref) : null
   const count = owner?.outline?.children.length ?? 0
-  if (!count) return CARD_H
-  return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8)
+  if (!count) return CARD_H + noteRow
+  return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8) + noteRow
 }
 
 /** 把 store 包成一个高度访问器：领域层的几何函数只认这个函数，不认 store */

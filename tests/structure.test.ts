@@ -3,6 +3,9 @@ import {
   CARD_H,
   CARD_W,
   COL_GAP,
+  arrangeBands,
+  findFreeSpot,
+  rectsOverlap,
   GRAPH_KINDS,
   ROW_GAP,
   STRUCT_MAX_ZOOM,
@@ -197,5 +200,86 @@ describe('结构图：读盘校验', () => {
   it('kindOf 只认表里的节点', () => {
     expect(kindOf([node('a', 'outline')], 'a')).toBe('outline')
     expect(kindOf([node('a', 'outline')], 'b')).toBeNull()
+  })
+})
+
+describe('结构图：碰撞体积', () => {
+  it('重叠算撞上，留出间隙之后不算', () => {
+    const a = { x: 0, y: 0, width: CARD_W, height: CARD_H }
+    expect(rectsOverlap(a, { x: 10, y: 10, width: CARD_W, height: CARD_H })).toBe(true)
+    expect(rectsOverlap(a, { x: CARD_W + 100, y: 0, width: CARD_W, height: CARD_H })).toBe(false)
+    // 只差 10px 也不行：卡片之间要留白
+    expect(rectsOverlap(a, { x: CARD_W + 10, y: 0, width: CARD_W, height: CARD_H })).toBe(true)
+  })
+
+  it('落点没人占就原样放下（不做无意义的位移）', () => {
+    const nodes = [{ id: 'a', kind: 'outline' as const, x: 0, y: 0 }]
+    expect(findFreeSpot(nodes, 'b', { x: 800, y: 600 }, CARD_H)).toEqual({ x: 800, y: 600 })
+  })
+
+  it('落点被占：就近找一个空位，且不会盖住别人', () => {
+    const nodes = [
+      { id: 'a', kind: 'outline' as const, x: 0, y: 0 },
+      { id: 'b', kind: 'doc' as const, x: 400, y: 0 },
+    ]
+    const spot = findFreeSpot(nodes, 'new', { x: 4, y: 4 }, CARD_H)
+    expect(spot).not.toEqual({ x: 4, y: 4 })
+    const rect = { x: spot.x, y: spot.y, width: CARD_W, height: CARD_H }
+    for (const n of nodes) {
+      expect(rectsOverlap(rect, { x: n.x, y: n.y, width: CARD_W, height: CARD_H })).toBe(false)
+    }
+  })
+
+  it('被拖的那个自己不算障碍（它在 z 轴上被提起来了）', () => {
+    const nodes = [{ id: 'a', kind: 'outline' as const, x: 0, y: 0 }]
+    expect(findFreeSpot(nodes, 'a', { x: 0, y: 0 }, CARD_H)).toEqual({ x: 0, y: 0 })
+  })
+})
+
+describe('结构图：分带自动排列', () => {
+  const nodes = [
+    { id: 'o1', kind: 'outline' as const, x: 500, y: 0 },
+    { id: 'o2', kind: 'outline' as const, x: 0, y: 0 },
+    { id: 'd1', kind: 'doc' as const, x: 0, y: 300 },
+    { id: 'n1', kind: 'note' as const, x: 0, y: 600 },
+  ]
+  const edges = [
+    { from: 'o2', to: 'd1' },
+    { from: 'd1', to: 'n1' },
+  ]
+
+  it('大纲在上、文档在中、叶子在下', () => {
+    const pos = arrangeBands(nodes, edges)
+    expect(pos.get('o1')!.y).toBe(0)
+    expect(pos.get('o2')!.y).toBe(0)
+    expect(pos.get('d1')!.y).toBeGreaterThan(0)
+    expect(pos.get('n1')!.y).toBeGreaterThan(pos.get('d1')!.y)
+  })
+
+  it('文档对齐到它的大纲父节点（一眼看得出归属）', () => {
+    const pos = arrangeBands(nodes, edges)
+    expect(pos.get('d1')!.x).toBe(pos.get('o2')!.x)
+    expect(pos.get('n1')!.x).toBe(pos.get('d1')!.x)
+  })
+
+  it('带内顺序沿用当前位置（不把用户挪过的次序打乱）', () => {
+    const pos = arrangeBands(nodes, edges)
+    // o2 原来在 x=0，o1 在 x=500 → 排完之后 o2 仍在 o1 左边
+    expect(pos.get('o2')!.x).toBeLessThan(pos.get('o1')!.x)
+  })
+
+  it('排完之后同一带里不重叠', () => {
+    const pos = arrangeBands(nodes, edges)
+    const rects = nodes.map((n) => {
+      const p = pos.get(n.id)!
+      return { x: p.x, y: p.y, width: CARD_W, height: CARD_H }
+    })
+    for (let i = 0; i < rects.length; i++) {
+      for (let j = i + 1; j < rects.length; j++) {
+        if (Math.abs(rects[i].y - rects[j].y) < 1) {
+          expect(rectsOverlap(rects[i], rects[j], 0)).toBe(false)
+        }
+      }
+    }
   })
 })

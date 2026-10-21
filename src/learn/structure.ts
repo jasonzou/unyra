@@ -107,6 +107,13 @@ export interface StructureNode {
    * 记 key 而不是序号：目标项重排、改名（key 跟着标题归一化）都不会把挂接关系弄丢。
    */
   slot?: string
+  /**
+   * 用户在画布上给这个节点写的注释（右键菜单「注释」）。
+   *
+   * 与大纲、文档里的内容无关：它是**贴在卡片上的便条**，只在图上看得见。
+   * 跟着 structure.json 走——换了设备、重开应用，便条还在原处。
+   */
+  note?: string
   /** 画布坐标：节点卡片左上角，世界坐标（与缩放无关） */
   x: number
   y: number
@@ -270,7 +277,7 @@ export const COL_GAP = CARD_W + 112
 export const ROW_GAP = CARD_H + 36
 
 export interface SeedGraph {
-  nodes: Array<{ id: string; kind: GraphKind; ref?: string; slot?: string }>
+  nodes: Array<{ id: string; kind: GraphKind; ref?: string; slot?: string; note?: string }>
   edges: Array<{ from: string; to: string }>
 }
 
@@ -412,6 +419,7 @@ export function seedLayout(seed: SeedGraph): StructureMap {
         kind: n.kind,
         ...(n.ref ? { ref: n.ref } : {}),
         ...(n.slot ? { slot: n.slot } : {}),
+        ...(n.note ? { note: n.note } : {}),
         x: d * COL_GAP,
         y: i * ROW_GAP,
       })
@@ -458,6 +466,7 @@ export function normalizeStructure(raw: unknown): StructureMap {
       kind: n.kind,
       ...(typeof n.ref === 'string' && n.ref ? { ref: n.ref } : {}),
       ...(typeof n.slot === 'string' && n.slot ? { slot: n.slot } : {}),
+      ...(typeof n.note === 'string' && n.note.trim() ? { note: n.note } : {}),
       x: n.x,
       y: n.y,
     })
@@ -494,4 +503,127 @@ export function normalizeStructureBook(raw: unknown, goalIds: ReadonlySet<string
     if (map.nodes.length) out[goalId] = map
   }
   return out
+}
+
+/* ---------- 碰撞体积 ---------- */
+
+/** 两张卡之间至少留这么多（世界坐标），挨太紧看着就是粘在一起 */
+export const NODE_GAP = 28
+
+/**
+ * 两块矩形算不算撞上（含间隙）。
+ *
+ * 用的是「分开检测」：只要在 x 或 y 上完全分开就不算撞。
+ * 写成一个函数而不是各处 `a.x < b.x + ...`，是因为碰撞的判据要能被测试钉住——
+ * 「拖完之后有没有叠在一起」这件事，肉眼看不出来，只能靠测试守。
+ */
+export function rectsOverlap(a: Rect, b: Rect, gap = NODE_GAP): boolean {
+  if (a.x + a.width + gap <= b.x) return false
+  if (b.x + b.width + gap <= a.x) return false
+  if (a.y + a.height + gap <= b.y) return false
+  if (b.y + b.height + gap <= a.y) return false
+  return true
+}
+
+/**
+ * 给「刚落下的这张卡」找一个不叠在别人身上的位置。
+ *
+ * 只在**松手那一刻**调用：拖动过程中节点是被提起来的（z 轴），允许从别人头上飞过，
+ * 这就是「拖拽时不会发生碰撞」的含义。落点被占时就近找一个空位，
+ * 由内向外一圈圈试——先把最近的一圈试完，用户看到的位移才最小。
+ */
+export function findFreeSpot(
+  nodes: readonly StructureNode[],
+  id: string,
+  desired: { x: number; y: number },
+  height: number,
+  heightOf: HeightOf = defaultHeight,
+  gap = NODE_GAP,
+): { x: number; y: number } {
+  const others = nodes.filter((n) => n.id !== id)
+  if (!others.length) return desired
+  const fits = (x: number, y: number) => {
+    const rect: Rect = { x, y, width: CARD_W, height }
+    return others.every((n) => !rectsOverlap(rect, rectOf(n, heightOf), gap))
+  }
+  if (fits(desired.x, desired.y)) return desired
+  const stepX = CARD_W + gap
+  const stepY = height + gap
+  for (let ring = 1; ring <= 8; ring++) {
+    for (let dx = -ring; dx <= ring; dx++) {
+      for (let dy = -ring; dy <= ring; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue
+        const x = desired.x + dx * stepX
+        const y = desired.y + dy * stepY
+        if (fits(x, y)) return { x, y }
+      }
+    }
+  }
+  return desired
+}
+
+/* ---------- 自动排列：大纲在上、文档在中、叶子在下 ---------- */
+
+/** 带与带之间留的空（世界坐标）：够放下连线的弯 */
+export const BAND_GAP = 110
+/** 同一条带里两张卡的间距 */
+export const BAND_X_GAP = 88
+
+/**
+ * 分带排列：**大纲一行在上，文档一行在中，笔记/试卷/超级文档在最下面**。
+ *
+ * 为什么不是「按树的层级从左到右」（seedLayout 那套）：图里可以有好多棵树、
+ * 甚至没有树（孤儿节点），横向铺开很快就看不见整体。按类型分带之后，
+ * 「这门课有几块大纲、每块下面挂着几份文档」一眼就能数出来。
+ *
+ * 带内顺序沿用**当前位置**（先看 x 再看 y）：用户手动挪过的相对次序不该被一次
+ * 自动排列打乱，那会让人觉得「排完之后全乱了」。
+ */
+export function arrangeBands(
+  nodes: readonly StructureNode[],
+  edges: readonly GraphEdge[],
+  heightOf: HeightOf = defaultHeight,
+): Map<string, { x: number; y: number }> {
+  const pos = new Map<string, { x: number; y: number }>()
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const parentOf = (id: string, kind: GraphKind): string | undefined =>
+    edges.find((e) => e.to === id && byId.get(e.from)?.kind === kind)?.from
+  const order = (list: readonly StructureNode[]) =>
+    [...list].sort((a, b) => a.x - b.x || a.y - b.y || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+
+  // 1. 大纲带
+  const outlines = order(nodes.filter((n) => n.kind === 'outline'))
+  let x = 0
+  let bandH = CARD_H
+  for (const node of outlines) {
+    pos.set(node.id, { x, y: 0 })
+    bandH = Math.max(bandH, heightOf(node))
+    x += CARD_W + BAND_X_GAP
+  }
+
+  // 2. 文档带：对齐到它的大纲父节点，同一个父下面横着排
+  const docY = bandH + BAND_GAP
+  const docSlot = new Map<string, number>()
+  let docH = CARD_H
+  for (const node of order(nodes.filter((n) => n.kind === 'doc'))) {
+    const parent = parentOf(node.id, 'outline')
+    const key = parent ?? ''
+    const slot = docSlot.get(key) ?? 0
+    pos.set(node.id, { x: (parent ? pos.get(parent)?.x ?? 0 : 0) + slot * (CARD_W + 48), y: docY })
+    docSlot.set(key, slot + 1)
+    docH = Math.max(docH, heightOf(node))
+  }
+
+  // 3. 叶子带：挂在文档下面，纵向排（一个文档下的几份笔记不会横着挤成一串）
+  const leafY = docY + docH + BAND_GAP
+  const leafSlot = new Map<string, number>()
+  for (const node of order(nodes.filter((n) => n.kind !== 'outline' && n.kind !== 'doc'))) {
+    const parent = parentOf(node.id, 'doc')
+    const key = parent ?? ''
+    const slot = leafSlot.get(key) ?? 0
+    pos.set(node.id, { x: parent ? pos.get(parent)?.x ?? 0 : 0, y: leafY + slot * (CARD_H + 24) })
+    leafSlot.set(key, slot + 1)
+  }
+
+  return pos
 }

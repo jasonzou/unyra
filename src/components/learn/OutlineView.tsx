@@ -26,6 +26,10 @@ export interface OutlineViewProps {
   docs: NodeDocActions
   /** 考试那一侧的动作（点试卷标题开考试窗口） */
   exams: ExamActions
+  /** 新建一份笔记并返回名字（笔记节点不需要上下文，拖出来就是真笔记） */
+  onCreateNote?: (nodeId: string) => string | null
+  /** 改笔记名 */
+  onRenameNote?: (nodeId: string, from: string, to: string) => void
   onToast?: (msg: string) => void
   /** 外部指定的聚焦目标（如 chip 路由） */
   focusTarget?: { nodeId: string; nonce: number } | null
@@ -47,6 +51,8 @@ export default memo(function OutlineView({
   onChangeStructure,
   docs,
   exams,
+  onCreateNote,
+  onRenameNote,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -62,6 +68,8 @@ export default memo(function OutlineView({
           onChange={change}
           docs={docs}
           exams={exams}
+          onCreateNote={onCreateNote}
+          onRenameNote={onRenameNote}
           onToast={onToast}
           focusTarget={focusTarget}
           onFocusHandled={onFocusHandled}
