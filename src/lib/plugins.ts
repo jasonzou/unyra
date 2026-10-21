@@ -28,9 +28,45 @@ import { native } from './native'
  * 插件类别。加新的一类时在这里加一个取值，并实现一份 spec（definePluginCategory）——
  * 宿主本身对类别一无所知。目前两类：
  * - markdown：文档里的一种语法 / 一段正文加工（lib/renderPlugins）；
- * - functional：给**应用**加一项能力（lib/functionalPlugins，目前是语音输入）。
+ * - functional：给**应用**加一项能力（lib/functionalPlugins，目前是语音输入）；
+ * - video：视频 / 音频来源插件（lib/videoPlugins，喂给「视频学习」页签）。
  */
-export type PluginCategory = 'markdown' | 'functional'
+export type PluginCategory = 'markdown' | 'functional' | 'video'
+
+/**
+ * 声明式配置字段：插件不画 UI，只声明字段，设置页统一渲染表单。
+ * 值存 `{数据根}/plugins-settings/{文件名}.json`；password 由主进程加密落盘。
+ */
+export type PluginSettingType = 'text' | 'password' | 'number' | 'select' | 'boolean' | 'textarea' | 'static'
+
+export interface PluginSettingField {
+  key: string
+  type: PluginSettingType
+  label: string
+  placeholder?: string
+  /** 字段下方的说明（如「怎么拿到这个值」的步骤） */
+  help?: string
+  default?: string | number | boolean
+  /** select 的选项 */
+  options?: Array<{ value: string; label: string }>
+  required?: boolean
+}
+
+/**
+ * 编译期注入的宿主能力（`new Function(…, 'host', source)` 的第 5 个参数）。
+ * 插件唯一的外部触手：网络走主进程通道（渲染层 CSP 拦外网），配置由主进程解密后交来，
+ * 日志打给控制台。插件拿不到文件系统、窗口与其他插件的数据。
+ */
+export interface PluginHost {
+  /** 已保存的配置（password 已解密）；插件在编译期拿到快照，改配置重启生效 */
+  settings: Readonly<Record<string, string | number | boolean>>
+  /** 带自定义请求头的 GET（UA / Referer / Cookie 这类 fetch() 发不出的头） */
+  fetch(
+    url: string,
+    opts?: { headers?: Record<string, string>; timeoutMs?: number },
+  ): Promise<{ ok: true; status: number; finalUrl: string; body: string } | { ok: false; error: string }>
+  log(...args: unknown[]): void
+}
 
 /** 所有插件共有的字段；各类插件在自己的 spec 里补上自己的钩子 */
 export interface PluginBase {
@@ -47,6 +83,10 @@ export interface PluginBase {
   origin?: string
   /** 有二级配置页（设置页里点这一行进得去）。目前只有功能性插件会用它 */
   configurable?: boolean
+  /** 声明式配置字段（设置页渲染成表单） */
+  settings?: PluginSettingField[]
+  /** 插件版本（视频来源插件建议声明，设置页显示） */
+  version?: string
 }
 
 export interface PluginCategorySpec {
@@ -187,6 +227,10 @@ export interface PluginStatus {
   summary: string[]
   /** 有二级配置页（见 PluginBase.configurable） */
   configurable?: boolean
+  /** 声明式配置字段（仅已装载的插件拿得到 schema） */
+  settings?: PluginSettingField[]
+  /** 插件版本 */
+  version?: string
 }
 
 let statuses: PluginStatus[] = []
@@ -322,6 +366,8 @@ export async function refreshPlugins(): Promise<PluginStatus[]> {
       defaultEnabled: false,
       ...(prev?.error ? { error: prev.error } : {}),
       summary: prev?.summary ?? [],
+      ...(prev?.settings ? { settings: prev.settings } : {}),
+      ...(prev?.version ? { version: prev.version } : {}),
     })
   }
 
@@ -349,17 +395,35 @@ function describeOf(plugin: PluginBase): string[] {
  * （理由见文件头与 lib/renderPlugins）。//# sourceURL 是给调试用的——报错时控制台里
  * 能看见是哪个插件文件。
  */
-export function compilePlugin(source: string, file: string): PluginBase {
-  const factory = new Function('register', 'module', 'exports', source + '\n//# sourceURL=moji-plugin/' + file + '\n')
+/** 编译器当前正在装的插件所属宿主（编译是同步的，单线程下一格就够） */
+let compileHostRef: PluginHost | null = null
+
+/** 类别模块在 normalize 里取一份当前编译的宿主（video 插件把它缝进插件对象） */
+export function currentCompileHost(): PluginHost | null {
+  return compileHostRef
+}
+
+export function compilePlugin(source: string, file: string, host?: PluginHost): PluginBase {
+  const factory = new Function(
+    'register', 'module', 'exports', 'host',
+    source + '\n//# sourceURL=moji-plugin/' + file + '\n',
+  )
   let declared: unknown = null
   const mod = { exports: {} as Record<string, unknown> }
-  factory(
-    (plugin: unknown) => {
-      declared = plugin
-    },
-    mod,
-    mod.exports,
-  )
+  const prevHost = compileHostRef
+  compileHostRef = host ?? null
+  try {
+    factory(
+      (plugin: unknown) => {
+        declared = plugin
+      },
+      mod,
+      mod.exports,
+      host ?? {},
+    )
+  } finally {
+    compileHostRef = prevHost
+  }
   const candidate = declared ?? mod.exports
   const value =
     candidate && typeof candidate === 'object' && 'default' in (candidate as Record<string, unknown>)
@@ -367,6 +431,34 @@ export function compilePlugin(source: string, file: string): PluginBase {
       : candidate
   if (!value || typeof value !== 'object') throw new Error(t('插件没有交出对象（需要调用 register({…})）'))
   return registerPlugin(value, file.replace(/\.js$/i, ''))
+}
+
+/**
+ * 给一个用户插件造宿主：配置从主进程读（password 已解密），网络走 video:fetch 通道。
+ * 读配置失败不影响装载——插件用它自己声明的默认值，界面上会提示「未配置」。
+ */
+async function makeHost(file: string): Promise<PluginHost> {
+  let settings: Record<string, string | number | boolean> = {}
+  try {
+    const res = await native().plugins.settingsGet(file)
+    if (res.ok && res.values) settings = res.values
+  } catch {
+    // 应用没跑在 Electron 里 / 磁盘读不出来：按空配置装载
+  }
+  return {
+    settings: Object.freeze({ ...settings }),
+    async fetch(url, opts) {
+      try {
+        const res = await native().video.fetch(url, opts?.headers)
+        return res.ok
+          ? { ok: true as const, status: res.status, finalUrl: res.finalUrl, body: res.body }
+          : { ok: false as const, error: res.error }
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+    log: (...args: unknown[]) => console.info('[plugin:' + file + ']', ...args),
+  }
 }
 
 async function readSource(file: string): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
@@ -400,11 +492,14 @@ export async function loadPlugins(): Promise<void> {
       continue
     }
     try {
-      const plugin = compilePlugin(src.content, status.file as string)
+      const host = await makeHost(status.file as string)
+      const plugin = compilePlugin(src.content, status.file as string, host)
       status.active = true
       status.name = plugin.name ?? status.name
       status.category = plugin.category
       status.summary = describeOf(plugin)
+      if (plugin.settings?.length) status.settings = plugin.settings
+      if (plugin.version) status.version = plugin.version
     } catch (err) {
       status.error = err instanceof Error ? err.message : String(err)
     }

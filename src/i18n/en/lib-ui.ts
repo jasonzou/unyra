@@ -48,6 +48,30 @@ const dict: Record<string, string> = {
 
   /* ---------- lib/plugins.ts：装载与开关插件时给设置页看的错误 ---------- */
   '未知的插件类别：{0}': 'Unknown plugin category: {0}',
+  '视频 / 音频来源': 'Video / audio sources',
+  '给「视频学习」页签提供流与字幕，或把音频交给语音识别。':
+    'Provides streams and transcripts for the Video study tab, or hands audio to speech recognition.',
+  '视频来源': 'Video source',
+  '音频来源': 'Audio source',
+  '播放流': 'playable stream',
+  '字幕直取': 'subtitles',
+  '插件的 {0} 必须是数组': "The plugin's {0} must be an array",
+  '插件的 settings 必须是数组': "The plugin's settings must be an array",
+  'settings 里的每一项都必须是对象': 'Every settings entry must be an object',
+  'settings 字段缺少 key': 'A settings field is missing its key',
+  'settings 字段 key 重复：{0}': 'Duplicate settings key: {0}',
+  'settings 字段「{0}」的 type 不认识': 'Unknown settings type for field “{0}”',
+  'settings 字段「{0}」缺少 label': 'Settings field “{0}” is missing a label',
+  'settings 字段「{0}」是 select，必须给 options': 'Settings field “{0}” is a select and needs options',
+  '插件需要 apiVersion: 1（当前宿主契约 v1，插件里写的是 {0}）':
+    'The plugin needs apiVersion: 1 (host contract v1; the plugin declares {0})',
+  '插件的 kinds 必须是 video / audio 之一': "The plugin's kinds must include video or audio",
+  '插件的 provides 必须是 stream / transcript 之一': "The plugin's provides must include stream or transcript",
+  '插件缺少 match(input) 函数': 'The plugin is missing match(input)',
+  '插件缺少 resolve(host, matched) 函数': 'The plugin is missing resolve(host, matched)',
+  '插件「{0}」没有装载上下文（重启应用后重试）': 'Plugin “{0}” has no host context (restart the app and retry)',
+  '没有插件支持这个输入：{0}。视频来源插件在「设置 → 插件 → 视频 / 音频来源」里安装与配置。':
+    'No plugin handles this input: {0}. Install and configure video source plugins under Settings → Plugins → Video / audio sources.',
   '插件没有交出对象': 'The plugin did not hand over an object',
   '插件缺少 id': 'The plugin is missing an id',
   '没有可用的插件类别': 'No plugin category is available',

@@ -11,6 +11,7 @@ export function pluginHint(p: PluginStatus): string {
   const parts: string[] = []
   if (p.kind === 'user' && p.file) parts.push(p.file, formatBytes(p.bytes ?? 0))
   else parts.push(t('内置'))
+  if (p.version) parts.push('v' + p.version)
   if (p.summary.length) parts.push(p.summary.join(' · '))
   parts.push(pluginStateText(p))
   return parts.join(' · ')

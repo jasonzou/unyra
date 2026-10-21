@@ -164,6 +164,8 @@ const dict: Record<string, string> = {
     'The data directory cannot be inside the installation folder: updates wipe that folder and your data with it. Pick a location outside it.',
   '数据目录不能包含软件安装目录：更新时安装目录会被整个清空，数据同样危在旦夕。请把两者分开存放。':
     'The data directory cannot contain the installation folder: updates wipe that folder. Keep them separate.',
+  '插件配置读不出来：{0}': 'Could not read plugin settings: {0}',
+  '插件配置写不进去：{0}': 'Could not write plugin settings: {0}',
   '数据目录在软件安装目录内，更新会把它一并删除。请先到「设置 → 存储」把数据目录迁出安装目录，再回来更新。':
     'Your data directory is inside the installation folder and an update would delete it. Move it out (Settings → Storage) first, then update.',
   '这不是可请求的地址：只支持 http(s)': 'This is not a requestable address: only http(s) is allowed',

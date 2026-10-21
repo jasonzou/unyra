@@ -6,37 +6,27 @@
  * 双向跳转（点转录段 seek 播放器；播放推进时高亮当前段）。分组与 agent 工具面
  * 是后续的事，这个页签刻意什么都不懂。
  *
- * 两个实验期的妥协，都写在各自的注释里：
- * - SESSDATA 走 localStorage + 页签内的小弹层：正式形态应该进设置页，先就地能用；
- * - 流地址每次解析都重新登记（media-relay 不落盘），所以页签状态是纯会话态，
- *   重启后回到空页（normalizeTab 不认 video 页签，同 guard 的待遇）。
+ * 来源全部由**用户安装的插件**提供（设置 → 插件 → 视频 / 音频来源）：应用本体零平台
+ * 知识，插件需要的凭据也在插件设置面板里配置（password 字段主进程加密落盘）。
+ * 流地址每次解析都重新登记（media-relay 不落盘），页签本身持久化、但解析结果不落盘。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Clapperboard, Download, Loader2, MonitorPlay, Settings2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Clapperboard, Download, Loader2, MonitorPlay } from 'lucide-react'
 import { t } from '../../i18n'
 import { isWeb, native } from '../../lib/native'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
-import { openRelayStream, resolveSource, resolveTranscriptOnly } from '../../video/registry'
+import { openRelayStream } from '../../video/registry'
+import { resolveVideoSource, resolveVideoTranscript } from '../../lib/videoPlugins'
 import { buildPagesMarkdown, type PagesExportEntry } from '../../video/export'
 import { formatClock, segmentIndexAt } from '../../video/transcript'
 import type { Transcript, VideoSource } from '../../video/types'
 import VideoPlayer, { type VideoPlayerHandle } from './VideoPlayer'
 
-/** SESSDATA 存放键：实验期存 localStorage（跟浏览器 profile 走），正式形态挪进设置页 */
-const SESSDATA_KEY = 'moji.video.sessdata'
 /** 上次解析的输入：页签持久化后（normalizeTab 认 video），重启把它填回输入框，一键重新解析 */
 const INPUT_KEY = 'moji.video.input'
 /** 合集列表收起与否：跟输入一样落在 localStorage，重启后保持上次的选择 */
 const COLLAPSED_KEY = 'moji.video.collapsed'
-
-const readSessdata = (): string => {
-  try {
-    return localStorage.getItem(SESSDATA_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
 
 const readLastInput = (): string => {
   try {
@@ -65,10 +55,6 @@ export default function VideoStudyTab() {
   const [transcriptNote, setTranscriptNote] = useState<string | null>(null)
   /** 播放器此刻的位置（ms）：timeupdate 约 4Hz，直接跟着走足够高亮与自动滚动用 */
   const [currentMs, setCurrentMs] = useState(0)
-  /** 登录设置小弹层 */
-  const [sessOpen, setSessOpen] = useState(false)
-  const [sessDraft, setSessDraft] = useState(readSessdata)
-  const [sessSaved, setSessSaved] = useState(false)
   /** 合集列表收起与否（用户可收起；选择落 localStorage，重启保持） */
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const toggleCollapsed = useCallback(() => {
@@ -107,7 +93,7 @@ export default function VideoStudyTab() {
         // localStorage 不可用就只当会话内的输入，无碍
       }
       try {
-        const src = await resolveSource(text, { sessdata: readSessdata() })
+        const src = await resolveVideoSource(text)
         const url = await openRelayStream(src)
         setSource(src)
         setRelayUrl(url)
@@ -115,7 +101,7 @@ export default function VideoStudyTab() {
         // 三种状态说三种话：拿到了 / 试过但失败（原话上屏）/ 真没有
         if (src.transcript) setTranscriptNote(null)
         else if (src.transcriptError) setTranscriptNote(t('字幕获取失败：{0}', src.transcriptError))
-        else setTranscriptNote(t('这条来源没有字幕：AI 字幕通常需要登录——点右上角齿轮填入 SESSDATA 后重试。'))
+        else setTranscriptNote(t('这条来源没有字幕：需要登录的平台，请到「设置 → 插件」的插件配置里填好凭据后重试。'))
         setCurrentMs(0)
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
@@ -148,7 +134,7 @@ export default function VideoStudyTab() {
           source: item.source,
         }
         try {
-          entry.transcript = await resolveTranscriptOnly(item.source, { sessdata: readSessdata() })
+          entry.transcript = await resolveVideoTranscript(item.source)
         } catch (err) {
           entry.error = err instanceof Error ? err.message : String(err)
         }
@@ -199,24 +185,6 @@ export default function VideoStudyTab() {
     if (target !== list.scrollTop) list.scrollTo({ top: target, behavior: 'smooth' })
   }, [activeIdx, transcript])
 
-  const saveSessdata = useCallback(() => {
-    // 容错：从浏览器复制时容易连「SESSDATA=」前缀或引号一起带上——剥掉再存，
-    // 插件那边拼的是 `SESSDATA=${值}`，前缀混进去 cookie 就废了
-    const value = sessDraft
-      .trim()
-      .replace(/^["']|["']$/g, '')
-      .replace(/^SESSDATA=/i, '')
-      .trim()
-    try {
-      localStorage.setItem(SESSDATA_KEY, value)
-    } catch {
-      // localStorage 不可用（隐私模式之类）就只在会话里生效：draft 还在内存里
-    }
-    setSessOpen(false)
-    setSessSaved(true)
-    window.setTimeout(() => setSessSaved(false), 1600)
-  }, [sessDraft])
-
   /* ---------- 浏览器（WebUI）模式：本地媒体通道不存在，整页给一句引导 ---------- */
   if (isWeb()) {
     return (
@@ -232,7 +200,7 @@ export default function VideoStudyTab() {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-paper select-none">
-      {/* 工具条：输入 + 解析 + 登录设置。实验徽章常驻，提醒这是未完成的功能 */}
+      {/* 工具条：输入 + 解析。实验徽章常驻，提醒这是未完成的功能 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-line bg-card/60 px-3 py-2">
         <MonitorPlay size={15} className="shrink-0 text-seal" />
         <span className="shrink-0 rounded border border-seal/40 bg-seal/10 px-1.5 py-px text-[10px] font-medium text-seal">
@@ -244,7 +212,7 @@ export default function VideoStudyTab() {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.nativeEvent.isComposing) void resolve()
           }}
-          placeholder={t('粘贴 B 站视频链接或 BV 号，回车解析')}
+          placeholder={t('粘贴视频链接或编号，回车解析（支持哪些来源取决于已安装的插件）')}
           disabled={busy}
           className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-2.5 py-1.5 text-[12.5px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/50 focus:ring-2 focus:ring-seal/10 disabled:opacity-50"
         />
@@ -258,69 +226,7 @@ export default function VideoStudyTab() {
           {busy ? <Loader2 size={13} className="animate-spin" /> : null}
           {t('解析')}
         </button>
-        <div className="relative shrink-0">
-          <button
-            type="button"
-            onClick={() => setSessOpen((v) => !v)}
-            title={t('登录设置（SESSDATA，可选）')}
-            aria-haspopup="dialog"
-            aria-expanded={sessOpen}
-            className={
-              'flex h-8 w-8 items-center justify-center rounded-lg text-ink-soft transition hover:bg-line/60 hover:text-ink ' +
-              (sessOpen ? 'bg-line/60 text-ink' : '')
-            }
-          >
-            <Settings2 size={15} />
-          </button>
-          {sessSaved && !sessOpen && (
-            <span className="absolute right-0 top-full mt-1 whitespace-nowrap rounded-md border border-line bg-card px-2 py-1 text-[10.5px] text-ink-soft shadow-sm">
-              {t('已保存')}
-            </span>
-          )}
-        </div>
       </div>
-
-      {/*
-        登录设置做成**工具条下方的内联展开行**，而不是浮层：文档区页签容器带
-        transform / overflow 裁剪，浮层的 fixed 定位会被劫持成「相对那个容器」，
-        弹出来就是一条被裁剩的缝盖在按钮上（实测）。内联行躺在正常文档流里，
-        谁也挡不住它。
-      */}
-      {sessOpen && (
-        <div className="shrink-0 border-b border-line bg-card/40 px-3 py-2">
-          <div className="text-[12px] font-medium text-ink-strong">{t('B 站登录态（SESSDATA，可选）')}</div>
-          <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-            {t('获取：浏览器登录 B 站 → F12 → 应用（Application）→ Cookies → www.bilibili.com → 复制「SESSDATA」的值粘贴到这里。')}
-            <br />
-            {t('AI 字幕通常要登录后才拿得到。值只存本机（浏览器存储），随请求发给 B 站。')}
-          </p>
-          <div className="mt-2 flex items-center gap-2">
-            <input
-              value={sessDraft}
-              onChange={(e) => setSessDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') saveSessdata()
-              }}
-              placeholder={t('只粘贴 Value 本身（带 SESSDATA= 前缀也能存，会自动剥掉）')}
-              className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-2.5 py-1.5 font-mono text-[11.5px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/50 focus:ring-2 focus:ring-seal/10"
-            />
-            <button
-              type="button"
-              onClick={() => setSessOpen(false)}
-              className="shrink-0 rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-soft transition hover:bg-line/60"
-            >
-              {t('取消')}
-            </button>
-            <button
-              type="button"
-              onClick={saveSessdata}
-              className="shrink-0 rounded-lg bg-seal px-2.5 py-1.5 text-[11.5px] font-medium text-white transition hover:bg-seal-deep"
-            >
-              {t('保存')}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* 错误横幅：解析或登记流的失败原话 */}
       {error && (
@@ -558,10 +464,10 @@ export default function VideoStudyTab() {
           <Clapperboard size={36} className="text-seal/60" />
           <div className="text-[13.5px] font-medium text-ink-strong">{t('视频学习（实验）')}</div>
           <p className="max-w-[420px] text-[12px] leading-relaxed text-ink-faint">
-            {t('在上面粘贴一个 B 站视频链接或 BV 号，解析后即可播放并按字幕时间戳跳转。')}
+            {t('在上面粘贴一个视频链接或编号，解析后即可播放并按字幕时间戳跳转。')}
           </p>
           <p className="max-w-[420px] text-[11px] leading-relaxed text-ink-faint/80">
-            {t('实验功能：视频接入由来源插件提供，应用本身不做任何平台解析。')}
+            {t('来源由插件提供：到「设置 → 插件 → 视频 / 音频来源」查看已安装的插件，需要的凭据也在那里配置。')}
           </p>
         </div>
       )}

@@ -174,6 +174,9 @@ export function createWebNativeBridge(): NativeBridge {
       reveal: () => Promise.resolve({ ok: true }),
       toggles: () => Promise.resolve({ ok: true, toggles: {} }),
       setToggle: () => Promise.resolve({ ok: true }),
+      // 插件配置只存在于桌面端（safeStorage 在主进程）
+      settingsGet: () => Promise.resolve({ ok: false, error: '插件配置仅桌面端可用' }),
+      settingsSet: () => Promise.resolve({ ok: false, error: '插件配置仅桌面端可用' }),
     },
 
     runner: {

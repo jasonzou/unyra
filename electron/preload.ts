@@ -25,7 +25,7 @@ import type {
   BaseProcessInfo, BaseProcessListResult, BaseProcessOutputResult, BaseProcessStartResult, BaseProcessStatusResult,
   BaseProcessStopResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
-  PluginEntry, PluginListResult,
+  PluginEntry, PluginListResult, PluginSettingsResult,
   PluginSourceResult, PluginTogglesResult, SaveFilter, SilentMark, StorageEntry, StorageFail,
   NoticeSettings,
   StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail, UpdatePhase, UpdateState,
@@ -293,6 +293,13 @@ const api = {
     list: (): Promise<PluginListResult> => ipcRenderer.invoke('plugins:list'),
 
     read: (file: string): Promise<PluginSourceResult> => ipcRenderer.invoke('plugins:read', file),
+
+    settingsGet: (file: string): Promise<PluginSettingsResult> => ipcRenderer.invoke('plugins:settingsGet', file),
+    settingsSet: (
+      file: string,
+      values: Record<string, string | number | boolean>,
+      secrets: string[],
+    ): Promise<PluginSettingsResult> => ipcRenderer.invoke('plugins:settingsSet', file, values, secrets),
 
     /** 开关插件；写 enabled.json，**重启后生效** */
     setEnabled: (file: string, enabled: boolean): Promise<StorageOk | StorageFail> =>

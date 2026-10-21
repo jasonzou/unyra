@@ -198,6 +198,14 @@ export interface NativeBridge {
     setEnabled(file: string, enabled: boolean): Promise<StorageOk | StorageFail>
     /** 在系统文件管理器里打开插件目录 */
     reveal(): Promise<StorageOk | StorageFail>
+    /** 读插件配置（password 字段已解密成明文） */
+    settingsGet(file: string): Promise<{ ok: boolean; values?: Record<string, string | number | boolean>; error?: string }>
+    /** 存插件配置：secrets 列出的 key 由主进程加密落盘 */
+    settingsSet(
+      file: string,
+      values: Record<string, string | number | boolean>,
+      secrets: string[],
+    ): Promise<{ ok: boolean; error?: string }>
     /**
      * 内置插件的开关。它们编译进包、跟机器走，所以存 appdata 的 global.yaml，
      * 而不是数据目录里那份用户插件清单（见 electron/plugins.ts）。

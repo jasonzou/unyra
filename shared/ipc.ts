@@ -187,6 +187,13 @@ export type CloseAction = 'close' | 'tray' | 'cancel'
 /** 数据根目录：当前用的是哪个、默认是哪个、是不是就是默认的。
  *  谁在用：preload 的 storage.info（通道 storage:info，主进程 electron/storage/ipc.ts），
  *  渲染层 src/lib/storage.ts 与 src/components/settings/StoragePanel.tsx。 */
+/** 插件配置（声明式设置面板）的读写结果：values 是解密后的明文键值 */
+export interface PluginSettingsResult {
+  ok: boolean
+  values?: Record<string, string | number | boolean>
+  error?: string
+}
+
 export interface StorageInfo {
   /** 当前生效的用户数据根目录 */
   root: string

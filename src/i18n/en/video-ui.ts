@@ -119,6 +119,15 @@ const dict: Record<string, string> = {
   /* ---------- B 站插件与注册表（src/video） ---------- */
   '没有插件支持这个输入：{0}': 'No plugin handles this input: {0}',
   '这个来源没有可播放的流': 'This source has no playable stream',
+  '这条来源没有可用字幕': 'This source has no usable subtitles',
+  '粘贴视频链接或编号，回车解析（支持哪些来源取决于已安装的插件）':
+    'Paste a video link or id and press Enter (supported sources depend on installed plugins)',
+  '这条来源没有字幕：需要登录的平台，请到「设置 → 插件」的插件配置里填好凭据后重试。':
+    'No subtitles for this source: for platforms that require login, fill in the credentials under Settings → Plugins and retry.',
+  '在上面粘贴一个视频链接或编号，解析后即可播放并按字幕时间戳跳转。':
+    'Paste a video link or id above; after resolving you can play it and jump by subtitle timestamps.',
+  '来源由插件提供：到「设置 → 插件 → 视频 / 音频来源」查看已安装的插件，需要的凭据也在那里配置。':
+    'Sources come from plugins: see Settings → Plugins → Video / audio sources for installed plugins and their credentials.',
   '这个页签没有可保存的内容': 'This tab has nothing to save',
   '本地文件流还没有接进播放通道': 'Local file streams are not wired into the player yet',
   '{0} 回的不是 JSON（status {1}）': '{0} did not return JSON (status {1})',

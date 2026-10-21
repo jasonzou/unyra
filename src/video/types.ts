@@ -96,42 +96,8 @@ export interface VideoSource {
   }>
 }
 
-/** 插件解析时能用的宿主能力：API 请求走主进程通道（渲染层发不出防盗链头） */
-export interface VideoPluginCtx {
-  /** 只读 GET。返回主进程的回执：ok 时 body 是响应原文（插件自己 parse JSON） */
-  fetch(url: string, headers?: Record<string, string>): Promise<
-    { ok: true; status: number; finalUrl: string; body: string } | { ok: false; error: string }
-  >
-}
-
-/** 来源插件：一个平台 / 一种来源一份 */
-export interface VideoSourcePlugin {
-  /** 插件 id（mediaId 前缀用，小写字母数字） */
-  id: string
-  /** 显示名（设置与日志里用） */
-  name: string
-  /** 能力声明：MVP 的插件要么「字幕直取」要么「交音频给 STT」——当前只有前者 */
-  provides: Array<'transcript' | 'audio' | 'stream'>
-  /**
-   * 这个输入归不归我管（不抛错，不认识就返回 null）。
-   * match 与 resolve 分开：同一个输入可能命中多个插件的规则，先到先得按注册顺序。
-   */
-  match(input: string): { input: string } | null
-  /** 解析：拿到流与转录。失败就抛 Error（错误原话直达界面，不做预判文案） */
-  resolve(matched: { input: string }, ctx: VideoPluginCtx, opts: VideoResolveOptions): Promise<VideoSource>
-  /**
-   * 只取转录（合集批量导出用）：跳过播放地址那一步，直接拿字幕。省略时注册表
-   * 回退到完整 resolve 再挑 transcript（能跑，只是多做一些无用功）。
-   */
-  resolveTranscript?(
-    matched: { input: string },
-    ctx: VideoPluginCtx,
-    opts: VideoResolveOptions,
-  ): Promise<Transcript>
-}
-
-/** 解析入参里与插件有关的部分（MVP 只有 B 站登录态一项） */
-export interface VideoResolveOptions {
-  /** B 站 SESSDATA（可选）：AI 字幕与高清流通常要登录后才给 */
-  sessdata?: string
-}
+/*
+ * 插件的行为契约（match / resolve / 配置面板）不在这个文件：它在
+ * lib/videoPlugins 的 VideoPlugin（PluginBase 的扩展，宿主是 lib/plugins）。
+ * 这里只留**数据结构**——插件交出来的东西长什么样，消费端只认这一份。
+ */

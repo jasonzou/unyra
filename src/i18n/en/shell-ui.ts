@@ -151,7 +151,6 @@ const dict: Record<string, string> = {
 
   /* ---------- lib/plugins 的错误（显示在插件页） ---------- */
   '读不到插件文件：应用没有跑在 Electron 里': 'Cannot read the plugin file: the app is not running in Electron',
-  '没能保存': 'Could not save',
   '打不开插件目录': 'Could not open the plugins folder',
 
   /* ---------- lib/closeBehavior 的关窗行为（显示在窗口页） ---------- */
@@ -173,6 +172,13 @@ const dict: Record<string, string> = {
   '已停用，重启后生效': 'Disabled; takes effect after restart',
   '打开插件目录': 'Open plugins folder',
   '这个类别下还没有插件。': 'No plugins in this category yet.',
+  '插件配置': 'Plugin settings',
+  '已保存，重启应用后生效': 'Saved — takes effect after restarting the app',
+  '没能保存': 'Could not save',
+  '密码类字段由系统加密存储（换机器后需要重新填写）。':
+    'Secret fields are encrypted by the OS (fill them in again on another machine).',
+  '保存后需重启应用才生效': 'Takes effect after restart',
+  '保存中…': 'Saving…',
   '往里放一个 .js 就多一个插件：文件里调用': 'Drop a .js file in to add a plugin: the file calls',
   '交出插件对象（认领一种围栏语言，或给几条正文文字规则）。目录：': 'to hand over the plugin object (claiming a fenced language or text rules). Folder:',
   '代码块的伪编译产物': 'Pseudo-compiled artifacts of code blocks',
