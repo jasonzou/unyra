@@ -63,10 +63,12 @@ interface Props {
   /** 解析成功回写标题（资源列表显示真实标题） */
   onResolved?: (title: string) => void
   /** 播放进度（毫秒，节流后上报）：工作区写进视频资源，下次打开自动跳回 */
-  onProgress?: (positionMs: number) => void
+  onProgress?: (positionMs: number, source: string) => void
+  /** 选集切换：把「停在的那一项」写进资源（重开回到同一集） */
+  onSelection?: (source: string, title: string) => void
 }
 
-export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress }: Props) {
+export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress, onSelection }: Props) {
   const bound = !!video
   /** 创建态输入（绑定态不用它——页里没有输入组件） */
   const [input, setInput] = useState(() => video?.input ?? readLastInput())
@@ -122,6 +124,8 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
   const playerRef = useRef<VideoPlayerHandle | null>(null)
   /** 上次上报进度时的位置：节流用（每 5 秒最多写一次存档） */
   const lastProgressRef = useRef(0)
+  /** 当前解析的是哪一项（选集 source）：进度要带上它，别把上一集的进度续到这一集 */
+  const currentSourceRef = useRef<string>('')
   const listRef = useRef<HTMLDivElement | null>(null)
   const rowRefs = useRef<Array<HTMLDivElement | null>>([])
   const edges = useScrollEdges(listRef)
@@ -151,7 +155,11 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
         else if (src.transcriptError) setTranscriptNote(t('字幕获取失败：{0}', src.transcriptError))
         else setTranscriptNote(t('这条来源没有字幕：需要登录的平台，请到「设置 → 插件」的插件配置里填好凭据后重试。'))
         setCurrentMs(0)
+        currentSourceRef.current = text
+        lastProgressRef.current = 0
         onResolved?.(src.title)
+        // 选集切换（合集项 / 分 P）：把那串输入记进资源，重开页签回到同一集
+        if (video && text !== (video.selection?.source ?? video.input)) onSelection?.(text, src.title)
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
@@ -161,13 +169,16 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
     [busy, onResolved],
   )
 
-  // 绑定态：进页即自动解析一次（按资源 id 记账——store 更新标题时会重渲染，但不再重解析）
+  /*
+   * 绑定态：进页即自动解析一次（按资源 id 记账——store 更新标题/进度会重渲染，
+   * 但不再重解析）。解析的**起点**是停下的那一集（selection），没有才是创建时的输入。
+   */
   const autoResolvedRef = useRef<string | null>(null)
   useEffect(() => {
     if (!video) return
     if (autoResolvedRef.current === video.id) return
     autoResolvedRef.current = video.id
-    void runResolve(video.input, video.fields)
+    void runResolve(video.selection?.source ?? video.input, video.fields)
   }, [video, runResolve])
 
   /**
@@ -181,7 +192,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
     const flush = () => {
       const ms = el.currentTime * 1000
       lastProgressRef.current = ms
-      onProgress(ms)
+      onProgress(ms, currentSourceRef.current)
     }
     el.addEventListener('pause', flush)
     el.addEventListener('ended', flush)
@@ -191,13 +202,20 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
     }
   }, [relayUrl, onProgress])
 
-  /** 续播：解析出流之后跳回上次位置（太靠前 / 已到片尾就不折腾） */
+  /**
+   * 续播：解析出流之后跳回上次位置（太靠前 / 已到片尾就不折腾）。
+   * **只在进度属于当前这一项时**才跳——换了选集还跳旧进度就是回到别的集上了。
+   */
   const resumedRef = useRef<string | null>(null)
   useEffect(() => {
     if (!relayUrl || !video) return
-    if (resumedRef.current === video.id) return
-    resumedRef.current = video.id
-    const saved = video.progress?.positionMs ?? 0
+    const resumeKey = video.id + '|' + currentSourceRef.current
+    if (resumedRef.current === resumeKey) return
+    resumedRef.current = resumeKey
+    const progress = video.progress
+    if (!progress) return
+    if (progress.source && progress.source !== currentSourceRef.current) return
+    const saved = progress.positionMs
     if (saved < 5000) return
     if (source?.durationMs && saved > source.durationMs - 5000) return
     const timer = window.setTimeout(() => {
@@ -413,13 +431,13 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
                   // 节流：每 5 秒最多存一次；暂停/播完另有即时落盘（见上面的 effect）
                   if (Math.abs(ms - lastProgressRef.current) >= 5000) {
                     lastProgressRef.current = ms
-                    onProgress?.(ms)
+                    onProgress?.(ms, currentSourceRef.current)
                   }
                 }}
                 onSeeked={(ms) => {
                   setCurrentMs(ms)
                   lastProgressRef.current = ms
-                  onProgress?.(ms)
+                  onProgress?.(ms, currentSourceRef.current)
                 }}
                 onExternalSubtitleLoaded={(extTranscript) => {
                   setTranscript(extTranscript)

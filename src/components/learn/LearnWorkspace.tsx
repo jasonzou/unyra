@@ -4702,7 +4702,7 @@ export default function LearnWorkspace({
                   videos: list.map((v) => (v.id === videoId ? { ...v, title, updatedAt: Date.now() } : v)),
                 })
               }}
-              onProgress={(videoId, positionMs) => {
+              onProgress={(videoId, positionMs, source) => {
                 const latest = getLatest()
                 const list = latest.videos ?? []
                 const cur = list.find((v) => v.id === videoId)
@@ -4710,7 +4710,31 @@ export default function LearnWorkspace({
                 set({
                   ...latest,
                   videos: list.map((v) =>
-                    v.id === videoId ? { ...v, progress: { positionMs: Math.round(positionMs), updatedAt: Date.now() } } : v,
+                    v.id === videoId
+                      ? {
+                          ...v,
+                          progress: { ...(source ? { source } : {}), positionMs: Math.round(positionMs), updatedAt: Date.now() },
+                        }
+                      : v,
+                  ),
+                })
+              }}
+              onSelection={(videoId, source, title) => {
+                const latest = getLatest()
+                const list = latest.videos ?? []
+                const cur = list.find((v) => v.id === videoId)
+                if (!cur) return
+                set({
+                  ...latest,
+                  videos: list.map((v) =>
+                    v.id === videoId
+                      ? {
+                          ...v,
+                          selection: { source, ...(title ? { title } : {}) },
+                          // 换集就把进度归零到新那一项：旧进度不能续到别的集上
+                          progress: { source, positionMs: 0, updatedAt: Date.now() },
+                        }
+                      : v,
                   ),
                 })
               }}

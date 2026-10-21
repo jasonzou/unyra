@@ -122,6 +122,12 @@ export function buildState(store: LearnStore): Record<string, unknown> {
     // 日程：有条目、或铃声被改过才写（默认铃声不值得占字段；改过就得记住）
     ...(hasSchedule(store.schedule) ? { schedule: store.schedule } : {}),
     /*
+     * 视频资源（见 learn/types 的 VideoResource）：与日程同一条纪律——有才写。
+     * **这一行曾经漏过**：资源只在内存里，一落盘就没了（用户报「选集和进度不生效」）。
+     * 新字段进 LearnStore 时记得同时补到这里，归一那头在 normalize/index。
+     */
+    ...(store.videos?.length ? { videos: store.videos } : {}),
+    /*
      * agent 栏的页签：只在真有页签时写（与 favorites 同一条纪律）。
      * 激活项跟着页签走——没有页签时的 null 是默认值，不值得占一个字段。
      */

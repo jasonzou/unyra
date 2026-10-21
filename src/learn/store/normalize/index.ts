@@ -330,8 +330,19 @@ export function parseLearnStore(raw: string): LearnStore | null {
  * 视频资源：只认「字段齐全 + id 唯一」的条目。
  * title 缺了用输入截断顶上（列表里总得有个名字）；fields 只留标量值。
  */
-/** 播放进度：只认「非负整数毫秒 + 时间戳」，坏形状当没记过 */
-function normalizeProgress(raw: unknown): { positionMs: number; updatedAt: number } | undefined {
+/** 选集状态：source 必须是非空字符串 */
+function normalizeSelection(raw: unknown): { source: string; title?: string } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const o = raw as Record<string, unknown>
+  const source = typeof o.source === 'string' ? o.source.trim() : ''
+  if (!source) return undefined
+  return { source, ...(typeof o.title === 'string' && o.title.trim() ? { title: o.title.trim() } : {}) }
+}
+
+/** 播放进度：只认「非负整数毫秒 + 时间戳」，坏形状当没记过（source 可选，旧数据没有） */
+function normalizeProgress(
+  raw: unknown,
+): { source?: string; positionMs: number; updatedAt: number } | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const o = raw as Record<string, unknown>
   const positionMs =
@@ -339,7 +350,8 @@ function normalizeProgress(raw: unknown): { positionMs: number; updatedAt: numbe
       ? Math.round(o.positionMs)
       : null
   const updatedAt = typeof o.updatedAt === 'number' && Number.isFinite(o.updatedAt) ? o.updatedAt : Date.now()
-  return positionMs === null ? undefined : { positionMs, updatedAt }
+  const source = typeof o.source === 'string' && o.source.trim() ? o.source.trim() : undefined
+  return positionMs === null ? undefined : { ...(source ? { source } : {}), positionMs, updatedAt }
 }
 
 function normalizeVideos(raw: unknown): VideoResource[] {
@@ -367,6 +379,7 @@ function normalizeVideos(raw: unknown): VideoResource[] {
       input,
       ...(Object.keys(fields).length ? { fields } : {}),
       title: typeof o.title === 'string' && o.title.trim() ? o.title.trim() : input.slice(0, 60),
+      ...(normalizeSelection(o.selection) ? { selection: normalizeSelection(o.selection) } : {}),
       ...(normalizeProgress(o.progress) ? { progress: normalizeProgress(o.progress) } : {}),
       createdAt: typeof o.createdAt === 'number' ? o.createdAt : Date.now(),
       ...(typeof o.updatedAt === 'number' ? { updatedAt: o.updatedAt } : {}),

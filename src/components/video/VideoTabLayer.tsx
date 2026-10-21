@@ -30,11 +30,13 @@ interface Props {
   onCreate: (tabId: string, draft: VideoCreateDraft) => void
   /** 解析成功回写标题 */
   onResolved: (videoId: string, title: string) => void
-  /** 播放进度（毫秒，已节流）：工作区写进视频资源，下次打开跳回 */
-  onProgress: (videoId: string, positionMs: number) => void
+  /** 播放进度（毫秒，已节流）：工作区写进视频资源，下次打开跳回；source 是那一项的输入 */
+  onProgress: (videoId: string, positionMs: number, source: string) => void
+  /** 选集切换：把「停在的那一项」写进资源（重开页签回到同一集） */
+  onSelection: (videoId: string, source: string, title: string) => void
 }
 
-export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onResolved, onProgress }: Props) {
+export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onResolved, onProgress, onSelection }: Props) {
   return (
     <>
       {tabs.map((tab) => {
@@ -62,8 +64,11 @@ export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onReso
                 onResolved={(title) => {
                   if (videoId) onResolved(videoId, title)
                 }}
-                onProgress={(positionMs) => {
-                  if (videoId) onProgress(videoId, positionMs)
+                onProgress={(positionMs, source) => {
+                  if (videoId) onProgress(videoId, positionMs, source)
+                }}
+                onSelection={(source, title) => {
+                  if (videoId) onSelection(videoId, source, title)
                 }}
               />
             )}

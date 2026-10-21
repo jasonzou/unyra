@@ -664,11 +664,18 @@ export interface VideoResource {
   /** 列表显示名：创建时取输入截断，解析成功后由插件给的标题覆盖 */
   title: string
   /**
+   * 选集状态（**通用状态归宿主**）：用户在合集 / 分 P 列表里最终停在的那一项。
+   * source 是那一项能被插件再认领的输入串（如带 ?p=N 的链接）；没选过就是创建时
+   * 的 input。重开页签按它解析——「上次看的那一集」也在进度里，见下。
+   */
+  selection?: { source: string; title?: string }
+  /**
    * 播放进度（**通用状态归宿主**）：上次播放到哪儿，打开绑定页签时自动跳回。
+   * source 记住这是**哪一项**的进度（换选集后旧进度不再乱套到新一集上当续播）。
    * 播放器自身的偏好（音量 / 倍速 / 静音）属于本机，不在这里（见 VideoPlayer 的
    * localStorage）；插件专属的状态放 fields。
    */
-  progress?: { positionMs: number; updatedAt: number }
+  progress?: { source?: string; positionMs: number; updatedAt: number }
   createdAt: number
   updatedAt?: number
 }
