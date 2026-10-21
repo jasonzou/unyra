@@ -23,6 +23,22 @@ const dict: Record<string, string> = {
   '在上面粘贴一个 B 站视频链接或 BV 号，解析后即可播放并按字幕时间戳跳转。':
     'Paste a Bilibili link or BV id above; after resolving you can play the video and jump by subtitle timestamps.',
   '这条来源没有可用的转录。': 'No transcript available for this source.',
+  '新建视频': 'New video',
+  '粘贴链接或输入编号，插件会认领它。视频创建后绑定插件与输入，打开页签即自动播放。':
+    'Paste a link or type an id and a plugin will claim it. Once created, the video is bound to that plugin and input and plays as soon as you open it.',
+  '链接或编号（例如 B 站链接 / BV 号）': 'Link or id (e.g. a Bilibili link / BV id)',
+  '创建': 'Create',
+  '没有插件认领这段输入。已安装：{0}': 'No plugin claims this input. Installed: {0}',
+  '还没有安装任何视频来源插件：到「设置 → 插件 → 视频 / 音频来源」安装并启用。':
+    'No video source plugins installed yet — install and enable one under Settings → Plugins → Video / audio sources.',
+  '上面填的是这个视频专属的数据；插件全局配置（如登录凭据）在「设置 → 插件」里。':
+    'The fields above are specific to this video; plugin-wide settings (like credentials) live under Settings → Plugins.',
+  '正在解析视频来源…': 'Resolving the video source…',
+  '这个视频还没有解析出来：检查插件是否已启用、凭据是否配好，然后重新打开本页签。':
+    'This video has not resolved yet: check that the plugin is enabled and its credentials are set, then reopen this tab.',
+  '视频已删除': 'Video deleted',
+  '这个页签绑定的视频资源已经不在了（可能被删除）：关掉页签即可。':
+    'The video this tab was bound to no longer exists (it may have been deleted). Close the tab.',
 
   /* ---------- 登录设置（SESSDATA） ---------- */
   '登录设置（SESSDATA，可选）': 'Login (SESSDATA, optional)',

@@ -11,7 +11,7 @@
  * 点开就是接着看，比在侧栏里另起一区更顺路。
  */
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, memo } from 'react'
-import type { FavoriteRef, KnowledgeNode, LearnStore, TabRef } from '../../learn/types'
+import type { FavoriteRef, KnowledgeNode, LearnStore, TabRef, VideoResource } from '../../learn/types'
 import { nodeById } from '../../learn/graph'
 import { EXPLORER_WIDTH_MAX, EXPLORER_WIDTH_MIN } from '../../lib/appearance'
 import { userAbsPrefix } from '../../lib/storage'
@@ -19,7 +19,7 @@ import Logo from '../Logo'
 import { NewGoalIcon, OpenLocalIcon } from '../icons'
 import { NodeRow } from './explorer/NodeRow'
 import { RowMenu } from './explorer/RowMenu'
-import { FavoriteSection, FocusReportsSection, LocalRow } from './explorer/sections'
+import { FavoriteSection, FocusReportsSection, LocalRow, VideoRow } from './explorer/sections'
 import { Section, SectionAction } from './explorer/Folder'
 import {
   publishReveal,
@@ -60,6 +60,12 @@ export type { ExamActions, NodeDocActions, NodeStateActions, WsActions } from '.
 
 interface Props {
   store: LearnStore
+  /** 视频资源（用户创建并绑定住的来源，见 learn/types 的 VideoResource） */
+  videos: VideoResource[]
+  /** 打开某个视频的绑定页签 */
+  onOpenVideo: (id: string) => void
+  /** 删除一个视频资源（调用方负责落库） */
+  onDeleteVideo: (id: string) => void
   /**
    * 当前**选中**的节点：由激活的页签推出，而不是「上次点过的节点」。
    * 关掉某个节点的教学文档页签，它就不该再是选中样式（见 LearnWorkspace）。
@@ -138,6 +144,9 @@ function ExplorerSidebarComponent({
   onRevealWs,
   onOpenWs,
   ws,
+  videos,
+  onOpenVideo,
+  onDeleteVideo,
   onOpenLocal,
   onOpenReport,
   onRemoveLocal,
@@ -331,6 +340,26 @@ function ExplorerSidebarComponent({
             onRenameTitle={onRenameFavoriteTitle}
             onCreateGroup={onCreateFavoriteGroup}
           />
+
+          {videos.length > 0 && (
+            <Section
+              title={t('视频')}
+              count={videos.length}
+              open={sectionOpen('videos')}
+              onToggle={() => toggleSection('videos')}
+            >
+              <div className="px-2">
+                {videos.map((v) => (
+                  <VideoRow
+                    key={v.id}
+                    video={v}
+                    onOpen={() => onOpenVideo(v.id)}
+                    onDelete={() => onDeleteVideo(v.id)}
+                  />
+                ))}
+              </div>
+            </Section>
+          )}
 
           {locals.length > 0 && (
             <Section

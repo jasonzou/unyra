@@ -49,6 +49,12 @@ export interface VideoPlugin extends PluginBase {
   resolveTranscript?(ctx: VideoPluginCtx, matched: { input: string }): Promise<Transcript>
   /** 设置页「测试连接」（可选） */
   onTest?(ctx: VideoPluginCtx): Promise<{ ok: boolean; message?: string }>
+  /**
+   * 创建视频时**每个视频各填一次**的字段（例如画质、课程密码）。与全局 settings
+   * 用同一套声明式 schema；值随视频资源落库，解析时合并进 host.settings
+   * （同键以这里的值为准——插件不必区分两份配置从哪来）。
+   */
+  createFields?: PluginSettingField[]
   /** 编译期注入的宿主（settings 快照 + fetch + log），由 compilePlugin 缝进来 */
   host?: PluginHost
 }
@@ -124,6 +130,7 @@ definePluginCategory({
     if (typeof raw.match !== 'function') throw new Error(t('插件缺少 match(input) 函数'))
     if (typeof raw.resolve !== 'function') throw new Error(t('插件缺少 resolve(host, matched) 函数'))
     const settings = normalizeSettings(raw.settings)
+    const createFields = normalizeSettings(raw.createFields)
     const host = currentCompileHost()
     const plugin: VideoPlugin = {
       id,
@@ -140,6 +147,7 @@ definePluginCategory({
         : {}),
       ...(typeof raw.onTest === 'function' ? { onTest: raw.onTest as VideoPlugin['onTest'] } : {}),
       ...(settings.length ? { settings } : {}),
+      ...(createFields.length ? { createFields } : {}),
       ...(typeof raw.version === 'string' ? { version: raw.version } : {}),
       ...(host ? { host } : {}),
     }
@@ -162,10 +170,15 @@ export function videoSourcePlugins(): VideoPlugin[] {
   return pluginsOf('video') as VideoPlugin[]
 }
 
-function ctxOf(plugin: VideoPlugin): VideoPluginCtx {
+/**
+ * 组装插件上下文：全局配置是编译期快照，视频级的 createFields 值按次合并
+ * （同键以视频资源为准）。没有额外值时直接复用快照，不产生新对象。
+ */
+function ctxOf(plugin: VideoPlugin, extra?: Record<string, string | number | boolean>): VideoPluginCtx {
   const host = plugin.host
   if (!host) throw new Error(t('插件「{0}」没有装载上下文（重启应用后重试）', plugin.name ?? plugin.id))
-  return host
+  if (!extra || !Object.keys(extra).length) return host
+  return { settings: Object.freeze({ ...host.settings, ...extra }), fetch: host.fetch, log: host.log }
 }
 
 /** 设置页「测试连接」：按文件找到已装载的视频插件，跑它的 onTest（没声明就算不支持） */
@@ -216,10 +229,13 @@ function vetTranscript(source: VideoSource): VideoSource {
 }
 
 /** 解析一次：match → resolve → 归一校验 + 时长对账。错误原话原样上抛 */
-export async function resolveVideoSource(input: string): Promise<VideoSource> {
+export async function resolveVideoSource(
+  input: string,
+  fields?: Record<string, string | number | boolean>,
+): Promise<VideoSource> {
   const hit = matchVideoPlugin(input)
   if (!hit) throw new Error(NO_PLUGIN_HINT().replace('{0}', input.slice(0, 80)))
-  const source = await hit.plugin.resolve(ctxOf(hit.plugin), hit.matched)
+  const source = await hit.plugin.resolve(ctxOf(hit.plugin, fields), hit.matched)
   const normalized = source.transcript
     ? { ...source, transcript: normalizeTranscript(source.transcript) }
     : source
@@ -227,10 +243,13 @@ export async function resolveVideoSource(input: string): Promise<VideoSource> {
 }
 
 /** 只取一份转录（合集批量导出用）：插件有专用路径走专用，没有就完整解析后挑 transcript */
-export async function resolveVideoTranscript(input: string): Promise<Transcript> {
+export async function resolveVideoTranscript(
+  input: string,
+  fields?: Record<string, string | number | boolean>,
+): Promise<Transcript> {
   const hit = matchVideoPlugin(input)
   if (!hit) throw new Error(NO_PLUGIN_HINT().replace('{0}', input.slice(0, 80)))
-  const ctx = ctxOf(hit.plugin)
+  const ctx = ctxOf(hit.plugin, fields)
   const transcript = hit.plugin.resolveTranscript
     ? await hit.plugin.resolveTranscript(ctx, hit.matched)
     : (await hit.plugin.resolve(ctx, hit.matched)).transcript

@@ -1,29 +1,32 @@
 /**
- * 视频学习页签（实验）：通用播放器 + 转录段面板 + 时间戳跳转。
+ * 视频页签：两种形态，同一个组件。
  *
- * 这是「视频内容分析」链路的第一段落地：来源插件解析出**合流 mp4 流**与**统一转录段**
- * （契约见 src/video/types），本页只做三件通用的事——播放、按时间戳显示转录、
- * 双向跳转（点转录段 seek 播放器；播放推进时高亮当前段）。分组与 agent 工具面
- * 是后续的事，这个页签刻意什么都不懂。
+ * - **创建态**（`video` 为空，全局一份，键 v:new）：只有一个输入框 + 创建按钮。
+ *   输入不一定是 URL——交给已装载的插件逐个 `match()` 认领，认领后展示该插件的
+ *   `createFields` 表单，填完创建。插件与输入在这一刻确定，之后不再让用户重填。
+ * - **绑定态**（`video` 有值，键 v:<id>）：页里**没有任何输入组件**，进页即按
+ *   资源的「输入 + 字段」自动解析；标题栏/播放器/合集/选集/字幕条照旧。
  *
- * 来源全部由**用户安装的插件**提供（设置 → 插件 → 视频 / 音频来源）：应用本体零平台
- * 知识，插件需要的凭据也在插件设置面板里配置（password 字段主进程加密落盘）。
- * 流地址每次解析都重新登记（media-relay 不落盘），页签本身持久化、但解析结果不落盘。
+ * 两种形态都走 `lib/videoPlugins` 的派发（match → resolve → 宿主归一 + 时长对账）。
+ * 流地址每次解析都重新登记（media-relay 不落盘）；解析结果不随页签持久化。
+ * 视频页签由工作区的常驻层 keepalive 渲染（切走只藏不卸，播放不打断）。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Clapperboard, Download, Loader2, MonitorPlay } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, Clapperboard, Download, Loader2, MonitorPlay, Plus, Puzzle } from 'lucide-react'
 import { t } from '../../i18n'
 import { isWeb, native } from '../../lib/native'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
+import { matchVideoPlugin, resolveVideoSource, resolveVideoTranscript, videoSourcePlugins } from '../../lib/videoPlugins'
 import { openRelayStream } from '../../video/registry'
-import { resolveVideoSource, resolveVideoTranscript } from '../../lib/videoPlugins'
 import { buildPagesMarkdown, type PagesExportEntry } from '../../video/export'
 import { formatClock, segmentIndexAt } from '../../video/transcript'
 import type { Transcript, VideoSource } from '../../video/types'
+import type { PluginSettingField } from '../../lib/plugins'
+import type { VideoResource } from '../../learn/types'
 import VideoPlayer, { type VideoPlayerHandle } from './VideoPlayer'
 
-/** 上次解析的输入：页签持久化后（normalizeTab 认 video），重启把它填回输入框，一键重新解析 */
+/** 创建态的输入记忆：下次打新建视频，上次粘的链接还在 */
 const INPUT_KEY = 'moji.video.input'
 /** 合集列表收起与否：跟输入一样落在 localStorage，重启后保持上次的选择 */
 const COLLAPSED_KEY = 'moji.video.collapsed'
@@ -44,11 +47,55 @@ const readCollapsed = (): boolean => {
   }
 }
 
-export default function VideoStudyTab() {
-  const [input, setInput] = useState(readLastInput)
+/** 创建时的工作区回调签名：落库 + 开关页签都在工作区做（页签自己不认识 store） */
+export interface VideoCreateDraft {
+  pluginId: string
+  pluginName: string
+  input: string
+  fields: Record<string, string | number | boolean>
+}
+
+interface Props {
+  /** 绑定的视频资源；空 = 创建态 */
+  video?: VideoResource | null
+  /** 创建（工作区负责落库、开绑定页签、关掉创建页签） */
+  onCreate?: (draft: VideoCreateDraft) => void
+  /** 解析成功回写标题（资源列表显示真实标题） */
+  onResolved?: (title: string) => void
+}
+
+export default function VideoStudyTab({ video = null, onCreate, onResolved }: Props) {
+  const bound = !!video
+  /** 创建态输入（绑定态不用它——页里没有输入组件） */
+  const [input, setInput] = useState(() => video?.input ?? readLastInput())
+  /**
+   * 创建态的匹配结果：纯函数，输入一变就重算。
+   * 空输入或无插件认领都是 null——界面上分别给「请输入」与「没有插件认领」两种提示。
+   */
+  const matched = useMemo(() => {
+    if (bound) return null
+    const text = input.trim()
+    if (!text) return null
+    return matchVideoPlugin(text)
+  }, [bound, input])
+  /** 创建态：插件的 createFields 值（换插件时按默认值重置） */
+  const [createValues, setCreateValues] = useState<Record<string, string | number | boolean>>({})
+  useEffect(() => {
+    const fields = matched?.plugin.createFields ?? []
+    const seed: Record<string, string | number | boolean> = {}
+    for (const f of fields) {
+      if (f.default !== undefined) seed[f.key] = f.default
+      else if (f.type === 'boolean') seed[f.key] = false
+      else seed[f.key] = ''
+    }
+    setCreateValues(seed)
+  }, [matched?.plugin.id])
+  const createFields: PluginSettingField[] = matched?.plugin.createFields ?? []
+  const missingRequired = createFields.some((f) => f.required && !String(createValues[f.key] ?? '').trim())
+
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  /** 解析结果：流地址（media-relay）+ 转录稿 + 元信息；null = 还没解析过（空态） */
+  /** 解析结果：流地址（media-relay）+ 转录稿 + 元信息；null = 还没解析出来 */
   const [relayUrl, setRelayUrl] = useState<string | null>(null)
   const [source, setSource] = useState<VideoSource | null>(null)
   const [transcript, setTranscript] = useState<Transcript | null>(null)
@@ -79,21 +126,18 @@ export default function VideoStudyTab() {
   /** 播放推进到哪一段：段间空隙（-1）时全部行保持素净 */
   const activeIdx = segments.length ? segmentIndexAt(segments, currentMs) : -1
 
-  /** 解析 → 登记流 → 更新整页状态。错误原话进横幅（库抛什么显示什么，不做预判文案）。
-   *  收一个显式入参：工具条吃输入框的值，合集列表点切换时吃那一项的来源串。 */
+  /**
+   * 解析一轮：换流 → 更新整页。错误原话进横幅（库抛什么显示什么，不做预判文案）。
+   * fields 是视频级的 createFields 值（创建时填的），与插件全局配置在宿主合并。
+   */
   const runResolve = useCallback(
-    async (text: string) => {
+    async (text: string, fields?: Record<string, string | number | boolean>) => {
       if (!text || busy) return
       setBusy(true)
       setError(null)
       setTranscriptNote(null)
       try {
-        localStorage.setItem(INPUT_KEY, text)
-      } catch {
-        // localStorage 不可用就只当会话内的输入，无碍
-      }
-      try {
-        const src = await resolveVideoSource(text)
+        const src = await resolveVideoSource(text, fields)
         const url = await openRelayStream(src)
         setSource(src)
         setRelayUrl(url)
@@ -103,16 +147,42 @@ export default function VideoStudyTab() {
         else if (src.transcriptError) setTranscriptNote(t('字幕获取失败：{0}', src.transcriptError))
         else setTranscriptNote(t('这条来源没有字幕：需要登录的平台，请到「设置 → 插件」的插件配置里填好凭据后重试。'))
         setCurrentMs(0)
+        onResolved?.(src.title)
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
         setBusy(false)
       }
     },
-    [busy],
+    [busy, onResolved],
   )
 
-  const resolve = useCallback(() => void runResolve(input.trim()), [runResolve, input])
+  // 绑定态：进页即自动解析一次（按资源 id 记账——store 更新标题时会重渲染，但不再重解析）
+  const autoResolvedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!video) return
+    if (autoResolvedRef.current === video.id) return
+    autoResolvedRef.current = video.id
+    void runResolve(video.input, video.fields)
+  }, [video, runResolve])
+
+  /** 创建：把「插件 + 输入 + 专属字段」交给工作区落库 */
+  const create = useCallback(() => {
+    if (!matched || missingRequired) return
+    const text = input.trim()
+    if (!text) return
+    try {
+      localStorage.setItem(INPUT_KEY, text)
+    } catch {
+      // 记不住也无碍
+    }
+    onCreate?.({
+      pluginId: matched.plugin.id,
+      pluginName: matched.plugin.name ?? matched.plugin.id,
+      input: text,
+      fields: createValues,
+    })
+  }, [matched, missingRequired, input, createValues, onCreate])
 
   /**
    * 批量导出**当前视频全部分 P** 的选集字幕：逐 P 只取转录（专用通道，跳过播放地址）
@@ -134,7 +204,7 @@ export default function VideoStudyTab() {
           source: item.source,
         }
         try {
-          entry.transcript = await resolveVideoTranscript(item.source)
+          entry.transcript = await resolveVideoTranscript(item.source, video?.fields)
         } catch (err) {
           entry.error = err instanceof Error ? err.message : String(err)
         }
@@ -148,7 +218,7 @@ export default function VideoStudyTab() {
         {
           title: source.title,
           durationMs: source.durationMs,
-          source: bvid ? `https://www.bilibili.com/video/${bvid}` : (input.trim() || source.mediaId),
+          source: bvid ? `https://www.bilibili.com/video/${bvid}` : (video?.input ?? source.mediaId),
         },
         entries,
       )
@@ -160,24 +230,22 @@ export default function VideoStudyTab() {
     } finally {
       setExportProgress(null)
     }
-  }, [source, exportProgress, input])
+  }, [source, exportProgress, video?.input, video?.fields])
 
   /** 点转录段 → 播放器 seek 到段首并起播 */
   const seekMs = useCallback((ms: number) => {
     playerRef.current?.seekMs(ms)
   }, [])
 
-  /** 当前段变了就把那行滚进视野（在视野里就别动——读着读着被拽走很烦） */
+  /** 当前段变了就把那行滚进视野（跟随定位：钉在可视区 20% 高度，用户定的） */
   useEffect(() => {
     const list = listRef.current
     const row = activeIdx >= 0 ? rowRefs.current[activeIdx] : null
     if (!list || !row) return
     /*
-     * 跟随定位：当前段钉在可视区 20% 高度处（歌词式跟随，用户定的）。
      * contentTop 必须是「行顶在滚动内容坐标系里的位置」——用 rect 差值现算，
      * 不用 offsetTop：那是相对 offsetParent（最近的定位祖先）量的，滚动容器
      * 自己没定位时量出来的是相对更外层的偏移，落点整个错掉（踩过）。
-     * 平滑滚 + 夹在内容范围内；段与段间隔几秒，每次只挪一行的量，不抖。
      */
     const contentTop = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
     const max = Math.max(0, list.scrollHeight - list.clientHeight)
@@ -198,36 +266,87 @@ export default function VideoStudyTab() {
     )
   }
 
+  /* ---------- 创建态：输入 → 插件匹配 → 填该插件要的数据 → 创建 ---------- */
+  if (!bound) {
+    const installed = videoSourcePlugins()
+    const ready = !!matched && !missingRequired
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-paper">
+        <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3 px-5 pt-[12vh]">
+          <div className="flex items-center gap-2">
+            <Clapperboard size={20} className="text-seal" />
+            <span className="text-[15px] font-semibold text-ink-strong">{t('新建视频')}</span>
+          </div>
+          <p className="text-[12px] leading-relaxed text-ink-faint">
+            {t('粘贴链接或输入编号，插件会认领它。视频创建后绑定插件与输入，打开页签即自动播放。')}
+          </p>
+
+          {/* 就一个输入框 + 创建按钮（用户定的创建态形态） */}
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing && ready) create()
+              }}
+              placeholder={t('链接或编号（例如 B 站链接 / BV 号）')}
+              className="min-w-0 flex-1 rounded-lg border border-line bg-card px-3 py-2 text-[13px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/50 focus:ring-2 focus:ring-seal/10"
+            />
+            <button
+              type="button"
+              onClick={create}
+              disabled={!ready}
+              className="flex h-[36px] shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-medium text-paper transition hover:bg-ink-strong disabled:pointer-events-none disabled:opacity-35"
+            >
+              <Plus size={13} />
+              {t('创建')}
+            </button>
+          </div>
+
+          {/* 匹配结果：认领了就显示插件卡片与它要的数据 */}
+          {input.trim() && !matched && (
+            <div className="rounded-xl border border-dashed border-line bg-card/50 px-3.5 py-3 text-[11.5px] leading-relaxed text-ink-soft">
+              {installed.length
+                ? t('没有插件认领这段输入。已安装：{0}', installed.map((p) => p.name ?? p.id).join('、'))
+                : t('还没有安装任何视频来源插件：到「设置 → 插件 → 视频 / 音频来源」安装并启用。')}
+            </div>
+          )}
+          {matched && (
+            <div className="flex flex-col gap-2.5 rounded-xl border border-seal/30 bg-seal/5 px-3.5 py-3">
+              <div className="flex items-center gap-1.5">
+                <Puzzle size={13} className="text-seal" />
+                <span className="text-[12px] font-medium text-ink-strong">
+                  {matched.plugin.name ?? matched.plugin.id}
+                </span>
+                {matched.plugin.version && (
+                  <span className="text-[10.5px] text-ink-faint">v{matched.plugin.version}</span>
+                )}
+              </div>
+              {createFields.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {createFields.map((f) => (
+                    <CreateField
+                      key={f.key}
+                      field={f}
+                      value={createValues[f.key]}
+                      onChange={(v) => setCreateValues((prev) => ({ ...prev, [f.key]: v }))}
+                    />
+                  ))}
+                </div>
+              )}
+              <p className="text-[10.5px] leading-relaxed text-ink-faint">
+                {t('上面填的是这个视频专属的数据；插件全局配置（如登录凭据）在「设置 → 插件」里。')}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  /* ---------- 绑定态：没有输入组件，自动解析 ---------- */
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-paper select-none">
-      {/* 工具条：输入 + 解析。实验徽章常驻，提醒这是未完成的功能 */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-line bg-card/60 px-3 py-2">
-        <MonitorPlay size={15} className="shrink-0 text-seal" />
-        <span className="shrink-0 rounded border border-seal/40 bg-seal/10 px-1.5 py-px text-[10px] font-medium text-seal">
-          {t('实验')}
-        </span>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.nativeEvent.isComposing) void resolve()
-          }}
-          placeholder={t('粘贴视频链接或编号，回车解析（支持哪些来源取决于已安装的插件）')}
-          disabled={busy}
-          className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-2.5 py-1.5 text-[12.5px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/50 focus:ring-2 focus:ring-seal/10 disabled:opacity-50"
-        />
-        <button
-          type="button"
-          onClick={() => void resolve()}
-          disabled={busy || !input.trim()}
-          title={busy ? t('正在解析…') : t('解析视频与字幕')}
-          className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-ink px-2.5 text-[12px] font-medium text-paper transition hover:bg-ink-strong disabled:pointer-events-none disabled:opacity-35"
-        >
-          {busy ? <Loader2 size={13} className="animate-spin" /> : null}
-          {t('解析')}
-        </button>
-      </div>
-
       {/* 错误横幅：解析或登记流的失败原话 */}
       {error && (
         <div className="shrink-0 border-b border-red-400/30 bg-red-400/10 px-3 py-1.5 text-[12px] leading-relaxed text-red-500 dark:text-red-300">
@@ -235,12 +354,9 @@ export default function VideoStudyTab() {
         </div>
       )}
 
-      {/* 正文：上播放器（吃满剩余高度）、下 200px 字幕条；没解析过时整片是引导空态。
-          「200 高」指的是**字幕列表的可视区**（用户定的），不是视频 */}
       {source && relayUrl ? (
         <>
-          {/* 视频与合集同一排：视频吃剩余高度，合集列表贴右侧同高——
-              点一项就地切换（重走一遍 resolve） */}
+          {/* 视频与合集同一排：视频吃剩余高度，合集列表贴右侧同高——点一项就地切换 */}
           <div className="flex min-h-0 flex-1">
             <div className="min-h-0 min-w-0 flex-1 bg-black">
               {/* key 绑流地址：重新解析换一条流时整只元素重建，播放状态清零是最诚实的表现 */}
@@ -261,11 +377,7 @@ export default function VideoStudyTab() {
             </div>
             {(source.collection || source.pages) && (
               <>
-                {/*
-                  收起/展开的开关条：常驻（收起后它是唯一入口）。图标方向 = 点击后
-                  面板的去向：展开时点它收起（向右滑出 → ChevronRight），收起时点它
-                  展开（向左滑回 → ChevronLeft）。
-                */}
+                {/* 收起/展开开关条：常驻（收起后它是唯一入口） */}
                 <button
                   type="button"
                   title={collapsed ? t('展开合集列表') : t('收起合集列表')}
@@ -275,12 +387,7 @@ export default function VideoStudyTab() {
                 >
                   {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
                 </button>
-                {/*
-                  宽度过渡（w-0 ↔ 320px）+ overflow-hidden：面板滑出/滑入。
-                  内容层钉死 320px——宽度动画期间文字不许跟着重排，只许被裁掉。
-                  列表是**三级树**（合集 > 视频 > 选集）：合集一段、选集一段，
-                  共用一个滚动容器；导出挂在选集段头上（导出的单位是视频的全部分 P）。
-                */}
+                {/* 宽度过渡 + 内容层钉死 320px：动画期间文字只裁不重排 */}
                 <div
                   className={
                     'shrink-0 overflow-hidden transition-[width] duration-200 ease-out ' +
@@ -300,7 +407,7 @@ export default function VideoStudyTab() {
                               type="button"
                               title={item.title}
                               disabled={busy}
-                              onClick={() => void runResolve(item.source)}
+                              onClick={() => void runResolve(item.source, video?.fields)}
                               className={
                                 'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition disabled:opacity-50 ' +
                                 (item.current ? 'bg-seal/10' : 'hover:bg-line/50')
@@ -357,13 +464,12 @@ export default function VideoStudyTab() {
                               type="button"
                               title={item.title}
                               disabled={busy}
-                              onClick={() => void runResolve(item.source)}
+                              onClick={() => void runResolve(item.source, video?.fields)}
                               className={
                                 'flex w-full items-center gap-2 rounded-md py-1 pl-4 pr-2 text-left transition disabled:opacity-50 ' +
                                 (item.current ? 'bg-seal/10' : 'hover:bg-line/50')
                               }
                             >
-                              {/* 选集缩进一格（树里的第三层），时长缀在标题后面 */}
                               <span className="shrink-0 font-mono text-[10.5px] text-ink-faint">p{item.page}</span>
                               <span
                                 className={
@@ -391,86 +497,159 @@ export default function VideoStudyTab() {
               </>
             )}
           </div>
-          {/* 字幕条：高度 = 30%（用户定的）；标题行 + 列表的可视区就这么多 */}
+          {/* 字幕条：高度 = 30%；标题行 + 列表的可视区就这么多 */}
           <div className="flex h-[30%] shrink-0 flex-col border-t border-line">
-          <div className="flex shrink-0 items-center gap-2 border-b border-line bg-card/40 px-3 py-1.5">
-            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">{source.title}</span>
-            {source.durationMs ? (
-              <span className="shrink-0 font-mono text-[10.5px] text-ink-faint">{formatClock(source.durationMs)}</span>
-            ) : null}
-                {transcript ? (
-                  <span className="shrink-0 rounded border border-line bg-paper px-1.5 py-px text-[10px] text-ink-faint">
-                    {(transcript.origin === 'subtitle' ? t('字幕') : t('语音识别')) +
-                      // 语言来源跟着字幕走（ai-zh = B 站 AI 生成；zh-Hans 等是 UP 传的 CC）：
-                      // 「对不上视频」这类报告，先看这一格说的是哪个来源
-                      (transcript.language
-                        ? ' · ' +
-                          (transcript.language === 'ai-zh'
-                            ? t('AI 中文字幕')
-                            : /^(zh-Hans|zh-CN)$/i.test(transcript.language)
-                              ? t('中文字幕')
-                              : transcript.language)
-                        : '')}
-                  </span>
-                ) : null}
-          </div>
-          {/* 转录面板：mask 挂外层、滚动留内层（见 scrollFade 的说明），点击行 seek 播放器 */}
-          <div
-            className="flex min-h-0 flex-1 flex-col"
-            style={{ maskImage: fadeMask(edges), WebkitMaskImage: fadeMask(edges) }}
-          >
-            <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-              {segments.length ? (
-                segments.map((seg, i) => (
-                  <div key={seg.startMs} ref={(el) => { rowRefs.current[i] = el }}>
-                    <button
-                      type="button"
-                      onClick={() => seekMs(seg.startMs)}
-                      className={
-                        'flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition ' +
-                        (i === activeIdx ? 'bg-seal/10' : 'hover:bg-line/50')
-                      }
-                    >
-                      <span
-                        className={
-                          'mt-px w-11 shrink-0 pt-px text-right font-mono text-[10.5px] ' +
-                          (i === activeIdx ? 'text-seal' : 'text-ink-faint')
-                        }
-                      >
-                        {formatClock(seg.startMs)}
-                      </span>
-                      <span
-                        className={
-                          'min-w-0 flex-1 text-[12.5px] leading-relaxed ' +
-                          (i === activeIdx ? 'font-medium text-ink-strong' : 'text-ink')
-                        }
-                      >
-                        {seg.text}
-                      </span>
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div className="px-3 py-8 text-center text-[12px] leading-relaxed text-ink-faint">
-                  {transcriptNote ?? t('这条来源没有可用的转录。')}
-                </div>
-              )}
+            <div className="flex shrink-0 items-center gap-2 border-b border-line bg-card/40 px-3 py-1.5">
+              <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">{source.title}</span>
+              {source.durationMs ? (
+                <span className="shrink-0 font-mono text-[10.5px] text-ink-faint">{formatClock(source.durationMs)}</span>
+              ) : null}
+              {transcript ? (
+                <span className="shrink-0 rounded border border-line bg-paper px-1.5 py-px text-[10px] text-ink-faint">
+                  {(transcript.origin === 'subtitle' ? t('字幕') : t('语音识别')) +
+                    (transcript.language
+                      ? ' · ' +
+                        (transcript.language === 'ai-zh'
+                          ? t('AI 中文字幕')
+                          : /^(zh-Hans|zh-CN)$/i.test(transcript.language)
+                            ? t('中文字幕')
+                            : transcript.language)
+                      : '')}
+                </span>
+              ) : null}
             </div>
-          </div>
+            {/* 转录面板：mask 挂外层、滚动留内层（见 scrollFade 的说明），点击行 seek 播放器 */}
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              style={{ maskImage: fadeMask(edges), WebkitMaskImage: fadeMask(edges) }}
+            >
+              <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+                {segments.length ? (
+                  segments.map((seg, i) => (
+                    <div key={seg.startMs} ref={(el) => { rowRefs.current[i] = el }}>
+                      <button
+                        type="button"
+                        onClick={() => seekMs(seg.startMs)}
+                        className={
+                          'flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition ' +
+                          (i === activeIdx ? 'bg-seal/10' : 'hover:bg-line/50')
+                        }
+                      >
+                        <span
+                          className={
+                            'mt-px w-11 shrink-0 pt-px text-right font-mono text-[10.5px] ' +
+                            (i === activeIdx ? 'text-seal' : 'text-ink-faint')
+                          }
+                        >
+                          {formatClock(seg.startMs)}
+                        </span>
+                        <span
+                          className={
+                            'min-w-0 flex-1 text-[12.5px] leading-relaxed ' +
+                            (i === activeIdx ? 'font-medium text-ink-strong' : 'text-ink')
+                          }
+                        >
+                          {seg.text}
+                        </span>
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="px-3 py-8 text-center text-[12px] leading-relaxed text-ink-faint">
+                    {transcriptNote ?? t('这条来源没有可用的转录。')}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </>
       ) : (
+        /* 绑定态还没解析出来：给在途提示；失败已在上方横幅里 */
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center select-none">
-          <Clapperboard size={36} className="text-seal/60" />
-          <div className="text-[13.5px] font-medium text-ink-strong">{t('视频学习（实验）')}</div>
-          <p className="max-w-[420px] text-[12px] leading-relaxed text-ink-faint">
-            {t('在上面粘贴一个视频链接或编号，解析后即可播放并按字幕时间戳跳转。')}
-          </p>
-          <p className="max-w-[420px] text-[11px] leading-relaxed text-ink-faint/80">
-            {t('来源由插件提供：到「设置 → 插件 → 视频 / 音频来源」查看已安装的插件，需要的凭据也在那里配置。')}
-          </p>
+          {busy ? (
+            <>
+              <Loader2 size={26} className="animate-spin text-seal/70" />
+              <p className="text-[12px] text-ink-faint">{t('正在解析视频来源…')}</p>
+            </>
+          ) : (
+            <>
+              <MonitorPlay size={30} className="text-seal/50" />
+              <p className="max-w-[420px] text-[12px] leading-relaxed text-ink-faint">
+                {t('这个视频还没有解析出来：检查插件是否已启用、凭据是否配好，然后重新打开本页签。')}
+              </p>
+            </>
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * 创建态的表单字段（插件 createFields 的渲染）。
+ * 与设置页的插件表单同一套字段类型，但值只属于**这一个视频**（创建时落库）。
+ */
+function CreateField({
+  field,
+  value,
+  onChange,
+}: {
+  field: PluginSettingField
+  value: string | number | boolean | undefined
+  onChange: (v: string | number | boolean) => void
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      {field.type !== 'static' && (
+        <span className="text-[11.5px] font-medium text-ink">
+          {field.label}
+          {field.required && <span className="ml-0.5 text-seal">*</span>}
+        </span>
+      )}
+      {field.type === 'static' ? (
+        <p className="text-[11px] leading-relaxed text-ink-faint">{field.label}</p>
+      ) : field.type === 'boolean' ? (
+        <button
+          type="button"
+          onClick={() => onChange(value !== true)}
+          className={
+            'flex h-7 w-11 items-center rounded-full px-0.5 transition ' +
+            (value === true ? 'justify-end bg-seal' : 'justify-start bg-line-strong')
+          }
+          aria-pressed={value === true}
+        >
+          <span className="h-6 w-6 rounded-full bg-card shadow" />
+        </button>
+      ) : field.type === 'select' ? (
+        <select
+          value={String(value ?? '')}
+          onChange={(e) => onChange(e.target.value)}
+          className="rounded-lg border border-line bg-card px-2 py-1.5 text-[12px] text-ink outline-none focus:border-seal/50"
+        >
+          {(field.options ?? []).map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : field.type === 'textarea' ? (
+        <textarea
+          value={String(value ?? '')}
+          placeholder={field.placeholder}
+          rows={3}
+          onChange={(e) => onChange(e.target.value)}
+          className="rounded-lg border border-line bg-card px-2 py-1.5 font-mono text-[11.5px] text-ink outline-none placeholder:text-ink-faint focus:border-seal/50"
+        />
+      ) : (
+        <input
+          type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+          value={String(value ?? '')}
+          placeholder={field.placeholder}
+          onChange={(e) => onChange(field.type === 'number' ? Number(e.target.value) : e.target.value)}
+          className="rounded-lg border border-line bg-card px-2 py-1.5 text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-seal/50"
+        />
+      )}
+      {field.help && <span className="text-[10.5px] leading-relaxed text-ink-faint">{field.help}</span>}
+    </label>
   )
 }

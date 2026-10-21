@@ -219,7 +219,8 @@ import { tabRefFromChip } from '../../learn/chipRef'
 import { CHIP_MIME, parseChipJson } from '../../lib/chipSyntax'
 import TabBar from './TabBar'
 import WebTabLayer, { type WebTab } from './web/WebTabLayer'
-import VideoStudyTab from '../video/VideoStudyTab'
+import VideoTabLayer, { type VideoTab } from '../video/VideoTabLayer'
+import type { VideoCreateDraft } from '../video/VideoStudyTab'
 import PluginDoc from '../plugins/PluginDoc'
 import { setPluginDocOpener } from '../../lib/pluginDoc'
 import { focusWebAddress } from './web/addressFocus'
@@ -659,7 +660,7 @@ export default function LearnWorkspace({
    */
   const tabDocPayload = useCallback((ref: TabRef): ChipPayload | null => {
     const s = getLatest()
-    const title = tabTitle(ref, (id) => nodeById(s, id)?.title, examTabTitle)
+    const title = tabTitle(ref, (id) => nodeById(s, id)?.title, examTabTitle, (vid) => s.videos?.find((v) => v.id === vid)?.title)
     if (ref.kind === 'local') return { type: 'local', path: ref.path, title }
     // 工作区内部文件：ws 型引用带磁盘路径（chipRef 的两种写法都认）与 nodeId，
     // 点击免于按路径反查——「不能当外部文件看」在引用这一层就是**不是 local 型**
@@ -712,7 +713,9 @@ export default function LearnWorkspace({
    * 后缀是「它住在哪儿」——节点类取节点到目标的路径（「极限/夹逼定理」），本地文件取所在目录。
    */
   const tabTrails = useMemo(() => {
-    const names = tabs.map((t) => tabTitle(t.ref, (id) => nodeById(store, id)?.title, examTabTitle))
+    const names = tabs.map((t) =>
+      tabTitle(t.ref, (id) => nodeById(store, id)?.title, examTabTitle, (vid) => store.videos?.find((v) => v.id === vid)?.title),
+    )
     const count = new Map<string, number>()
     for (const n of names) count.set(n, (count.get(n) ?? 0) + 1)
     const out: Record<string, string> = {}
@@ -4098,6 +4101,8 @@ export default function LearnWorkspace({
     )
     /** 这一格挂着的网页页签：WebTabLayer 常驻层只挂一份，切页签只藏不卸（见下） */
     const gWebTabs = gVisibleTabs.filter((x): x is WebTab => x.ref.kind === 'web')
+    /** 这一格挂着的视频页签（含创建态）：VideoTabLayer 常驻，切页签只藏不卸（用户定的 keepalive） */
+    const gVideoTabs = (g.group?.tabs ?? []).filter((x): x is VideoTab => x.ref.kind === 'video')
     /** 这一格挂着的大纲页签：keepalive 常驻，切页签只藏不卸，切回时保留导图相机视角与选中状态 */
     const gOutlineTabs = (g.group?.tabs ?? []).filter((x) => x.ref.kind === 'outline')
     /** 这一格的正文层：切页签的过场、查找条与数据属性都挂在它身上 */
@@ -4172,7 +4177,9 @@ export default function LearnWorkspace({
                 tabs={gVisibleTabs}
                 paneTotal={g.group?.tabs.length}
                 activeId={g.group?.active ?? null}
-                titleOf={(ref) => tabTitle(ref, (id) => nodeById(store, id)?.title, examTabTitle)}
+                titleOf={(ref) =>
+                  tabTitle(ref, (id) => nodeById(store, id)?.title, examTabTitle, (vid) => store.videos?.find((v) => v.id === vid)?.title)
+                }
                 trailOf={(ref) => tabTrails[tabKey(ref)] ?? ''}
                 onActivate={activateTab}
                 onClose={(id, mode, opts) => closeTab(groupId, id, mode, opts)}
@@ -4341,12 +4348,10 @@ export default function LearnWorkspace({
               <UsagePanel />
             ) : gTab?.ref.kind === 'video' ? (
               /*
-                视频学习（实验）：通用播放器 + 转录段面板 + 时间戳跳转（见
-                components/video/VideoStudyTab）。流与转录全部由来源插件解析；
-                页签持久化（normalizeTab 认 video），但解析结果不落盘——重启后
-                空页 + 上次的输入还在输入框里，一键重新解析。
+                视频页签：由下面的 VideoTabLayer 常驻层画（切页签只藏不卸，
+                播放与已解析的流都留着）。这里只让出位置，别画任何东西。
               */
-              <VideoStudyTab />
+              null
             ) : gTab?.ref.kind === 'pluginDoc' ? (
               /*
                 插件开发文档（设置 → 插件里的入口打开）：契约说明 + 导出 .md。
@@ -4663,6 +4668,41 @@ export default function LearnWorkspace({
             网页层（见 components/learn/web/WebTabLayer）：常挂在格子里、切去文档时
             整层藏起来（guest 进程照跑）。z-10 盖过正文，又在拖放高亮（z-30）之下。
           */}
+          {/* 视频页签常驻层（keepalive）：开着就挂着，切走只藏不卸（见 VideoTabLayer） */}
+          {gVideoTabs.length > 0 && (
+            <VideoTabLayer
+              tabs={gVideoTabs}
+              activeId={gTab?.ref.kind === 'video' ? gTab.id : null}
+              videos={store.videos}
+              onCreate={(tabId, draft: VideoCreateDraft) => {
+                const id = crypto.randomUUID()
+                const now = Date.now()
+                const record = {
+                  id,
+                  pluginId: draft.pluginId,
+                  pluginName: draft.pluginName,
+                  input: draft.input,
+                  ...(Object.keys(draft.fields).length ? { fields: draft.fields } : {}),
+                  title: draft.input.slice(0, 60),
+                  createdAt: now,
+                }
+                set({ ...store, videos: [...(store.videos ?? []), record] })
+                // 开绑定页签、关掉创建页签（顺序反过来会让这一格短暂没页签）
+                openTab({ kind: 'video', videoId: id })
+                closeTab(groupId, tabId, 'self')
+              }}
+              onResolved={(videoId, title) => {
+                const list = store.videos ?? []
+                const cur = list.find((v) => v.id === videoId)
+                if (!cur || cur.title === title) return
+                set({
+                  ...store,
+                  videos: list.map((v) => (v.id === videoId ? { ...v, title, updatedAt: Date.now() } : v)),
+                })
+              }}
+            />
+          )}
+
           {!isWeb() && gWebTabs.length > 0 && (
             <WebTabLayer
               tabs={gWebTabs}
@@ -4901,6 +4941,11 @@ export default function LearnWorkspace({
     <div className="print-flat flex h-full overflow-hidden">
       <ExplorerSidebar
         store={store}
+        videos={store.videos ?? []}
+        onOpenVideo={(id) => openTab({ kind: 'video', videoId: id })}
+        onDeleteVideo={(id) =>
+          set({ ...store, videos: (store.videos ?? []).filter((v) => v.id !== id) })
+        }
         // 高亮跟着**激活的页签**走：关掉某个节点的教学文档页签，它就不再是选中样式
         activeNodeId={selectedNodeId}
         // 文档行也一样：焦点格开着哪份笔记 / 试卷副本 / 超级文档 / 学习文档，那一行就亮

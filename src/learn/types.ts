@@ -476,11 +476,13 @@ export type TabRef =
    */
   | { kind: 'guard' }
   /**
-   * 视频学习页签（实验，见 components/video/VideoStudyTab）：通用播放器 + 转录段面板，
-   * 流与转录都由来源插件解析（契约见 src/video/types）。**页签持久化**（normalizeTab
-   * 认它）；但解析结果不落盘——流地址带签名会过期，重启后是空页等重新解析。
+   * 视频页签（见 components/video/VideoStudyTab）。两种形态：
+   * - 带 videoId：**绑定**到一个视频资源（描述在 learn/types 的 VideoResource），
+   *   页里没有输入组件，打开即自动解析；
+   * - 不带 videoId：**创建**态（全局一份），只有输入框 + 插件匹配 + 创建按钮。
+   * 页签持久化；解析结果不落盘（流地址带签名会过期，重开再解析）。
    */
-  | { kind: 'video' }
+  | { kind: 'video'; videoId?: string }
   /**
    * 插件开发文档页签：介绍插件契约与配置面板（见 components/plugins/PluginDoc）。
    * 跟着页签持久化（normalize 认它），内容全是静态文档，没有要落盘的状态。
@@ -639,6 +641,32 @@ export type FavoriteRef =
  */
 export type FavoriteItem = FavoriteRef & { at: number; group?: string }
 
+/**
+ * 一个视频资源：**创建时确定**的「插件 + 输入 + 插件专属数据」。
+ *
+ * 与「视频页签」的关系：页签只记 id，资源记内容。所以页签关掉再开、换机器带
+ * state.json 走，都能复原；资源被删则页签显示「已删除」的占位。
+ *
+ * fields 是插件在 createFields 里声明的**每个视频各自的**数据（例如画质），
+ * 解析时与插件全局配置合并进 host.settings（同键以这里为准）——插件不需要
+ * 区分两份配置从哪来。
+ */
+export interface VideoResource {
+  id: string
+  /** 处理它的插件的声明 id（插件被删时视频仍列着，解析会报插件不存在） */
+  pluginId: string
+  /** 插件显示名的快照（列表里不依赖插件是否还装着） */
+  pluginName?: string
+  /** 创建时的输入（原样交给插件 match / resolve） */
+  input: string
+  /** createFields 的值（创建时填好，之后不再改） */
+  fields?: Record<string, string | number | boolean>
+  /** 列表显示名：创建时取输入截断，解析成功后由插件给的标题覆盖 */
+  title: string
+  createdAt: number
+  updatedAt?: number
+}
+
 export interface LearnStore {
   version: 2
   nodes: KnowledgeNode[]
@@ -695,6 +723,12 @@ export interface LearnStore {
    * 与「在学哪门课」无关，删掉目标也不该带走它。可选，理由同上（旧数据没有这个字段）。
    */
   schedule?: ScheduleStore
+  /**
+   * 视频资源（见 learn/videos）：用户创建的「绑定住的视频来源」。
+   * 与日程同一档——用户级、整块存 state.json、不挂任何节点；删目标不该带走它。
+   * 视频页签按 video.id 绑定；插件与输入在创建时确定，之后不再让用户重填。
+   */
+  videos?: VideoResource[]
   /**
    * 目标级资源库的清单：目标 id → 资源列表（见 learn/static）。
    * 只放元数据，文件本体在 `{目标}/static/` 下——与图片引用一样的取舍：

@@ -21,6 +21,7 @@ import { normalizeEssayDock, normalizeEssays } from '../../essays'
 import { normalizeEssayCommits } from '../../essayCommits'
 import { normalizeFocus } from '../../focus'
 import { normalizeSchedule } from '../../schedule'
+import type { VideoResource } from '../../types'
 import { normalizeMemoryStore } from '../../memory'
 import { normalizeResourceList, retargetStaticRefs, type StaticResource } from '../../static'
 import { normalizeTmpStore, pruneTmpToNodes } from '../../../lib/tmpStore'
@@ -287,6 +288,8 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       focus: normalizeFocus(d.focus ?? legacy.pomodoro),
       // 日程是用户级数据（见 learn/schedule）：不按目标过滤，坏条目逐条丢
       schedule: normalizeSchedule(d.schedule),
+      // 视频资源（见 learn/types 的 VideoResource）：用户级、不按目标过滤，坏条目逐条丢
+      ...(normalizeVideos(d.videos).length ? { videos: normalizeVideos(d.videos) } : {}),
       activeGoalId,
       activeNodeId: nextActiveNodeId,
       activeConversationId,
@@ -320,4 +323,41 @@ export function parseLearnStore(raw: string): LearnStore | null {
     console.error('[learn] 备份数据解析失败：', err)
     return null
   }
+}
+
+
+/**
+ * 视频资源：只认「字段齐全 + id 唯一」的条目。
+ * title 缺了用输入截断顶上（列表里总得有个名字）；fields 只留标量值。
+ */
+function normalizeVideos(raw: unknown): VideoResource[] {
+  if (!Array.isArray(raw)) return []
+  const out: VideoResource[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const o = item as Record<string, unknown>
+    const id = typeof o.id === 'string' ? o.id.trim() : ''
+    const input = typeof o.input === 'string' ? o.input.trim() : ''
+    const pluginId = typeof o.pluginId === 'string' ? o.pluginId.trim() : ''
+    if (!id || !input || !pluginId || seen.has(id)) continue
+    seen.add(id)
+    const fields: Record<string, string | number | boolean> = {}
+    if (o.fields && typeof o.fields === 'object') {
+      for (const [k, v] of Object.entries(o.fields as Record<string, unknown>)) {
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') fields[k] = v
+      }
+    }
+    out.push({
+      id,
+      pluginId,
+      ...(typeof o.pluginName === 'string' && o.pluginName ? { pluginName: o.pluginName } : {}),
+      input,
+      ...(Object.keys(fields).length ? { fields } : {}),
+      title: typeof o.title === 'string' && o.title.trim() ? o.title.trim() : input.slice(0, 60),
+      createdAt: typeof o.createdAt === 'number' ? o.createdAt : Date.now(),
+      ...(typeof o.updatedAt === 'number' ? { updatedAt: o.updatedAt } : {}),
+    })
+  }
+  return out
 }
