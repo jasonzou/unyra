@@ -272,6 +272,9 @@ export function centerPan(bounds: Rect, view: ViewSize, zoom: number): { x: numb
 
 /* ---------- 初始铺排（迁移与「新建目标」共用） ---------- */
 
+/** 同一列里类型的先后：大纲 → 文档 → 叶子（读图时从上往下就是这个顺序） */
+const KIND_RANK: Record<GraphKind, number> = { outline: 0, doc: 1, note: 2, exam: 2, superdoc: 2 }
+
 /** 列间距 / 行间距（世界坐标）：卡片 + 连线留白 */
 export const COL_GAP = CARD_W + 112
 export const ROW_GAP = CARD_H + 36
@@ -412,7 +415,19 @@ export function seedLayout(seed: SeedGraph): StructureMap {
       const p = parent ? placed.find((n) => n.id === parent) : undefined
       return p ? p.y : Number.MAX_SAFE_INTEGER
     }
-    column.sort((a, b) => anchorY(a.id) - anchorY(b.id) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    /*
+     * 同一列里先按「父节点的 y」再按类型次序（大纲 → 文档 → 叶子）。
+     *
+     * 只按父节点的 y 排，兄弟之间谁上谁下就取决于 uuid 的大小——同一张图每次排出来
+     * 顺序一样（id 是稳定的），但那个顺序对人是随机的：大纲可能被排到自己的文档下面。
+     * 加上类型次序之后，同一列永远是「大纲在上、它的文档在下」，与读图的方向一致。
+     */
+    column.sort(
+      (a, b) =>
+        anchorY(a.id) - anchorY(b.id) ||
+        KIND_RANK[a.kind] - KIND_RANK[b.kind] ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    )
     column.forEach((n, i) => {
       placed.push({
         id: n.id,
@@ -503,70 +518,4 @@ export function normalizeStructureBook(raw: unknown, goalIds: ReadonlySet<string
     if (map.nodes.length) out[goalId] = map
   }
   return out
-}
-
-/* ---------- 自动排列：大纲在上、文档在中、叶子在下 ---------- */
-
-/** 带与带之间留的空（世界坐标）：够放下连线的弯 */
-export const BAND_GAP = 110
-/** 同一条带里两张卡的间距 */
-export const BAND_X_GAP = 88
-
-/**
- * 分带排列：**大纲一行在上，文档一行在中，笔记/试卷/超级文档在最下面**。
- *
- * 为什么不是「按树的层级从左到右」（seedLayout 那套）：图里可以有好多棵树、
- * 甚至没有树（孤儿节点），横向铺开很快就看不见整体。按类型分带之后，
- * 「这门课有几块大纲、每块下面挂着几份文档」一眼就能数出来。
- *
- * 带内顺序沿用**当前位置**（先看 x 再看 y）：用户手动挪过的相对次序不该被一次
- * 自动排列打乱，那会让人觉得「排完之后全乱了」。
- */
-export function arrangeBands(
-  nodes: readonly StructureNode[],
-  edges: readonly GraphEdge[],
-  heightOf: HeightOf = defaultHeight,
-): Map<string, { x: number; y: number }> {
-  const pos = new Map<string, { x: number; y: number }>()
-  const byId = new Map(nodes.map((n) => [n.id, n]))
-  const parentOf = (id: string, kind: GraphKind): string | undefined =>
-    edges.find((e) => e.to === id && byId.get(e.from)?.kind === kind)?.from
-  const order = (list: readonly StructureNode[]) =>
-    [...list].sort((a, b) => a.x - b.x || a.y - b.y || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-
-  // 1. 大纲带
-  const outlines = order(nodes.filter((n) => n.kind === 'outline'))
-  let x = 0
-  let bandH = CARD_H
-  for (const node of outlines) {
-    pos.set(node.id, { x, y: 0 })
-    bandH = Math.max(bandH, heightOf(node))
-    x += CARD_W + BAND_X_GAP
-  }
-
-  // 2. 文档带：对齐到它的大纲父节点，同一个父下面横着排
-  const docY = bandH + BAND_GAP
-  const docSlot = new Map<string, number>()
-  let docH = CARD_H
-  for (const node of order(nodes.filter((n) => n.kind === 'doc'))) {
-    const parent = parentOf(node.id, 'outline')
-    const key = parent ?? ''
-    const slot = docSlot.get(key) ?? 0
-    pos.set(node.id, { x: (parent ? pos.get(parent)?.x ?? 0 : 0) + slot * (CARD_W + 48), y: docY })
-    docSlot.set(key, slot + 1)
-    docH = Math.max(docH, heightOf(node))
-  }
-
-  // 3. 叶子带：挂在文档下面，纵向排（一个文档下的几份笔记不会横着挤成一串）
-  const leafY = docY + docH + BAND_GAP
-  const leafSlot = new Map<string, number>()
-  for (const node of order(nodes.filter((n) => n.kind !== 'outline' && n.kind !== 'doc'))) {
-    const parent = parentOf(node.id, 'doc')
-    const key = parent ?? ''
-    const slot = leafSlot.get(key) ?? 0
-    pos.set(node.id, { x: parent ? pos.get(parent)?.x ?? 0 : 0, y: leafY + slot * (CARD_H + 24) })
-    leafSlot.set(key, slot + 1)
-  }
-
-  return pos
 }

@@ -3,7 +3,6 @@ import {
   CARD_H,
   CARD_W,
   COL_GAP,
-  arrangeBands,
   GRAPH_KINDS,
   ROW_GAP,
   STRUCT_MAX_ZOOM,
@@ -147,6 +146,23 @@ describe('结构图：初始铺排', () => {
     expect(map.nodes.some((n) => n.id === 'ghost')).toBe(false)
   })
 
+  it('同一列里大纲排在文档前面（读图方向：先大纲、后文档）', () => {
+    const map = seedLayout({
+      nodes: [
+        { id: 'o1', kind: 'outline' },
+        { id: 'd1', kind: 'doc' },
+        { id: 'o2', kind: 'outline' },
+      ],
+      edges: [
+        { from: 'o1', to: 'o2' },
+        { from: 'o1', to: 'd1' },
+      ],
+    })
+    const at = (id: string) => map.nodes.find((n) => n.id === id)!
+    expect(at('o2').x).toBe(at('d1').x)
+    expect(at('o2').y).toBeLessThan(at('d1').y)
+  })
+
   it('每个节点都拿到坐标，一个不落', () => {
     const map = seedLayout(seed)
     expect(map.nodes).toHaveLength(seed.nodes.length)
@@ -198,49 +214,5 @@ describe('结构图：读盘校验', () => {
   it('kindOf 只认表里的节点', () => {
     expect(kindOf([node('a', 'outline')], 'a')).toBe('outline')
     expect(kindOf([node('a', 'outline')], 'b')).toBeNull()
-  })
-})
-
-describe('结构图：分带自动排列', () => {
-  const nodes = [
-    { id: 'o1', kind: 'outline' as const, x: 500, y: 0 },
-    { id: 'o2', kind: 'outline' as const, x: 0, y: 0 },
-    { id: 'd1', kind: 'doc' as const, x: 0, y: 300 },
-    { id: 'n1', kind: 'note' as const, x: 0, y: 600 },
-  ]
-  const edges = [
-    { from: 'o2', to: 'd1' },
-    { from: 'd1', to: 'n1' },
-  ]
-
-  it('大纲在上、文档在中、叶子在下', () => {
-    const pos = arrangeBands(nodes, edges)
-    expect(pos.get('o1')!.y).toBe(0)
-    expect(pos.get('o2')!.y).toBe(0)
-    expect(pos.get('d1')!.y).toBeGreaterThan(0)
-    expect(pos.get('n1')!.y).toBeGreaterThan(pos.get('d1')!.y)
-  })
-
-  it('文档对齐到它的大纲父节点（一眼看得出归属）', () => {
-    const pos = arrangeBands(nodes, edges)
-    expect(pos.get('d1')!.x).toBe(pos.get('o2')!.x)
-    expect(pos.get('n1')!.x).toBe(pos.get('d1')!.x)
-  })
-
-  it('带内顺序沿用当前位置（不把用户挪过的次序打乱）', () => {
-    const pos = arrangeBands(nodes, edges)
-    // o2 原来在 x=0，o1 在 x=500 → 排完之后 o2 仍在 o1 左边
-    expect(pos.get('o2')!.x).toBeLessThan(pos.get('o1')!.x)
-  })
-
-  it('排完之后同一带里不重叠（横坐标至少隔开一张卡）', () => {
-    const pos = arrangeBands(nodes, edges)
-    const placed = nodes.map((n) => pos.get(n.id)!)
-    for (let i = 0; i < placed.length; i++) {
-      for (let j = i + 1; j < placed.length; j++) {
-        if (Math.abs(placed[i].y - placed[j].y) > 1) continue
-        expect(Math.abs(placed[i].x - placed[j].x)).toBeGreaterThanOrEqual(CARD_W)
-      }
-    }
   })
 })

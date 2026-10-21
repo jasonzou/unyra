@@ -27,12 +27,12 @@ import {
   CARD_H,
   CARD_W,
   GRAPH_KIND_LABEL,
-  arrangeBands,
   boundsOf,
   canAddEdge,
   centerPan,
   clampZoom,
   fitZoom,
+  seedLayout,
   type GraphKind,
   type StructureMap,
   type StructureNode,
@@ -466,10 +466,20 @@ export const StructureCanvas = memo(function StructureCanvas({
     [docs, exams, onFillNode, onToast, store],
   )
 
-  /* ---------- 自动排列（大纲在上、文档在中、叶子在下） ---------- */
+  /* ---------- 自动排列（按层级从左到右铺开） ---------- */
 
   const autoArrange = useCallback(() => {
-    const pos = arrangeBands(nodes, edges, height)
+    const laid = seedLayout({
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        kind: n.kind,
+        ...(n.ref ? { ref: n.ref } : {}),
+        ...(n.slot ? { slot: n.slot } : {}),
+        ...(n.note ? { note: n.note } : {}),
+      })),
+      edges,
+    })
+    const pos = new Map(laid.nodes.map((n) => [n.id, { x: n.x, y: n.y }]))
     fitNextRef.current = true
     commit({
       version: 1,
@@ -479,7 +489,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       }),
       edges,
     })
-  }, [nodes, edges, height, commit])
+  }, [nodes, edges, commit])
 
   /* ---------- 右键菜单的三个动作 ---------- */
 
