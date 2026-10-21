@@ -943,6 +943,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
               {onToggleSidePanel && (
                 <button
                   type="button"
+                  data-video-panel-toggle=""
                   onClick={onToggleSidePanel}
                   title={sidePanelOpen ? t('收起选集列表') : t('展开选集列表')}
                   aria-expanded={sidePanelOpen}

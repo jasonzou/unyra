@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Clapperboard, Download, Loader2, MonitorPlay, Plus, Puzzle } from 'lucide-react'
+import { Clapperboard, Download, Loader2, MonitorPlay, Plus, Puzzle } from 'lucide-react'
 import { t } from '../../i18n'
 import { isWeb, native } from '../../lib/native'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
@@ -138,6 +138,33 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
       return !v
     })
   }, [])
+  /** 面板容器：判断「点的是不是面板里面」（外点自动收起用） */
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const collapsePanel = useCallback(() => {
+    setCollapsed(true)
+    try {
+      localStorage.setItem(COLLAPSED_KEY, '1')
+    } catch {
+      // 会话内生效即可
+    }
+  }, [])
+  /**
+   * 点面板外任意处 → 自动收起（用户定的）。
+   * 捕获阶段监听 pointerdown：视频区的点击、控件栏、空白处都算「外面」；
+   * 控件栏那颗开关要放行（它自己负责开合，否则 pointerdown 先收起、click 又打开）。
+   */
+  useEffect(() => {
+    if (collapsed) return
+    const onDown = (e: PointerEvent) => {
+      const target = e.target
+      if (!(target instanceof Node)) return
+      if (panelRef.current?.contains(target)) return
+      if (target instanceof Element && target.closest('[data-video-panel-toggle]')) return
+      collapsePanel()
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [collapsed, collapsePanel])
   /** 合集字幕批量导出进度；null = 没在导出 */
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null)
 
@@ -440,27 +467,18 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
   const sidePanel =
     source && (source.collection || source.pages) ? (
       <>
-        {/* 收起/展开：一枚低调的小按钮，贴面板左缘（收起时贴右缘）；平时半透明，指上来才清楚 */}
-        <button
-          type="button"
-          title={collapsed ? t('展开合集列表') : t('收起合集列表')}
-          aria-expanded={!collapsed}
-          onClick={toggleCollapsed}
-          className={
-            'absolute top-1/2 z-20 flex h-7 w-3.5 -translate-y-1/2 items-center justify-center rounded-l-md bg-black/35 text-white/55 opacity-40 transition-all duration-300 hover:bg-black/60 hover:text-white/90 hover:opacity-100 ' +
-            (collapsed ? 'right-3' : 'right-[332px]')
-          }
-        >
-          {collapsed ? <ChevronLeft size={12} /> : <ChevronRight size={12} />}
-        </button>
-        {/* 面板本体：宽度过渡（300ms）；内容层钉死 320px，动画期间只裁不重排 */}
+        {/* 面板本体：宽度过渡（300ms）；内容层钉死 320px，动画期间只裁不重排。
+            开关只剩控件栏那一颗（边缘小竖条已按用户要求去掉）；点面板外任意处自动收起。 */}
         <div
           className={
             'absolute right-3 top-1/2 z-10 h-[80%] -translate-y-1/2 overflow-hidden rounded-xl transition-[width] duration-300 ease-out ' +
             (collapsed ? 'w-0' : 'w-[320px]')
           }
         >
-          <div className="flex h-full w-[320px] flex-col border border-line/60 bg-card/95 shadow-[0_10px_30px_rgba(0,0,0,0.28)]">
+          <div
+            ref={panelRef}
+            className="flex h-full w-[320px] flex-col border border-line/60 bg-card/95 shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
+          >
             <div className="min-h-0 flex-1 overflow-y-auto">
                       {source.collection && (
                         <>
