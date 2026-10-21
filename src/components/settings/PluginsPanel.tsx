@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
+  BookOpen,
   Cpu,
   FolderOpen,
   PlugZap,
@@ -33,6 +34,7 @@ import { pluginHint } from './pluginHints'
 import { native } from '../../lib/native'
 import type { PluginSettingField } from '../../lib/plugins'
 import { testVideoPlugin } from '../../lib/videoPlugins'
+import { openPluginDocTab } from '../../lib/pluginDoc'
 
 interface Props {
   onToast: (msg: string) => void
@@ -125,18 +127,29 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            void revealPluginDir().then((err) => {
-              if (err) onToast(t(err))
-            })
-          }}
-          className="flex items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 py-1.5 text-[11.5px] font-medium text-ink transition hover:border-line-strong hover:bg-card/80"
-        >
-          <FolderOpen size={13} className="text-seal" />
-          <span>{t('打开插件目录')}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 插件开发文档：开一个独立页签（可导出 .md），给写插件的人看 */}
+          <button
+            type="button"
+            onClick={() => openPluginDocTab()}
+            className="flex items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 py-1.5 text-[11.5px] font-medium text-ink transition hover:border-line-strong hover:bg-card/80"
+          >
+            <BookOpen size={13} className="text-seal" />
+            <span>{t('插件开发文档')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void revealPluginDir().then((err) => {
+                if (err) onToast(t(err))
+              })
+            }}
+            className="flex items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 py-1.5 text-[11.5px] font-medium text-ink transition hover:border-line-strong hover:bg-card/80"
+          >
+            <FolderOpen size={13} className="text-seal" />
+            <span>{t('打开插件目录')}</span>
+          </button>
+        </div>
       </div>
 
       {/* 重启提示横幅 */}

@@ -69,6 +69,8 @@ export function tabKey(ref: TabRef): string {
   // 视频学习（实验）同样全局只有一份：顶栏那颗按钮点多少次都是切回同一枚，
   // 上一次解析到哪个视频还留在页签里
   if (ref.kind === 'video') return 'v:video'
+  // 插件文档全局一份：设置里的入口点多少次都是切回同一页
+  if (ref.kind === 'pluginDoc') return 'p:plugin-doc'
   if (ref.kind === 'report') return 'r:' + ref.reportId
   // 设置页与用量页同样全局只有一份：从哪个入口打开都是切到它，不会开出第二枚
   if (ref.kind === 'settings') return 'set:settings'
@@ -133,6 +135,7 @@ export function tabNodeId(ref: TabRef): string | null {
   return ref.kind === 'local' ||
     ref.kind === 'web' ||
     ref.kind === 'video' ||
+    ref.kind === 'pluginDoc' ||
     ref.kind === 'guard' ||
     ref.kind === 'report' ||
     ref.kind === 'settings' ||
@@ -204,6 +207,7 @@ export function tabTitle(
   if (ref.kind === 'guard') return t('守卫 Agent')
   // 视频学习（实验）页签：解析到的视频标题活在页签内容里，栏上统一叫这一个名字
   if (ref.kind === 'video') return t('视频学习')
+  if (ref.kind === 'pluginDoc') return t('插件开发文档')
   if (ref.kind === 'report') return t('专注报告')
   if (ref.kind === 'settings') return t('设置')
   if (ref.kind === 'usage') return t('用量统计')
@@ -240,6 +244,7 @@ export function tabTrail(
   if (
     ref.kind === 'guard' ||
     ref.kind === 'video' ||
+    ref.kind === 'pluginDoc' ||
     ref.kind === 'report' ||
     ref.kind === 'settings' ||
     ref.kind === 'usage' ||

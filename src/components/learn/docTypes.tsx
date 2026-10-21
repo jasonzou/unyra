@@ -1,4 +1,4 @@
-import { AppWindow, Bot, BookOpen, Brain, CalendarClock, ChartColumn, FileClock, FilePlus, Folder, FolderOpen, Globe, GraduationCap, HardDrive, ListTree, Loader2, MonitorPlay, NotebookPen, Package, Settings2, ShieldCheck } from 'lucide-react'
+import { AppWindow, Bot, BookOpen, Brain, CalendarClock, ChartColumn, FileClock, FilePlus, Folder, FolderOpen, Globe, GraduationCap, HardDrive, ListTree, Loader2, MonitorPlay, NotebookPen, Package, Puzzle, Settings2, ShieldCheck } from 'lucide-react'
 import Bullseye from '../Bullseye'
 
 /**
@@ -20,6 +20,7 @@ export type DocKindKey =
   | 'ws'
   | 'web'
   | 'video'
+  | 'pluginDoc'
   | 'guard'
   | 'report'
   | 'settings'
@@ -41,6 +42,7 @@ const DOC_TYPE_COLOR: Record<DocKindKey, string> = {
   ws: '#7c8f4f', // 橄榄：工作区（项目）内部文件——与外部文件的灰明确分开
   web: '#2aa1b8', // 青：网页（内置浏览器）
   video: '#5d6ac4', // 靛蓝：视频学习（实验）——介于网页的青与超级文档的紫之间，谁也不撞
+  pluginDoc: '#8a6d3b', // 土金：插件开发文档——参考手册的气质，与正文的黑白区分开
   guard: '#d4577b', // 绯粉：守卫 agent 的上下文（警戒色——它在盯梢）
   report: '#7a6a54', // 褐灰：专注模式报告（收场的凭据）
   settings: '#7c8698', // 蓝灰：系统页（设置）——与哪一类学习内容都不同族
@@ -108,6 +110,8 @@ export function DocTypeIcon({ kind, size = 11 }: { kind: DocKindKey; size?: numb
       <Globe size={size} />
     ) : kind === 'video' ? (
       <MonitorPlay size={size} />
+    ) : kind === 'pluginDoc' ? (
+      <Puzzle size={size} />
     ) : kind === 'guard' ? (
       <ShieldCheck size={size} />
     ) : kind === 'report' ? (

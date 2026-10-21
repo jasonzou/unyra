@@ -220,6 +220,8 @@ import { CHIP_MIME, parseChipJson } from '../../lib/chipSyntax'
 import TabBar from './TabBar'
 import WebTabLayer, { type WebTab } from './web/WebTabLayer'
 import VideoStudyTab from '../video/VideoStudyTab'
+import PluginDoc from '../plugins/PluginDoc'
+import { setPluginDocOpener } from '../../lib/pluginDoc'
 import { focusWebAddress } from './web/addressFocus'
 import FindBar from './FindBar'
 import SuperDocView from './SuperDocView'
@@ -678,6 +680,7 @@ export default function LearnWorkspace({
     if (
       ref.kind === 'guard' ||
       ref.kind === 'video' ||
+      ref.kind === 'pluginDoc' ||
       ref.kind === 'report' ||
       ref.kind === 'settings' ||
       ref.kind === 'usage' ||
@@ -3347,6 +3350,12 @@ export default function LearnWorkspace({
     return () => setChipOpener(null)
   }, [openChip])
 
+  // 设置 → 插件里的「插件开发文档」：同一条打开器纪律（见 lib/pluginDoc）
+  useEffect(() => {
+    setPluginDocOpener(() => openTab({ kind: 'pluginDoc' }))
+    return () => setPluginDocOpener(null)
+  }, [openTab])
+
   /*
     plot 错误卡片上的「让导师修复」：以**工作流**（learn/workflows 的 plot-fix）注入——
     隐藏指令、分界条一条，不是一条普通用户消息。报错原因、字符区间与围栏原文都算好
@@ -4338,6 +4347,12 @@ export default function LearnWorkspace({
                 空页 + 上次的输入还在输入框里，一键重新解析。
               */
               <VideoStudyTab />
+            ) : gTab?.ref.kind === 'pluginDoc' ? (
+              /*
+                插件开发文档（设置 → 插件里的入口打开）：契约说明 + 导出 .md。
+                静态内容，没有会话态（见 components/plugins/PluginDoc）。
+              */
+              <PluginDoc />
             ) : gTab?.ref.kind === 'settings' ? (
               /*
                 设置面板：文档区的一枚页签（不再是弹窗）。全局只有这一份（tabKey 恒定），
@@ -4706,7 +4721,9 @@ export default function LearnWorkspace({
             gTab.ref.kind !== 'draft' &&
             // 视频学习页（实验）也不画：大纲/视图切换对播放器没有意义，纯净阅读
             // 仍可用 F11（用户定的：这一页右上角不要按钮组）
-            gTab.ref.kind !== 'video' && (
+            gTab.ref.kind !== 'video' &&
+            // 插件文档页同样不画：它是参考手册，不是可编辑文档
+            gTab.ref.kind !== 'pluginDoc' && (
             <DocFloat
               /*
                * key 绑「格 + 节点」：换节点时重挂，各块 tip 的展开状态自然回到收起；

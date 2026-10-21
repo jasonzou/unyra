@@ -58,6 +58,8 @@ function normalizeTabRef(raw: unknown, byId: Map<string, KnowledgeNode>): TabRef
   // 视频学习（实验）：同样全局一份、没有「指向」可校验。页签持久化（用户定的），
   // 里面的流地址与转录本来就不落盘（会过期），重启后是空页等重新解析
   if (r.kind === 'video') return { kind: r.kind }
+  // 插件文档页签：纯静态文档，没有可校验的指向
+  if (r.kind === 'pluginDoc') return { kind: r.kind }
   // 记忆页签一枚目标一份：goalId 缺了（或不是字符串）就没法认领，丢弃
   if (r.kind === 'mind') {
     const goalId = typeof r.goalId === 'string' ? r.goalId : ''

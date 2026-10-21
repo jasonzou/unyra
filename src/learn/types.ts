@@ -481,6 +481,11 @@ export type TabRef =
    * 认它）；但解析结果不落盘——流地址带签名会过期，重启后是空页等重新解析。
    */
   | { kind: 'video' }
+  /**
+   * 插件开发文档页签：介绍插件契约与配置面板（见 components/plugins/PluginDoc）。
+   * 跟着页签持久化（normalize 认它），内容全是静态文档，没有要落盘的状态。
+   */
+  | { kind: 'pluginDoc' }
   /** 一份专注模式报告（只读，见 learn/focusGuard 的 FocusReport 与 FocusReportView） */
   | { kind: 'report'; reportId: string }
   /**
