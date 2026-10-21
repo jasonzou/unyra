@@ -95,6 +95,12 @@ export interface PluginCategorySpec {
   label: string
   /** 分类下面那句说明 */
   hint: string
+  /**
+   * 这一类的插件支持**热插拔**（卸了还能装回来、改了立即生效）。
+   * 只有不碰全局渲染管线的类别才配得上：video 是；markdown 不是——
+   * 它的扩展装进全局 marked 摘不下来，渲染结果还按源文缓存（见文件头）。
+   */
+  hotReload?: boolean
   /** 把外部交来的对象校验成这一类插件的形状；不合法就抛一句能直接显示给用户的话 */
   normalize(raw: Record<string, unknown>, id: string): PluginBase
   /** 这个插件声称自己做了什么（设置页显示成一行摘要） */
@@ -370,7 +376,19 @@ export async function refreshPlugins(): Promise<PluginStatus[]> {
       summary: prev?.summary ?? [],
       ...(prev?.settings ? { settings: prev.settings } : {}),
       ...(prev?.version ? { version: prev.version } : {}),
+      ...(prev?.testable ? { testable: true } : {}),
     })
+  }
+
+  /*
+   * 磁盘上没了的（删了 / 改名了）热插拔插件即时卸掉：注册表要与目录一致，
+   * 否则「删了文件还能解析」是另一种惊吓。markdown 等重启（扩展摘不下来）。
+   */
+  for (const file of [...loadedUserFiles.keys()]) {
+    if (entries.some((e) => e.file === file)) continue
+    const id = loadedUserFiles.get(file)
+    const plugin = id ? registry.get(id) : undefined
+    if (plugin && isHotReloadCategory(plugin.category)) unloadUserPlugin(file)
   }
 
   statuses = rows
@@ -405,6 +423,17 @@ let compileHostRef: PluginHost | null = null
  * 而注册表里的插件按声明 id 收；两边要能对上（测试连接、按文件找插件都靠它）。
  */
 const pluginOrigins = new Map<string, string>()
+
+/**
+ * 已装载的用户插件：文件 → 声明 id。
+ * 卸载/重载要按**文件**找回来（同一个文件可能先叫 a 后改叫 b）。
+ */
+const loadedUserFiles = new Map<string, string>()
+
+/** 这个文件此刻装着吗（设置页按钮与开关文案用它区分「重启后」） */
+export function isUserPluginLoaded(file: string): boolean {
+  return loadedUserFiles.has(file)
+}
 
 export function notePluginOrigin(id: string, file: string): void {
   pluginOrigins.set(id, file)
@@ -482,6 +511,72 @@ async function makeHost(file: string): Promise<PluginHost> {
   }
 }
 
+/**
+ * 编译并登记**一个**用户插件：读源码 → 造宿主 → 编译 → 记录账本。
+ * 失败只把原因交回去，不抛——调用方决定是记在状态行上还是回给用户。
+ */
+async function compileUserPlugin(
+  file: string,
+): Promise<{ ok: true; plugin: PluginBase } | { ok: false; error: string }> {
+  const src = await readSource(file)
+  if (!src.ok) return { ok: false, error: src.error }
+  try {
+    const host = await makeHost(file)
+    const plugin = compilePlugin(src.content, file, host)
+    notePluginOrigin(plugin.id, file)
+    loadedUserFiles.set(file, plugin.id)
+    return { ok: true, plugin }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** 把一次编译的结果写进状态行（装载成功 / 失败原因） */
+function applyCompiledToStatus(file: string, plugin: PluginBase | null, error?: string): void {
+  const status = statuses.find((s) => s.kind === 'user' && s.file === file)
+  if (!status) return
+  if (plugin) {
+    status.active = true
+    status.name = plugin.name ?? status.name
+    status.category = plugin.category
+    status.summary = describeOf(plugin)
+    if (plugin.settings?.length) status.settings = plugin.settings
+    if (plugin.version) status.version = plugin.version
+    if (typeof (plugin as { onTest?: unknown }).onTest === 'function') status.testable = true
+    delete status.error
+  } else {
+    status.active = false
+    if (error) status.error = error
+  }
+}
+
+/** 卸载一个文件的插件（按账本找回声明 id）；没装着就返回 false */
+export function unloadUserPlugin(file: string): boolean {
+  const id = loadedUserFiles.get(file)
+  if (!id) return false
+  loadedUserFiles.delete(file)
+  return unregisterPlugin(id)
+}
+
+/**
+ * 热重载一个文件：先卸旧的再编新的（宁可短暂没有，也不留半个旧插件）。
+ * 只有声明了 hotReload 的类别允许走到这里——其余类别照样要重启（见 setPluginEnabled）。
+ * 失败时插件处于「没装着」状态并把原因记到状态行，用户改好文件点「重新加载」即可。
+ */
+export async function reloadUserPlugin(file: string): Promise<string | null> {
+  // 只有热插拔类别允许重载；markdown 的扩展摘不下来，改动只能重启（见类别注释）
+  const category = await peekCategoryOf(file)
+  if (!isHotReloadCategory(category)) return t('这类插件的改动需要重启应用才生效')
+  unloadUserPlugin(file)
+  const compiled = await compileUserPlugin(file)
+  if (!compiled.ok) {
+    applyCompiledToStatus(file, null, compiled.error)
+    return compiled.error
+  }
+  applyCompiledToStatus(file, compiled.plugin)
+  return null
+}
+
 async function readSource(file: string): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
   try {
     return await native().plugins.read(file)
@@ -507,25 +602,8 @@ export async function loadPlugins(): Promise<void> {
   await refreshPlugins()
   for (const status of statuses) {
     if (status.kind !== 'user' || !status.enabled) continue
-    const src = await readSource(status.file as string)
-    if (!src.ok) {
-      status.error = src.error
-      continue
-    }
-    try {
-      const host = await makeHost(status.file as string)
-      const plugin = compilePlugin(src.content, status.file as string, host)
-      status.active = true
-      status.name = plugin.name ?? status.name
-      status.category = plugin.category
-      status.summary = describeOf(plugin)
-      if (plugin.settings?.length) status.settings = plugin.settings
-      if (plugin.version) status.version = plugin.version
-      notePluginOrigin(plugin.id, status.file as string)
-      if (typeof (plugin as { onTest?: unknown }).onTest === 'function') status.testable = true
-    } catch (err) {
-      status.error = err instanceof Error ? err.message : String(err)
-    }
+    const compiled = await compileUserPlugin(status.file as string)
+    applyCompiledToStatus(status.file as string, compiled.ok ? compiled.plugin : null, compiled.ok ? undefined : compiled.error)
   }
   const active = statuses.filter((s) => s.active).length
   const failed = statuses.filter((s) => s.enabled && !s.active).length
@@ -542,6 +620,7 @@ export async function setPluginEnabled(id: string, enabled: boolean): Promise<st
     if (blocked) return blocked
   }
   const builtin = builtins.find((p) => p.id === id)
+  const wasLoaded = loadedUserFiles.has(id)
   try {
     const res = builtin ? await native().plugins.setToggle(id, enabled) : await native().plugins.setEnabled(id, enabled)
     if (!res.ok) return res.error ?? t('没能保存')
@@ -549,7 +628,57 @@ export async function setPluginEnabled(id: string, enabled: boolean): Promise<st
     return t('应用没有跑在 Electron 里')
   }
   await refreshPlugins()
+  if (builtin) return null
+
+  /*
+   * 热插拔（用户定的：视频来源这类要能即开即用）：
+   * - 开：先编译，声明类别带 hotReload 才留着跑；其余（markdown）编完立刻摘掉，
+   *   维持「重启后装载」的旧语义——它们的扩展装进全局 marked，摘不下来也热不得。
+   * - 关：只有已装载且是热插拔类别的才即时卸载；markdown 照旧等重启。
+   * 判断类别靠扫源码里的 category 声明（不编译猜不出、编译 markdown 又有副作用）：
+   * 扫到 video（或其它 hotReload 类别）才做即时装载，扫不到一律走重启语义。
+   */
+  if (enabled) {
+    const category = await peekCategoryOf(id)
+    if (!isHotReloadCategory(category)) return null
+    const compiled = await compileUserPlugin(id)
+    if (!compiled.ok) {
+      applyCompiledToStatus(id, null, compiled.error)
+      return compiled.error
+    }
+    applyCompiledToStatus(id, compiled.plugin)
+    return null
+  }
+  if (wasLoaded) {
+    const pluginId = loadedUserFiles.get(id)
+    const plugin = pluginId ? pluginById(pluginId) : undefined
+    if (plugin && isHotReloadCategory(plugin.category)) {
+      unloadUserPlugin(id)
+      applyCompiledToStatus(id, null)
+    }
+  }
   return null
+}
+
+/** 这个类别是否支持热插拔（未知类别当不支持——宁可让用户重启） */
+function isHotReloadCategory(category: PluginCategory | null): boolean {
+  if (!category) return false
+  try {
+    return pluginCategorySpec(category).hotReload === true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 扫源码里的 `category: 'xxx'` 声明。只在**决定要不要即时装载**时用：
+ * 编译 markdown 插件有副作用（marked 扩展装上去摘不下来），不能拿编译去探类别。
+ */
+async function peekCategoryOf(file: string): Promise<PluginCategory | null> {
+  const src = await readSource(file)
+  if (!src.ok) return null
+  const m = /\bcategory\s*:\s*['"]([a-z-]+)['"]/.exec(src.content)
+  return (m ? (m[1] as PluginCategory) : null) ?? null
 }
 
 /** 在系统文件管理器里打开用户插件目录；成功给 null */

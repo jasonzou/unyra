@@ -24,6 +24,7 @@ import {
   revealPluginDir,
   pluginEnableBlocker,
   setPluginEnabled,
+  reloadUserPlugin,
   type PluginStatus,
 } from '../../lib/plugins'
 import { artifactCount, clearArtifacts, loadArtifacts, silentCount } from '../../lib/codeArtifacts'
@@ -50,6 +51,7 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
     refreshPlugins().then((next) => {
       setList([...next])
       setListError(pluginListError())
+      return next
     })
 
   useEffect(() => {
@@ -82,13 +84,28 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
   const toggle = async (id: string, on: boolean) => {
     setBusy(id)
     const err = await setPluginEnabled(id, on)
-    setBusy('')
     if (err) {
+      setBusy('')
       onToast(t(err))
+      await reload()
       return
     }
+    // 热插拔类别（视频来源）即时装卸：装没装上看刷新后的那一行
+    const next = await reload()
+    setBusy('')
+    const row = next.find((p) => p.id === id)
+    if (on) onToast(row?.active ? t('已启用并生效') : t('已启用，重启后生效'))
+    else onToast(row && !row.active ? t('已停用并卸载') : t('已停用，重启后生效'))
+  }
+
+  /** 手动重新加载（视频来源这类热插拔插件：改完文件不用重启） */
+  const reloadPlugin = async (p: PluginStatus) => {
+    if (!p.file) return
+    setBusy(p.id)
+    const err = await reloadUserPlugin(p.file)
     await reload()
-    onToast(on ? t('已启用，重启后生效') : t('已停用，重启后生效'))
+    setBusy('')
+    onToast(err ? t(err) : t('已重新加载'))
   }
 
   const restartNeeded = list.some((p) => p.enabled !== p.active)
@@ -200,6 +217,18 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
 
                         {/* 右侧：配置按钮与开关 */}
                         <div className="flex shrink-0 items-center gap-2">
+                          {p.kind === 'user' && p.category === 'video' && p.file && (
+                            <button
+                              type="button"
+                              title={t('重新加载（改动立即生效）')}
+                              aria-label={t('重新加载（改动立即生效）')}
+                              disabled={busy === p.id}
+                              onClick={() => void reloadPlugin(p)}
+                              className="flex h-7 w-7 items-center justify-center border-0 bg-transparent text-ink-soft transition hover:text-ink disabled:opacity-40"
+                            >
+                              <RefreshCw size={14} />
+                            </button>
+                          )}
                           {p.configurable && (
                             <button
                               type="button"
@@ -342,9 +371,16 @@ function PluginSettingsForm({
     const secrets = fields.filter((f) => f.type === 'password').map((f) => f.key)
     void native()
       .plugins.settingsSet(file, values, secrets)
-      .then((res) => {
+      .then(async (res) => {
+        if (!res.ok) {
+          setSaving(false)
+          onToast(res.error ?? t('没能保存'))
+          return
+        }
+        // 配置是编译期快照：存完立刻热重载，插件马上用上新值（视频来源这类热插拔类别）
+        const err = await reloadUserPlugin(file)
         setSaving(false)
-        onToast(res.ok ? t('已保存，重启应用后生效') : res.error ?? t('没能保存'))
+        onToast(err ? t('已保存，但重新加载失败：{0}', err) : t('已保存并生效'))
       })
   }
 
@@ -421,7 +457,7 @@ function PluginSettingsForm({
             </p>
           )}
           <div className="flex items-center justify-end gap-2">
-            <span className="mr-auto text-[10.5px] text-ink-faint">{t('保存后需重启应用才生效')}</span>
+            <span className="mr-auto text-[10.5px] text-ink-faint">{t('保存后立即生效')}</span>
             {testable && (
               <button
                 type="button"

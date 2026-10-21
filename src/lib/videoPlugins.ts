@@ -105,6 +105,8 @@ definePluginCategory({
   id: 'video',
   label: '视频 / 音频来源',
   hint: '给「视频学习」页签提供流与字幕，或把音频交给语音识别。',
+  // 不碰全局渲染管线（marked / 文档缓存），装卸可以在运行中完成
+  hotReload: true,
   normalize(raw: Record<string, unknown>, id: string): PluginBase {
     if (raw.apiVersion !== 1) {
       throw new Error(
