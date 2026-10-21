@@ -282,3 +282,29 @@ export function findActiveSubtitle(
 
   return null
 }
+
+/**
+ * 生成全向均匀实心硬描边（0 扩散度，确保纯黑实心硬边缘，无模糊与发散）。
+ * 采用 16 个主方向 + 8 个次方向，半径随字体大小比例 (em) 自适应缩放。
+ */
+export function generateHardTextShadow(radiusEm = 0.065, color = '#000'): string {
+  const shadows: string[] = []
+  // 外圈 16 方向
+  for (let i = 0; i < 16; i++) {
+    const angle = (i * 2 * Math.PI) / 16
+    const x = (Math.cos(angle) * radiusEm).toFixed(4)
+    const y = (Math.sin(angle) * radiusEm).toFixed(4)
+    shadows.push(`${x}em ${y}em 0 ${color}`)
+  }
+  // 内圈 8 方向密实填充
+  for (let i = 0; i < 8; i++) {
+    const angle = (i * 2 * Math.PI) / 8
+    const x = (Math.cos(angle) * (radiusEm * 0.55)).toFixed(4)
+    const y = (Math.sin(angle) * (radiusEm * 0.55)).toFixed(4)
+    shadows.push(`${x}em ${y}em 0 ${color}`)
+  }
+  return shadows.join(', ')
+}
+
+/** 默认实心硬描边 text-shadow 样式 */
+export const SUBTITLE_HARD_TEXT_SHADOW = generateHardTextShadow(0.065, '#000')

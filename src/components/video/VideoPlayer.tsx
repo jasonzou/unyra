@@ -42,6 +42,7 @@ import { formatClock } from '../../video/transcript'
 import {
   findActiveSubtitle,
   parseSubtitleFile,
+  SUBTITLE_HARD_TEXT_SHADOW,
   toTranscript,
 } from '../../video/subtitles'
 import type { Transcript, TranscriptSegment } from '../../video/types'
@@ -605,6 +606,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         ref={containerRef}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
+        style={{ containerType: 'inline-size' }}
         className={`group/player relative flex h-full w-full select-none items-center justify-center overflow-hidden bg-black text-white ${
           isFullscreen && !isControlsVisible ? 'cursor-none' : ''
         } ${className}`}
@@ -706,10 +708,23 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           </div>
         )}
 
-        {/* 屏幕字幕显示层（不受视频镜像影响） */}
+        {/* 屏幕字幕显示层（不受视频镜像影响）：跟随屏幕尺寸自适应缩放，无背景色，使用 text-shadow 绘制不扩散的硬描边 */}
         {activeCue && (
-          <div className="pointer-events-none absolute bottom-14 z-20 max-w-[85%] px-4 text-center">
-            <span className="inline-block whitespace-pre-line rounded-lg bg-black/75 px-3.5 py-1.5 text-[15px] font-medium leading-relaxed text-white shadow-lg backdrop-blur-xs">
+          <div
+            style={{
+              bottom: isControlsVisible ? 'clamp(4.2rem, 7.5cqi, 6rem)' : 'clamp(1.5rem, 4cqi, 3.5rem)',
+              transition: 'bottom 0.25s ease-out',
+            }}
+            className="pointer-events-none absolute z-20 w-full max-w-[90%] px-4 text-center"
+          >
+            <span
+              style={{
+                fontSize: 'clamp(15px, 2.8cqi, 34px)',
+                lineHeight: 1.35,
+                textShadow: SUBTITLE_HARD_TEXT_SHADOW,
+              }}
+              className="inline-block whitespace-pre-line bg-transparent font-bold tracking-wide text-white"
+            >
               {activeCue.text}
             </span>
           </div>

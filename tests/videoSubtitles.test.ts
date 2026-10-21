@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   cleanSubtitleText,
   findActiveSubtitle,
+  generateHardTextShadow,
   parseJsonSubtitles,
   parseSrt,
   parseSubtitleFile,
   parseTimestamp,
   parseVtt,
   sanitizeSubtitleSegments,
+  SUBTITLE_HARD_TEXT_SHADOW,
   toTranscript,
 } from '../src/video/subtitles'
 
@@ -141,5 +143,21 @@ Next step in WebVTT
     expect(clampRate(1.5)).toBe(1.5)
     expect(clampRate(3.0)).toBe(3.0)
     expect(clampRate(3.5)).toBe(3.0)
+  })
+
+  it('generates non-diffused hard text-shadow outline without blur', () => {
+    expect(SUBTITLE_HARD_TEXT_SHADOW).toBeTruthy()
+    const parts = SUBTITLE_HARD_TEXT_SHADOW.split(', ')
+    expect(parts.length).toBeGreaterThanOrEqual(16)
+    // 验证每一段的模糊扩散半径均为 0，确保硬描边不扩散
+    for (const part of parts) {
+      expect(part).toMatch(/\s0\s#000$/)
+    }
+
+    const custom = generateHardTextShadow(0.08, '#111')
+    expect(custom).toContain('#111')
+    for (const part of custom.split(', ')) {
+      expect(part).toMatch(/\s0\s#111$/)
+    }
   })
 })
