@@ -7,7 +7,7 @@
  */
 
 import type { LearnStore } from './types'
-import { seedFromSource, type SeedSourceNode, type StructureMap } from './structure'
+import { heightOf, seedFromSource, type SeedSourceNode, type StructureMap } from './structure'
 
 /**
  * 把一个目标的旧结构铺成图。
@@ -47,5 +47,5 @@ export function structureFromStore(store: LearnStore, goalId: string): Structure
     exams: examsByNode.get(node.id) ?? [],
   }))
 
-  return seedFromSource(source)
+  return seedFromSource(source, heightOf(store))
 }

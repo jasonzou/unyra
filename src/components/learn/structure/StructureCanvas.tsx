@@ -58,13 +58,6 @@ import {
   splitLeafRef,
 } from './structureView'
 
-/** 固定视角：平面绕 X 轴倾斜多少度 */
-const TILT_DEG = 18
-/** 正交投影下，世界坐标的 y 到屏幕要乘这个系数（与 CSS 的 rotateX 同一个数） */
-const TILT_COS = Math.cos((TILT_DEG * Math.PI) / 180)
-/** 拖动时把卡片抬多高（世界坐标）。抬起来才看得见影子，也才「碰不到别人」 */
-const LIFT_Z = 96
-
 export interface StructureCanvasProps {
   store: LearnStore
   /** 这一页属于哪个目标 */
@@ -317,7 +310,7 @@ export const StructureCanvas = memo(function StructureCanvas({
     const top = rect?.top ?? 0
     return {
       x: (clientX - left - cam.x) / cam.zoom,
-      y: (clientY - top - cam.y) / (cam.zoom * TILT_COS),
+      y: (clientY - top - cam.y) / cam.zoom,
     }
   }, [])
 
@@ -478,7 +471,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         ...(n.note ? { note: n.note } : {}),
       })),
       edges,
-    })
+    }, height)
     const pos = new Map(laid.nodes.map((n) => [n.id, { x: n.x, y: n.y }]))
     fitNextRef.current = true
     commit({
@@ -489,7 +482,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       }),
       edges,
     })
-  }, [nodes, edges, commit])
+  }, [nodes, edges, height, commit])
 
   /* ---------- 右键菜单的三个动作 ---------- */
 
@@ -875,22 +868,13 @@ export const StructureCanvas = memo(function StructureCanvas({
       style={{ cursor: hoverDot ? 'pointer' : undefined }}
     >
       {/*
-        固定视角的 3D 平面：绕 X 轴倾斜、正交投影（不开 perspective）。
-        拖动时这一层抬到垃圾桶之上——被提起的节点必须压在删除区上面，否则拖到垃圾桶
-        附近就看不见它了。`preserve-3d` 是子元素能用 translateZ 的前提。
+        画布平面：纯 2D（只有平移与缩放，没有倾斜、没有 z 轴）。
+        拖动时整层抬到垃圾桶之上，这样拖到删除区附近也看得见手里的节点。
       */}
       <div
         className={`absolute top-0 left-0 origin-top-left ${dragging ? 'z-30' : 'z-0'}`}
-        style={{
-          transform: `translate3d(${camera.x}px, ${camera.y}px, 0) scale(${camera.zoom}) rotateX(${TILT_DEG}deg)`,
-          transformStyle: 'preserve-3d',
-        }}
+        style={{ transform: `translate3d(${camera.x}px, ${camera.y}px, 0) scale(${camera.zoom})` }}
       >
-        {/* 地板：网格长在这块倾斜的平面上（而不是外层容器上），倾斜才看得出来 */}
-        <div
-          className={`absolute ${dragging ? '' : 'bg-dot-grid'}`}
-          style={{ left: -4000, top: -4000, width: 8000, height: 8000 }}
-        />
 
         {/* 连线层：尺寸跟着包围盒走（SVG 根默认会裁掉超出的路径，所以不能用 1×1） */}
         {bounds && (
@@ -992,15 +976,13 @@ export const StructureCanvas = memo(function StructureCanvas({
               className={`absolute flex flex-col rounded-xl border ${KIND_TONE[node.kind]} ${
                 empty ? 'border-dashed' : ''
               } ${selected ? 'ring-2 ring-seal/60' : isHovered ? 'ring-1 ring-seal/35' : ''} ${
-                lifted ? 'moji-structure-lifted' : 'shadow-sm'
+                lifted ? 'shadow-lg' : 'shadow-sm'
               } ${flashId === node.id ? 'moji-structure-flash' : ''}`}
               style={{
                 left: node.x,
                 top: node.y,
                 width: CARD_W,
                 height: h,
-                // 拖起来的那张抬到 z 轴上：正交投影下表现为往上飘一截，配合影子就是「浮着」
-                transform: lifted ? `translateZ(${LIFT_Z}px)` : undefined,
                 cursor: lifted ? 'grabbing' : 'grab',
               }}
             >

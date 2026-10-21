@@ -10,13 +10,19 @@
 
 import type { LearnStore } from '../../../learn/types'
 import {
-  CARD_H,
   defaultHeight,
   rectOf,
   type GraphKind,
   type HeightOf,
   type StructureNode,
 } from '../../../learn/structure'
+
+/**
+ * 卡片高度与那几个行高常量住在领域层（`learn/structure`）：布局也要用它们
+ * （自动排列按实际高度往下排），放在组件层会让领域层反向依赖界面。
+ * 这里 re-export 一份，调用方从 structureView 取的习惯不变。
+ */
+export { NOTE_ROW, OUTLINE_HEAD, SLOT_ROW, cardHeight, heightOf } from '../../../learn/structure'
 import { nodeById } from '../../../learn/graph'
 
 /** 卡片上要显示的两行字 */
@@ -112,36 +118,6 @@ export function outlineSlots(store: LearnStore, node: StructureNode, nodes: read
     const child = nodes.find((n) => n.id !== node.id && n.kind === 'outline' && slotKeyOf(store, n) === entry.key)
     return { key: entry.key, title: entry.title, index, color: slotColor(index), childId: child?.id ?? null }
   })
-}
-
-/* ---------- 卡片高度 ---------- */
-
-/** 大纲卡片的标题行高度（含上下 padding） */
-export const OUTLINE_HEAD = 44
-/** 每一行目标项的高度 */
-export const SLOT_ROW = 22
-/** 卡片底部那条注释标签的高度 */
-export const NOTE_ROW = 20
-
-/**
- * 一张卡有多高：大纲节点按目标项条数长高，其余一律 CARD_H。
- *
- * 大纲卡片必须能装下全部目标项——装不下的部分如果做成滚动或省略号，
- * 「点目标项生成子大纲」这个主要入口就有一半是点不到的。
- */
-export function cardHeight(store: LearnStore, node: StructureNode): number {
-  /** 注释标签占的一行：贴在卡片最下面 */
-  const noteRow = node.note ? NOTE_ROW : 0
-  if (node.kind !== 'outline') return CARD_H + noteRow
-  const owner = node.ref ? nodeById(store, node.ref) : null
-  const count = owner?.outline?.children.length ?? 0
-  if (!count) return CARD_H + noteRow
-  return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8) + noteRow
-}
-
-/** 把 store 包成一个高度访问器：领域层的几何函数只认这个函数，不认 store */
-export function heightOf(store: LearnStore): HeightOf {
-  return (node) => cardHeight(store, node)
 }
 
 /* ---------- 节点显示什么 ---------- */

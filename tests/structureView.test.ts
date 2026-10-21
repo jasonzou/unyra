@@ -229,10 +229,10 @@ describe('结构画布：大纲的目标项（接入点）', () => {
   it('大纲卡片按目标项条数长高（否则点不到后面的目标项）', () => {
     expect(cardHeight(store, parentNode)).toBe(OUTLINE_HEAD + 2 * SLOT_ROW + 8)
     // 其它类型恒为固定高度
-    expect(cardHeight(store, { id: 'd', kind: 'doc', ref: 'p1', x: 0, y: 0 })).toBe(CARD_H)
+    expect(cardHeight(store, { kind: 'doc', ref: 'p1' })).toBe(CARD_H)
     // 没有目标项的大纲也不缩到比默认更矮
     const bare = makeStore([makeNode({ id: 'p9', title: '空' })])
-    expect(cardHeight(bare, { id: 'o:p9', kind: 'outline', ref: 'p9', x: 0, y: 0 })).toBe(CARD_H)
+    expect(cardHeight(bare, { kind: 'outline', ref: 'p9' })).toBe(CARD_H)
   })
 
   it('大纲 → 子大纲 的连线取那个接入点的颜色；别的连线没有颜色', () => {

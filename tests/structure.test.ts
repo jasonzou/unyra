@@ -136,8 +136,9 @@ describe('结构图：初始铺排', () => {
     expect(at('d1').x).toBe(COL_GAP)
     expect(at('n1').x).toBe(COL_GAP * 2)
     // 同一列不重叠
-    expect(Math.abs(at('o2').y - at('d1').y)).toBe(ROW_GAP)
-    expect(Math.abs(at('n1').y - at('n2').y)).toBe(ROW_GAP)
+    // 两张卡之间隔一个 ROW_GAP 的空（行距 = 卡片高度 + 空隙，高度是算出来的）
+    expect(Math.abs(at('o2').y - at('d1').y)).toBe(CARD_H + ROW_GAP)
+    expect(Math.abs(at('n1').y - at('n2').y)).toBe(CARD_H + ROW_GAP)
   })
 
   it('指向不存在节点的边被丢掉（旧数据里依赖指向已删节点很常见）', () => {
@@ -161,6 +162,29 @@ describe('结构图：初始铺排', () => {
     const at = (id: string) => map.nodes.find((n) => n.id === id)!
     expect(at('o2').x).toBe(at('d1').x)
     expect(at('o2').y).toBeLessThan(at('d1').y)
+  })
+
+  it('高的卡片不会压住下一张（按实际高度往下排）', () => {
+    // 大纲卡片里有 8 个目标项时能长到 240 上下，按固定行距排必然叠住
+    const tall = (n: { kind: string }) => (n.kind === 'outline' ? 240 : CARD_H)
+    const map = seedLayout(
+      {
+        nodes: [
+          { id: 'o1', kind: 'outline' },
+          { id: 'o2', kind: 'outline' },
+          { id: 'd1', kind: 'doc' },
+        ],
+        edges: [
+          { from: 'o1', to: 'o2' },
+          { from: 'o1', to: 'd1' },
+        ],
+      },
+      tall,
+    )
+    const at = (id: string) => map.nodes.find((n) => n.id === id)!
+    // o2 与 d1 同列，o2 在上：d1 的顶必须落在 o2 的底之下（含空隙）
+    expect(at('d1').x).toBe(at('o2').x)
+    expect(at('d1').y).toBeGreaterThanOrEqual(at('o2').y + 240)
   })
 
   it('每个节点都拿到坐标，一个不落', () => {

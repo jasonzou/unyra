@@ -23,6 +23,9 @@
  * （掌握度 / 错误记忆 / 检验记录），这里的 structure 是「这门课的节点怎么摆、谁连着谁」。
  */
 
+import type { LearnStore } from './types'
+import { nodeById } from './graph'
+
 /** 节点类型。顺序即「层级」：越靠后越下游（见 GRAPH_EDGE_RULES） */
 export const GRAPH_KINDS = ['outline', 'doc', 'note', 'exam', 'superdoc'] as const
 export type GraphKind = (typeof GRAPH_KINDS)[number]
@@ -272,12 +275,47 @@ export function centerPan(bounds: Rect, view: ViewSize, zoom: number): { x: numb
 
 /* ---------- 初始铺排（迁移与「新建目标」共用） ---------- */
 
+/* ---------- 卡片高度（内容算出来的，不进数据） ---------- */
+
+/** 大纲卡片的标题行高度（含上下 padding） */
+export const OUTLINE_HEAD = 44
+/** 每一行目标项的高度 */
+export const SLOT_ROW = 22
+/** 卡片底部那条注释标签的高度 */
+export const NOTE_ROW = 20
+
+/**
+ * 一张卡有多高：大纲节点按目标项条数长高，有注释再加一行，其余一律 CARD_H。
+ *
+ * 大纲卡片必须能装下全部目标项——装不下的部分如果做成滚动或省略号，
+ * 「点目标项生成子大纲」这个主要入口就有一半是点不到的。
+ */
+export function cardHeight(store: LearnStore, node: { kind: GraphKind; ref?: string; note?: string }): number {
+  const noteRow = node.note ? NOTE_ROW : 0
+  if (node.kind !== 'outline') return CARD_H + noteRow
+  const owner = node.ref ? nodeById(store, node.ref) : null
+  const count = owner?.outline?.children.length ?? 0
+  if (!count) return CARD_H + noteRow
+  return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8) + noteRow
+}
+
+/** 把 store 包成一个高度访问器：布局与几何函数只认这个函数，不认 store */
+export function heightOf(store: LearnStore): HeightOf {
+  return (node) => cardHeight(store, node)
+}
+
 /** 同一列里类型的先后：大纲 → 文档 → 叶子（读图时从上往下就是这个顺序） */
 const KIND_RANK: Record<GraphKind, number> = { outline: 0, doc: 1, note: 2, exam: 2, superdoc: 2 }
 
-/** 列间距 / 行间距（世界坐标）：卡片 + 连线留白 */
+/** 列间距（世界坐标）：卡片宽 + 连线留白 */
 export const COL_GAP = CARD_W + 112
-export const ROW_GAP = CARD_H + 36
+/**
+ * 同一列里两张卡之间的空（世界坐标）。
+ *
+ * **它是「空」不是「行距」**：卡片高度是内容算出来的（大纲卡片能长到两三百），
+ * 按固定行距往下排，高的那张就会压住下一张——这正是「自动排列之后叠在一起」的成因。
+ */
+export const ROW_GAP = 36
 
 export interface SeedGraph {
   nodes: Array<{ id: string; kind: GraphKind; ref?: string; slot?: string; note?: string }>
@@ -322,7 +360,10 @@ export const examGid = (examId: string): string => `e:${examId}`
  * 为什么「空的文档不建节点」：旧模型每个节点都有一个空 `.md`，全建出来画布上一半是空盒子。
  * 想要就拖一个——这正是新架构的用法。
  */
-export function seedFromSource(source: readonly SeedSourceNode[]): StructureMap {
+export function seedFromSource(
+  source: readonly SeedSourceNode[],
+  heightOf: HeightOf = defaultHeight,
+): StructureMap {
   const seedNodes: SeedGraph['nodes'] = []
   const seedEdges: GraphEdge[] = []
   const known = new Set(source.map((n) => n.id))
@@ -359,7 +400,7 @@ export function seedFromSource(source: readonly SeedSourceNode[]): StructureMap 
     }
   }
 
-  return seedLayout({ nodes: seedNodes, edges: seedEdges })
+  return seedLayout({ nodes: seedNodes, edges: seedEdges }, heightOf)
 }
 
 /**
@@ -372,7 +413,7 @@ export function seedFromSource(source: readonly SeedSourceNode[]): StructureMap 
  * 它只负责「第一次摆得像话」，之后位置由用户拖、存进 structure.json，不再重算。
  * 根节点（没有入边）在第 0 列；同列内按「父节点的 y」再按 id 排序，尽量让兄弟挨着。
  */
-export function seedLayout(seed: SeedGraph): StructureMap {
+export function seedLayout(seed: SeedGraph, heightOf: HeightOf = defaultHeight): StructureMap {
   const nodes = seed.nodes
   const byId = new Map(nodes.map((n) => [n.id, n]))
   /** 有效边：两端都在表里才认（迁移时旧数据里可能有指向已删节点的依赖） */
@@ -428,16 +469,24 @@ export function seedLayout(seed: SeedGraph): StructureMap {
         KIND_RANK[a.kind] - KIND_RANK[b.kind] ||
         (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
     )
-    column.forEach((n, i) => {
-      placed.push({
+    /*
+     * 往下排的方式：**上一张的底 + 空隙**，而不是「第 i 行 × 固定行距」。
+     * 卡片高度是内容算出来的（大纲卡片能长到两三百），按固定行距排，高的那张
+     * 一定会压住下一张——这就是「自动排列之后节点叠在一起」的成因。
+     */
+    let cursorY = 0
+    column.forEach((n) => {
+      const node: StructureNode = {
         id: n.id,
         kind: n.kind,
         ...(n.ref ? { ref: n.ref } : {}),
         ...(n.slot ? { slot: n.slot } : {}),
         ...(n.note ? { note: n.note } : {}),
         x: d * COL_GAP,
-        y: i * ROW_GAP,
-      })
+        y: cursorY,
+      }
+      placed.push(node)
+      cursorY += heightOf(node) + ROW_GAP
     })
   }
 

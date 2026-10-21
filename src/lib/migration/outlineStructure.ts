@@ -30,7 +30,14 @@
  */
 
 import type { MigrationContext, MigrationScript, MigrationStepResult } from './types'
-import { seedFromSource, type SeedSourceNode } from '../../learn/structure'
+import {
+  CARD_H,
+  NOTE_ROW,
+  OUTLINE_HEAD,
+  SLOT_ROW,
+  seedFromSource,
+  type SeedSourceNode,
+} from '../../learn/structure'
 
 /** meta.json 里迁移用得到的部分（其余字段搬不过来也不影响结构图） */
 interface MetaLike {
@@ -50,6 +57,8 @@ interface Collected {
   downstream: string[]
   notes: string[]
   superdocs: string[]
+  /** 大纲里的目标项条数：决定这张卡在画布上多高（见 learn/structure 的 cardHeight） */
+  slots: number
 }
 
 function asArray(v: unknown): unknown[] {
@@ -91,6 +100,7 @@ async function collectMetas(ctx: MigrationContext, goalDir: string): Promise<Col
       const diskNotes = (await ctx.storage.listDir(`${dir}/${base}.notes`))
         .filter((e) => !e.dir && e.name.endsWith('.md'))
         .map((e) => e.name.slice(0, -3))
+      const outline = await ctx.storage.readJson<{ children?: unknown[] }>(`${dir}/${base}.outline.json`)
       const metaSuperdocs = asArray(meta.superdocs)
         .map((s) => str((s as { name?: unknown } | null)?.name))
         .filter(Boolean)
@@ -106,6 +116,7 @@ async function collectMetas(ctx: MigrationContext, goalDir: string): Promise<Col
           .filter(Boolean),
         notes: [...new Set([...metaNotes, ...diskNotes])],
         superdocs: [...new Set([...metaSuperdocs, ...diskSuperdocs])],
+        slots: asArray(outline?.children).length,
       })
     }
     // 子目录里也可能有节点（旧模型允许节点嵌在节点目录里）
@@ -174,7 +185,19 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
       if (ids.length) examsOf.set(item.id, ids)
     }
 
-    const map = seedFromSource(toSource(items, docsWithBody, examsOf))
+    /*
+     * 高度要跟着数据走：大纲卡片的行数就是目标项条数，不传高度的话
+     * 迁移铺出来的图会像「按固定行距排」那样叠在一起。
+     */
+    const slotsOf = new Map(items.map((i) => [i.id, i.slots]))
+    const height = (node: { kind: string; ref?: string; note?: string }): number => {
+      const noteRow = node.note ? NOTE_ROW : 0
+      if (node.kind !== 'outline' || !node.ref) return CARD_H + noteRow
+      const count = slotsOf.get(node.ref) ?? 0
+      if (!count) return CARD_H + noteRow
+      return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8) + noteRow
+    }
+    const map = seedFromSource(toSource(items, docsWithBody, examsOf), height)
     if (!map.nodes.length) {
       ctx.log(`跳过「${goal.name}」：铺出来是空的`)
       continue
