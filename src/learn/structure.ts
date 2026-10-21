@@ -505,63 +505,6 @@ export function normalizeStructureBook(raw: unknown, goalIds: ReadonlySet<string
   return out
 }
 
-/* ---------- 碰撞体积 ---------- */
-
-/** 两张卡之间至少留这么多（世界坐标），挨太紧看着就是粘在一起 */
-export const NODE_GAP = 28
-
-/**
- * 两块矩形算不算撞上（含间隙）。
- *
- * 用的是「分开检测」：只要在 x 或 y 上完全分开就不算撞。
- * 写成一个函数而不是各处 `a.x < b.x + ...`，是因为碰撞的判据要能被测试钉住——
- * 「拖完之后有没有叠在一起」这件事，肉眼看不出来，只能靠测试守。
- */
-export function rectsOverlap(a: Rect, b: Rect, gap = NODE_GAP): boolean {
-  if (a.x + a.width + gap <= b.x) return false
-  if (b.x + b.width + gap <= a.x) return false
-  if (a.y + a.height + gap <= b.y) return false
-  if (b.y + b.height + gap <= a.y) return false
-  return true
-}
-
-/**
- * 给「刚落下的这张卡」找一个不叠在别人身上的位置。
- *
- * 只在**松手那一刻**调用：拖动过程中节点是被提起来的（z 轴），允许从别人头上飞过，
- * 这就是「拖拽时不会发生碰撞」的含义。落点被占时就近找一个空位，
- * 由内向外一圈圈试——先把最近的一圈试完，用户看到的位移才最小。
- */
-export function findFreeSpot(
-  nodes: readonly StructureNode[],
-  id: string,
-  desired: { x: number; y: number },
-  height: number,
-  heightOf: HeightOf = defaultHeight,
-  gap = NODE_GAP,
-): { x: number; y: number } {
-  const others = nodes.filter((n) => n.id !== id)
-  if (!others.length) return desired
-  const fits = (x: number, y: number) => {
-    const rect: Rect = { x, y, width: CARD_W, height }
-    return others.every((n) => !rectsOverlap(rect, rectOf(n, heightOf), gap))
-  }
-  if (fits(desired.x, desired.y)) return desired
-  const stepX = CARD_W + gap
-  const stepY = height + gap
-  for (let ring = 1; ring <= 8; ring++) {
-    for (let dx = -ring; dx <= ring; dx++) {
-      for (let dy = -ring; dy <= ring; dy++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue
-        const x = desired.x + dx * stepX
-        const y = desired.y + dy * stepY
-        if (fits(x, y)) return { x, y }
-      }
-    }
-  }
-  return desired
-}
-
 /* ---------- 自动排列：大纲在上、文档在中、叶子在下 ---------- */
 
 /** 带与带之间留的空（世界坐标）：够放下连线的弯 */

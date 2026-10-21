@@ -32,7 +32,6 @@ import {
   canAddEdge,
   centerPan,
   clampZoom,
-  findFreeSpot,
   fitZoom,
   type GraphKind,
   type StructureMap,
@@ -330,13 +329,50 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   /* ---------- 写回 ---------- */
 
+  /**
+   * 撤回栈：每次改动前把**上一张图**压进来。
+   *
+   * 只活在这个组件里、不进 store：它是「这一页最近做了什么」，换目标、重开应用都该清空。
+   * 上限 50 步——再多只是占内存，没人会退到那么远。
+   */
+  const historyRef = useRef<StructureMap[]>([])
+  const [canUndo, setCanUndo] = useState(false)
+
+  /** 所有改动都走它：先记一笔再改 */
+  const commit = useCallback(
+    (next: StructureMap) => {
+      historyRef.current.push(map)
+      if (historyRef.current.length > 50) historyRef.current.shift()
+      setCanUndo(true)
+      onChange(next)
+    },
+    [map, onChange],
+  )
+
+  const undo = useCallback(() => {
+    const prev = historyRef.current.pop()
+    if (!prev) return
+    setCanUndo(historyRef.current.length > 0)
+    // 撤回本身不再进栈，否则 Ctrl+Z 会在两版之间来回弹
+    onChange(prev)
+    setDraft(null)
+    setSelectedId(null)
+    setSelectedEdge(null)
+  }, [onChange])
+
+  /** 换目标就清空：A 课的撤回不该退到 B 课去 */
+  useEffect(() => {
+    historyRef.current = []
+    setCanUndo(false)
+  }, [goalId])
+
   const removeNode = useCallback(
     (id: string) => {
       const next = nodes.filter((n) => n.id !== id)
-      onChange({ version: 1, nodes: next, edges: edges.filter((e) => e.from !== id && e.to !== id) })
+      commit({ version: 1, nodes: next, edges: edges.filter((e) => e.from !== id && e.to !== id) })
       setSelectedId(null)
     },
-    [nodes, edges, onChange],
+    [nodes, edges, commit],
   )
 
   const addEdge = useCallback(
@@ -361,23 +397,13 @@ export const StructureCanvas = memo(function StructureCanvas({
           return false
         }
         const patched = key === toNode.slot ? nodes : nodes.map((n) => (n.id === to ? { ...n, slot: key ?? undefined } : n))
-        onChange({ version: 1, nodes: patched, edges: [...edges, { from, to }] })
+        commit({ version: 1, nodes: patched, edges: [...edges, { from, to }] })
         return true
       }
-      onChange({ version: 1, nodes, edges: [...edges, { from, to }] })
+      commit({ version: 1, nodes, edges: [...edges, { from, to }] })
       return true
     },
-    [nodes, edges, onChange, onToast, store],
-  )
-
-  /** 落点避让：撞上别人就在附近找一个空位（拖动过程中不提，松手才算） */
-  const dropAt = useCallback(
-    (id: string, desired: { x: number; y: number }) => {
-      const node = nodes.find((n) => n.id === id)
-      if (!node) return desired
-      return findFreeSpot(nodes, id, desired, height(node), height)
-    },
-    [nodes, height],
+    [nodes, edges, commit, onToast, store],
   )
 
   /* ---------- 点目标项 ---------- */
@@ -392,20 +418,18 @@ export const StructureCanvas = memo(function StructureCanvas({
         centerOn(slot.childId)
         return
       }
-      const desired = { x: parent.x + CARD_W + 112, y: parent.y + slot.index * (CARD_H + 24) }
-      const spot = dropAt('', desired)
       const child: StructureNode = {
         id: crypto.randomUUID(),
         kind: 'outline',
         slot: slot.key,
-        x: spot.x,
-        y: spot.y,
+        x: parent.x + CARD_W + 112,
+        y: parent.y + slot.index * (CARD_H + 24),
       }
-      onChange({ version: 1, nodes: [...nodes, child], edges: [...edges, { from: parent.id, to: child.id }] })
+      commit({ version: 1, nodes: [...nodes, child], edges: [...edges, { from: parent.id, to: child.id }] })
       setSelectedId(child.id)
       onToast?.(t('「{0}」的空子大纲已就位：双击它可以开始生成内容', slot.title))
     },
-    [centerOn, dropAt, edges, nodes, onChange, onToast, store],
+    [centerOn, edges, nodes, commit, onToast, store],
   )
 
   /* ---------- 打开内容 ---------- */
@@ -447,7 +471,7 @@ export const StructureCanvas = memo(function StructureCanvas({
   const autoArrange = useCallback(() => {
     const pos = arrangeBands(nodes, edges, height)
     fitNextRef.current = true
-    onChange({
+    commit({
       version: 1,
       nodes: nodes.map((n) => {
         const p = pos.get(n.id)
@@ -455,34 +479,32 @@ export const StructureCanvas = memo(function StructureCanvas({
       }),
       edges,
     })
-  }, [nodes, edges, height, onChange])
+  }, [nodes, edges, height, commit])
 
   /* ---------- 右键菜单的三个动作 ---------- */
 
   const cloneNode = useCallback(
     (node: StructureNode) => {
-      const desired = { x: node.x + 40, y: node.y + 40 }
-      const spot = dropAt('', desired)
       const copy: StructureNode = {
         id: crypto.randomUUID(),
         kind: node.kind,
         ...(node.ref ? { ref: node.ref } : {}),
         ...(node.note ? { note: node.note } : {}),
         // 故意不复制 slot：一个接入点只挂一个子大纲
-        x: spot.x,
-        y: spot.y,
+        x: node.x + 40,
+        y: node.y + 40,
       }
-      onChange({ version: 1, nodes: [...nodes, copy], edges })
+      commit({ version: 1, nodes: [...nodes, copy], edges })
       setSelectedId(copy.id)
       onToast?.(t('已克隆一个节点'))
     },
-    [dropAt, edges, nodes, onChange, onToast],
+    [edges, nodes, commit, onToast],
   )
 
   const saveNote = useCallback(
     (nodeId: string, text: string) => {
       const value = text.trim()
-      onChange({
+      commit({
         version: 1,
         nodes: nodes.map((n) => {
           if (n.id !== nodeId) return n
@@ -495,7 +517,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       })
       setMenu(null)
     },
-    [nodes, edges, onChange],
+    [nodes, edges, commit],
   )
 
   const saveRename = useCallback(
@@ -508,14 +530,14 @@ export const StructureCanvas = memo(function StructureCanvas({
       }
       onRenameNote?.(leaf.owner, leaf.name, name)
       // 节点上的 ref 跟着改：改名之后它指向的是同一份笔记的新名字
-      onChange({
+      commit({
         version: 1,
         nodes: nodes.map((n) => (n.id === node.id ? { ...n, ref: `${leaf.owner}:${name}` } : n)),
         edges,
       })
       setMenu(null)
     },
-    [nodes, edges, onChange, onRenameNote],
+    [nodes, edges, commit, onRenameNote],
   )
 
   /* ---------- 指针 ---------- */
@@ -651,14 +673,13 @@ export const StructureCanvas = memo(function StructureCanvas({
         if (inTrash && g.moved) {
           removeNode(g.id)
           setDraft(null)
-          onToast?.(t('已从画布上移除。内容没有删，还能从左侧重新拖回来'))
+          onToast?.(t('已从画布上移除。内容没有删，Ctrl+Z 可以撤回'))
           return
         }
         if (draft && draft.id === g.id && g.moved) {
-          const spot = dropAt(g.id, { x: draft.x, y: draft.y })
-          onChange({
+          commit({
             version: 1,
-            nodes: nodes.map((n) => (n.id === draft.id ? { ...n, x: spot.x, y: spot.y } : n)),
+            nodes: nodes.map((n) => (n.id === draft.id ? { ...n, x: draft.x, y: draft.y } : n)),
             edges,
           })
         } else if (!g.moved && g.openTitle) {
@@ -708,7 +729,7 @@ export const StructureCanvas = memo(function StructureCanvas({
             x: target ? target.x + CARD_W + 96 : world.x - CARD_W / 2,
             y: target ? target.y : world.y - CARD_H / 2,
           }
-          onChange({
+          commit({
             version: 1,
             nodes: [...nodes, node],
             edges: target ? [...edges, { from: target.id, to: node.id }] : edges,
@@ -742,12 +763,12 @@ export const StructureCanvas = memo(function StructureCanvas({
             onToast?.(t('这张大纲的目标项都挂满了：先给它加目标项，才有新的接入点'))
           }
         }
-        onChange({ version: 1, nodes: nextNodes, edges: nextEdges })
+        commit({ version: 1, nodes: nextNodes, edges: nextEdges })
         setSelectedId(node.id)
         onToast?.(t('空节点：它还没有内容，挂上父节点之后由它自己决定生成什么'))
       }
     },
-    [addEdge, draft, dropAt, edges, height, isOverTrash, nodes, onChange, onCreateNote, onToast, openNode, removeNode, store, toWorld],
+    [addEdge, draft, edges, height, isOverTrash, nodes, commit, onCreateNote, onToast, openNode, removeNode, store, toWorld],
   )
 
   /* ---------- 双击 ---------- */
@@ -790,10 +811,15 @@ export const StructureCanvas = memo(function StructureCanvas({
         setMenu(null)
         return
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        undo()
+        return
+      }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
       if (selectedEdge) {
         e.preventDefault()
-        onChange({
+        commit({
           version: 1,
           nodes,
           edges: edges.filter((x) => !(x.from === selectedEdge.from && x.to === selectedEdge.to)),
@@ -804,9 +830,9 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (!selectedId) return
       e.preventDefault()
       removeNode(selectedId)
-      onToast?.(t('已从画布上移除。内容没有删，还能从左侧重新拖回来'))
+      onToast?.(t('已从画布上移除。内容没有删，Ctrl+Z 可以撤回'))
     },
-    [edges, nodes, onChange, onToast, removeNode, selectedEdge, selectedId],
+    [edges, nodes, commit, onToast, removeNode, selectedEdge, selectedId],
   )
 
   /* ---------- 渲染 ---------- */
@@ -852,7 +878,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       >
         {/* 地板：网格长在这块倾斜的平面上（而不是外层容器上），倾斜才看得出来 */}
         <div
-          className="bg-dot-grid absolute"
+          className={`absolute ${dragging ? '' : 'bg-dot-grid'}`}
           style={{ left: -4000, top: -4000, width: 8000, height: 8000 }}
         />
 
@@ -1090,6 +1116,14 @@ export const StructureCanvas = memo(function StructureCanvas({
           +
         </button>
         <span className="mx-1 h-3 w-px bg-line" />
+        <button
+          type="button"
+          disabled={!canUndo}
+          className="rounded px-1.5 py-0.5 hover:bg-line/60 disabled:opacity-40"
+          onClick={undo}
+        >
+          {t('撤回')}
+        </button>
         <button type="button" className="rounded px-1.5 py-0.5 hover:bg-line/60" onClick={fit}>
           {t('适应画布')}
         </button>
@@ -1136,7 +1170,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                 onClick={() => {
                   removeNode(menuNode.id)
                   setMenu(null)
-                  onToast?.(t('已从画布上移除。内容没有删，还能从左侧重新拖回来'))
+                  onToast?.(t('已从画布上移除。内容没有删，Ctrl+Z 可以撤回'))
                 }}
               >
                 {t('删除')}
