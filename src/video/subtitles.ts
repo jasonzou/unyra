@@ -328,9 +328,9 @@ export function calculateSubtitleLayout(
   playerHeight: number,
   isControlsVisible: boolean,
   videoAspect: number = 16 / 9,
-  fontScale: number = 1.0,
+  fontScale: number = 0.8,
 ): SubtitleLayoutStyle {
-  const safeScale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1.0
+  const safeScale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 0.8
 
   if (playerWidth <= 0 || playerHeight <= 0) {
     return {

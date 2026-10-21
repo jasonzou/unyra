@@ -116,7 +116,7 @@ const readStoredSubtitleScale = (): number => {
   } catch {
     // 忽略
   }
-  return 1.0
+  return 0.8
 }
 
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
@@ -791,9 +791,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
               style={{
                 fontSize: `${subtitleLayout.fontSizePx}px`,
                 lineHeight: 1.35,
+                letterSpacing: '0.08em',
                 textShadow: SUBTITLE_HARD_TEXT_SHADOW,
               }}
-              className="inline-block whitespace-pre-line bg-transparent font-bold tracking-wide text-white"
+              className="inline-block whitespace-pre-line bg-transparent font-bold tracking-wider text-white"
             >
               {activeCue.text}
             </span>

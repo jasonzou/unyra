@@ -163,18 +163,22 @@ Next step in WebVTT
   })
 
   it('calculates subtitle layout dynamically based on player dimensions rather than screen size', () => {
-    // 播放器小尺寸（如分屏/侧栏展开时 480x270）
+    // 播放器小尺寸（如分屏/侧栏展开时 480x270，默认字号为小 0.8x）
     const small = calculateSubtitleLayout(480, 270, false, 16 / 9)
-    expect(small.fontSizePx).toBe(16) // 270 * 0.058 = 15.66 -> 16px
+    expect(small.fontSizePx).toBe(14) // 270 * 0.058 * 0.8 = 12.5 -> clamped to 14px
     expect(small.bottomPx).toBe(18) // letterbox 0 + 270 * 0.04 (~11) -> Math.max(18, 11) = 18
 
-    // 播放器大尺寸（如 1280x720）
+    // 播放器大尺寸（如 1280x720，默认字号为小 0.8x）
     const large = calculateSubtitleLayout(1280, 720, false, 16 / 9)
-    expect(large.fontSizePx).toBe(42) // 720 * 0.058 = 41.76 -> 42px
+    expect(large.fontSizePx).toBe(33) // 720 * 0.058 * 0.8 = 33.4 -> 33px
     expect(large.bottomPx).toBe(29) // 720 * 0.04 (~29) -> max(18, 29) = 29
 
-    // 全屏尺寸（1920x1080）：验证不再受原先 38px 上限限制，字号达到舒适全屏尺寸
-    const fullscreen1080p = calculateSubtitleLayout(1920, 1080, false, 16 / 9)
+    // 全屏尺寸（1920x1080，默认字号为小 0.8x）：达到 50px
+    const fullscreenDefault = calculateSubtitleLayout(1920, 1080, false, 16 / 9)
+    expect(fullscreenDefault.fontSizePx).toBe(50) // 1080 * 0.058 * 0.8 = 50.1 -> 50px
+
+    // 全屏尺寸（1920x1080，标准字号 1.0x）：达到 63px，远超原先 38px 限制
+    const fullscreen1080p = calculateSubtitleLayout(1920, 1080, false, 16 / 9, 1.0)
     expect(fullscreen1080p.fontSizePx).toBe(63) // 1080 * 0.058 = 62.64 -> 63px
 
     // 全屏尺寸 + 用户选择放大倍率（1.5x 特大）
@@ -187,7 +191,7 @@ Next step in WebVTT
 
     // 播放器高度被压缩（上下有较大黑边或高宽比较小）时，以实际视频有效画面为准
     const letterboxed = calculateSubtitleLayout(600, 600, false, 16 / 9)
-    // 画面实际高度为 600 / (16/9) = 337.5px
-    expect(letterboxed.fontSizePx).toBe(20) // 337.5 * 0.058 = 19.58 -> 20px
+    // 画面实际高度为 600 / (16/9) = 337.5px -> 337.5 * 0.058 * 0.8 = 15.66 -> 16px
+    expect(letterboxed.fontSizePx).toBe(16)
   })
 })
