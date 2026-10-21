@@ -237,6 +237,52 @@ describe('结构图：初始铺排', () => {
     expect(order({ kind: 'outline' })).toBe(0)
   })
 
+  it('没记 slot 的老数据：退回按节点 key 对上目标项次序', () => {
+    // 迁移铺出来的图就是这样：只有 ref，没有 slot
+    const store = {
+      nodes: [
+        {
+          id: 'p',
+          goalId: 'g1',
+          key: 'p',
+          outline: {
+            intro: '',
+            updatedAt: 0,
+            children: [
+              { key: 'a', title: 'A', summary: '' },
+              { key: 'b', title: 'B', summary: '' },
+            ],
+          },
+        },
+        { id: 'ca', goalId: 'g1', key: 'a' },
+        { id: 'cb', goalId: 'g1', key: 'b' },
+      ],
+    } as unknown as Parameters<typeof slotOrderOf>[0]
+
+    const order = slotOrderOf(store, 'g1')
+    expect(order({ kind: 'outline', ref: 'ca' })).toBe(0)
+    expect(order({ kind: 'outline', ref: 'cb' })).toBe(1)
+
+    const map = seedLayout(
+      {
+        nodes: [
+          { id: 'o:p', kind: 'outline', ref: 'p' },
+          { id: 'o:cb', kind: 'outline', ref: 'cb' },
+          { id: 'o:ca', kind: 'outline', ref: 'ca' },
+        ],
+        edges: [
+          { from: 'o:p', to: 'o:cb' },
+          { from: 'o:p', to: 'o:ca' },
+        ],
+      },
+      undefined,
+      order,
+    )
+    const at = (id: string) => map.nodes.find((n) => n.id === id)!
+    // 目标项 A 在前 → 它的子大纲排在上面
+    expect(at('o:ca').y).toBeLessThan(at('o:cb').y)
+  })
+
   it('每个节点都拿到坐标，一个不落', () => {
     const map = seedLayout(seed)
     expect(map.nodes).toHaveLength(seed.nodes.length)

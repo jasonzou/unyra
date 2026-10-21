@@ -42,6 +42,7 @@ import {
 /** meta.json 里迁移用得到的部分（其余字段搬不过来也不影响结构图） */
 interface MetaLike {
   id?: unknown
+  key?: unknown
   dependencies?: unknown
   notes?: unknown
   superdocs?: unknown
@@ -53,6 +54,8 @@ interface Collected {
   /** 文件名主干（`{base}.meta.json` 的 base） */
   base: string
   id: string
+  /** 归一化去重键：子大纲靠它认领父大纲里的那条目标项 */
+  key: string
   /** 旧树里「我 → 下游」的节点 id（依赖边的 to 侧） */
   downstream: string[]
   notes: string[]
@@ -114,6 +117,7 @@ async function collectMetas(ctx: MigrationContext, goalDir: string): Promise<Col
         dir,
         base,
         id,
+        key: str(meta.key),
         downstream: asArray(meta.dependencies)
           .map((d) => str((d as { to?: unknown } | null)?.to))
           .filter(Boolean),
@@ -151,6 +155,7 @@ function toSource(
 ): SeedSourceNode[] {
   return items.map((item) => ({
     id: item.id,
+    key: item.key,
     hasDoc: docsWithBody.has(item.id),
     downstream: item.downstream,
     notes: item.notes,

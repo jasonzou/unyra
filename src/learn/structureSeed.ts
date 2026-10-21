@@ -40,6 +40,7 @@ export function structureFromStore(store: LearnStore, goalId: string): Structure
 
   const source: SeedSourceNode[] = nodes.map((node) => ({
     id: node.id,
+    key: node.key,
     hasDoc: node.docs.teaching.trim().length > 0,
     downstream: downstream.get(node.id) ?? [],
     notes: node.notes.map((n) => n.name),

@@ -327,7 +327,16 @@ export function slotOrderOf(store: LearnStore, goalId: string): SiblingOrder {
     if (node.goalId !== goalId) continue
     for (const [i, entry] of (node.outline?.children ?? []).entries()) rank.set(entry.key, i)
   }
-  return (n) => (n.slot ? rank.get(n.slot) ?? 0 : 0)
+  return (n) => {
+    /*
+     * 没记 slot 的节点（迁移铺出来的那批就是这样：只有 ref，没有 slot）
+     * 退回用它自己的 key —— 旧模型里「子节点的 key」就是「父大纲里那一条目标项的 key」，
+     * 两者本来就是同一套口径（见 types 的 OutlineEntry）。
+     * 少了这条回退，所有迁移来的子大纲都会取到 0，排序退化成比 uuid。
+     */
+    const key = n.slot ?? (n.ref ? nodeById(store, n.ref)?.key : undefined)
+    return key ? rank.get(key) ?? 0 : 0
+  }
 }
 
 /** 同一列里类型的先后：大纲 → 文档 → 叶子（读图时从上往下就是这个顺序） */
@@ -361,6 +370,8 @@ export interface SeedGraph {
 export interface SeedSourceNode {
   /** 学习节点的 id */
   id: string
+  /** 归一化去重键（= 父大纲里那条目标项的 key），用来给子大纲写上 slot */
+  key?: string
   /** 教学文档有没有正文（没有正文、也没有下游时不建文档节点） */
   hasDoc: boolean
   /** 旧树里「我 → 下游」的那些边（依赖边 from=我、to=下游） */
@@ -425,6 +436,21 @@ export function seedFromSource(
       if (!known.has(dep)) continue
       seedEdges.push({ from: outlineGid(item.id), to: outlineGid(dep) })
     }
+  }
+
+  /*
+   * 顺手把 slot 写上：有入边的大纲节点就是「子大纲」，它占的是父大纲里 key 相同的那条目标项。
+   *
+   * 不写也能靠 `slotOrderOf` 按 key 回退对上号（老数据就是这么活的），但一旦节点改名、
+   * key 变了，回退就断了；显式记下来之后，排顺序只认这一条，与标题怎么改无关。
+   */
+  const keyOf = new Map(source.filter((s) => s.key).map((s) => [s.id, s.key as string]))
+  const byId = new Map(seedNodes.map((n) => [n.id, n]))
+  for (const edge of seedEdges) {
+    const child = byId.get(edge.to)
+    if (child?.kind !== 'outline' || !child.ref) continue
+    const key = keyOf.get(child.ref)
+    if (key) child.slot = key
   }
 
   return seedLayout({ nodes: seedNodes, edges: seedEdges }, heightOf, siblingOrder)
