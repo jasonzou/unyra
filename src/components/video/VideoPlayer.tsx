@@ -764,14 +764,14 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           </div>
         )}
 
-        {/* 画面中央播放/暂停气泡动画 */}
+        {/* 画面中央播放/暂停气泡动画（暂停显示播放图标，起播显示暂停图标） */}
         {centerIndicator && (
           <div className="pointer-events-none absolute z-30 flex items-center justify-center transition-all duration-300">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black/60 shadow-xl backdrop-blur-sm">
               {centerIndicator === 'play' ? (
-                <Play size={32} className="ml-1 text-white fill-white" />
-              ) : (
                 <Pause size={32} className="text-white fill-white" />
+              ) : (
+                <Play size={32} className="ml-1 text-white fill-white" />
               )}
             </div>
           </div>
