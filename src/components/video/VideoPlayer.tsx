@@ -51,11 +51,18 @@ import type { Transcript, TranscriptSegment } from '../../video/types'
 export interface VideoPlayerProps {
   src: string
   title?: string
+  /** 顶部标题的副行：当前选集 / 分 P（可空） */
+  subLabel?: string
   durationMs?: number
   transcript?: Transcript | null
   onTimeUpdate?: (currentMs: number) => void
   onSeeked?: (currentMs: number) => void
   onExternalSubtitleLoaded?: (transcript: Transcript) => void
+  /**
+   * 右侧悬浮面板（合集 / 选集列表）。挂在**播放器根容器里**——全屏时也能打开，
+   * 这是它不进外层布局的原因（全屏只显示 containerRef 的子树）。
+   */
+  sidePanel?: React.ReactNode
   className?: string
 }
 
@@ -67,6 +74,8 @@ export interface VideoPlayerHandle {
 }
 
 const SPEED_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+/** 中心播放/暂停气泡的完整时长（与 motion.css 的 moji-center-pop 对齐：淡入+停留+淡出） */
+const CENTER_FEEDBACK_MS = 700
 const VOLUME_STORAGE_KEY = 'moji.video.volume'
 const MUTED_STORAGE_KEY = 'moji.video.muted'
 const PLAYBACK_RATE_STORAGE_KEY = 'moji.video.playbackRate'
@@ -124,11 +133,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     {
       src,
       title = '',
+      subLabel,
       durationMs: propDurationMs,
       transcript,
       onTimeUpdate,
       onSeeked,
       onExternalSubtitleLoaded,
+      sidePanel,
       className = '',
     },
     ref,
@@ -157,6 +168,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     // 全屏与镜像
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [isMirrored, setIsMirrored] = useState(false)
+    /** 进出全屏的短过渡（真实全屏切换是瞬时的，这层只是把跳变抹平） */
+    const [fsAnimating, setFsAnimating] = useState(false)
+    const fsTimerRef = useRef<number | null>(null)
 
     // 菜单弹层控制
     const [speedMenuOpen, setSpeedMenuOpen] = useState(false)
@@ -294,13 +308,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         void video.play().then(() => {
           setCenterIndicator('play')
           if (centerTimerRef.current) window.clearTimeout(centerTimerRef.current)
-          centerTimerRef.current = window.setTimeout(() => setCenterIndicator(null), 500)
+          centerTimerRef.current = window.setTimeout(() => setCenterIndicator(null), CENTER_FEEDBACK_MS)
         }).catch(() => {})
       } else {
         video.pause()
         setCenterIndicator('pause')
         if (centerTimerRef.current) window.clearTimeout(centerTimerRef.current)
-        centerTimerRef.current = window.setTimeout(() => setCenterIndicator(null), 500)
+        centerTimerRef.current = window.setTimeout(() => setCenterIndicator(null), CENTER_FEEDBACK_MS)
       }
       scheduleHideControls()
     }, [scheduleHideControls, speedMenuOpen, subtitleMenuOpen])
@@ -390,9 +404,15 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     useEffect(() => {
       const onFsChange = () => {
         setIsFullscreen(!!document.fullscreenElement)
+        setFsAnimating(true)
+        if (fsTimerRef.current) window.clearTimeout(fsTimerRef.current)
+        fsTimerRef.current = window.setTimeout(() => setFsAnimating(false), 320)
       }
       document.addEventListener('fullscreenchange', onFsChange)
-      return () => document.removeEventListener('fullscreenchange', onFsChange)
+      return () => {
+        document.removeEventListener('fullscreenchange', onFsChange)
+        if (fsTimerRef.current) window.clearTimeout(fsTimerRef.current)
+      }
     }, [])
 
     // 水平镜像翻转
@@ -675,7 +695,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         style={{ containerType: 'inline-size' }}
         className={`group/player relative flex h-full w-full select-none items-center justify-center overflow-hidden bg-black text-white ${
           isFullscreen && !isControlsVisible ? 'cursor-none' : ''
-        } ${className}`}
+        } ${fsAnimating ? 'moji-fs-in' : ''} ${className}`}
       >
         {/* 快门闪光层 */}
         <div
@@ -766,7 +786,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
 
         {/* 画面中央播放/暂停气泡动画（暂停显示播放图标，起播显示暂停图标） */}
         {centerIndicator && (
-          <div className="pointer-events-none absolute z-30 flex items-center justify-center transition-all duration-300">
+          <div className="moji-center-pop pointer-events-none absolute z-30 flex items-center justify-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black/60 shadow-xl backdrop-blur-sm">
               {centerIndicator === 'play' ? (
                 <Pause size={32} className="text-white fill-white" />
@@ -798,6 +818,24 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             >
               {activeCue.text}
             </span>
+          </div>
+        )}
+
+        {/*
+          顶部标题层：当前视频 + 选集副行。
+          和底部控件栏**同进同退**——鼠标不动 2.5 秒一起收起（见 scheduleHideControls），
+          暂停时保持可见；全屏里同样成立。
+        */}
+        {(title || subLabel) && (
+          <div
+            className={`pointer-events-none absolute inset-x-0 top-0 z-30 bg-gradient-to-b from-black/80 via-black/30 to-transparent px-4 pb-8 pt-3 transition-opacity duration-300 ${
+              isControlsVisible ? 'opacity-100' : 'opacity-0'
+            }`}
+          >
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="min-w-0 truncate text-[13px] font-medium text-white/95">{title}</span>
+              {subLabel && <span className="shrink-0 text-[11px] text-white/60">{subLabel}</span>}
+            </div>
           </div>
         )}
 
@@ -931,14 +969,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                 </div>
               </div>
 
-              {/* 外挂字幕控制 */}
-              <div className="relative">
+              {/* 外挂字幕控制：鼠标经过即展开（用户定的，不再要求点击） */}
+              <div
+                className="relative"
+                onMouseEnter={() => {
+                  setSubtitleMenuOpen(true)
+                  setSpeedMenuOpen(false)
+                }}
+                onMouseLeave={() => setSubtitleMenuOpen(false)}
+              >
                 <button
                   type="button"
-                  onClick={() => {
-                    setSubtitleMenuOpen((v) => !v)
-                    setSpeedMenuOpen(false)
-                  }}
                   title={t('字幕设置')}
                   className={`flex h-8 items-center gap-1 rounded-lg px-2 text-[12px] font-medium transition hover:bg-white/20 ${
                     subtitleTrack !== 'off' ? 'bg-white/15 text-seal font-semibold' : 'text-white/80'
@@ -1089,14 +1130,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                 )}
               </div>
 
-              {/* 倍速控制菜单 */}
-              <div className="relative">
+              {/* 倍速控制菜单：鼠标经过即展开 */}
+              <div
+                className="relative"
+                onMouseEnter={() => {
+                  setSpeedMenuOpen(true)
+                  setSubtitleMenuOpen(false)
+                }}
+                onMouseLeave={() => setSpeedMenuOpen(false)}
+              >
                 <button
                   type="button"
-                  onClick={() => {
-                    setSpeedMenuOpen((v) => !v)
-                    setSubtitleMenuOpen(false)
-                  }}
                   title={t('倍速调节')}
                   className="flex h-8 min-w-[42px] items-center justify-center rounded-lg px-2 text-[12px] font-medium text-white/80 transition hover:bg-white/20 hover:text-white"
                 >
@@ -1190,6 +1234,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             </div>
           </div>
         </div>
+
+        {/* 右侧悬浮面板（合集 / 选集）：挂在根容器里，全屏时同样可见 */}
+        {sidePanel}
 
         {/* 隐藏的字幕文件导入 input */}
         <input

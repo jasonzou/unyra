@@ -41,7 +41,8 @@ const readLastInput = (): string => {
 
 const readCollapsed = (): boolean => {
   try {
-    return localStorage.getItem(COLLAPSED_KEY) === '1'
+    // 默认**收起**（用户定的）：没存过就按收起算，展开过一次才记住
+    return (localStorage.getItem(COLLAPSED_KEY) ?? '1') === '1'
   } catch {
     return false
   }
@@ -82,19 +83,38 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
     if (!text) return null
     return matchVideoPlugin(text)
   }, [bound, input])
-  /** 创建态：插件的 createFields 值（换插件时按默认值重置） */
-  const [createValues, setCreateValues] = useState<Record<string, string | number | boolean>>({})
-  useEffect(() => {
-    const fields = matched?.plugin.createFields ?? []
+  // 记忆化：空数组兜底不能每次渲染新建一个，否则下面的 useMemo 永远失效
+  const createFields = useMemo<PluginSettingField[]>(() => matched?.plugin.createFields ?? [], [matched])
+  /**
+   * 创建态：插件的 createFields 值。
+   * 默认值在渲染期推导（换插件自动换一套），用户改动只记「覆盖项」——
+   * 不用 effect 里 setState，换插件那一瞬也不会闪一帧空表单。
+   */
+  const [createOverrides, setCreateOverrides] = useState<{
+    pluginId: string
+    values: Record<string, string | number | boolean>
+  } | null>(null)
+  const createValues = useMemo(() => {
     const seed: Record<string, string | number | boolean> = {}
-    for (const f of fields) {
+    for (const f of createFields) {
       if (f.default !== undefined) seed[f.key] = f.default
       else if (f.type === 'boolean') seed[f.key] = false
       else seed[f.key] = ''
     }
-    setCreateValues(seed)
-  }, [matched?.plugin.id])
-  const createFields: PluginSettingField[] = matched?.plugin.createFields ?? []
+    const pluginId = matched?.plugin.id ?? ''
+    const overrides = createOverrides?.pluginId === pluginId ? createOverrides.values : {}
+    return { ...seed, ...overrides }
+  }, [createFields, createOverrides, matched?.plugin.id])
+  const setCreateValue = useCallback(
+    (key: string, value: string | number | boolean) => {
+      const pluginId = matched?.plugin.id ?? ''
+      setCreateOverrides((prev) => ({
+        pluginId,
+        values: { ...(prev?.pluginId === pluginId ? prev.values : {}), [key]: value },
+      }))
+    },
+    [matched?.plugin.id],
+  )
   const missingRequired = createFields.some((f) => f.required && !String(createValues[f.key] ?? '').trim())
 
   const [busy, setBusy] = useState(false)
@@ -166,7 +186,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
         setBusy(false)
       }
     },
-    [busy, onResolved],
+    [busy, onResolved, video, onSelection],
   )
 
   /*
@@ -248,7 +268,15 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
    * → 拼一个 Markdown → 原生保存对话框落盘。一 P 失败不炸全局（那一节写
    * 「字幕缺失：原因」）；一条条来并留 150ms 间隙，别把 B 站风控招来。
    */
-  const exportPages = useCallback(async () => {
+  /** 视频级字段的稳定引用：导出回调不因 video 对象每次更新（进度每 5 秒变）而重建 */
+  const videoFieldsRef = useRef(video?.fields)
+  useEffect(() => {
+    videoFieldsRef.current = video?.fields
+  }, [video?.fields])
+
+  // 普通函数而不是 useCallback：只在按钮点击时调用，没有 memo 消费者；useCallback 反而让
+  // React Compiler 的自动缓存降级（这条 async 循环里跨 await 的闭包它保留不了）
+  const exportPages = async () => {
     const pages = source?.pages
     if (!pages || !source || exportProgress) return
     setExportProgress({ done: 0, total: pages.length })
@@ -263,7 +291,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
           source: item.source,
         }
         try {
-          entry.transcript = await resolveVideoTranscript(item.source, video?.fields)
+          entry.transcript = await resolveVideoTranscript(item.source, videoFieldsRef.current)
         } catch (err) {
           entry.error = err instanceof Error ? err.message : String(err)
         }
@@ -289,7 +317,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
     } finally {
       setExportProgress(null)
     }
-  }, [source, exportProgress, video?.input, video?.fields])
+  }
 
   /** 点转录段 → 播放器 seek 到段首并起播 */
   const seekMs = useCallback((ms: number) => {
@@ -388,7 +416,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
                       key={f.key}
                       field={f}
                       value={createValues[f.key]}
-                      onChange={(v) => setCreateValues((prev) => ({ ...prev, [f.key]: v }))}
+                      onChange={(v) => setCreateValue(f.key, v)}
                     />
                   ))}
                 </div>
@@ -403,76 +431,37 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
     )
   }
 
-  /* ---------- 绑定态：没有输入组件，自动解析 ---------- */
-  return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-paper select-none">
-      {/* 错误横幅：解析或登记流的失败原话 */}
-      {error && (
-        <div className="shrink-0 border-b border-red-400/30 bg-red-400/10 px-3 py-1.5 text-[12px] leading-relaxed text-red-500 dark:text-red-300">
-          {error}
-        </div>
-      )}
-
-      {source && relayUrl ? (
-        <>
-          {/* 播放器铺满整格；合集/选集改成**浮在画面上的右侧悬浮窗**（用户定的） */}
-          <div className="relative min-h-0 flex-1">
-            <div className="absolute inset-0 bg-black">
-              {/* key 绑流地址：重新解析换一条流时整只元素重建，播放状态清零是最诚实的表现 */}
-              <VideoPlayer
-                key={relayUrl}
-                ref={playerRef}
-                src={relayUrl}
-                title={source.title}
-                durationMs={source.durationMs}
-                transcript={transcript}
-                onTimeUpdate={(ms) => {
-                  setCurrentMs(ms)
-                  // 节流：每 5 秒最多存一次；暂停/播完另有即时落盘（见上面的 effect）
-                  if (Math.abs(ms - lastProgressRef.current) >= 5000) {
-                    lastProgressRef.current = ms
-                    onProgress?.(ms, currentSourceRef.current)
-                  }
-                }}
-                onSeeked={(ms) => {
-                  setCurrentMs(ms)
-                  lastProgressRef.current = ms
-                  onProgress?.(ms, currentSourceRef.current)
-                }}
-                onExternalSubtitleLoaded={(extTranscript) => {
-                  setTranscript(extTranscript)
-                  setTranscriptNote(null)
-                }}
-              />
-            </div>
-            {(source.collection || source.pages) && (
-              <>
-                {/* 悬浮窗开关：贴在悬浮窗左缘（收起时贴右缘），竖向居中 */}
-                <button
-                  type="button"
-                  title={collapsed ? t('展开合集列表') : t('收起合集列表')}
-                  aria-expanded={!collapsed}
-                  onClick={toggleCollapsed}
-                  className={
-                    'absolute top-1/2 z-20 -translate-y-1/2 rounded-l-lg border border-r-0 border-line/60 bg-card/85 py-3 pl-0.5 pr-1 text-ink-soft shadow-sm backdrop-blur-md transition-all hover:bg-card hover:text-ink ' +
-                    (collapsed ? 'right-0' : 'right-[320px]')
-                  }
-                >
-                  {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
-                </button>
-                {/*
-                  悬浮窗本体：贴右沿浮在画面上（半透明 + 背景模糊），宽度过渡；
-                  内容层钉死 320px——动画期间文字只裁不重排。
-                  不挤占画面宽度：收起/展开都不影响播放器的尺寸。
-                */}
-                <div
-                  className={
-                    'absolute right-0 top-0 z-10 h-full overflow-hidden transition-[width] duration-200 ease-out ' +
-                    (collapsed ? 'w-0' : 'w-[320px]')
-                  }
-                >
-                  <div className="ml-auto flex h-full w-[320px] flex-col border-l border-line/60 bg-card/85 shadow-[-10px_0_28px_rgba(20,16,12,0.22)] backdrop-blur-md">
-                    <div className="min-h-0 flex-1 overflow-y-auto">
+  /**
+   * 右侧悬浮面板（合集 / 选集）：交给**播放器根容器**渲染——全屏时也能打开。
+   * 80% 高、垂直居中、离右边缘留缝；背景不做模糊（backdrop-blur 有性能代价）。
+   */
+  const currentPage = source?.pages?.find((p) => p.current)
+  const pageLabel = currentPage ? 'P' + currentPage.page + ' ' + currentPage.title : undefined
+  const sidePanel =
+    source && (source.collection || source.pages) ? (
+      <>
+        {/* 收起/展开：一枚低调的小按钮，贴面板左缘（收起时贴右缘）；平时半透明，指上来才清楚 */}
+        <button
+          type="button"
+          title={collapsed ? t('展开合集列表') : t('收起合集列表')}
+          aria-expanded={!collapsed}
+          onClick={toggleCollapsed}
+          className={
+            'absolute top-1/2 z-20 flex h-7 w-3.5 -translate-y-1/2 items-center justify-center rounded-l-md bg-black/35 text-white/55 opacity-40 transition-all duration-300 hover:bg-black/60 hover:text-white/90 hover:opacity-100 ' +
+            (collapsed ? 'right-3' : 'right-[332px]')
+          }
+        >
+          {collapsed ? <ChevronLeft size={12} /> : <ChevronRight size={12} />}
+        </button>
+        {/* 面板本体：宽度过渡（300ms）；内容层钉死 320px，动画期间只裁不重排 */}
+        <div
+          className={
+            'absolute right-3 top-1/2 z-10 h-[80%] -translate-y-1/2 overflow-hidden rounded-xl transition-[width] duration-300 ease-out ' +
+            (collapsed ? 'w-0' : 'w-[320px]')
+          }
+        >
+          <div className="flex h-full w-[320px] flex-col border border-line/60 bg-card/95 shadow-[0_10px_30px_rgba(0,0,0,0.28)]">
+            <div className="min-h-0 flex-1 overflow-y-auto">
                       {source.collection && (
                         <>
                           <div className="px-2 pb-0.5 pt-1.5 text-[10.5px] font-medium text-ink-faint">
@@ -568,11 +557,54 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
                           ))}
                         </>
                       )}
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
+</div>
+          </div>
+        </div>
+      </>
+    ) : null
+
+  /* ---------- 绑定态：没有输入组件，自动解析 ---------- */
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col bg-paper select-none">
+      {/* 错误横幅：解析或登记流的失败原话 */}
+      {error && (
+        <div className="shrink-0 border-b border-red-400/30 bg-red-400/10 px-3 py-1.5 text-[12px] leading-relaxed text-red-500 dark:text-red-300">
+          {error}
+        </div>
+      )}
+
+      {source && relayUrl ? (
+        <>
+          {/* 播放器铺满整格；合集/选集改成**浮在画面上的右侧悬浮窗**（用户定的） */}
+          <div className="min-h-0 flex-1 bg-black">
+              {/* key 绑流地址：重新解析换一条流时整只元素重建，播放状态清零是最诚实的表现 */}
+              <VideoPlayer
+                key={relayUrl}
+                ref={playerRef}
+                src={relayUrl}
+                title={source.title}
+                durationMs={source.durationMs}
+                transcript={transcript}
+                sidePanel={sidePanel}
+                subLabel={pageLabel}
+                onTimeUpdate={(ms) => {
+                  setCurrentMs(ms)
+                  // 节流：每 5 秒最多存一次；暂停/播完另有即时落盘（见上面的 effect）
+                  if (Math.abs(ms - lastProgressRef.current) >= 5000) {
+                    lastProgressRef.current = ms
+                    onProgress?.(ms, currentSourceRef.current)
+                  }
+                }}
+                onSeeked={(ms) => {
+                  setCurrentMs(ms)
+                  lastProgressRef.current = ms
+                  onProgress?.(ms, currentSourceRef.current)
+                }}
+                onExternalSubtitleLoaded={(extTranscript) => {
+                  setTranscript(extTranscript)
+                  setTranscriptNote(null)
+                }}
+              />
           </div>
           {/* 字幕条：高度 = 30%；标题行 + 列表的可视区就这么多 */}
           <div className="flex h-[30%] shrink-0 flex-col border-t border-line">

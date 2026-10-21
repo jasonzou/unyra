@@ -681,4 +681,39 @@
     transform: none;
   }
 }
+
 
+
+/* ---------- 视频播放器：中心播放/暂停气泡、全屏切换过渡 ---------- */
+
+/*
+ * 中心气泡一次播完（淡入 → 停留 → 淡出）：由 setTimeout 在 700ms 后清状态，
+ * 两边时长对得上（见 VideoPlayer 的 CENTER_FEEDBACK_MS）。
+ * 用 animation 而不是 transition：显隐只发生一次，卸载不需要退场钩子。
+ */
+@keyframes moji-center-pop {
+  0% { opacity: 0; transform: scale(0.7); }
+  18% { opacity: 1; transform: scale(1.02); }
+  28% { transform: scale(1); }
+  72% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.88); }
+}
+.moji-center-pop {
+  animation: moji-center-pop 700ms ease-out both;
+}
+
+/* 进出全屏时给容器一个短过渡：真实全屏是瞬时切换，靠这 300ms 把「画面跳变」抹平 */
+@keyframes moji-fs-in {
+  from { opacity: 0.55; transform: scale(0.985); }
+  to { opacity: 1; transform: scale(1); }
+}
+.moji-fs-in {
+  animation: moji-fs-in 300ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moji-center-pop,
+  .moji-fs-in {
+    animation: none;
+  }
+}
