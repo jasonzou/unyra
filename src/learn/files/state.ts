@@ -64,6 +64,12 @@ export interface LearnState {
   /** 旧字段（番茄钟那一版的数据）：只读，读回来后迁移成 focus 的新形状 */
   pomodoro?: unknown
   /**
+   * 视频资源（见 learn/types 的 VideoResource）：用户级，整块存在这里。
+   * 新字段进 state.json 要同时改三处：buildState（写）/ parseDocs（搬）/ normalize（读），
+   * 少任何一处都是「写下去了、读不回来」——videos 就是在中间这层漏过。
+   */
+  videos?: unknown
+  /**
    * 日程（见 learn/schedule）：提醒清单 + 铃声设置。同样**整块**存在这里——
    * 它是用户级数据（不挂目标），漏一个字段就等于「写下去了、读不回来」。
    */

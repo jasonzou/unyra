@@ -132,6 +132,7 @@ const dict: Record<string, string> = {
   '从一个目标开始吧': 'Start with a goal',
   '本地文件': 'Local files',
   '视频': 'Videos',
+  '还没有视频：点右上角的「＋」新建一个。': 'No videos yet — click + in the header to create one.',
   '删除视频': 'Delete video',
   '打开本地文件': 'Open local file',
   '收藏': 'Favorites',

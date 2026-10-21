@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, Check, ChevronDown, Compass, FilePlus, FolderOpen, Globe, History, Loader2, Menu, MonitorPlay, Paperclip, Sparkles, Star, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Compass, FilePlus, FolderOpen, Globe, History, Loader2, Menu, Paperclip, Sparkles, Star, X } from 'lucide-react'
 import type { PendingFile } from '../../../agent/types'
 import type { FavoriteItem, FavoriteRef, KnowledgeNode, LearnStore } from '../../../learn/types'
 import { favoriteKey } from '../../../learn/favorites'
@@ -58,7 +58,6 @@ export function Topbar({
   onSignOut,
   onOpenSettings,
   onOpenUsage,
-  onOpenVideo,
   onOpenUpdate,
   onOpenNotice,
   onToast: _onToast,
@@ -97,8 +96,6 @@ export function Topbar({
   onOpenSettings: () => void
   /** 打开用量统计页签（入口在用户菜单，见 UserMenu） */
   onOpenUsage: () => void
-  /** 打开视频学习页签（实验，见 components/video/VideoStudyTab） */
-  onOpenVideo: () => void
   onOpenUpdate: () => void
   /** 打开公告弹窗（弹窗由 App 渲染，理由见 components/notice/NoticeDialog） */
   onOpenNotice: () => void
@@ -217,16 +214,6 @@ export function Topbar({
         {schedule}
         {focus}
         {reading}
-        {/* 视频学习（实验）：通用播放器 + 转录跳转，入口先放顶栏方便测试；
-            稳定之后挪去它该在的地方（侧栏工具区或目标页签），别在这里长住 */}
-        <button
-          type="button"
-          title={t('视频学习（实验）')}
-          onClick={onOpenVideo}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-soft transition-all hover:bg-line/60 hover:text-ink"
-        >
-          <MonitorPlay size={15} />
-        </button>
         <UserMenu
           user={user}
           onOpenUser={onOpenUser}

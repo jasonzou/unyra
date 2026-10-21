@@ -833,8 +833,11 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             }`}
           >
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 truncate text-[13px] font-medium text-white/95">{title}</span>
-              {subLabel && <span className="shrink-0 text-[11px] text-white/60">{subLabel}</span>}
+              {/* 标题限宽（截断）：把右侧位置让给选集名——长标题不许把选集挤没 */}
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white/95">{title}</span>
+              {subLabel && (
+                <span className="max-w-[45%] shrink-0 truncate text-[11px] text-white/60">{subLabel}</span>
+              )}
             </div>
           </div>
         )}

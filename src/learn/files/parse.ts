@@ -277,6 +277,12 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
     docArea: s.docArea ?? null,
     tabs: s.tabs ?? null,
     activeTab: s.activeTab ?? null,
+    /*
+     * 视频资源：跟着 state.json 走（用户级）。**这一行曾经漏过**——写（buildState）
+     * 与归一（normalizeVideos）都补了，唯独文件→内存这一层没搬，于是重启即空。
+     * 新字段进 state.json 要同时改三处：buildState / 这里 / normalize。
+     */
+    videos: s.videos ?? null,
     drafts: s.drafts ?? null,
     localFiles: s.localFiles ?? null,
     favorites: s.favorites ?? null,

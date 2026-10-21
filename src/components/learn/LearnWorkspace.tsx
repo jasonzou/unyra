@@ -1648,8 +1648,6 @@ export default function LearnWorkspace({
    * 不需要晚绑定把手——直接依赖 openTab 即可。
    */
   const onOpenUsage = useCallback(() => openTab({ kind: 'usage' }), [openTab])
-  // 视频学习（实验）入口：页签全局一枚，重复点击只是切回去（与设置/用量同一句话）
-  const onOpenVideo = useCallback(() => openTab({ kind: 'video' }), [openTab])
 
   /** 日程安排页签的入口（顶栏日程 tip 的「手动安排日程」与提醒弹层）。与用量页同样全局一枚 */
   const onOpenSchedule = useCallback(() => openTab({ kind: 'schedule' }), [openTab])
@@ -4984,6 +4982,8 @@ export default function LearnWorkspace({
         onDeleteVideo={(id) =>
           set({ ...store, videos: (store.videos ?? []).filter((v) => v.id !== id) })
         }
+        // 视频的新建入口（顶栏按钮已移除）：开创建态页签
+        onNewVideo={() => openTab({ kind: 'video' })}
         // 高亮跟着**激活的页签**走：关掉某个节点的教学文档页签，它就不再是选中样式
         activeNodeId={selectedNodeId}
         // 文档行也一样：焦点格开着哪份笔记 / 试卷副本 / 超级文档 / 学习文档，那一行就亮
@@ -5073,7 +5073,6 @@ export default function LearnWorkspace({
             onSignOut={onSignOut}
             onOpenSettings={onOpenSettings}
             onOpenUsage={onOpenUsage}
-            onOpenVideo={onOpenVideo}
             onOpenUpdate={onOpenUpdate}
             onOpenNotice={onOpenNotice}
             onToast={onToast}
