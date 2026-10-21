@@ -42,7 +42,7 @@ describe('注册表形状', () => {
     const names = exposedApiNames()
     for (const name of [
       'doc.read', 'doc.write', 'doc.replace', 'doc.append',
-      'node.read', 'node.update', 'node.create', 'node.paths',
+      'graph.read', 'graph.update', 'graph.create', 'graph.paths', 'graph.relations', 'graph.link',
       'outline.read', 'outline.write',
       'state.read', 'state.update', 'state.mistake', 'state.check',
       'exam.create', 'exam.read', 'exam.grade', 'exam.explain',
@@ -118,8 +118,8 @@ describe('__help() 渲染', () => {
 
   it('系统提示词的组索引只有组名与一句说明，不泄露具体签名', () => {
     const index = groupIndexForSystemPrompt()
-    expect(index).toContain('api.node — 知识点节点')
+    expect(index).toContain('api.graph — 节点与拓扑')
     expect(index).not.toContain('doc.write(path')
-    expect(index).not.toContain('node.read(path)')
+    expect(index).not.toContain('graph.read(path)')
   })
 })

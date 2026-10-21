@@ -197,7 +197,7 @@ export function createChildNode(
 }
 
 /**
- * 建一个节点并挂到 parent 之下（Agent 的 api.node.create 走这条路）。
+ * 建一个节点并挂到 parent 之下（Agent 的 api.graph.create 走这条路）。
  * 与 createChildNode 的差别只在返回值：这里不需要会话 id，但要能区分「新建」与「复用了同名节点」。
  */
 export function createNodeUnder(
@@ -221,7 +221,7 @@ export function createNodeUnder(
 }
 
 /**
- * 把一个节点迁移到另一个节点之下（Agent 的 api.node.move 走这里）。
+ * 把一个节点迁移到另一个节点之下（Agent 的 api.graph.move 走这里）。
  *
  * 语义是「改这条父线」而不是「再多挂一个父节点」：先摘掉它现在的全部父边，
  * 再挂到新父节点之下——侧栏与大纲都按单一父线读层级，多父线会让「它在哪一层」

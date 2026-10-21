@@ -36,7 +36,7 @@ export const PROMPT_MODULES: PromptModule[] = [
 
 一、物理路径体系与命名契约
 - 节点超级文档（推荐）：每个知识点节点下可包含多个超级文档，物理存放于 docs/.../superdocs/<名称>.html。
-  - 获取当前节点路径：先调用 const p = await api.node.paths()，返回对象中包含 dir、superdocsDir。
+  - 获取当前节点路径：先调用 const p = await api.graph.paths()，返回对象中包含 dir、superdocsDir。
   - 完整物理文件路径形如：\`\${p.dir}/superdocs/\${name}.html\`（例如 docs/微积分/superdocs/极限动态演化.html）。
 - 目标根级超级文档：存放于 \`superdocs/\${name}.html\`。
 - 命名契约：文件名强制以 .html 结尾；在界面中与 api.ui.superdoc 中引用的名称 name 不含 .html 后缀。
@@ -242,7 +242,7 @@ export const PROMPT_MODULES: PromptModule[] = [
    - 读：await api.exam.read(attemptId?) 读取试卷与最新作答（attempts[attempts.length - 1]，携带 attemptId）。
    - 判分：客观题严格核对 answer；填空题与简答题依据 rubric 评判，生成 results 数组后，用 await api.exam.grade({ attemptId?, passed?, summary?, results }) 落账。
    - 讲解：await api.exam.explain({ content, attemptId? }) 写错题讲解，它落在同一次考试上并自动打开试卷副本。
-   - 更新状态：调用 api.node.update(path, { status: passed ? 'mastered' : 'learning' }) 同步节点掌握状态。
+   - 更新状态：调用 api.graph.update(path, { status: passed ? 'mastered' : 'learning' }) 同步节点掌握状态。
 
 四、读写权限与严格边界（哪些能写、哪些绝对禁止篡改）
 - 🔒 用户事实层（只读！Agent 绝对禁止篡改）：

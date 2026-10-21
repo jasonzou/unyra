@@ -2597,7 +2597,7 @@ export default function LearnWorkspace({
        *
        * 这样点「开始学习」当场就有节点、有侧栏条目、有对话开始跑，用户马上看到东西在动；
        * 旧流程要先等一次「生成描述」的模型往返，那几秒里界面是空的。标题随后会被
-       * api.node.rename 改掉，数据目录名跟着变（改标题＝目录改名，早已支持）。
+       * api.graph.rename 改掉，数据目录名跟着变（改标题＝目录改名，早已支持）。
        */
       const rootNode: KnowledgeNode = {
         id: crypto.randomUUID(),
@@ -3323,7 +3323,7 @@ export default function LearnWorkspace({
       if (p.type === 'doc' && p.path) {
         const wanted = p.path.replace(/\/(教学|讲义|笔记|大纲|试卷)$/, '')
         const norm = (v: string): string => v.replace(/\\/g, '/').trim().replace(/\/+$/, '')
-        // 先按「节点树路径原样」对一次：api.node.list 回的就是这种，模型多半直接抄
+        // 先按「节点树路径原样」对一次：api.graph.list 回的就是这种，模型多半直接抄
         const exact = s.nodes.find(
           (n) => !!n.goalId && norm(nodePathOf(s, n.goalId, n.id)) === norm(wanted),
         )

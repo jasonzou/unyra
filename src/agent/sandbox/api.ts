@@ -241,15 +241,15 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     })
   }, log)
 
-  wrapApi(api, 'node.list', () => opts.nodeOps.list(), log)
+  wrapApi(api, 'graph.list', () => opts.nodeOps.list(), log)
 
-  wrapApi(api, 'node.read', (args) => {
+  wrapApi(api, 'graph.read', (args) => {
     const r = nodeRef(args[0])
     if ('error' in r) return { error: r.error }
     return opts.nodeOps.read(r.ref.id)
   }, log)
 
-  wrapApi(api, 'node.title', (args) => {
+  wrapApi(api, 'graph.title', (args) => {
     const r = nodeRef(args[0])
     if ('error' in r) return { error: r.error }
     return { path: r.ref.label, id: r.ref.id, title: r.ref.title }
@@ -257,7 +257,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
 
   if (opts.nodeOps.paths) {
     const np = opts.nodeOps.paths
-    wrapApi(api, 'node.paths', (args) => {
+    wrapApi(api, 'graph.paths', (args) => {
       const p = args.length ? asText(args[0]).trim() : undefined
       const r = nodeRef(p)
       if ('error' in r) return { error: r.error }
@@ -265,9 +265,9 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     }, log)
   }
 
-  wrapApi(api, 'node.rename', (args) => {
+  wrapApi(api, 'graph.rename', (args) => {
     const raw = asText(args[0]).trim()
-    if (!raw) return { ok: false, error: 'node.rename 必须指定要重命名的节点路径或 ID，不允许省略节点路径' }
+    if (!raw) return { ok: false, error: 'graph.rename 必须指定要重命名的节点路径或 ID，不允许省略节点路径' }
     const r = nodeRef(raw)
     if ('error' in r) return { error: r.error }
     const title = asText(args[1]).trim()
@@ -275,7 +275,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     return opts.nodeOps.update(r.ref.id, { title })
   }, log)
 
-  wrapApi(api, 'node.annotate', (args) => {
+  wrapApi(api, 'graph.annotate', (args) => {
     const first = args[0]
     const payloadFirst = !!first && typeof first === 'object'
     const r = nodeRef(payloadFirst ? '' : first)
@@ -295,7 +295,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     })
   }, log)
 
-  wrapApi(api, 'node.update', (args) => {
+  wrapApi(api, 'graph.update', (args) => {
     const r = nodeRef(args[0])
     if ('error' in r) return { error: r.error }
     const p = asRecord(args[1])
@@ -307,12 +307,12 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     return opts.nodeOps.update(r.ref.id, patch)
   }, log)
 
-  wrapApi(api, 'node.create', (args) => {
+  wrapApi(api, 'graph.create', (args) => {
     const first = args[0]
-    // 两种写法都收：node.create({ title, parent, description }) 与 node.create('标题')
+    // 两种写法都收：graph.create({ title, parent, description }) 与 graph.create('标题')
     const a = typeof first === 'string' ? { title: first } : asRecord(first)
     const title = asText(a.title).trim()
-    if (!title) return { error: 'node.create 需要一个 title（新节点的标题）' }
+    if (!title) return { error: 'graph.create 需要一个 title（新节点的标题）' }
     /*
      * parent 是**必填**的（2026-09 的口径收紧）：不再隐式建在「当前节点」之下。
      * 「在哪个节点下就在哪个节点下建」是隐患——上下文是目标级的，模型一轮里同时碰好几个
@@ -323,8 +323,8 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     if (!rawParent) {
       return {
         error:
-          'node.create 必须写明 parent（新建到哪个节点之下）：写一个标题（如 "极限"）、一段路径' +
-          '（如 "微积分/极限"）或 #id。不再隐式建在「当前节点」之下——先 api.node.list() 挑准父节点。',
+          'graph.create 必须写明 parent（新建到哪个节点之下）：写一个标题（如 "极限"）、一段路径' +
+          '（如 "微积分/极限"）或 #id。不再隐式建在「当前节点」之下——先 api.graph.list() 挑准父节点。',
       }
     }
     const head = rawParent.split('/')[0]?.trim().toLowerCase() ?? ''
@@ -340,7 +340,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     return opts.nodeOps.create(pr.ref.id, { ...a, title })
   }, log)
 
-  wrapApi(api, 'node.createTree', (args) => {
+  wrapApi(api, 'graph.createTree', (args) => {
     if (!opts.nodeOps.createTree) return { error: '当前环境不支持 node.createTree' }
     const input = asRecord(args[0])
     const rawParent = input.parent !== undefined ? String(input.parent).trim() : ''
@@ -353,7 +353,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     return opts.nodeOps.createTree(parentId, input)
   }, log)
 
-  wrapApi(api, 'node.move', (args) => {
+  wrapApi(api, 'graph.move', (args) => {
     const r = nodeRef(args[0])
     if ('error' in r) return { error: r.error }
     const pr = nodeRef(args[1])
@@ -361,7 +361,35 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     return opts.nodeOps.move(r.ref.id, pr.ref.id)
   }, log)
 
-  wrapApi(api, 'node.delete', (args) => {
+wrapApi(api, 'graph.relations', (args) => {
+    const r = nodeRef(args[0])
+    if ('error' in r) return { error: r.error }
+    const detail = opts.nodeOps.read(r.ref.id) as Record<string, unknown> | null
+    if (!detail) return { error: '这个节点已经不在了' }
+    if (typeof detail.error === 'string') return { error: detail.error }
+    // 复用 read 已经算好的上下级，不再另开一套遍历
+    const parents = Array.isArray(detail.parents) ? (detail.parents as string[]) : []
+    return {
+      id: detail.id,
+      title: detail.title,
+      // 树上的父只有一个；数组留着是为了兼容「多父」的历史数据
+      parent: parents[0] ?? null,
+      parents,
+      children: detail.children ?? [],
+      prereqs: detail.prereqs ?? [],
+    }
+  }, log)
+
+  wrapApi(api, 'graph.link', (args) => {
+    const pr = nodeRef(args[0])
+    if ('error' in pr) return { error: pr.error }
+    const cr = nodeRef(args[1])
+    if ('error' in cr) return { error: cr.error }
+    // 树上父子唯一：绑定新父 = 换父
+    return opts.nodeOps.move(cr.ref.id, pr.ref.id)
+  }, log)
+
+    wrapApi(api, 'graph.delete', (args) => {
     const r = nodeRef(args[0])
     if ('error' in r) return { error: r.error }
     const opt = args.length > 1 ? asRecord(args[1]) : undefined
@@ -1210,7 +1238,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
         const title = curDoc.ref.title
         return { ok: true, path: resolveSandboxedPath(`docs/${label}/${title}.md`) }
       }
-      return { ok: false, error: '未指定文件路径且当前无激活的教学节点，请显式提供目标文件路径（例如 "docs/..." 或使用 api.node.paths() 获取路径）' }
+      return { ok: false, error: '未指定文件路径且当前无激活的教学节点，请显式提供目标文件路径（例如 "docs/..." 或使用 api.graph.paths() 获取路径）' }
     }
     return { ok: true, path: resolveSandboxedPath(trimmed) }
   }

@@ -88,7 +88,7 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
       ? '执行一段 JS 来完成任务：api 按本会话的授权开放（完整签名见参数说明，也可用 api.<组>.__help() 现查）。' +
         '多步、批量、需要判断或循环的活用代码一次做完，不要把中间结果写进对话；' +
         '体量大的中间数据用 api.tmp.set 暂存或 api.workspace.write 落盘，只把结论带回来。'
-      : '执行一段 JS 来操作学习数据——**唯一的工具**：文档与笔记（api.doc.*）、节点（api.node.*）、' +
+      : '执行一段 JS 来操作学习数据——**唯一的工具**：文档与笔记（api.doc.*）、节点（api.graph.*）、' +
         '大纲（api.outline.*）、学习状态（api.state.*）、试卷（api.exam.*）、超级文档（api.sdoc.*）、' +
         '工作流（api.wf.*）、人机协作与界面操作都只能通过这里调用。多步、批量、需要判断或循环的活用代码一次做完，' +
         '不要把中间结果写进对话。**每个组、每条 api 都有 __help()**：先用 api.<组>.__help() 查签名与示例再动手。' +

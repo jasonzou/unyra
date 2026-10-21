@@ -79,7 +79,7 @@ export function classifyDataPath(raw: string): DataPathVerdict {
       return { kind: 'app-data', api: 'outline', note: '节点大纲' }
     }
     if (/\.meta\.json$/i.test(rest)) {
-      return { kind: 'app-data', api: 'node', note: '节点元数据与学习状态（读用 node.read，写用 node.update / state.*）' }
+      return { kind: 'app-data', api: 'graph', note: '节点元数据与学习状态（读用 graph.read，写用 graph.update / state.*）' }
     }
     if (/(^|\/)chat\.json$/i.test(rest)) {
       return { kind: 'app-data', note: '目标会话（宿主管理，agent 不能直接读写）' }

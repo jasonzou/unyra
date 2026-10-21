@@ -48,7 +48,7 @@ export function createWorkspaceOps(deps: AgentOpsDeps, io: WorkspaceIo) {
       .filter(Boolean)
     if (!segments.length) {
       const cur = currentOf()
-      if (!cur) return { error: '没有指定路径，此刻也没有打开的节点；写明路径（如 极限/要点.md）或先 api.node.list()' }
+      if (!cur) return { error: '没有指定路径，此刻也没有打开的节点；写明路径（如 极限/要点.md）或先 api.graph.list()' }
       return { node: cur, rest: [] }
     }
     let cursor: KnowledgeNode
@@ -56,7 +56,7 @@ export function createWorkspaceOps(deps: AgentOpsDeps, io: WorkspaceIo) {
     const first = segments[0]
     if (first.startsWith('#')) {
       const found = store0().nodes.find((n) => n.id === first.slice(1).trim())
-      if (!found) return { error: '「' + first + '」没有对上任何节点 id（id 在 api.node.list 里）' }
+      if (!found) return { error: '「' + first + '」没有对上任何节点 id（id 在 api.graph.list 里）' }
       cursor = found
       i = 1
     } else if (CURRENT_ALIASES.has(first.toLowerCase())) {

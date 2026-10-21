@@ -92,12 +92,12 @@ describe('内置工作流', () => {
     expect(text).toContain('只有一种情况值得问')
     expect(text).toContain('除此之外不要问')
     // 任务型分支明确禁止建树、禁止写大纲，并要求先打开文档
-    expect(text).toContain('不要**调用 api.node.createTree')
+    expect(text).toContain('不要**调用 api.graph.createTree')
     expect(text).toContain('不要**调 api.outline.write')
     expect(text).toContain('先把文档打开')
     // 学习型分支仍按创建模式走
     expect(text).toContain('选择目标创建模式')
-    expect(text).toContain('api.node.createTree')
+    expect(text).toContain('api.graph.createTree')
     // 没有漏出来的占位符
     expect(text).not.toContain('{{mode}}')
   })

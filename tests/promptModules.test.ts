@@ -80,7 +80,7 @@ describe('触发映射', () => {
     expect(promptModuleForApiName('focus.status')).toBe('learning-process')
     // 每轮必用的组不触发——进了模块反而每轮都要注入一遍
     expect(promptModuleForApiName('doc.write')).toBeNull()
-    expect(promptModuleForApiName('node.read')).toBeNull()
+    expect(promptModuleForApiName('graph.read')).toBeNull()
     expect(promptModuleForApiName('state.update')).toBeNull()
     expect(promptModuleForApiName('outline.write')).toBeNull()
     expect(promptModuleForApiName('wait')).toBeNull()
@@ -112,7 +112,7 @@ describe('触发映射', () => {
     expect(writableContentOf('doc.replace', ['', { content: '@keyframes p{}' }])).toBe('@keyframes p{}')
     expect(writableContentOf('sdoc.write', ['', '名', '<p>页</p>'])).toBe('<p>页</p>')
     expect(writableContentOf('doc.read', ['', '```plot\n{}\n```'])).toBeNull()
-    expect(writableContentOf('node.rename', ['', '```plot\n{}\n```'])).toBeNull()
+    expect(writableContentOf('graph.rename', ['', '```plot\n{}\n```'])).toBeNull()
   })
 })
 
@@ -171,7 +171,7 @@ describe('系统提示词确实瘦了（减负的验收线）', () => {
 
   it('系统提示词只给 api 集：组索引在场，具体签名靠 __help 现查', () => {
     // 组索引在场（模型必须知道能力存在）
-    expect(system).toContain('api.node — 知识点节点')
+    expect(system).toContain('api.graph — 节点与拓扑')
     expect(system).toContain('api.doc — 教学文档与笔记')
     expect(system).toContain('api.state — 学习状态')
     expect(system).toContain('api.browser')
@@ -185,7 +185,7 @@ describe('系统提示词确实瘦了（减负的验收线）', () => {
     expect(system).not.toContain('监督回路')
     expect(system).not.toContain('dom(tabId?')
     // 具体 api 的签名不再压在系统提示词里——那是 __help() 的活
-    expect(system).not.toContain('node.read(path)')
+    expect(system).not.toContain('graph.read(path)')
     expect(system).not.toContain('exam.create({')
     // 低频 api 的行为细节随模块走，系统提示词里不再逐条展开
     expect(system).not.toContain('api.res.refs(uuid)：谁在引用它')

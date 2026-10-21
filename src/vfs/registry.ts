@@ -188,7 +188,7 @@ export const FILE_ENTITIES: FileEntityDef[] = [
     itemShape: 'questions 列表为试题对象；attempts 列表为历次考试记录',
     defaultValue: () => ({ id: '', nodeId: '', title: '', kind: 'quiz', level: 'easy', minutes: 15, questions: [], attempts: [] }),
     params: [
-      { name: 'path*', description: '所属节点路径，可从 api.node.paths().dir 获取', example: '高等数学/极限' },
+      { name: 'path*', description: '所属节点路径，可从 api.graph.paths().dir 获取', example: '高等数学/极限' },
       { name: 'examId', description: '试卷唯一标识（不要带 .json 后缀）', example: 'ex_limit_1' },
     ],
   },
@@ -223,7 +223,7 @@ export const FILE_ENTITIES: FileEntityDef[] = [
     description: '绑定知识点的可交互独立页面（HTML/SVG/JS），支持 var(--color-*) 主题变量、<moji-markdown> 标签及 api.method.call 持久化脚本调用。写入后用 api.ui.superdoc(path, name) 在界面展示。',
     defaultValue: () => '<!DOCTYPE html><html><body></body></html>',
     params: [
-      { name: 'path*', description: '所属节点路径，可从 api.node.paths().dir 获取', example: '高等数学/极限' },
+      { name: 'path*', description: '所属节点路径，可从 api.graph.paths().dir 获取', example: '高等数学/极限' },
       { name: 'name', description: '超级文档名称（不要带 .html 后缀）', example: '极限收敛实验' },
     ],
   },

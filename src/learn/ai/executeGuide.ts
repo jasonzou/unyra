@@ -31,7 +31,7 @@ export const EXECUTE_GUIDE = `唯一的工具是 execute(description, body)：
 （唯一的例外是下面单独成节的 api.see：它的用法直接写在提示词里，当作本能用。）
 
 **应用数据一律走 api 组，files.* 不许碰**
-- 教学文档与笔记 → api.doc.*　知识点树 → api.node.*　大纲 → api.outline.*
+- 教学文档与笔记 → api.doc.*　知识点树 → api.graph.*　大纲 → api.outline.*
 - 学习状态 → api.state.*　试卷 → api.exam.*　超级文档 → api.sdoc.*
 - 工作流 → api.wf.*　持久化函数 → api.method.*　画像 → api.userInfo.*
 - 阅读事实 → api.reading.*　临时变量 → api.tmp.*　静态资源 → api.res.*

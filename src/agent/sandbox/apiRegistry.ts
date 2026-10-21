@@ -148,14 +148,14 @@ const p = await api.see({ pdf: 'moji:static/<uuid>', page: [1, 3] })`,
 
   /* ---------- 学习数据 ---------- */
   g(
-    'node',
-    '知识点节点',
+    'graph',
+    '节点与拓扑',
     '知识点树：列表、详情、路径、创建、改名、更新、移动、删除、注解。',
     `节点是学习数据的骨架。所有 path 都按「本目标内标题唯一」寻址：
 - '' 或 '当前' = 当前节点；
 - '极限' = 本目标里标题为「极限」的节点；
 - '微积分/极限' = 从根逐段走；
-- '#<id>' = 直接给节点 id（api.node.list() 里有）。
+- '#<id>' = 直接给节点 id（api.graph.list() 里有）。
 path 找不到时回执会列候选子节点，照着改一次就对。
 
 **类型与关系（先看这段再建节点）**
@@ -179,17 +179,34 @@ path 找不到时回执会列候选子节点，照着改一次就对。
 再 node.create({ parent: 父标题, title: 目标项标题 }) 让它落地成子节点——
 子节点自己会带一份文档与一份空大纲。**不要**为了挂上父子关系去建一条大纲→大纲的线。`,
     [
-      a('list', 'node.list()', '本目标全部节点', '回 path / id / title / status / 描述摘要 / 字数 / 掌握度。规划路线、找父节点、核对是否存在时先调它。', 'const all = await api.node.list()'),
-      a('read', 'node.read(path?)', '单个节点详情', '含描述、状态、各文档字数、上级/下级、学习状态。想知道「这个节点写过什么」先看它，不要整篇读文档。', `const n = await api.node.read('极限')`),
-      a('title', 'node.title(path?)', '读节点标题', '只回标题，用于轻量确认；要看描述/状态/字数用 node.read。', `const t = await api.node.title('极限')`),
-      a('paths', 'node.paths(path?)', '节点路径索引', '回 { id, title, path, dir, doc, notesDir, outline, meta, superdocsDir, examsDir, workspaceDir }。需要引用真实文件时用它取，不要自己拼目录名。', `const p = await api.node.paths()`),
-      a('create', 'node.create({ parent, title, description?, status? })', '新建子节点', 'parent 必填（标题 / 路径 / #id），不接受「当前」这种隐式起点；同名节点会被拒绝。建完教学文档与大纲同时就位。', `await api.node.create({ parent: '微积分', title: '夹逼定理', description: '用两个边界函数夹住目标函数求极限' })`),
-      a('createTree', 'node.createTree({ parent?, tree })', '批量/递归建大纲树', 'tree 每项 { title, description?, status?, content?, outline?, children? }。规划式/完整式目标一次建整棵树时用；不要拿它建重复节点。', `await api.node.createTree({ parent: '微积分', tree: [{ title: '极限', children: [{ title: '夹逼定理' }] }] })`),
-      a('rename', 'node.rename(path, 新标题)', '改节点标题', '标题就是路径，改名等于换目录；同目标重名会被拒绝。', `await api.node.rename('极限', '极限与连续')`),
-      a('update', 'node.update(path?, { title?, description?, status? })', '改节点属性', 'status 只认 learning / mastered。描述写 150~300 字；改标题优先用 rename。', `await api.node.update('极限', { description: '从数列极限到函数极限的完整入门。', status: 'learning' })`),
-      a('annotate', 'node.annotate(path?, { term, occurrence?, body })', '写正文划词注解', 'term 是正文里那一小段文字；occurrence 从 0 起，同一个词多次出现时指定第几处。注解挂在节点上。', `await api.node.annotate('极限', { term: '夹逼定理', body: '用两个边界函数夹住目标函数。' })`),
-      a('move', 'node.move(path, 新父节点)', '迁移节点', '改父线；根节点、跨目标、成环都会被拒。', `await api.node.move('夹逼定理', '极限')`),
-      a('delete', 'node.delete(path, { cascade?, dryRun? })', '删除节点', '学习目标本身不能删；cascade 连子节点一起删，dryRun 只回影响面。删用户内容前先确认。', `await api.node.delete('草稿节点')`),
+      a('list', 'graph.list()', '本目标全部节点', '回 path / id / title / status / 描述摘要 / 字数 / 掌握度。规划路线、找父节点、核对是否存在时先调它。', 'const all = await api.graph.list()'),
+      a('read', 'graph.read(path?)', '单个节点详情', '含描述、状态、各文档字数、上级/下级、学习状态。想知道「这个节点写过什么」先看它，不要整篇读文档。', `const n = await api.graph.read('极限')`),
+      a('title', 'graph.title(path?)', '读节点标题', '只回标题，用于轻量确认；要看描述/状态/字数用 graph.read。', `const t = await api.graph.title('极限')`),
+      a('paths', 'graph.paths(path?)', '节点路径索引', '回 { id, title, path, dir, doc, notesDir, outline, meta, superdocsDir, examsDir, workspaceDir }。需要引用真实文件时用它取，不要自己拼目录名。', `const p = await api.graph.paths()`),
+      a('create', 'graph.create({ parent, title, description?, status? })', '新建子节点', 'parent 必填（标题 / 路径 / #id），不接受「当前」这种隐式起点；同名节点会被拒绝。建完教学文档与大纲同时就位。', `await api.graph.create({ parent: '微积分', title: '夹逼定理', description: '用两个边界函数夹住目标函数求极限' })`),
+      a('createTree', 'graph.createTree({ parent?, tree })', '批量/递归建大纲树', 'tree 每项 { title, description?, status?, content?, outline?, children? }。规划式/完整式目标一次建整棵树时用；不要拿它建重复节点。', `await api.graph.createTree({ parent: '微积分', tree: [{ title: '极限', children: [{ title: '夹逼定理' }] }] })`),
+      a('rename', 'graph.rename(path, 新标题)', '改节点标题', '标题就是路径，改名等于换目录；同目标重名会被拒绝。', `await api.graph.rename('极限', '极限与连续')`),
+      a('update', 'graph.update(path?, { title?, description?, status? })', '改节点属性', 'status 只认 learning / mastered。描述写 150~300 字；改标题优先用 rename。', `await api.graph.update('极限', { description: '从数列极限到函数极限的完整入门。', status: 'learning' })`),
+      a('annotate', 'graph.annotate(path?, { term, occurrence?, body })', '写正文划词注解', 'term 是正文里那一小段文字；occurrence 从 0 起，同一个词多次出现时指定第几处。注解挂在节点上。', `await api.graph.annotate('极限', { term: '夹逼定理', body: '用两个边界函数夹住目标函数。' })`),
+      a('move', 'graph.move(path, 新父节点)', '迁移节点', '改父线；根节点、跨目标、成环都会被拒。', `await api.graph.move('夹逼定理', '极限')`),
+      a(
+        'relations',
+        'graph.relations(path?)',
+        '读一个节点的拓扑关系',
+        '回 { id, title, parent, parents, children, prereqs }：parent 是树上的父，children 是下级，' +
+          'prereqs 是「先学谁」。想知道「这个节点挂在哪、下面有什么」就用它，不要靠遍历 graph.list() 自己推。',
+        `const rel = await api.graph.relations('极限')`,
+      ),
+      a(
+        'link',
+        'graph.link(parent, child)',
+        '把 child 挂到 parent 之下（绑定拓扑）',
+        '等价于 graph.move(child, parent)：树的父子是**唯一**的拓扑，绑一个新父就等于换父。' +
+          '根节点不能挂到别人下面，跨目标与成环会被拒。解绑不单独提供——树上的节点必须有父，' +
+          '要「摘下来」就挂到别的节点下。',
+        `await api.graph.link('微积分', '夹逼定理')`,
+      ),
+      a('delete', 'graph.delete(path, { cascade?, dryRun? })', '删除节点', '学习目标本身不能删；cascade 连子节点一起删，dryRun 只回影响面。删用户内容前先确认。', `await api.graph.delete('草稿节点')`),
     ],
   ),
   g(
@@ -585,7 +602,7 @@ files.* 碰到它们会被拒绝，并提示该用哪一组。`,
       a('read', 'files.read(path, { encoding?, offset?, maxBytes? }?)', '读真实文件', '只读非应用数据；文本支持 offset/maxBytes，二进制用 base64。', `const src = await api.files.read('docs/目标/节点/workspace/main.py')`),
       a('write', 'files.write(path, content, { encoding?, overwrite? }?)', '写真实文件', '父目录自动建；只写非应用数据。交付物优先 api.workspace.write。', `await api.files.write('docs/目标/节点/workspace/notes.txt', 'hello')`),
       a('edit', 'files.edit(path, { replace?, edits?, content?, start?, end? }?)', '改真实文件', '支持字符串替换、多项编辑、区间替换；只改非应用数据。', `await api.files.edit('docs/目标/节点/workspace/main.py', { replace: { target: 'print(1)', replacement: 'print(2)' } })`),
-      a('list', 'files.list(path?)', '列一个目录的清单', '只列非应用数据目录；应用数据（docs/ 下的数据文件）会被拒绝，用 api.node.list / api.doc.*。', `const items = await api.files.list('docs/目标/节点/workspace')`),
+      a('list', 'files.list(path?)', '列一个目录的清单', '只列非应用数据目录；应用数据（docs/ 下的数据文件）会被拒绝，用 api.graph.list / api.doc.*。', `const items = await api.files.list('docs/目标/节点/workspace')`),
       a('stat', 'files.stat(path)', '查文件或目录的属性', '回大小、类型与时间戳；只查非应用数据。', `const st = await api.files.stat('docs/目标/节点/workspace/main.py')`),
       a('mkdir', 'files.mkdir(path)', '创建一个目录', '父级自动递归；只建非应用数据目录（workspace/、static/、skills/、外部）。', `await api.files.mkdir('docs/目标/节点/workspace/output')`),
       a('copy', 'files.copy(from, to, { overwrite? }?)', '复制文件或目录', '两端都必须是非应用数据；目标存在时按 overwrite 决定是否覆盖。', `await api.files.copy('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
@@ -632,10 +649,10 @@ files.* 碰到它们会被拒绝，并提示该用哪一组。`,
     'description',
     '节点描述（兼容）',
     '旧的 description.* 兼容层；新写法用 node.update。',
-    `保留实现是为了老对话与老探针；新编排不要用。请直接 api.node.update(path, { description })。`,
+    `保留实现是为了老对话与老探针；新编排不要用。请直接 api.graph.update(path, { description })。`,
     [
-      a('read', 'description.read(path?)', '读节点描述', '等价于 node.read(path).description。', `const d = await api.description.read('极限')`, { exposed: false, deprecated: '用 api.node.update(path, { description })' }),
-      a('update', 'description.update(path?, content)', '改节点描述', '等价于 node.update(path, { description })。', `await api.description.update('极限', '新描述')`, { exposed: false, deprecated: '用 api.node.update(path, { description })' }),
+      a('read', 'description.read(path?)', '读节点描述', '等价于 node.read(path).description。', `const d = await api.description.read('极限')`, { exposed: false, deprecated: '用 api.graph.update(path, { description })' }),
+      a('update', 'description.update(path?, content)', '改节点描述', '等价于 node.update(path, { description })。', `await api.description.update('极限', '新描述')`, { exposed: false, deprecated: '用 api.graph.update(path, { description })' }),
     ],
   ),
 ]

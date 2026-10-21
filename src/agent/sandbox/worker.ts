@@ -18,15 +18,15 @@ export const RENAMED_API_HINT: Record<string, string> = {
   'note.write': 'files.write("docs/.../节点.notes/笔记名.md", content)',
   'doc.read': 'files.read("docs/.../节点名.md")',
   'doc.write': 'files.write("docs/.../节点名.md", content)',
-  'doc.list': 'node.read(path)（里面列出该节点的文档与字数）',
+  'doc.list': 'graph.read(path)（里面列出该节点的文档与字数）',
   'doc.search': 'files.read(path) 获取内容后在 JS 内存中检索',
   read_note: 'files.read("docs/.../节点.notes/笔记名.md")',
   update_note: 'files.write("docs/.../节点.notes/笔记名.md", content)',
-  set_title: 'node.rename(path, title)',
-  rename_node: 'node.rename(path, title)',
-  create_node: 'node.create({ parent, title, description })',
-  delete_node: 'node.delete(path)',
-  list_nodes: 'node.list()',
+  set_title: 'graph.rename(path, title)',
+  rename_node: 'graph.rename(path, title)',
+  create_node: 'graph.create({ parent, title, description })',
+  delete_node: 'graph.delete(path)',
+  list_nodes: 'graph.list()',
 }
 
 /* ---------- 真正跑沙箱 ---------- */

@@ -309,7 +309,7 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
       ok: true,
       content:
         '已创建节点「' + r.node.title + '」（路径 ' + label + '，id #' + r.node.id +
-        '）。教学文档与大纲两份文件已同时就位（都还是空的），接着写：api.doc.write(\'' + label + '\', 讲义内容)（省略 path 就是这份教学文档）；大纲用 api.outline.write(\'' + label + '\', { intro, children })；修改描述用 api.node.update(\'#' + r.node.id + '\', { description })。用前先 api.doc.__help() 查用法。',
+        '）。教学文档与大纲两份文件已同时就位（都还是空的），接着写：api.doc.write(\'' + label + '\', 讲义内容)（省略 path 就是这份教学文档）；大纲用 api.outline.write(\'' + label + '\', { intro, children })；修改描述用 api.graph.update(\'#' + r.node.id + '\', { description })。用前先 api.doc.__help() 查用法。',
     }
   }
 
@@ -457,7 +457,7 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     if (!node) return { ok: false, content: '这个节点已经不存在了' }
     /*
      * 根节点不能从这里删：deleteNode 对根节点的语义是「删掉整个目标」，
-     * 一句 api.node.delete() 就把用户整个学习目标连同对话一起抹掉，代价太大。
+     * 一句 api.graph.delete() 就把用户整个学习目标连同对话一起抹掉，代价太大。
      */
     if (s.goals.some((g) => g.rootNodeId === nodeId)) {
       return {
@@ -577,7 +577,7 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     if (whole && !req.content.trim()) return { ok: false, content: '内容为空，未做修改' }
     const written = writeDocText(nodeId, kind, note, full.slice(0, start) + req.content + full.slice(end))
     if (!written.ok) {
-      return { ok: false, content: '写入失败：节点已经不在了，请重新 api.node.list() 看一眼' }
+      return { ok: false, content: '写入失败：节点已经不在了，请重新 api.graph.list() 看一眼' }
     }
     const delta = req.content.length - (end - start)
     if (whole) {
