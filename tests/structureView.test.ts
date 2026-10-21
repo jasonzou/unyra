@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { CARD_H, CARD_W, type StructureNode } from '../src/learn/structure'
-import { edgeAt, edgeCurve, edgePathD, hitTest, resolveNodeView, splitLeafRef } from '../src/components/learn/structure/structureView'
+import {
+  OUTLINE_HEAD,
+  SLOT_ROW,
+  cardHeight,
+  edgeAt,
+  edgeColorOf,
+  edgeCurve,
+  edgeDotAt,
+  edgeDots,
+  edgePathD,
+  hitTest,
+  outlineSlots,
+  resolveNodeView,
+  slotColor,
+  slotKeyOf,
+  splitLeafRef,
+} from '../src/components/learn/structure/structureView'
 import { structureFromStore } from '../src/learn/structureSeed'
 import { emptyLearnStore } from '../src/learn/store/empty'
 import { emptyOutline, type KnowledgeNode, type LearnStore } from '../src/learn/types'
@@ -63,7 +79,7 @@ describe('结构画布：节点显示什么', () => {
   it('大纲节点报子目标数，文档节点报正文长度（同一个节点，两副面孔）', () => {
     const outline = resolveNodeView(store, { id: 'o', kind: 'outline', ref: 'n1', x: 0, y: 0 })
     expect(outline.title).toBe('极限')
-    expect(outline.subtitle).toBe('2 个子目标')
+    expect(outline.subtitle).toBe('2 个目标项')
     const doc = resolveNodeView(store, { id: 'd', kind: 'doc', ref: 'n1', x: 0, y: 0 })
     expect(doc.subtitle).toBe('5 字')
   })
@@ -168,5 +184,83 @@ describe('结构画布：连线的点选', () => {
     expect(edgePathD(curve)).toBe(
       `M${CARD_W} ${CARD_H / 2} C${CARD_W + 48} ${CARD_H / 2}, ${300 - 48} ${CARD_H / 2}, 300 ${CARD_H / 2}`,
     )
+  })
+})
+
+describe('结构画布：大纲的目标项（接入点）', () => {
+  const parent = makeNode({
+    id: 'p1',
+    title: '极限',
+    outline: {
+      intro: '',
+      children: [
+        { key: 'a', title: '导数', summary: '' },
+        { key: 'b', title: '中值定理', summary: '' },
+      ],
+      updatedAt: NOW,
+    },
+  })
+  const store = makeStore([parent])
+
+  const parentNode: StructureNode = { id: 'o:p1', kind: 'outline', ref: 'p1', x: 0, y: 0 }
+  const childNode: StructureNode = { id: 'o:p2', kind: 'outline', ref: 'p2', slot: 'a', x: 400, y: 0 }
+  const graph = [parentNode, childNode]
+
+  it('每个目标项一行，颜色各不相同', () => {
+    const slots = outlineSlots(store, parentNode, graph)
+    expect(slots.map((s) => s.title)).toEqual(['导数', '中值定理'])
+    expect(slots[0].color).not.toBe(slots[1].color)
+    expect(slots[0].color).toBe(slotColor(0))
+  })
+
+  it('下游有子大纲占了这个接入点 → 亮起（childId 有值），其余是空的', () => {
+    const slots = outlineSlots(store, parentNode, graph)
+    expect(slots[0].childId).toBe('o:p2')
+    expect(slots[1].childId).toBeNull()
+  })
+
+  it('没有显式 slot 的老数据：退回用节点的 key 对上号', () => {
+    const legacy: StructureNode = { id: 'o:p2', kind: 'outline', ref: 'p2', x: 0, y: 0 }
+    const store2 = makeStore([parent, makeNode({ id: 'p2', title: '导数', key: 'a' })])
+    expect(slotKeyOf(store2, legacy)).toBe('a')
+    expect(outlineSlots(store2, parentNode, [parentNode, legacy])[0].childId).toBe('o:p2')
+  })
+
+  it('大纲卡片按目标项条数长高（否则点不到后面的目标项）', () => {
+    expect(cardHeight(store, parentNode)).toBe(OUTLINE_HEAD + 2 * SLOT_ROW + 8)
+    // 其它类型恒为固定高度
+    expect(cardHeight(store, { id: 'd', kind: 'doc', ref: 'p1', x: 0, y: 0 })).toBe(CARD_H)
+    // 没有目标项的大纲也不缩到比默认更矮
+    const bare = makeStore([makeNode({ id: 'p9', title: '空' })])
+    expect(cardHeight(bare, { id: 'o:p9', kind: 'outline', ref: 'p9', x: 0, y: 0 })).toBe(CARD_H)
+  })
+
+  it('大纲 → 子大纲 的连线取那个接入点的颜色；别的连线没有颜色', () => {
+    expect(edgeColorOf(store, graph, { from: 'o:p1', to: 'o:p2' })).toBe(slotColor(0))
+    const docNode: StructureNode = { id: 'd:p1', kind: 'doc', ref: 'p1', x: 400, y: 200 }
+    expect(edgeColorOf(store, [parentNode, docNode], { from: 'o:p1', to: 'd:p1' })).toBeNull()
+  })
+})
+
+describe('结构画布：连线两端的小圆点', () => {
+  const nodes: StructureNode[] = [
+    { id: 'a', kind: 'outline', x: 0, y: 0 },
+    { id: 'b', kind: 'doc', x: 300, y: 0 },
+  ]
+  const edges = [{ from: 'a', to: 'b' }]
+
+  it('两颗点分别靠近两端，且落在线上', () => {
+    const dots = edgeDots(nodes[0], nodes[1])
+    expect(dots.from.x).toBeGreaterThan(CARD_W)
+    expect(dots.from.x).toBeLessThan(dots.to.x)
+    expect(dots.to.x).toBeLessThan(300)
+    expect(edgeAt(nodes, edges, dots.from.x, dots.from.y, 2)).toEqual({ from: 'a', to: 'b' })
+  })
+
+  it('点中圆点报出是哪一端（点它跳到另一端）', () => {
+    const dots = edgeDots(nodes[0], nodes[1])
+    expect(edgeDotAt(nodes, edges, dots.from.x, dots.from.y)).toEqual({ edge: edges[0], side: 'from' })
+    expect(edgeDotAt(nodes, edges, dots.to.x, dots.to.y)).toEqual({ edge: edges[0], side: 'to' })
+    expect(edgeDotAt(nodes, edges, 150, 400)).toBeNull()
   })
 })

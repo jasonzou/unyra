@@ -9,36 +9,55 @@
  *
  * ## 一条纪律：几何计算全在领域层
  *
- * 包围盒、缩放下限、卡片尺寸、命中矩形、连线规则，全部来自 `learn/structure` 与
- * `structureView`。组件只负责把指针事件翻译成「谁的坐标变了」「连了哪两个」，
- * 一旦在这里就地算一遍，就会出现「拖动时按 200 宽算、画的时候是 208」这类对不上的 bug。
+ * 包围盒、缩放下限、卡片尺寸与高度、命中矩形、连线规则与曲线、目标项配色，全部来自
+ * `learn/structure` 与 `structureView`。组件只负责把指针事件翻译成「谁的坐标变了」
+ * 「连了哪两个」——一旦在这里就地算一遍，就会出现「拖动时按 200 宽算、画的时候是 208」。
  *
  * ## 为什么所有指针事件都挂在容器上
  *
- * 拖动与连线都要跨元素：从一张卡拖到另一张、从左侧列表拖进画布。子元素各挂一套
- * pointerdown/move/up 会在跨越边界时丢事件。这里用**容器捕获指针 + 几何命中测试**
- * （hitTest），指针在谁身上都不影响判断。
+ * 拖动与连线都要跨元素：从一张卡拖到另一张、从左侧列表拖进画布、拖到垃圾桶上。
+ * 子元素各挂一套 pointerdown/move/up 会在跨越边界时丢事件。这里用
+ * **容器捕获指针 + 几何命中测试**，指针在谁身上都不影响判断。
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Trash2 } from 'lucide-react'
 import type { LearnStore } from '../../../learn/types'
+import type { ExamActions, NodeDocActions } from '../explorer/types'
 import {
   CARD_H,
   CARD_W,
+  GRAPH_KIND_LABEL,
   boundsOf,
   canAddEdge,
   centerPan,
   clampZoom,
   fitZoom,
+  seedLayout,
   type GraphKind,
   type StructureMap,
   type StructureNode,
   type ViewSize,
 } from '../../../learn/structure'
 import { structureFromStore } from '../../../learn/structureSeed'
-import { GRAPH_KIND_LABEL } from '../../../learn/structure'
 import { t } from '../../../i18n'
-import { KIND_BADGE, KIND_TONE, edgeAt, edgeCurve, edgePathD, hitTest, resolveNodeView } from './structureView'
+import {
+  KIND_BADGE,
+  KIND_TONE,
+  SLOT_ROW,
+  edgeAt,
+  edgeColorOf,
+  edgeCurve,
+  edgeDotAt,
+  edgeDots,
+  edgePathD,
+  heightOf,
+  hitTest,
+  outlineSlots,
+  resolveNodeView,
+  slotKeyOf,
+  splitLeafRef,
+} from './structureView'
 
 export interface StructureCanvasProps {
   store: LearnStore
@@ -46,8 +65,10 @@ export interface StructureCanvasProps {
   goalId: string
   /** 图变了（上层写进 store 并落盘） */
   onChange: (next: StructureMap) => void
-  /** 双击有内容的节点：打开它（大纲 / 教学文档） */
-  onOpenNode: (nodeId: string) => void
+  /** 文档那一侧的动作：点标题打开教学文档 / 笔记 / 超级文档 */
+  docs: NodeDocActions
+  /** 考试那一侧的动作：点试卷标题开考试窗口 */
+  exams: ExamActions
   /** 双击空节点：交给上层去生成内容（这一版还没接，先提示） */
   onFillNode?: (node: StructureNode) => void
   onToast?: (msg: string) => void
@@ -63,7 +84,17 @@ const PALETTE: GraphKind[] = ['outline', 'doc', 'note', 'exam', 'superdoc']
 
 type Gesture =
   | { mode: 'pan'; startX: number; startY: number; camX: number; camY: number }
-  | { mode: 'node'; id: string; grabX: number; grabY: number; origX: number; origY: number; moved: boolean }
+  | {
+      mode: 'node'
+      id: string
+      grabX: number
+      grabY: number
+      origX: number
+      origY: number
+      moved: boolean
+      /** 按下的是标题：没拖动的话松手就打开它 */
+      openTitle: boolean
+    }
   | { mode: 'link'; from: string }
   | { mode: 'palette'; kind: GraphKind }
   | null
@@ -72,7 +103,8 @@ export const StructureCanvas = memo(function StructureCanvas({
   store,
   goalId,
   onChange,
-  onOpenNode,
+  docs,
+  exams,
   onFillNode,
   onToast,
   focusTarget,
@@ -83,6 +115,7 @@ export const StructureCanvas = memo(function StructureCanvas({
   const edges = map.edges
 
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const trashRef = useRef<HTMLDivElement | null>(null)
   const [view, setView] = useState<ViewSize>({ width: 0, height: 0 })
   const [camera, setCamera] = useState({ x: 72, y: 72, zoom: 1 })
   const cameraRef = useRef(camera)
@@ -102,12 +135,18 @@ export const StructureCanvas = memo(function StructureCanvas({
   /** 从列表拖出来的那一下：指针的屏幕坐标 */
   const [paletteAt, setPaletteAt] = useState<{ x: number; y: number } | null>(null)
   const [paletteKind, setPaletteKind] = useState<GraphKind | null>(null)
+  /** 正拖着一个节点在垃圾桶上方 */
+  const [overTrash, setOverTrash] = useState(false)
 
   const gestureRef = useRef<Gesture>(null)
   const seededRef = useRef(false)
   const fittedRef = useRef(false)
+  /** 下一次 nodes 变了之后要不要自动对镜头（自动排列之后用） */
+  const fitNextRef = useRef(false)
 
-  const bounds = useMemo(() => boundsOf(nodes), [nodes])
+  /** 高度访问器：大纲卡片按目标项条数长高，其余固定（见 structureView） */
+  const height = useMemo(() => heightOf(store), [store])
+  const bounds = useMemo(() => boundsOf(nodes, height), [nodes, height])
 
   /* ---------- 视口尺寸（缩放的下限要靠它算） ---------- */
 
@@ -138,23 +177,40 @@ export const StructureCanvas = memo(function StructureCanvas({
     onChange(seeded)
   }, [nodes.length, store, goalId, onChange])
 
-  /* ---------- 有图但还没对过镜头：先「适应画布」一次 ---------- */
+  /* ---------- 镜头：适应画布 / 对准某个节点 ---------- */
 
   const fit = useCallback(() => {
-    const box = boundsOf(nodes)
+    const box = boundsOf(nodes, height)
     if (!box || !view.width || !view.height) return
     const zoom = fitZoom(box, view)
     setCamera({ ...centerPan(box, view, zoom), zoom })
-  }, [nodes, view])
+  }, [nodes, height, view])
 
   useEffect(() => {
+    if (fitNextRef.current) {
+      fitNextRef.current = false
+      fit()
+      return
+    }
     if (fittedRef.current) return
     if (!view.width || !bounds) return
     fittedRef.current = true
     fit()
   }, [view.width, bounds, fit])
 
-  /* ---------- 外部聚焦（chip 路由）：把镜头挪过去 ---------- */
+  const centerOn = useCallback(
+    (id: string) => {
+      const node = nodes.find((n) => n.id === id)
+      if (!node || !view.width) return
+      const zoom = Math.max(cameraRef.current.zoom, 1)
+      setCamera({
+        ...centerPan({ x: node.x, y: node.y, width: CARD_W, height: height(node) }, view, zoom),
+        zoom,
+      })
+      setSelectedId(id)
+    },
+    [nodes, view, height],
+  )
 
   const lastFocusNonce = useRef<number | null>(null)
   useEffect(() => {
@@ -165,11 +221,11 @@ export const StructureCanvas = memo(function StructureCanvas({
       nodes.find((n) => n.ref === focusTarget.nodeId)
     if (target && view.width) {
       const zoom = Math.max(cameraRef.current.zoom, 1)
-      setCamera({ ...centerPan({ x: target.x, y: target.y, width: CARD_W, height: CARD_H }, view, zoom), zoom })
+      setCamera({ ...centerPan({ x: target.x, y: target.y, width: CARD_W, height: height(target) }, view, zoom), zoom })
       setSelectedId(target.id)
     }
     onFocusHandled?.()
-  }, [focusTarget, nodes, view, onFocusHandled])
+  }, [focusTarget, nodes, view, height, onFocusHandled])
 
   /* ---------- 滚轮：平移为主，Ctrl/⌘ + 滚轮缩放（与旧导图一致） ---------- */
 
@@ -184,7 +240,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         const px = e.clientX - rect.left
         const py = e.clientY - rect.top
         // 缩放收进 [动态下限, 固定上限]：下限由内容包围盒算，见 learn/structure
-        const next = clampZoom(cam.zoom * (e.deltaY > 0 ? 0.92 : 1.08), boundsOf(nodes), view)
+        const next = clampZoom(cam.zoom * (e.deltaY > 0 ? 0.92 : 1.08), boundsOf(nodes, height), view)
         if (next === cam.zoom) return
         const k = next / cam.zoom
         setCamera({ x: px - (px - cam.x) * k, y: py - (py - cam.y) * k, zoom: next })
@@ -194,7 +250,7 @@ export const StructureCanvas = memo(function StructureCanvas({
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [nodes, view])
+  }, [nodes, height, view])
 
   /* ---------- 坐标换算 ---------- */
 
@@ -207,23 +263,13 @@ export const StructureCanvas = memo(function StructureCanvas({
     return { x: (clientX - left - cam.x) / cam.zoom, y: (clientY - top - cam.y) / cam.zoom }
   }, [])
 
+  const isOverTrash = useCallback((clientX: number, clientY: number) => {
+    const rect = trashRef.current?.getBoundingClientRect()
+    if (!rect) return false
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+  }, [])
+
   /* ---------- 写回 ---------- */
-
-  const commitNodes = useCallback(
-    (next: StructureNode[]) => {
-      onChange({ version: 1, nodes: next, edges })
-    },
-    [edges, onChange],
-  )
-
-  const addEdge = useCallback(
-    (from: string, to: string) => {
-      if (!canAddEdge(nodes, edges, from, to)) return false
-      onChange({ version: 1, nodes, edges: [...edges, { from, to }] })
-      return true
-    },
-    [nodes, edges, onChange],
-  )
 
   const removeNode = useCallback(
     (id: string) => {
@@ -233,6 +279,124 @@ export const StructureCanvas = memo(function StructureCanvas({
     },
     [nodes, edges, onChange],
   )
+
+  const addEdge = useCallback(
+    (from: string, to: string) => {
+      if (!canAddEdge(nodes, edges, from, to)) return false
+      const fromNode = nodes.find((n) => n.id === from)
+      const toNode = nodes.find((n) => n.id === to)
+      /*
+       * 大纲 → 子大纲 还要多过一关：父大纲提供的接入点**数量固定**（有几个目标项就有几个），
+       * 一个接入点只挂一个子大纲。文档那一侧不受这个限制（用户原话：文档数量不受限）。
+       */
+      if (fromNode?.kind === 'outline' && toNode?.kind === 'outline') {
+        const slots = outlineSlots(store, fromNode, nodes)
+        const key = slotKeyOf(store, toNode)
+        const slot = key ? slots.find((s) => s.key === key) : undefined
+        if (!slot) {
+          onToast?.(t('这张大纲没有这个接入点：子大纲只能挂在它的某个目标项上'))
+          return false
+        }
+        if (slot.childId && slot.childId !== to) {
+          onToast?.(t('「{0}」这个目标项已经挂了一个子大纲', slot.title))
+          return false
+        }
+        // 老数据没有 slot：这次连上就把它补上，之后重排/重开都认得这个接入点
+        const patched = key === toNode.slot ? nodes : nodes.map((n) => (n.id === to ? { ...n, slot: key ?? undefined } : n))
+        onChange({ version: 1, nodes: patched, edges: [...edges, { from, to }] })
+        return true
+      }
+      onChange({ version: 1, nodes, edges: [...edges, { from, to }] })
+      return true
+    },
+    [nodes, edges, onChange, onToast, store],
+  )
+
+  /* ---------- 点目标项：已挂上就跳过去，没挂就生成一个空子大纲 ---------- */
+
+  const onSlotClick = useCallback(
+    (parentId: string, key: string) => {
+      const parent = nodes.find((n) => n.id === parentId)
+      if (!parent) return
+      const slot = outlineSlots(store, parent, nodes).find((s) => s.key === key)
+      if (!slot) return
+      if (slot.childId) {
+        centerOn(slot.childId)
+        return
+      }
+      // 空子大纲节点：它只占住这个接入点，内容由它自己决定（双击生成）
+      const child: StructureNode = {
+        id: crypto.randomUUID(),
+        kind: 'outline',
+        slot: slot.key,
+        x: parent.x + CARD_W + 112,
+        y: parent.y + slot.index * (CARD_H + 24),
+      }
+      onChange({ version: 1, nodes: [...nodes, child], edges: [...edges, { from: parent.id, to: child.id }] })
+      setSelectedId(child.id)
+      onToast?.(t('「{0}」的空子大纲已就位：双击它可以开始生成内容', slot.title))
+    },
+    [centerOn, edges, nodes, onChange, onToast, store],
+  )
+
+  /* ---------- 点标题：打开那一份内容 ---------- */
+
+  const openNode = useCallback(
+    (node: StructureNode) => {
+      const ref = node.ref
+      if (!ref) {
+        if (onFillNode) onFillNode(node)
+        else onToast?.(t('空节点还没有内容：等它自己决定生成什么这条链接上之后，双击就能生成'))
+        return
+      }
+      if (node.kind === 'doc') {
+        docs.onOpenTeach(ref)
+        return
+      }
+      if (node.kind === 'note') {
+        const leaf = splitLeafRef(ref)
+        if (leaf) docs.onOpenNote(leaf.owner, leaf.name)
+        return
+      }
+      if (node.kind === 'superdoc') {
+        const leaf = splitLeafRef(ref)
+        if (leaf) docs.onOpenSuperDoc(leaf.owner, leaf.name)
+        return
+      }
+      if (node.kind === 'exam') {
+        const exam = store.exams.find((e) => e.id === ref)
+        if (exam) exams.onStart(exam.nodeId, exam.id)
+        return
+      }
+      // 大纲节点没有独立页签：它本身就是这一页
+      onToast?.(t('大纲节点就在这张画布上，没有另一份页签'))
+    },
+    [docs, exams, onFillNode, onToast, store],
+  )
+
+  /* ---------- 自动排列 ---------- */
+
+  const autoArrange = useCallback(() => {
+    const laid = seedLayout({
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        kind: n.kind,
+        ...(n.ref ? { ref: n.ref } : {}),
+        ...(n.slot ? { slot: n.slot } : {}),
+      })),
+      edges,
+    })
+    const pos = new Map(laid.nodes.map((n) => [n.id, { x: n.x, y: n.y }]))
+    fitNextRef.current = true
+    onChange({
+      version: 1,
+      nodes: nodes.map((n) => {
+        const p = pos.get(n.id)
+        return p ? { ...n, x: p.x, y: p.y } : n
+      }),
+      edges,
+    })
+  }, [nodes, edges, onChange])
 
   /* ---------- 指针 ---------- */
 
@@ -255,6 +419,15 @@ export const StructureCanvas = memo(function StructureCanvas({
         return
       }
 
+      // 目标项：点一下（不是拖）就生成 / 跳转，不进拖动分支
+      const slotEl = target.closest<HTMLElement>('[data-slot-key]')
+      if (slotEl) {
+        const parentId = slotEl.dataset.slotParent ?? ''
+        const key = slotEl.dataset.slotKey ?? ''
+        onSlotClick(parentId, key)
+        return
+      }
+
       const handleEl = target.closest<HTMLElement>('[data-link-handle]')
       if (handleEl) {
         const from = handleEl.dataset.linkHandle as string
@@ -273,13 +446,30 @@ export const StructureCanvas = memo(function StructureCanvas({
         const world = toWorld(e.clientX, e.clientY)
         setSelectedId(id)
         setSelectedEdge(null)
-        gestureRef.current = { mode: 'node', id, grabX: world.x, grabY: world.y, origX: node.x, origY: node.y, moved: false }
+        gestureRef.current = {
+          mode: 'node',
+          id,
+          grabX: world.x,
+          grabY: world.y,
+          origX: node.x,
+          origY: node.y,
+          moved: false,
+          openTitle: !!target.closest('[data-open-title]'),
+        }
+        return
+      }
+
+      // 连线上的小圆点：跳到线的另一端
+      const world = toWorld(e.clientX, e.clientY)
+      const dot = edgeDotAt(nodes, edges, world.x, world.y, 11 / cameraRef.current.zoom, height)
+      if (dot) {
+        const other = dot.side === 'from' ? dot.edge.to : dot.edge.from
+        centerOn(other)
         return
       }
 
       // 点在连线上：选中它（Delete 可断开），不进入平移
-      const world = toWorld(e.clientX, e.clientY)
-      const edge = edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom)
+      const edge = edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height)
       if (edge) {
         setSelectedEdge(edge)
         setSelectedId(null)
@@ -290,7 +480,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       setSelectedId(null)
       setSelectedEdge(null)
     },
-    [edges, nodes, toWorld],
+    [centerOn, edges, height, nodes, onSlotClick, toWorld],
   )
 
   const onPointerMove = useCallback(
@@ -308,17 +498,18 @@ export const StructureCanvas = memo(function StructureCanvas({
         if (!g.moved && Math.abs(dx) + Math.abs(dy) < 2) return
         g.moved = true
         setDraft({ id: g.id, x: g.origX + dx, y: g.origY + dy })
+        setOverTrash(isOverTrash(e.clientX, e.clientY))
         return
       }
       if (g.mode === 'link') {
         setLinkAt(world)
-        setHoverId(hitTest(nodes, world.x, world.y)?.id ?? null)
+        setHoverId(hitTest(nodes, world.x, world.y, height)?.id ?? null)
         return
       }
       setPaletteAt({ x: e.clientX, y: e.clientY })
-      setHoverId(hitTest(nodes, world.x, world.y)?.id ?? null)
+      setHoverId(hitTest(nodes, world.x, world.y, height)?.id ?? null)
     },
-    [nodes, toWorld],
+    [height, isOverTrash, nodes, toWorld],
   )
 
   const onPointerUp = useCallback(
@@ -330,8 +521,23 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (!g) return
 
       if (g.mode === 'node') {
+        const inTrash = isOverTrash(e.clientX, e.clientY)
+        setOverTrash(false)
+        if (inTrash && g.moved) {
+          removeNode(g.id)
+          setDraft(null)
+          onToast?.(t('已从画布上移除。内容没有删，还能从左侧重新拖回来'))
+          return
+        }
         if (draft && draft.id === g.id && g.moved) {
-          commitNodes(nodes.map((n) => (n.id === draft.id ? { ...n, x: draft.x, y: draft.y } : n)))
+          onChange({
+            version: 1,
+            nodes: nodes.map((n) => (n.id === draft.id ? { ...n, x: draft.x, y: draft.y } : n)),
+            edges,
+          })
+        } else if (!g.moved && g.openTitle) {
+          const node = nodes.find((n) => n.id === g.id)
+          if (node) openNode(node)
         }
         setDraft(null)
         return
@@ -339,7 +545,7 @@ export const StructureCanvas = memo(function StructureCanvas({
 
       if (g.mode === 'link') {
         const world = toWorld(e.clientX, e.clientY)
-        const target = hitTest(nodes, world.x, world.y)
+        const target = hitTest(nodes, world.x, world.y, height)
         if (target && target.id !== g.from && !addEdge(g.from, target.id)) {
           onToast?.(t('这两个节点不能这样连：下游不能回流，笔记/试卷/超级文档只能挂在文档下面'))
         }
@@ -351,7 +557,7 @@ export const StructureCanvas = memo(function StructureCanvas({
 
       if (g.mode === 'palette') {
         const world = toWorld(e.clientX, e.clientY)
-        const target = hitTest(nodes, world.x, world.y)
+        const target = hitTest(nodes, world.x, world.y, height)
         const node: StructureNode = {
           id: crypto.randomUUID(),
           kind: g.kind,
@@ -361,9 +567,24 @@ export const StructureCanvas = memo(function StructureCanvas({
         }
         const nextNodes = [...nodes, node]
         const nextEdges = [...edges]
-        // 落在卡片上 = 顺手接上（用户不用再拖一条线）；落在空白处就是孤儿节点
-        if (target && canAddEdge(nextNodes, nextEdges, target.id, node.id)) {
-          nextEdges.push({ from: target.id, to: node.id })
+        /*
+         * 落在卡片上 = 顺手接上（用户不用再拖一条线）；落在空白处就是孤儿节点。
+         * 拖出来的是大纲、落在大纲上时，要顺手占一个**空着的接入点**——
+         * 父大纲的目标项数量就是接入点数量，不能让用户凭空多接一个。
+         */
+        if (target) {
+          const free =
+            target.kind === 'outline' && node.kind === 'outline'
+              ? outlineSlots(store, target, nodes).find((s) => !s.childId)
+              : null
+          if (free) node.slot = free.key
+          const allowed =
+            target.kind === 'outline' && node.kind === 'outline' ? !!free : canAddEdge(nextNodes, nextEdges, target.id, node.id)
+          if (allowed) {
+            nextEdges.push({ from: target.id, to: node.id })
+          } else if (target.kind === 'outline' && node.kind === 'outline') {
+            onToast?.(t('这张大纲的目标项都挂满了：先给它加目标项，才有新的接入点'))
+          }
         }
         onChange({ version: 1, nodes: nextNodes, edges: nextEdges })
         setSelectedId(node.id)
@@ -373,10 +594,10 @@ export const StructureCanvas = memo(function StructureCanvas({
         onToast?.(t('空节点：它还没有内容，挂上父节点之后由它自己决定生成什么'))
       }
     },
-    [addEdge, commitNodes, draft, edges, nodes, onChange, onToast, toWorld],
+    [addEdge, draft, edges, height, isOverTrash, nodes, onChange, onToast, openNode, removeNode, toWorld],
   )
 
-  /* ---------- 双击：打开内容 / 生成内容 ---------- */
+  /* ---------- 双击：打开内容 / 适应画布 ---------- */
 
   const onDoubleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -386,17 +607,9 @@ export const StructureCanvas = memo(function StructureCanvas({
         return
       }
       const node = nodes.find((n) => n.id === target.dataset.nodeId)
-      if (!node) return
-      if (node.kind === 'outline' || node.kind === 'doc') {
-        if (node.ref) onOpenNode(node.ref)
-        else if (onFillNode) onFillNode(node)
-        else onToast?.(t('空节点还没有内容：等它自己决定生成什么这条链接上之后，双击就能生成'))
-        return
-      }
-      // 笔记 / 试卷 / 超级文档的打开入口还在接（它们各自有自己的页签）
-      onToast?.(t('这个节点的内容还在接：先点空白处取消选中'))
+      if (node) openNode(node)
     },
-    [fit, nodes, onFillNode, onOpenNode, onToast],
+    [fit, nodes, openNode],
   )
 
   /* ---------- 键盘：Delete 删掉（只从图上删，内容不动） ---------- */
@@ -406,7 +619,11 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
       if (selectedEdge) {
         e.preventDefault()
-        onChange({ version: 1, nodes, edges: edges.filter((x) => !(x.from === selectedEdge.from && x.to === selectedEdge.to)) })
+        onChange({
+          version: 1,
+          nodes,
+          edges: edges.filter((x) => !(x.from === selectedEdge.from && x.to === selectedEdge.to)),
+        })
         setSelectedEdge(null)
         return
       }
@@ -420,12 +637,15 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   /* ---------- 渲染 ---------- */
 
+  /** 拖动中的那一张用 draft 的位置：连线跟着动，而不是松手才跳过去 */
+  const displayNodes = useMemo(
+    () => (draft ? nodes.map((n) => (n.id === draft.id ? { ...n, x: draft.x, y: draft.y } : n)) : nodes),
+    [nodes, draft],
+  )
+  const byId = useMemo(() => new Map(displayNodes.map((n) => [n.id, n])), [displayNodes])
+
   const edgeOrigin = bounds ? { x: bounds.x - 240, y: bounds.y - 240 } : { x: 0, y: 0 }
-  const edgeSize = bounds
-    ? { width: bounds.width + 480, height: bounds.height + 480 }
-    : { width: 0, height: 0 }
-  const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
-  const dragId = draft?.id ?? null
+  const edgeSize = bounds ? { width: bounds.width + 480, height: bounds.height + 480 } : { width: 0, height: 0 }
   const zoomPct = Math.round(camera.zoom * 100)
 
   return (
@@ -457,20 +677,39 @@ export const StructureCanvas = memo(function StructureCanvas({
               const from = byId.get(edge.from)
               const to = byId.get(edge.to)
               if (!from || !to) return null
-              const curve = edgeCurve(from, to).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
-              const isSelected =
-                selectedEdge?.from === edge.from && selectedEdge?.to === edge.to
+              const curve = edgeCurve(from, to, height).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
+              const isSelected = selectedEdge?.from === edge.from && selectedEdge?.to === edge.to
               const highlighted = isSelected || hoverId === edge.to || hoverId === edge.from
+              // 目标项的颜色：只有「大纲 → 子大纲」这条有（见 structureView 的 edgeColorOf）
+              const color = edgeColorOf(store, displayNodes, edge)
+              const dots = edgeDots(from, to, height)
               return (
-                <path
-                  key={`${edge.from}>${edge.to}`}
-                  d={edgePathD(curve)}
-                  fill="none"
-                  stroke={highlighted ? 'var(--color-seal, #b45309)' : 'currentColor'}
-                  className={highlighted ? '' : 'text-ink-faint/60'}
-                  strokeWidth={isSelected ? 2.5 : 1.5}
-                  strokeLinecap="round"
-                />
+                <g key={`${edge.from}>${edge.to}`}>
+                  <path
+                    d={edgePathD(curve)}
+                    fill="none"
+                    stroke={color ?? (highlighted ? 'var(--color-seal, #b45309)' : 'currentColor')}
+                    className={color || highlighted ? '' : 'text-ink-faint/60'}
+                    strokeWidth={isSelected ? 2.5 : 1.5}
+                    strokeLinecap="round"
+                  />
+                  {/* 两端的小圆点：点一下跳到线的另一端 */}
+                  {(['from', 'to'] as const).map((side) => {
+                    const p = side === 'from' ? dots.from : dots.to
+                    return (
+                      <circle
+                        key={side}
+                        cx={p.x - edgeOrigin.x}
+                        cy={p.y - edgeOrigin.y}
+                        r={4.5}
+                        fill="currentColor"
+                        className="text-card"
+                        stroke={color ?? 'rgba(140,140,140,0.65)'}
+                        strokeWidth={1.5}
+                      />
+                    )
+                  })}
+                </g>
               )
             })}
             {/* 跟手的那条线 */}
@@ -478,10 +717,11 @@ export const StructureCanvas = memo(function StructureCanvas({
               const from = byId.get(linkFrom)
               if (!from) return null
               // 借 edgeCurve 的算法画「跟手的那条」：把指针位置当成一张卡片的左沿中点
-              const curve = edgeCurve(from, { id: '', kind: from.kind, x: linkAt.x, y: linkAt.y - CARD_H / 2 }).map((p) => ({
-                x: p.x - edgeOrigin.x,
-                y: p.y - edgeOrigin.y,
-              }))
+              const curve = edgeCurve(
+                from,
+                { id: '', kind: from.kind, x: linkAt.x, y: linkAt.y - CARD_H / 2 },
+                height,
+              ).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
               return (
                 <path
                   d={edgePathD(curve)}
@@ -496,35 +736,73 @@ export const StructureCanvas = memo(function StructureCanvas({
           </svg>
         )}
 
-        {nodes.map((node) => {
-          const pos = dragId === node.id && draft ? draft : node
+        {displayNodes.map((node) => {
           const view = resolveNodeView(store, node)
           const selected = selectedId === node.id
           const isHovered = hoverId === node.id
           const empty = !node.ref
+          const h = height(node)
+          const slots = node.kind === 'outline' ? outlineSlots(store, node, nodes) : []
+          const openable = node.kind !== 'outline'
           return (
             <div
               key={node.id}
               data-node-id={node.id}
-              className={`absolute flex flex-col justify-center gap-1 rounded-xl border px-3 shadow-sm transition-colors ${KIND_TONE[node.kind]} ${
+              className={`absolute flex flex-col rounded-xl border shadow-sm transition-colors ${KIND_TONE[node.kind]} ${
                 empty ? 'border-dashed' : ''
               } ${selected ? 'ring-2 ring-seal/60' : isHovered ? 'ring-1 ring-seal/35' : ''}`}
               style={{
-                left: pos.x,
-                top: pos.y,
+                left: node.x,
+                top: node.y,
                 width: CARD_W,
-                height: CARD_H,
-                cursor: dragId === node.id ? 'grabbing' : 'grab',
+                height: h,
+                cursor: draft?.id === node.id ? 'grabbing' : 'grab',
               }}
             >
-              <div className="flex items-center gap-1.5">
-                <span className={`rounded px-1.5 py-[1px] text-[10px] font-semibold ${KIND_BADGE[node.kind]}`}>
+              <div className="flex items-center gap-1.5 px-3 pt-2" style={{ minHeight: 30 }}>
+                <span className={`shrink-0 rounded px-1.5 py-[1px] text-[10px] font-semibold ${KIND_BADGE[node.kind]}`}>
                   {t(GRAPH_KIND_LABEL[node.kind])}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{view.title}</span>
+                <span
+                  {...(openable ? { 'data-open-title': node.id } : {})}
+                  title={openable ? t('点标题直接打开') : undefined}
+                  className={`min-w-0 flex-1 truncate text-[13px] font-medium text-ink ${
+                    openable ? 'hover:text-seal hover:underline' : ''
+                  }`}
+                >
+                  {view.title}
+                </span>
                 {view.missing && <span className="text-[10px] text-rose-500">{t('内容不在了')}</span>}
               </div>
-              <div className="truncate text-[11px] text-ink-soft">{view.subtitle}</div>
+
+              {node.kind === 'outline' && slots.length > 0 ? (
+                /* 目标项：亮着的是已经挂了子大纲的，灰的是还空着的接入点（点一下生成） */
+                <div className="mt-0.5 flex flex-col overflow-hidden px-2 pb-2">
+                  {slots.map((slot) => (
+                    <div
+                      key={slot.key}
+                      data-slot-key={slot.key}
+                      data-slot-parent={node.id}
+                      title={slot.childId ? t('跳到这个子大纲') : t('生成一个空子大纲')}
+                      className="flex cursor-pointer items-center gap-1.5 rounded px-1 hover:bg-seal/[0.08]"
+                      style={{ height: SLOT_ROW }}
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full border"
+                        style={{ borderColor: slot.color, background: slot.childId ? slot.color : 'transparent' }}
+                      />
+                      <span
+                        className="truncate text-[11.5px]"
+                        style={{ color: slot.childId ? slot.color : undefined, opacity: slot.childId ? 1 : 0.55 }}
+                      >
+                        {slot.title}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="truncate px-3 pb-2 text-[11px] text-ink-soft">{view.subtitle}</div>
+              )}
 
               {/* 连线手柄：从这里拖出去接下一个节点 */}
               <div
@@ -552,14 +830,27 @@ export const StructureCanvas = memo(function StructureCanvas({
         ))}
       </div>
 
-      {/* 右下角：缩放读数与适应画布 */}
+      {/* 垃圾桶：画面水平居中、垂直靠底；拖着节点上去松手就删掉 */}
+      <div
+        ref={trashRef}
+        className={`absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-dashed px-4 py-2 text-[11px] transition-all ${
+          overTrash
+            ? 'scale-110 border-rose-500 bg-rose-500/15 text-rose-600 dark:text-rose-300'
+            : 'border-line bg-card/70 text-ink-faint'
+        }`}
+      >
+        <Trash2 size={14} />
+        {overTrash ? t('松手删除') : t('拖到这里删除')}
+      </div>
+
+      {/* 右下角：缩放读数、适应画布、自动排列 */}
       <div className="absolute right-4 bottom-4 flex items-center gap-1 rounded-lg border border-line bg-card/85 px-1.5 py-1 text-[11px] text-ink-soft backdrop-blur">
         <button
           type="button"
           className="rounded px-1.5 py-0.5 hover:bg-line/60"
           onClick={() => {
             const cam = cameraRef.current
-            const next = clampZoom(cam.zoom - 0.15, boundsOf(nodes), view)
+            const next = clampZoom(cam.zoom - 0.15, boundsOf(nodes, height), view)
             if (next !== cam.zoom) setCamera({ ...cam, zoom: next })
           }}
         >
@@ -571,7 +862,7 @@ export const StructureCanvas = memo(function StructureCanvas({
           className="rounded px-1.5 py-0.5 hover:bg-line/60"
           onClick={() => {
             const cam = cameraRef.current
-            const next = clampZoom(cam.zoom + 0.15, boundsOf(nodes), view)
+            const next = clampZoom(cam.zoom + 0.15, boundsOf(nodes, height), view)
             if (next !== cam.zoom) setCamera({ ...cam, zoom: next })
           }}
         >
@@ -580,6 +871,9 @@ export const StructureCanvas = memo(function StructureCanvas({
         <span className="mx-1 h-3 w-px bg-line" />
         <button type="button" className="rounded px-1.5 py-0.5 hover:bg-line/60" onClick={fit}>
           {t('适应画布')}
+        </button>
+        <button type="button" className="rounded px-1.5 py-0.5 hover:bg-line/60" onClick={autoArrange}>
+          {t('自动排列')}
         </button>
       </div>
 

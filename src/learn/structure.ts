@@ -99,6 +99,14 @@ export interface StructureNode {
    * - exam：试卷 id
    */
   ref?: string
+  /**
+   * 这个大纲节点占的是父大纲的**哪一个接入点**（= 目标项的 key，见 OutlineEntry）。
+   *
+   * 只有「子大纲」有这一项：父大纲提供的接入点数量是固定的（有几个目标项就有几个），
+   * 每个接入点只能挂一个子大纲；文档那一侧不受这个限制。
+   * 记 key 而不是序号：目标项重排、改名（key 跟着标题归一化）都不会把挂接关系弄丢。
+   */
+  slot?: string
   /** 画布坐标：节点卡片左上角，世界坐标（与缩放无关） */
   x: number
   y: number
@@ -161,23 +169,39 @@ export interface Rect {
   height: number
 }
 
+/**
+ * 一张卡有多高。默认全是 CARD_H，但大纲节点的卡片里要列出目标项，条目多了就更高。
+ *
+ * 为什么不在 StructureNode 上存 height：高度是**内容算出来的**（目标项几条），
+ * 存进数据就多了一份会过期的副本——加一条目标项忘了改高度，卡片就会盖住别人。
+ */
+export type HeightOf = (node: StructureNode) => number
+
+export const defaultHeight: HeightOf = () => CARD_H
+
 export interface ViewSize {
   width: number
   height: number
 }
 
+/** 一张卡的矩形（世界坐标）。命中测试、连线端点、包围盒都从这里取 */
+export function rectOf(node: StructureNode, heightOf: HeightOf = defaultHeight): Rect {
+  return { x: node.x, y: node.y, width: CARD_W, height: heightOf(node) }
+}
+
 /** 全部节点的包围盒；一个节点都没有时返回 null（调用方据此不做「适应画布」） */
-export function boundsOf(nodes: readonly StructureNode[]): Rect | null {
+export function boundsOf(nodes: readonly StructureNode[], heightOf: HeightOf = defaultHeight): Rect | null {
   if (!nodes.length) return null
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
   for (const n of nodes) {
+    const h = heightOf(n)
     if (n.x < minX) minX = n.x
     if (n.y < minY) minY = n.y
     if (n.x + CARD_W > maxX) maxX = n.x + CARD_W
-    if (n.y + CARD_H > maxY) maxY = n.y + CARD_H
+    if (n.y + h > maxY) maxY = n.y + h
   }
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
 }
@@ -246,7 +270,7 @@ export const COL_GAP = CARD_W + 112
 export const ROW_GAP = CARD_H + 36
 
 export interface SeedGraph {
-  nodes: Array<{ id: string; kind: GraphKind; ref?: string }>
+  nodes: Array<{ id: string; kind: GraphKind; ref?: string; slot?: string }>
   edges: Array<{ from: string; to: string }>
 }
 
@@ -383,7 +407,14 @@ export function seedLayout(seed: SeedGraph): StructureMap {
     }
     column.sort((a, b) => anchorY(a.id) - anchorY(b.id) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     column.forEach((n, i) => {
-      placed.push({ id: n.id, kind: n.kind, ...(n.ref ? { ref: n.ref } : {}), x: d * COL_GAP, y: i * ROW_GAP })
+      placed.push({
+        id: n.id,
+        kind: n.kind,
+        ...(n.ref ? { ref: n.ref } : {}),
+        ...(n.slot ? { slot: n.slot } : {}),
+        x: d * COL_GAP,
+        y: i * ROW_GAP,
+      })
     })
   }
 
@@ -426,6 +457,7 @@ export function normalizeStructure(raw: unknown): StructureMap {
       id: n.id,
       kind: n.kind,
       ...(typeof n.ref === 'string' && n.ref ? { ref: n.ref } : {}),
+      ...(typeof n.slot === 'string' && n.slot ? { slot: n.slot } : {}),
       x: n.x,
       y: n.y,
     })

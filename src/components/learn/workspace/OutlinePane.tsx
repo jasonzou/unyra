@@ -11,6 +11,7 @@
 import { memo } from 'react'
 import type { KnowledgeNode, LearnStore } from '../../../learn/types'
 import type { StructureMap } from '../../../learn/structure'
+import type { ExamActions, NodeDocActions } from '../explorer/types'
 import OutlineView from '../OutlineView'
 
 export interface OutlinePaneProps {
@@ -19,7 +20,8 @@ export interface OutlinePaneProps {
   store: LearnStore
   node: KnowledgeNode
   onChangeStructure: (goalId: string, next: StructureMap) => void
-  onOpenNode: (nodeId: string) => void
+  docs: NodeDocActions
+  exams: ExamActions
   onToast?: (msg: string) => void
   focusTarget?: { nodeId: string; nonce: number } | null
   onFocusHandled?: () => void
@@ -49,7 +51,8 @@ export const OutlinePane = memo(function OutlinePane({
   store,
   node,
   onChangeStructure,
-  onOpenNode,
+  docs,
+  exams,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -64,7 +67,8 @@ export const OutlinePane = memo(function OutlinePane({
         store={store}
         node={node}
         onChangeStructure={onChangeStructure}
-        onOpenNode={onOpenNode}
+        docs={docs}
+        exams={exams}
         onToast={onToast}
         focusTarget={focusTarget}
         onFocusHandled={onFocusHandled}

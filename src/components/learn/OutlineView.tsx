@@ -13,6 +13,7 @@
 import { memo, useCallback } from 'react'
 import type { KnowledgeNode, LearnStore } from '../../learn/types'
 import type { StructureMap } from '../../learn/structure'
+import type { ExamActions, NodeDocActions } from './explorer/types'
 import { StructureCanvas } from './structure/StructureCanvas'
 
 export interface OutlineViewProps {
@@ -21,8 +22,10 @@ export interface OutlineViewProps {
   node: KnowledgeNode
   /** 图变了：上层写进 store 并落盘（goalId 由这里补上，调用方只认图） */
   onChangeStructure: (goalId: string, next: StructureMap) => void
-  /** 双击有内容的节点：打开它的教学文档 */
-  onOpenNode: (nodeId: string) => void
+  /** 文档那一侧的动作（点标题打开教学文档 / 笔记 / 超级文档） */
+  docs: NodeDocActions
+  /** 考试那一侧的动作（点试卷标题开考试窗口） */
+  exams: ExamActions
   onToast?: (msg: string) => void
   /** 外部指定的聚焦目标（如 chip 路由） */
   focusTarget?: { nodeId: string; nonce: number } | null
@@ -33,6 +36,7 @@ function sameOutlineView(prev: OutlineViewProps, next: OutlineViewProps): boolea
   if (prev.node !== next.node) return false
   if (prev.store.structure !== next.store.structure) return false
   if (prev.store.nodes !== next.store.nodes || prev.store.exams !== next.store.exams) return false
+  if (prev.docs !== next.docs || prev.exams !== next.exams) return false
   if (prev.focusTarget !== next.focusTarget) return false
   return true
 }
@@ -41,7 +45,8 @@ export default memo(function OutlineView({
   store,
   node,
   onChangeStructure,
-  onOpenNode,
+  docs,
+  exams,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -55,7 +60,8 @@ export default memo(function OutlineView({
           store={store}
           goalId={goalId}
           onChange={change}
-          onOpenNode={onOpenNode}
+          docs={docs}
+          exams={exams}
           onToast={onToast}
           focusTarget={focusTarget}
           onFocusHandled={onFocusHandled}

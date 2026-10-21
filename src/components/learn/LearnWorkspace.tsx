@@ -3577,13 +3577,6 @@ export default function LearnWorkspace({
     onToast(pending.isRoot ? t('已删除该学习目标，可按 Ctrl+Z 撤回') : t('已删除该节点，可按 Ctrl+Z 撤回'))
   }
 
-  const handleOpenOutlineNode = useCallback(
-    (id: string) => {
-      openTab({ kind: 'teach', nodeId: id })
-    },
-    [openTab],
-  )
-
   const generateTeachingDoc = useCallback(
     (targetNode: KnowledgeNode) => {
       if (!hasKey) {
@@ -4645,7 +4638,8 @@ export default function LearnWorkspace({
                   store={store}
                   node={oNode}
                   onChangeStructure={updateStructure}
-                  onOpenNode={handleOpenOutlineNode}
+                  docs={explorerDocs}
+                  exams={explorerExams}
                   onToast={onToast}
                   focusTarget={outlineFocus}
                   onFocusHandled={handleOutlineFocusHandled}
