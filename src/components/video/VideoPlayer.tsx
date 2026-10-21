@@ -242,6 +242,31 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       [],
     )
 
+    /**
+     * 换流（切换选集 / 换来源）：**在同一只 <video> 上重载**，不重建组件——
+     * 全屏状态挂在容器上，容器一重建浏览器就退出全屏。这里手动 load + 起播，
+     * 补上原先靠 autoPlay 起播的那一份行为。
+     */
+    const prevSrcRef = useRef(src)
+    useEffect(() => {
+      if (prevSrcRef.current === src) return
+      prevSrcRef.current = src
+      const video = videoRef.current
+      if (!video) return
+      setCurrentTime(0)
+      setBuffered(0)
+      setCenterIndicator(null)
+      // 外挂字幕属于上一集：换流时清掉，免得把别人的字幕挂在新集上
+      setExternalSegments([])
+      setExternalName('')
+      setSubtitleOffsetMs(0)
+      setSubtitleTrack((mode) => (mode === 'external' ? 'builtin' : mode))
+      video.load()
+      void video.play().catch(() => {
+        // 浏览器可能拦自动播放：留着暂停态，用户点一下即可
+      })
+    }, [src])
+
     // 自动重置/同步视频元素属性
     useEffect(() => {
       const video = videoRef.current

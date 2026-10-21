@@ -595,9 +595,12 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
         <>
           {/* 播放器铺满整格；合集/选集改成**浮在画面上的右侧悬浮窗**（用户定的） */}
           <div className="min-h-0 flex-1 bg-black">
-              {/* key 绑流地址：重新解析换一条流时整只元素重建，播放状态清零是最诚实的表现 */}
+              {/*
+                **不要给播放器绑 key**：选集切换会换流，重建组件等于把全屏元素
+                （requestFullscreen 的那个容器）从 DOM 里摘掉，浏览器会立刻退出全屏
+                （实测）。换源由播放器内部在同一只 <video> 上 load() 完成。
+              */}
               <VideoPlayer
-                key={relayUrl}
                 ref={playerRef}
                 src={relayUrl}
                 title={source.title}
