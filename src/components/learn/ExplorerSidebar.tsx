@@ -17,7 +17,6 @@ import { EXPLORER_WIDTH_MAX, EXPLORER_WIDTH_MIN } from '../../lib/appearance'
 import { userAbsPrefix } from '../../lib/storage'
 import Logo from '../Logo'
 import { NewGoalIcon, OpenLocalIcon } from '../icons'
-import { Plus } from 'lucide-react'
 import { NodeRow } from './explorer/NodeRow'
 import { RowMenu } from './explorer/RowMenu'
 import { FavoriteSection, FocusReportsSection, LocalRow, VideoRow } from './explorer/sections'
@@ -345,18 +344,13 @@ function ExplorerSidebarComponent({
             onCreateGroup={onCreateFavoriteGroup}
           />
 
-          {/* 视频（用户创建的「绑定住的来源」）：分区常显——新建入口就在这里（用户定的：
-              顶栏不再放按钮）。空列表时给一句「怎么开始」，别留一片空。 */}
+          {/* 视频（用户创建的「绑定住的来源」）：列表在这里，新建入口在**播放器控件栏**里。
+              分区常显；一条都没有时留一个低调的文字入口——否则首次使用没有任何地方能开创建页。 */}
           <Section
             title={t('视频')}
             count={videos.length}
             open={sectionOpen('videos')}
             onToggle={() => toggleSection('videos')}
-            action={
-              <SectionAction title={t('新建视频')} onClick={onNewVideo}>
-                <Plus size={13} />
-              </SectionAction>
-            }
           >
             <div className="px-2">
               {videos.length ? (
@@ -369,9 +363,13 @@ function ExplorerSidebarComponent({
                   />
                 ))
               ) : (
-                <p className="px-1.5 py-1 text-[11px] leading-relaxed text-ink-faint">
-                  {t('还没有视频：点右上角的「＋」新建一个。')}
-                </p>
+                <button
+                  type="button"
+                  onClick={onNewVideo}
+                  className="rounded px-1.5 py-1 text-left text-[11px] leading-relaxed text-ink-faint transition hover:text-ink hover:underline"
+                >
+                  {t('还没有视频：点这里新建一个')}
+                </button>
               )}
             </div>
           </Section>

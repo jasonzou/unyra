@@ -31,6 +31,7 @@ import {
   Minimize,
   Pause,
   Play,
+  Plus,
   RotateCcw,
   Upload,
   Volume1,
@@ -63,6 +64,8 @@ export interface VideoPlayerProps {
    * 这是它不进外层布局的原因（全屏只显示 containerRef 的子树）。
    */
   sidePanel?: React.ReactNode
+  /** 底部控件栏的「新建视频」入口（打开创建态页签；不传就不画） */
+  onNewVideo?: () => void
   className?: string
 }
 
@@ -140,6 +143,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       onSeeked,
       onExternalSubtitleLoaded,
       sidePanel,
+      onNewVideo,
       className = '',
     },
     ref,
@@ -932,6 +936,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
 
             {/* 右侧功能控制集合 */}
             <div className="flex items-center gap-1.5">
+              {/* 新建视频：回到创建态页签（入口用户定的就在控件栏里） */}
+              {onNewVideo && (
+                <button
+                  type="button"
+                  onClick={onNewVideo}
+                  title={t('新建视频')}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/20 hover:text-white"
+                >
+                  <Plus size={16} />
+                </button>
+              )}
+
               {/* 音量控制组 */}
               <div
                 onMouseEnter={() => setVolumeHovered(true)}

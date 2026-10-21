@@ -67,9 +67,11 @@ interface Props {
   onProgress?: (positionMs: number, source: string) => void
   /** 选集切换：把「停在的那一项」写进资源（重开回到同一集） */
   onSelection?: (source: string, title: string) => void
+  /** 控件栏的「新建视频」入口（交给播放器画） */
+  onNewVideo?: () => void
 }
 
-export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress, onSelection }: Props) {
+export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress, onSelection, onNewVideo }: Props) {
   const bound = !!video
   /** 创建态输入（绑定态不用它——页里没有输入组件） */
   const [input, setInput] = useState(() => video?.input ?? readLastInput())
@@ -587,6 +589,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
                 transcript={transcript}
                 sidePanel={sidePanel}
                 subLabel={pageLabel}
+                onNewVideo={onNewVideo}
                 onTimeUpdate={(ms) => {
                   setCurrentMs(ms)
                   // 节流：每 5 秒最多存一次；暂停/播完另有即时落盘（见上面的 effect）
