@@ -33,6 +33,7 @@ import { loadAgentSettings } from '../agent/settings'
 import { makeMcpOps } from '../agent/mcp/ops'
 import { makePermissionOps } from '../agent/permissions'
 import { getActiveSkills, getSkillsDigest, needsSkillsAnnounce, skillsAnnounceMessage } from '../agent/skill/registry'
+import { getMcpDigest, mcpAnnounceMessage, needsMcpAnnounce } from '../agent/mcp/announce'
 import type { LearnStore } from './types'
 import { buildFreeChatSystem, buildTeacherSystem } from './ai'
 import { fetchForAgent, searchForAgent } from './webSearch'
@@ -372,7 +373,8 @@ export function useAgent(opts: {
       modules?: PromptModule[],
     ) => {
       const trimmed = text.trim()
-      if (!trimmed) return
+      // 与 runTurn 同一道门：纯图片/纯文件（无字）放行——图片转存与消息组装都在后面
+      if (!trimmed && !(pending?.length || files?.length)) return
       const settings = loadAiSettings()
       const before = getLatest()
       if (!nodeById(before, target.nodeId)) return
@@ -473,6 +475,22 @@ export function useAgent(opts: {
           ]
         : []
 
+      // MCP 感知注入：与技能发现层同一套机制（隐藏消息 + digest 变更重注入）。
+      // 主观能动性的前提是知情——agent 不知道有哪些外部服务，就不会在任务需要时想到它们
+      const currentMcpDigest = getMcpDigest(agentSettings.mcp)
+      const hasPreviousMcpAnnounce = conv.messages.some((m) => !m.retired && m.mcpDigest !== undefined)
+      const mcpAnnouncer = needsMcpAnnounce(conv.messages, currentMcpDigest)
+        ? [
+            mcpAnnounceMessage(
+              agentSettings.mcp,
+              Date.now(),
+              crypto.randomUUID(),
+              currentMcpDigest,
+              hasPreviousMcpAnnounce,
+            ),
+          ]
+        : []
+
       // 提示词模块与技能 Slash 命令检测：支持用户以 /<skill-id> 显式指定，提前将技能注入上下文
       //
       // 工作流指定的模块同样要过格式策略过滤（「开讲」「学习大纲」会强制带上 doc-html）：
@@ -503,7 +521,7 @@ export function useAgent(opts: {
         : []
       conv = {
         ...conv,
-        messages: [...conv.messages, ...announcer, ...formatAnnouncer, ...skillsAnnouncer, ...moduleMsgs, userMsg],
+        messages: [...conv.messages, ...announcer, ...formatAnnouncer, ...skillsAnnouncer, ...mcpAnnouncer, ...moduleMsgs, userMsg],
         updatedAt: Date.now(),
         // 在途标记：这一轮没收口（进程被杀）时，载入恢复据此找到这条回复（见 learn/agent/inflight）
         inflight: { messageId: assistantId, startedAt: Date.now() },
@@ -1081,7 +1099,12 @@ export function useAgent(opts: {
       /** 工作流触发时随指令注入的提示词模块（见 runTurnUnchecked 同名参数） */
       modules?: PromptModule[],
     ) => {
-      if (!text.trim()) return
+      /*
+       * 空文本 + 带附件（纯图片 / 纯文件）也是合法消息：气泡（MessageBubble 只在
+       * 有字时才画文字泡）与历史组装（agent/history 的 nodeContext 恒在正文里，
+       * 不会发出空块）都为「只发图」留好了位置——门只拦「什么都没有」的那条。
+       */
+      if (!text.trim() && !(pending?.length || files?.length)) return
       if (!hasApiKey(loadAiSettings())) {
         if (!hidden) onNeedKeyRef.current()
         return
@@ -1174,14 +1197,15 @@ export function useAgent(opts: {
    */
   const sendFree = useCallback(
     (conversationId: string, text: string, opts?: { files?: PendingFile[]; images?: PendingImage[] }) => {
+      // 图片附件在这里没有去处（static 资源库按目标目录落盘，自由聊天没有目标目录）：
+      // 有图就先说一声——纯图片那条在自由聊天里没有可发的东西（下面会拦），不能闷声吞掉
+      if (opts?.images?.length) onNoticeRef.current?.(t('自由聊天暂不支持图片，图片已去掉'))
       if (!text.trim()) return
       if (!freeConversationById(conversationId)) return
       if (!hasApiKey(loadAiSettings())) {
         onNeedKeyRef.current()
         return
       }
-      // 图片附件在这里没有去处（static 资源库按目标目录落盘，自由聊天没有目标目录）
-      if (opts?.images?.length) onNoticeRef.current?.(t('自由聊天暂不支持图片，图片已去掉'))
       const chain = turnChainRef.current
       const prev = chain.get(conversationId)
       let release!: () => void

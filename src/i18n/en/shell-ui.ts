@@ -151,7 +151,6 @@ const dict: Record<string, string> = {
 
   /* ---------- lib/plugins 的错误（显示在插件页） ---------- */
   '读不到插件文件：应用没有跑在 Electron 里': 'Cannot read the plugin file: the app is not running in Electron',
-  '没能保存': 'Could not save',
   '打不开插件目录': 'Could not open the plugins folder',
 
   /* ---------- lib/closeBehavior 的关窗行为（显示在窗口页） ---------- */
@@ -173,6 +172,29 @@ const dict: Record<string, string> = {
   '已停用，重启后生效': 'Disabled; takes effect after restart',
   '打开插件目录': 'Open plugins folder',
   '这个类别下还没有插件。': 'No plugins in this category yet.',
+  '插件配置': 'Plugin settings',
+  '已保存，重启应用后生效': 'Saved — takes effect after restarting the app',
+  '没能保存': 'Could not save',
+  '密码类字段由系统加密存储（换机器后需要重新填写）。':
+    'Secret fields are encrypted by the OS (fill them in again on another machine).',
+  '保存后需重启应用才生效': 'Takes effect after restart',
+  '保存后立即生效': 'Takes effect immediately',
+  '插件开发文档': 'Plugin developer guide',
+  '导出插件文档': 'Export plugin guide',
+  '导出插件文档（Markdown）': 'Export plugin guide (Markdown)',
+  '已启用并生效': 'Enabled and active',
+  '已停用并卸载': 'Disabled and unloaded',
+  '已重新加载': 'Reloaded',
+  '已保存并生效': 'Saved and applied',
+  '已保存，但重新加载失败：{0}': 'Saved, but reloading failed: {0}',
+  '重新加载（改动立即生效）': 'Reload (changes apply immediately)',
+  '这类插件的改动需要重启应用才生效': 'This plugin type only applies changes after restarting the app',
+  '测试中…': 'Testing…',
+  '连接正常': 'Connection OK',
+  '连接失败': 'Connection failed',
+  '这个插件不支持测试连接': 'This plugin does not support connection tests',
+  '这个插件还没装载（重启应用后重试）': 'This plugin is not loaded yet (restart the app and retry)',
+  '保存中…': 'Saving…',
   '往里放一个 .js 就多一个插件：文件里调用': 'Drop a .js file in to add a plugin: the file calls',
   '交出插件对象（认领一种围栏语言，或给几条正文文字规则）。目录：': 'to hand over the plugin object (claiming a fenced language or text rules). Folder:',
   '代码块的伪编译产物': 'Pseudo-compiled artifacts of code blocks',
@@ -734,6 +756,8 @@ const dict: Record<string, string> = {
   '本地优先 · 离线安全': 'Local-first · Offline safe',
   '当前存储目录': 'Current storage directory',
   '系统默认位置': 'System default location',
+  '警告：数据目录在软件安装目录内（或与其互相包含）。更新软件时安装目录会被整个清空，数据会一并删除——请立即在下方更换数据目录到安装目录之外，迁移完成前不要更新软件。':
+    'Warning: your data directory is inside the installation folder (or contains it). Updates wipe that folder and your data with it — move the data directory outside it below, and do not update until migrated.',
   '自定义工作空间': 'Custom workspace',
   '正在读取存储路径…': 'Reading storage path...',
   '复制路径': 'Copy path',

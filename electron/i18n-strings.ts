@@ -90,6 +90,9 @@ const dict: Record<string, string> = {
   '这不是能读的网页（{0}）：只读 HTML 与纯文本': "This isn't a readable web page ({0}): only HTML and plain text",
   '抓取超时（超过 {0} 秒）：这个站点太慢或连不上': 'Fetching timed out (over {0} s): the site is too slow or unreachable',
   '抓取失败：{0}': 'Fetching failed: {0}',
+  /* web.ts fetchBinary（api.see 的取字节通道：图片 / PDF） */
+  '抓取的内容超过 {0}MB 上限': 'The fetched content is over the {0} MB limit',
+  '内容字节编码失败': 'Failed to encode the fetched bytes',
 
   /* ---------- storage/files.ts ---------- */
   '路径不合法': 'Invalid path',
@@ -159,6 +162,18 @@ const dict: Record<string, string> = {
   '还没下载语音模型': 'The speech model has not been downloaded yet',
   '这段录音是空的': 'That recording is empty',
   '识别失败：{0}': 'Recognition failed: {0}',
+  /* ---------- video-net.ts：视频学习（实验） ---------- */
+  '数据目录不能放在软件安装目录里：更新软件时安装目录会被整个清空，数据会一并删除。请选择安装目录之外的位置。':
+    'The data directory cannot be inside the installation folder: updates wipe that folder and your data with it. Pick a location outside it.',
+  '数据目录不能包含软件安装目录：更新时安装目录会被整个清空，数据同样危在旦夕。请把两者分开存放。':
+    'The data directory cannot contain the installation folder: updates wipe that folder. Keep them separate.',
+  '插件配置读不出来：{0}': 'Could not read plugin settings: {0}',
+  '插件配置写不进去：{0}': 'Could not write plugin settings: {0}',
+  '数据目录在软件安装目录内，更新会把它一并删除。请先到「设置 → 存储」把数据目录迁出安装目录，再回来更新。':
+    'Your data directory is inside the installation folder and an update would delete it. Move it out (Settings → Storage) first, then update.',
+  '这不是可请求的地址：只支持 http(s)': 'This is not a requestable address: only http(s) is allowed',
+  '请求超时（{0} 秒）：{1}': 'Request timed out ({0} s): {1}',
+  '这不是可播放的地址：只支持 http(s)': 'This is not a playable address: only http(s) is allowed',
 }
 
 export default dict

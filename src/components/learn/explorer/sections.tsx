@@ -9,8 +9,8 @@
  * 一行「最近打开」的图示、说明与相对时间四处共用，不另起一份。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ExternalLink, FileClock, Folder, FolderInput, FolderMinus, FolderPlus, Pencil, X } from 'lucide-react'
-import type { FavoriteItem, FavoriteRef, LocalFile } from '../../../learn/types'
+import { ExternalLink, FileClock, Folder, FolderInput, FolderMinus, FolderPlus, MonitorPlay, Pencil, X } from 'lucide-react'
+import type { FavoriteItem, FavoriteRef, LocalFile, VideoResource } from '../../../learn/types'
 import { chipPayloadOfFavorite, favoriteKey } from '../../../learn/favorites'
 import { useClampToViewport, useDismissOn } from '../../../lib/useDismiss'
 import type { RecentOpen } from '../../../learn/recents'
@@ -763,6 +763,70 @@ function FocusReportRow({ meta, onOpen }: { meta: FocusReportMeta; onOpen: () =>
       </span>
       <span className={'h-1.5 w-1.5 shrink-0 rounded-full ' + OUTCOME_DOT[meta.outcome]} />
       <span className="shrink-0 text-[10.5px] tabular-nums text-ink-faint">{t('{0} 分', minutes)}</span>
+    </div>
+  )
+}
+
+
+/**
+ * 「视频」分区里的一行：一个绑定住的视频资源。
+ *
+ * 点击直接打开它的绑定页签（页签按 video.id 复用，重复点不会开出第二张）。
+ * 删除是**两段式**：先在行内换成「删除 / 取消」，避免一个手滑删掉资源——
+ * 这条资源里存着插件与创建时填的数据，删了要重填。
+ */
+export function VideoRow({
+  video,
+  onOpen,
+  onDelete,
+}: {
+  video: VideoResource
+  onOpen: () => void
+  onDelete: () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  return (
+    <div className="group flex items-center gap-1.5 rounded-md py-1 pl-1.5 pr-1 transition hover:bg-line/40">
+      <button
+        type="button"
+        onClick={() => {
+          setConfirming(false)
+          onOpen()
+        }}
+        title={video.input}
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+      >
+        <MonitorPlay size={12} className="shrink-0 text-seal/80" />
+        <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">{video.title}</span>
+        {video.pluginName && <span className="shrink-0 text-[10.5px] text-ink-faint">{video.pluginName}</span>}
+      </button>
+      {confirming ? (
+        <span className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={onDelete}
+            className="rounded px-1 py-0.5 text-[10.5px] font-medium text-seal-deep transition hover:bg-seal/10"
+          >
+            {t('删除')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            className="rounded px-1 py-0.5 text-[10.5px] text-ink-faint transition hover:bg-line/60"
+          >
+            {t('取消')}
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          title={t('删除视频')}
+          className="shrink-0 rounded p-0.5 text-ink-faint opacity-0 transition group-hover:opacity-100 hover:text-ink"
+        >
+          <X size={12} />
+        </button>
+      )}
     </div>
   )
 }

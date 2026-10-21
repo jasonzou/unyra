@@ -17,8 +17,8 @@ import type {
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
   NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
-  UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
-  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebLogDetailResult,
+  UpdatePhase, UpdateState, VideoApiFetchResult, VideoStreamOpenResult, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
+  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebBinaryFetchResult, WebLogDetailResult,
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
   WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
@@ -32,8 +32,8 @@ export type {
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
   NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
-  UpdatePhase, UpdateState, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
-  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebLogDetailResult,
+  UpdatePhase, UpdateState, VideoApiFetchResult, VideoStreamOpenResult, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
+  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebBinaryFetchResult, WebLogDetailResult,
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
   WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
@@ -198,6 +198,14 @@ export interface NativeBridge {
     setEnabled(file: string, enabled: boolean): Promise<StorageOk | StorageFail>
     /** 在系统文件管理器里打开插件目录 */
     reveal(): Promise<StorageOk | StorageFail>
+    /** 读插件配置（password 字段已解密成明文） */
+    settingsGet(file: string): Promise<{ ok: boolean; values?: Record<string, string | number | boolean>; error?: string }>
+    /** 存插件配置：secrets 列出的 key 由主进程加密落盘 */
+    settingsSet(
+      file: string,
+      values: Record<string, string | number | boolean>,
+      secrets: string[],
+    ): Promise<{ ok: boolean; error?: string }>
     /**
      * 内置插件的开关。它们编译进包、跟机器走，所以存 appdata 的 global.yaml，
      * 而不是数据目录里那份用户插件清单（见 electron/plugins.ts）。
@@ -369,6 +377,17 @@ export interface NativeBridge {
    */
   web: {
     fetch(url: string): Promise<WebFetchResult>
+    /** 抓一个网络二进制（图片 / PDF，字节以 base64 data URL 过 IPC）；api.see 的取字节通道（见 learn/see） */
+    fetchBinary(url: string): Promise<WebBinaryFetchResult>
+  }
+  /**
+   * 视频学习（实验）：来源插件的两条通道（见 shared/ipc 的说明与 electron/video-net）。
+   * fetch 是插件 API 请求（只读 GET + 防盗链头）；openStream 把媒体流登记进主进程
+   * 换回 media-relay:// 中转地址——每次播放前都要重新登记（流地址带签名会过期）。
+   */
+  video: {
+    fetch(url: string, headers?: Record<string, string>): Promise<VideoApiFetchResult>
+    openStream(url: string, headers?: Record<string, string>): Promise<VideoStreamOpenResult>
   }
   /**
    * 内置浏览器页签（见 src/components/learn/web 与 electron/app/webSession）。
@@ -505,4 +524,4 @@ export const isMac = (): boolean => {
     return window.mojiNative?.platform === 'darwin'
   }
   return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
-}
+}

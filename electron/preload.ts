@@ -25,13 +25,13 @@ import type {
   BaseProcessInfo, BaseProcessListResult, BaseProcessOutputResult, BaseProcessStartResult, BaseProcessStatusResult,
   BaseProcessStopResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
-  PluginEntry, PluginListResult,
+  PluginEntry, PluginListResult, PluginSettingsResult,
   PluginSourceResult, PluginTogglesResult, SaveFilter, SilentMark, StorageEntry, StorageFail,
   NoticeSettings,
   StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail, UpdatePhase, UpdateState,
-  VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
+  VideoApiFetchResult, VideoStreamOpenResult, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
   VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult,
-  WebFetchResult, WebLogDetailResult, WebLogsOpts, WebLogsResult, WebPageFetchReq,
+  WebFetchResult, WebBinaryFetchResult, WebLogDetailResult, WebLogsOpts, WebLogsResult, WebPageFetchReq,
   WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult, WebScrollReq,
   WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
 } from '../shared/ipc'
@@ -51,7 +51,7 @@ export type {
   StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail, UpdatePhase, UpdateState,
   VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
   VoiceTranscribeResult, WebDomOpResult,
-  WebFetchResult, WebPointResult, WebReadHtmlResult, WebSnapshotResult,
+  WebFetchResult, WebBinaryFetchResult, WebPointResult, WebReadHtmlResult, WebSnapshotResult,
 }
 
 /* ---------- 只在 preload 这一侧用到的形状 ---------- */
@@ -293,6 +293,13 @@ const api = {
     list: (): Promise<PluginListResult> => ipcRenderer.invoke('plugins:list'),
 
     read: (file: string): Promise<PluginSourceResult> => ipcRenderer.invoke('plugins:read', file),
+
+    settingsGet: (file: string): Promise<PluginSettingsResult> => ipcRenderer.invoke('plugins:settingsGet', file),
+    settingsSet: (
+      file: string,
+      values: Record<string, string | number | boolean>,
+      secrets: string[],
+    ): Promise<PluginSettingsResult> => ipcRenderer.invoke('plugins:settingsSet', file, values, secrets),
 
     /** 开关插件；写 enabled.json，**重启后生效** */
     setEnabled: (file: string, enabled: boolean): Promise<StorageOk | StorageFail> =>
@@ -563,6 +570,21 @@ const api = {
    */
   web: {
     fetch: (url: string): Promise<WebFetchResult> => ipcRenderer.invoke('web:fetch', url),
+    /** 抓一个网络二进制（图片/PDF，web:fetchBinary）：字节以 base64 data URL 过 IPC，api.see 的取字节通道 */
+    fetchBinary: (url: string): Promise<WebBinaryFetchResult> => ipcRenderer.invoke('web:fetchBinary', url),
+  },
+
+  /**
+   * 视频学习（实验）：来源插件的两条通道（见 electron/video-net）。
+   * fetch —— 插件的 API 请求（只读 GET，允许 Referer/Cookie 这类防盗链头）；
+   * openStream —— 把媒体流地址与请求头登记进主进程，换回 media-relay:// 中转地址
+   * 给 `<video>` 用。**每次播放前都要重新 openStream**：平台流地址带签名、会过期。
+   */
+  video: {
+    fetch: (url: string, headers?: Record<string, string>): Promise<VideoApiFetchResult> =>
+      ipcRenderer.invoke('video:fetch', url, headers ?? {}),
+    openStream: (url: string, headers?: Record<string, string>): Promise<VideoStreamOpenResult> =>
+      ipcRenderer.invoke('video:openStream', url, headers ?? {}),
   },
 
   /**

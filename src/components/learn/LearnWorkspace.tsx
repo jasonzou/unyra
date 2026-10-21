@@ -219,6 +219,10 @@ import { tabRefFromChip } from '../../learn/chipRef'
 import { CHIP_MIME, parseChipJson } from '../../lib/chipSyntax'
 import TabBar from './TabBar'
 import WebTabLayer, { type WebTab } from './web/WebTabLayer'
+import VideoTabLayer, { type VideoTab } from '../video/VideoTabLayer'
+import type { VideoCreateDraft } from '../video/VideoStudyTab'
+import PluginDoc from '../plugins/PluginDoc'
+import { setPluginDocOpener } from '../../lib/pluginDoc'
 import { focusWebAddress } from './web/addressFocus'
 import FindBar from './FindBar'
 import SuperDocView from './SuperDocView'
@@ -656,7 +660,7 @@ export default function LearnWorkspace({
    */
   const tabDocPayload = useCallback((ref: TabRef): ChipPayload | null => {
     const s = getLatest()
-    const title = tabTitle(ref, (id) => nodeById(s, id)?.title, examTabTitle)
+    const title = tabTitle(ref, (id) => nodeById(s, id)?.title, examTabTitle, (vid) => s.videos?.find((v) => v.id === vid)?.title)
     if (ref.kind === 'local') return { type: 'local', path: ref.path, title }
     // 工作区内部文件：ws 型引用带磁盘路径（chipRef 的两种写法都认）与 nodeId，
     // 点击免于按路径反查——「不能当外部文件看」在引用这一层就是**不是 local 型**
@@ -676,6 +680,8 @@ export default function LearnWorkspace({
     // 新建文件页签同样没有——它还没有落点，引用一个「还不存在的文件」没有意义
     if (
       ref.kind === 'guard' ||
+      ref.kind === 'video' ||
+      ref.kind === 'pluginDoc' ||
       ref.kind === 'report' ||
       ref.kind === 'settings' ||
       ref.kind === 'usage' ||
@@ -707,7 +713,9 @@ export default function LearnWorkspace({
    * 后缀是「它住在哪儿」——节点类取节点到目标的路径（「极限/夹逼定理」），本地文件取所在目录。
    */
   const tabTrails = useMemo(() => {
-    const names = tabs.map((t) => tabTitle(t.ref, (id) => nodeById(store, id)?.title, examTabTitle))
+    const names = tabs.map((t) =>
+      tabTitle(t.ref, (id) => nodeById(store, id)?.title, examTabTitle, (vid) => store.videos?.find((v) => v.id === vid)?.title),
+    )
     const count = new Map<string, number>()
     for (const n of names) count.set(n, (count.get(n) ?? 0) + 1)
     const out: Record<string, string> = {}
@@ -3343,6 +3351,12 @@ export default function LearnWorkspace({
     return () => setChipOpener(null)
   }, [openChip])
 
+  // 设置 → 插件里的「插件开发文档」：同一条打开器纪律（见 lib/pluginDoc）
+  useEffect(() => {
+    setPluginDocOpener(() => openTab({ kind: 'pluginDoc' }))
+    return () => setPluginDocOpener(null)
+  }, [openTab])
+
   /*
     plot 错误卡片上的「让导师修复」：以**工作流**（learn/workflows 的 plot-fix）注入——
     隐藏指令、分界条一条，不是一条普通用户消息。报错原因、字符区间与围栏原文都算好
@@ -4085,6 +4099,8 @@ export default function LearnWorkspace({
     )
     /** 这一格挂着的网页页签：WebTabLayer 常驻层只挂一份，切页签只藏不卸（见下） */
     const gWebTabs = gVisibleTabs.filter((x): x is WebTab => x.ref.kind === 'web')
+    /** 这一格挂着的视频页签（含创建态）：VideoTabLayer 常驻，切页签只藏不卸（用户定的 keepalive） */
+    const gVideoTabs = (g.group?.tabs ?? []).filter((x): x is VideoTab => x.ref.kind === 'video')
     /** 这一格挂着的大纲页签：keepalive 常驻，切页签只藏不卸，切回时保留导图相机视角与选中状态 */
     const gOutlineTabs = (g.group?.tabs ?? []).filter((x) => x.ref.kind === 'outline')
     /** 这一格的正文层：切页签的过场、查找条与数据属性都挂在它身上 */
@@ -4159,7 +4175,9 @@ export default function LearnWorkspace({
                 tabs={gVisibleTabs}
                 paneTotal={g.group?.tabs.length}
                 activeId={g.group?.active ?? null}
-                titleOf={(ref) => tabTitle(ref, (id) => nodeById(store, id)?.title, examTabTitle)}
+                titleOf={(ref) =>
+                  tabTitle(ref, (id) => nodeById(store, id)?.title, examTabTitle, (vid) => store.videos?.find((v) => v.id === vid)?.title)
+                }
                 trailOf={(ref) => tabTrails[tabKey(ref)] ?? ''}
                 onActivate={activateTab}
                 onClose={(id, mode, opts) => closeTab(groupId, id, mode, opts)}
@@ -4326,6 +4344,18 @@ export default function LearnWorkspace({
                 （ai/usageLog）而不是配置，所以不挤在设置里；页面自己订阅台账重渲染。
               */
               <UsagePanel />
+            ) : gTab?.ref.kind === 'video' ? (
+              /*
+                视频页签：由下面的 VideoTabLayer 常驻层画（切页签只藏不卸，
+                播放与已解析的流都留着）。这里只让出位置，别画任何东西。
+              */
+              null
+            ) : gTab?.ref.kind === 'pluginDoc' ? (
+              /*
+                插件开发文档（设置 → 插件里的入口打开）：契约说明 + 导出 .md。
+                静态内容，没有会话态（见 components/plugins/PluginDoc）。
+              */
+              <PluginDoc />
             ) : gTab?.ref.kind === 'settings' ? (
               /*
                 设置面板：文档区的一枚页签（不再是弹窗）。全局只有这一份（tabKey 恒定），
@@ -4636,6 +4666,79 @@ export default function LearnWorkspace({
             网页层（见 components/learn/web/WebTabLayer）：常挂在格子里、切去文档时
             整层藏起来（guest 进程照跑）。z-10 盖过正文，又在拖放高亮（z-30）之下。
           */}
+          {/* 视频页签常驻层（keepalive）：开着就挂着，切走只藏不卸（见 VideoTabLayer） */}
+          {gVideoTabs.length > 0 && (
+            <VideoTabLayer
+              tabs={gVideoTabs}
+              activeId={gTab?.ref.kind === 'video' ? gTab.id : null}
+              videos={store.videos}
+              onCreate={(tabId, draft: VideoCreateDraft) => {
+                const id = crypto.randomUUID()
+                const now = Date.now()
+                const record = {
+                  id,
+                  pluginId: draft.pluginId,
+                  pluginName: draft.pluginName,
+                  input: draft.input,
+                  ...(Object.keys(draft.fields).length ? { fields: draft.fields } : {}),
+                  title: draft.input.slice(0, 60),
+                  createdAt: now,
+                }
+                set({ ...store, videos: [...(store.videos ?? []), record] })
+                // 开绑定页签、关掉创建页签（顺序反过来会让这一格短暂没页签）
+                openTab({ kind: 'video', videoId: id })
+                closeTab(groupId, tabId, 'self')
+              }}
+              onResolved={(videoId, title) => {
+                // 取最新一份再合并：进度写入是高频的，闭包里的 store 可能落后一拍
+                const latest = getLatest()
+                const list = latest.videos ?? []
+                const cur = list.find((v) => v.id === videoId)
+                if (!cur || cur.title === title) return
+                set({
+                  ...latest,
+                  videos: list.map((v) => (v.id === videoId ? { ...v, title, updatedAt: Date.now() } : v)),
+                })
+              }}
+              onProgress={(videoId, positionMs, source) => {
+                const latest = getLatest()
+                const list = latest.videos ?? []
+                const cur = list.find((v) => v.id === videoId)
+                if (!cur) return
+                set({
+                  ...latest,
+                  videos: list.map((v) =>
+                    v.id === videoId
+                      ? {
+                          ...v,
+                          progress: { ...(source ? { source } : {}), positionMs: Math.round(positionMs), updatedAt: Date.now() },
+                        }
+                      : v,
+                  ),
+                })
+              }}
+              onSelection={(videoId, source, title) => {
+                const latest = getLatest()
+                const list = latest.videos ?? []
+                const cur = list.find((v) => v.id === videoId)
+                if (!cur) return
+                set({
+                  ...latest,
+                  videos: list.map((v) =>
+                    v.id === videoId
+                      ? {
+                          ...v,
+                          selection: { source, ...(title ? { title } : {}) },
+                          // 换集就把进度归零到新那一项：旧进度不能续到别的集上
+                          progress: { source, positionMs: 0, updatedAt: Date.now() },
+                        }
+                      : v,
+                  ),
+                })
+              }}
+            />
+          )}
+
           {!isWeb() && gWebTabs.length > 0 && (
             <WebTabLayer
               tabs={gWebTabs}
@@ -4691,7 +4794,12 @@ export default function LearnWorkspace({
             gTab.ref.kind !== 'agentSettings' &&
             gTab.ref.kind !== 'outline' &&
             gTab.ref.kind !== 'newGoal' &&
-            gTab.ref.kind !== 'draft' && (
+            gTab.ref.kind !== 'draft' &&
+            // 视频学习页（实验）也不画：大纲/视图切换对播放器没有意义，纯净阅读
+            // 仍可用 F11（用户定的：这一页右上角不要按钮组）
+            gTab.ref.kind !== 'video' &&
+            // 插件文档页同样不画：它是参考手册，不是可编辑文档
+            gTab.ref.kind !== 'pluginDoc' && (
             <DocFloat
               /*
                * key 绑「格 + 节点」：换节点时重挂，各块 tip 的展开状态自然回到收起；
@@ -4869,6 +4977,13 @@ export default function LearnWorkspace({
     <div className="print-flat flex h-full overflow-hidden">
       <ExplorerSidebar
         store={store}
+        videos={store.videos ?? []}
+        onOpenVideo={(id) => openTab({ kind: 'video', videoId: id })}
+        onDeleteVideo={(id) =>
+          set({ ...store, videos: (store.videos ?? []).filter((v) => v.id !== id) })
+        }
+        // 视频的新建入口（顶栏按钮已移除）：开创建态页签
+        onNewVideo={() => openTab({ kind: 'video' })}
         // 高亮跟着**激活的页签**走：关掉某个节点的教学文档页签，它就不再是选中样式
         activeNodeId={selectedNodeId}
         // 文档行也一样：焦点格开着哪份笔记 / 试卷副本 / 超级文档 / 学习文档，那一行就亮

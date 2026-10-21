@@ -19,7 +19,7 @@
  *   flush.ts    关窗前的同步落盘 / local.ts 外部文件与监听 / attach.ts 附件 / ipc.ts 通道注册
  */
 
-export type { CloseBehavior, GlobalSettings } from './storage/settings'
+export type { CloseBehavior, GlobalSettings, RootRisk } from './storage/settings'
 export type { FlushItem } from './storage/flush'
 export type { AttachRead } from './storage/attach'
 export {
@@ -27,6 +27,7 @@ export {
   autoUpdate,
   closeBehavior,
   currentRoot,
+  dataRootRiskOf,
   defaultRoot,
   isCloseBehavior,
   noticeSettings,

@@ -187,6 +187,13 @@ export type CloseAction = 'close' | 'tray' | 'cancel'
 /** 数据根目录：当前用的是哪个、默认是哪个、是不是就是默认的。
  *  谁在用：preload 的 storage.info（通道 storage:info，主进程 electron/storage/ipc.ts），
  *  渲染层 src/lib/storage.ts 与 src/components/settings/StoragePanel.tsx。 */
+/** 插件配置（声明式设置面板）的读写结果：values 是解密后的明文键值 */
+export interface PluginSettingsResult {
+  ok: boolean
+  values?: Record<string, string | number | boolean>
+  error?: string
+}
+
 export interface StorageInfo {
   /** 当前生效的用户数据根目录 */
   root: string
@@ -194,7 +201,20 @@ export interface StorageInfo {
   defaultRoot: string
   /** 当前是否用的就是默认根目录 */
   isDefault: boolean
+  /**
+   * 数据根与**软件安装目录**的包含关系风险。更新走 NSIS 静默安装，会先静默卸载
+   * 旧版本——卸载器清整个安装目录，数据根只要与它有包含关系，数据就会在更新时
+   * 被一并删除（用户实测踩过）。非空时设置页要挂警告、更新安装要拦截。
+   */
+  rootRisk?: RootRisk
 }
+
+/** 数据根 × 安装目录的风险类型（判定见 electron/storage/settings 的 dataRootRiskOf） */
+export type RootRisk =
+  /** 数据根在安装目录里面：更新必删 */
+  | 'inside-install-dir'
+  /** 数据根包含安装目录：安装目录那棵子树必删（数据可能幸存，但同样不可接受） */
+  | 'contains-install-dir'
 
 /** 数据目录里的一项（文件或目录）。
  *  谁在用：preload 的 storage.list（见下面 preload 侧那份 StorageListResult），
@@ -580,6 +600,29 @@ export type WebFetchResult =
     }
   | { ok: false; error: string }
 
+/**
+ * 抓一个**网络二进制**（图片 / PDF）的结果（通道 web:fetchBinary，主进程 electron/web.ts 的 fetchBinary）。
+ *
+ * 与 web:fetch 分开的原因：那边只回 HTML / 纯文本（图片与 PDF 会被当成 kind:'other' 拒掉），
+ * 而这里要的是原始字节——走 data URL（base64）过 IPC，渲染层拿到后再按用途校验
+ * （图片看魔数、PDF 看头四个字节）。通道本身不做内容类型限制。
+ * 谁在用：preload 的 web.fetchBinary，渲染层 src/learn/see.ts（api.see 的宿主实现）。
+ */
+export type WebBinaryFetchResult =
+  | {
+      ok: true
+      url: string
+      finalUrl: string
+      status: number
+      contentType: string
+      /** 响应头或魔数认定的 mime（仅报告用；内容是否合格由调用方校验） */
+      mime: string
+      bytes: number
+      /** `data:<mime>;base64,…` 形式的字节 */
+      dataUrl: string
+    }
+  | { ok: false; error: string }
+
 /* ---------- 基础文件系统与进程管理 (base.files.* / base.process.*) ---------- */
 
 export interface BaseFileEntry {
@@ -788,3 +831,36 @@ export interface NoticeSettings {
    */
   readIds: string[]
 }
+
+/* ---------- 视频学习（实验） ---------- */
+
+/**
+ * video:fetch 的返回：主进程替来源插件发的一次 API 请求（只读 GET）。
+ *
+ * 与 web:fetch 的差别：允许插件声明 Referer / Cookie 等请求头——平台 API 大多有
+ * 防盗链校验，不带就回 403。这也正是它必须**独立成频道**的原因：web:fetch 的三条
+ * 自我约束（不带凭据）是给「agent 写的代码」设的，来源插件是用户自己装的，
+ * 信任级别不同。体积与时间仍有硬上限（见 electron/video-net）。
+ *
+ * 谁在用：主进程 electron/video-net.ts（video:fetch），preload 的 video.fetch，
+ * 渲染层 src/video/registry（插件的 ctx.fetch）。
+ */
+export type VideoApiFetchResult =
+  | { ok: true; status: number; finalUrl: string; body: string }
+  | { ok: false; error: string }
+
+/**
+ * video:openStream 的返回：媒体流的**中转地址**。
+ *
+ * 渲染层把插件给的流地址与请求头登记到主进程，换回一条
+ * `media-relay://<id>/stream?u=<encoded>` 形式的中转 URL——`<video>` 元素改不了
+ * 请求头，而平台 CDN 校验 Referer，必须由主进程的协议处理器（见
+ * electron/media-relay.ts）注入后转发。**流地址有时效**（平台签名几小时过期），
+ * 所以这个登记是「每次播放前调用」的：URL 永不落盘，转录缓存里只存媒体 id。
+ *
+ * 谁在用：主进程 electron/video-net.ts（video:openStream），preload 的 video.openStream，
+ * 渲染层 src/components/video/VideoStudyTab。
+ */
+export type VideoStreamOpenResult =
+  | { ok: true; relayUrl: string }
+  | { ok: false; error: string }

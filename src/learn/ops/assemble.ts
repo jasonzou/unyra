@@ -744,5 +744,7 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     chip: createChipOps(deps),
     // 读网页：实现整个由界面层给（见 learn/webDocs），这里只接线
     ...(deps.web ? { web: deps.web } : {}),
+    // 看图（顶层 api.see）：实现由界面层给（见 learn/see），这里只接线
+    ...(deps.see ? { see: deps.see } : {}),
   }
 }

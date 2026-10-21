@@ -42,6 +42,7 @@ export type {
   SandboxOptions,
   SandboxReply,
   SandboxRequest,
+  SeeRequest,
   SuperDocOps,
   UiCaptureResult,
   UiOps,

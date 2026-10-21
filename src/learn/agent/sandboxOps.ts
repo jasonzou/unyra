@@ -16,6 +16,7 @@ import { fetchForAgent, searchForAgent } from '../webSearch'
 import { tmpEntriesOf, withTmpEntries } from '../../lib/tmpStore'
 import { activeProfile, activeUser, updateUser } from '../../user/store'
 import { patchFromAnswers } from '../../user/fields'
+import { createSeeOps } from '../see'
 
 export interface AgentRunTarget {
   /** 上下文归属的目标：一个目标一份对话，目标下所有节点共用 */
@@ -119,6 +120,11 @@ export function learnSandboxOps(deps: {
      * 网络搜索与网页抓取：基于 DeepSeek 官方 Search API 与 Fetch API。
      */
     web: { fetch: fetchForAgent, search: searchForAgent },
+    /**
+     * 看图（顶层 api.see）：把模型递来的图片地址 / base64 转存进目标资源库并挂到下一跳。
+     * 与资源库同一套 store/goalId 现取闭包；实现见 learn/see。
+     */
+    see: createSeeOps({ getLatest: deps.getLatest, set: deps.set, goalId: deps.goalId }),
     // 临时变量按「此刻的当前节点」存取：agent 轮次里是这一轮的节点，超级文档桥里是界面当前节点
     tmp: () => {
       const nid = deps.nodeId() ?? ''

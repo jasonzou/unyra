@@ -174,6 +174,9 @@ export function createWebNativeBridge(): NativeBridge {
       reveal: () => Promise.resolve({ ok: true }),
       toggles: () => Promise.resolve({ ok: true, toggles: {} }),
       setToggle: () => Promise.resolve({ ok: true }),
+      // 插件配置只存在于桌面端（safeStorage 在主进程）
+      settingsGet: () => Promise.resolve({ ok: false, error: '插件配置仅桌面端可用' }),
+      settingsSet: () => Promise.resolve({ ok: false, error: '插件配置仅桌面端可用' }),
     },
 
     runner: {
@@ -287,6 +290,14 @@ export function createWebNativeBridge(): NativeBridge {
 
     web: {
       fetch: (url: string) => apiFetch('/api/web/fetch', { method: 'POST', body: JSON.stringify({ url }) }),
+      // Web 模式没有主进程的二进制图片通道；see(url) 在这一模式下会拿到这句明确回执
+      fetchBinary: async () => ({ ok: false as const, error: 'Web 模式暂不支持抓取网络二进制（图片/PDF），可改用 base64 传入' }),
+    },
+
+    // 视频学习（实验）在 Web 模式不可用：媒体中转协议只存在于桌面端主进程里
+    video: {
+      fetch: async () => ({ ok: false as const, error: '视频学习仅桌面端可用' }),
+      openStream: async () => ({ ok: false as const, error: '视频学习仅桌面端可用' }),
     },
 
     browser: {

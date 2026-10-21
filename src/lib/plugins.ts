@@ -28,9 +28,45 @@ import { native } from './native'
  * 插件类别。加新的一类时在这里加一个取值，并实现一份 spec（definePluginCategory）——
  * 宿主本身对类别一无所知。目前两类：
  * - markdown：文档里的一种语法 / 一段正文加工（lib/renderPlugins）；
- * - functional：给**应用**加一项能力（lib/functionalPlugins，目前是语音输入）。
+ * - functional：给**应用**加一项能力（lib/functionalPlugins，目前是语音输入）；
+ * - video：视频 / 音频来源插件（lib/videoPlugins，喂给「视频学习」页签）。
  */
-export type PluginCategory = 'markdown' | 'functional'
+export type PluginCategory = 'markdown' | 'functional' | 'video'
+
+/**
+ * 声明式配置字段：插件不画 UI，只声明字段，设置页统一渲染表单。
+ * 值存 `{数据根}/plugins-settings/{文件名}.json`；password 由主进程加密落盘。
+ */
+export type PluginSettingType = 'text' | 'password' | 'number' | 'select' | 'boolean' | 'textarea' | 'static'
+
+export interface PluginSettingField {
+  key: string
+  type: PluginSettingType
+  label: string
+  placeholder?: string
+  /** 字段下方的说明（如「怎么拿到这个值」的步骤） */
+  help?: string
+  default?: string | number | boolean
+  /** select 的选项 */
+  options?: Array<{ value: string; label: string }>
+  required?: boolean
+}
+
+/**
+ * 编译期注入的宿主能力（`new Function(…, 'host', source)` 的第 5 个参数）。
+ * 插件唯一的外部触手：网络走主进程通道（渲染层 CSP 拦外网），配置由主进程解密后交来，
+ * 日志打给控制台。插件拿不到文件系统、窗口与其他插件的数据。
+ */
+export interface PluginHost {
+  /** 已保存的配置（password 已解密）；插件在编译期拿到快照，改配置重启生效 */
+  settings: Readonly<Record<string, string | number | boolean>>
+  /** 带自定义请求头的 GET（UA / Referer / Cookie 这类 fetch() 发不出的头） */
+  fetch(
+    url: string,
+    opts?: { headers?: Record<string, string>; timeoutMs?: number },
+  ): Promise<{ ok: true; status: number; finalUrl: string; body: string } | { ok: false; error: string }>
+  log(...args: unknown[]): void
+}
 
 /** 所有插件共有的字段；各类插件在自己的 spec 里补上自己的钩子 */
 export interface PluginBase {
@@ -47,6 +83,10 @@ export interface PluginBase {
   origin?: string
   /** 有二级配置页（设置页里点这一行进得去）。目前只有功能性插件会用它 */
   configurable?: boolean
+  /** 声明式配置字段（设置页渲染成表单） */
+  settings?: PluginSettingField[]
+  /** 插件版本（视频来源插件建议声明，设置页显示） */
+  version?: string
 }
 
 export interface PluginCategorySpec {
@@ -55,6 +95,12 @@ export interface PluginCategorySpec {
   label: string
   /** 分类下面那句说明 */
   hint: string
+  /**
+   * 这一类的插件支持**热插拔**（卸了还能装回来、改了立即生效）。
+   * 只有不碰全局渲染管线的类别才配得上：video 是；markdown 不是——
+   * 它的扩展装进全局 marked 摘不下来，渲染结果还按源文缓存（见文件头）。
+   */
+  hotReload?: boolean
   /** 把外部交来的对象校验成这一类插件的形状；不合法就抛一句能直接显示给用户的话 */
   normalize(raw: Record<string, unknown>, id: string): PluginBase
   /** 这个插件声称自己做了什么（设置页显示成一行摘要） */
@@ -187,6 +233,12 @@ export interface PluginStatus {
   summary: string[]
   /** 有二级配置页（见 PluginBase.configurable） */
   configurable?: boolean
+  /** 声明式配置字段（仅已装载的插件拿得到 schema） */
+  settings?: PluginSettingField[]
+  /** 支持「测试连接」（插件声明了 onTest） */
+  testable?: boolean
+  /** 插件版本 */
+  version?: string
 }
 
 let statuses: PluginStatus[] = []
@@ -322,7 +374,21 @@ export async function refreshPlugins(): Promise<PluginStatus[]> {
       defaultEnabled: false,
       ...(prev?.error ? { error: prev.error } : {}),
       summary: prev?.summary ?? [],
+      ...(prev?.settings ? { settings: prev.settings } : {}),
+      ...(prev?.version ? { version: prev.version } : {}),
+      ...(prev?.testable ? { testable: true } : {}),
     })
+  }
+
+  /*
+   * 磁盘上没了的（删了 / 改名了）热插拔插件即时卸掉：注册表要与目录一致，
+   * 否则「删了文件还能解析」是另一种惊吓。markdown 等重启（扩展摘不下来）。
+   */
+  for (const file of [...loadedUserFiles.keys()]) {
+    if (entries.some((e) => e.file === file)) continue
+    const id = loadedUserFiles.get(file)
+    const plugin = id ? registry.get(id) : undefined
+    if (plugin && isHotReloadCategory(plugin.category)) unloadUserPlugin(file)
   }
 
   statuses = rows
@@ -349,24 +415,166 @@ function describeOf(plugin: PluginBase): string[] {
  * （理由见文件头与 lib/renderPlugins）。//# sourceURL 是给调试用的——报错时控制台里
  * 能看见是哪个插件文件。
  */
-export function compilePlugin(source: string, file: string): PluginBase {
-  const factory = new Function('register', 'module', 'exports', source + '\n//# sourceURL=moji-plugin/' + file + '\n')
+/** 编译器当前正在装的插件所属宿主（编译是同步的，单线程下一格就够） */
+let compileHostRef: PluginHost | null = null
+
+/**
+ * 插件 id → 来源文件：设置页拿到的是**文件名**（用户插件的状态行 id 就是文件），
+ * 而注册表里的插件按声明 id 收；两边要能对上（测试连接、按文件找插件都靠它）。
+ */
+const pluginOrigins = new Map<string, string>()
+
+/**
+ * 已装载的用户插件：文件 → 声明 id。
+ * 卸载/重载要按**文件**找回来（同一个文件可能先叫 a 后改叫 b）。
+ */
+const loadedUserFiles = new Map<string, string>()
+
+/** 这个文件此刻装着吗（设置页按钮与开关文案用它区分「重启后」） */
+export function isUserPluginLoaded(file: string): boolean {
+  return loadedUserFiles.has(file)
+}
+
+export function notePluginOrigin(id: string, file: string): void {
+  pluginOrigins.set(id, file)
+}
+
+export function pluginOriginOf(id: string): string | undefined {
+  return pluginOrigins.get(id)
+}
+
+/** 类别模块在 normalize 里取一份当前编译的宿主（video 插件把它缝进插件对象） */
+export function currentCompileHost(): PluginHost | null {
+  return compileHostRef
+}
+
+export function compilePlugin(source: string, file: string, host?: PluginHost): PluginBase {
+  const factory = new Function(
+    'register', 'module', 'exports', 'host',
+    source + '\n//# sourceURL=moji-plugin/' + file + '\n',
+  )
   let declared: unknown = null
   const mod = { exports: {} as Record<string, unknown> }
-  factory(
-    (plugin: unknown) => {
-      declared = plugin
+  const prevHost = compileHostRef
+  compileHostRef = host ?? null
+  try {
+    factory(
+      (plugin: unknown) => {
+        declared = plugin
+      },
+      mod,
+      mod.exports,
+      host ?? {},
+    )
+    const candidate = declared ?? mod.exports
+    const value =
+      candidate && typeof candidate === 'object' && 'default' in (candidate as Record<string, unknown>)
+        ? (candidate as Record<string, unknown>).default
+        : candidate
+    if (!value || typeof value !== 'object') throw new Error(t('插件没有交出对象（需要调用 register({…})）'))
+    /*
+     * 注册（normalize 里读 currentCompileHost 缝宿主）必须在**还原之前**完成：
+     * 放在 finally 外面的话宿主引用已经还原成 null，插件装载成功却拿不到 settings/fetch
+     * （用户实测报「插件没有装载上下文」——就是这个顺序错的）。
+     */
+    return registerPlugin(value, file.replace(/\.js$/i, ''))
+  } finally {
+    compileHostRef = prevHost
+  }
+}
+
+/**
+ * 给一个用户插件造宿主：配置从主进程读（password 已解密），网络走 video:fetch 通道。
+ * 读配置失败不影响装载——插件用它自己声明的默认值，界面上会提示「未配置」。
+ */
+async function makeHost(file: string): Promise<PluginHost> {
+  let settings: Record<string, string | number | boolean> = {}
+  try {
+    const res = await native().plugins.settingsGet(file)
+    if (res.ok && res.values) settings = res.values
+  } catch {
+    // 应用没跑在 Electron 里 / 磁盘读不出来：按空配置装载
+  }
+  return {
+    settings: Object.freeze({ ...settings }),
+    async fetch(url, opts) {
+      try {
+        const res = await native().video.fetch(url, opts?.headers)
+        return res.ok
+          ? { ok: true as const, status: res.status, finalUrl: res.finalUrl, body: res.body }
+          : { ok: false as const, error: res.error }
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      }
     },
-    mod,
-    mod.exports,
-  )
-  const candidate = declared ?? mod.exports
-  const value =
-    candidate && typeof candidate === 'object' && 'default' in (candidate as Record<string, unknown>)
-      ? (candidate as Record<string, unknown>).default
-      : candidate
-  if (!value || typeof value !== 'object') throw new Error(t('插件没有交出对象（需要调用 register({…})）'))
-  return registerPlugin(value, file.replace(/\.js$/i, ''))
+    log: (...args: unknown[]) => console.info('[plugin:' + file + ']', ...args),
+  }
+}
+
+/**
+ * 编译并登记**一个**用户插件：读源码 → 造宿主 → 编译 → 记录账本。
+ * 失败只把原因交回去，不抛——调用方决定是记在状态行上还是回给用户。
+ */
+async function compileUserPlugin(
+  file: string,
+): Promise<{ ok: true; plugin: PluginBase } | { ok: false; error: string }> {
+  const src = await readSource(file)
+  if (!src.ok) return { ok: false, error: src.error }
+  try {
+    const host = await makeHost(file)
+    const plugin = compilePlugin(src.content, file, host)
+    notePluginOrigin(plugin.id, file)
+    loadedUserFiles.set(file, plugin.id)
+    return { ok: true, plugin }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** 把一次编译的结果写进状态行（装载成功 / 失败原因） */
+function applyCompiledToStatus(file: string, plugin: PluginBase | null, error?: string): void {
+  const status = statuses.find((s) => s.kind === 'user' && s.file === file)
+  if (!status) return
+  if (plugin) {
+    status.active = true
+    status.name = plugin.name ?? status.name
+    status.category = plugin.category
+    status.summary = describeOf(plugin)
+    if (plugin.settings?.length) status.settings = plugin.settings
+    if (plugin.version) status.version = plugin.version
+    if (typeof (plugin as { onTest?: unknown }).onTest === 'function') status.testable = true
+    delete status.error
+  } else {
+    status.active = false
+    if (error) status.error = error
+  }
+}
+
+/** 卸载一个文件的插件（按账本找回声明 id）；没装着就返回 false */
+export function unloadUserPlugin(file: string): boolean {
+  const id = loadedUserFiles.get(file)
+  if (!id) return false
+  loadedUserFiles.delete(file)
+  return unregisterPlugin(id)
+}
+
+/**
+ * 热重载一个文件：先卸旧的再编新的（宁可短暂没有，也不留半个旧插件）。
+ * 只有声明了 hotReload 的类别允许走到这里——其余类别照样要重启（见 setPluginEnabled）。
+ * 失败时插件处于「没装着」状态并把原因记到状态行，用户改好文件点「重新加载」即可。
+ */
+export async function reloadUserPlugin(file: string): Promise<string | null> {
+  // 只有热插拔类别允许重载；markdown 的扩展摘不下来，改动只能重启（见类别注释）
+  const category = await peekCategoryOf(file)
+  if (!isHotReloadCategory(category)) return t('这类插件的改动需要重启应用才生效')
+  unloadUserPlugin(file)
+  const compiled = await compileUserPlugin(file)
+  if (!compiled.ok) {
+    applyCompiledToStatus(file, null, compiled.error)
+    return compiled.error
+  }
+  applyCompiledToStatus(file, compiled.plugin)
+  return null
 }
 
 async function readSource(file: string): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
@@ -394,20 +602,8 @@ export async function loadPlugins(): Promise<void> {
   await refreshPlugins()
   for (const status of statuses) {
     if (status.kind !== 'user' || !status.enabled) continue
-    const src = await readSource(status.file as string)
-    if (!src.ok) {
-      status.error = src.error
-      continue
-    }
-    try {
-      const plugin = compilePlugin(src.content, status.file as string)
-      status.active = true
-      status.name = plugin.name ?? status.name
-      status.category = plugin.category
-      status.summary = describeOf(plugin)
-    } catch (err) {
-      status.error = err instanceof Error ? err.message : String(err)
-    }
+    const compiled = await compileUserPlugin(status.file as string)
+    applyCompiledToStatus(status.file as string, compiled.ok ? compiled.plugin : null, compiled.ok ? undefined : compiled.error)
   }
   const active = statuses.filter((s) => s.active).length
   const failed = statuses.filter((s) => s.enabled && !s.active).length
@@ -424,6 +620,7 @@ export async function setPluginEnabled(id: string, enabled: boolean): Promise<st
     if (blocked) return blocked
   }
   const builtin = builtins.find((p) => p.id === id)
+  const wasLoaded = loadedUserFiles.has(id)
   try {
     const res = builtin ? await native().plugins.setToggle(id, enabled) : await native().plugins.setEnabled(id, enabled)
     if (!res.ok) return res.error ?? t('没能保存')
@@ -431,7 +628,57 @@ export async function setPluginEnabled(id: string, enabled: boolean): Promise<st
     return t('应用没有跑在 Electron 里')
   }
   await refreshPlugins()
+  if (builtin) return null
+
+  /*
+   * 热插拔（用户定的：视频来源这类要能即开即用）：
+   * - 开：先编译，声明类别带 hotReload 才留着跑；其余（markdown）编完立刻摘掉，
+   *   维持「重启后装载」的旧语义——它们的扩展装进全局 marked，摘不下来也热不得。
+   * - 关：只有已装载且是热插拔类别的才即时卸载；markdown 照旧等重启。
+   * 判断类别靠扫源码里的 category 声明（不编译猜不出、编译 markdown 又有副作用）：
+   * 扫到 video（或其它 hotReload 类别）才做即时装载，扫不到一律走重启语义。
+   */
+  if (enabled) {
+    const category = await peekCategoryOf(id)
+    if (!isHotReloadCategory(category)) return null
+    const compiled = await compileUserPlugin(id)
+    if (!compiled.ok) {
+      applyCompiledToStatus(id, null, compiled.error)
+      return compiled.error
+    }
+    applyCompiledToStatus(id, compiled.plugin)
+    return null
+  }
+  if (wasLoaded) {
+    const pluginId = loadedUserFiles.get(id)
+    const plugin = pluginId ? pluginById(pluginId) : undefined
+    if (plugin && isHotReloadCategory(plugin.category)) {
+      unloadUserPlugin(id)
+      applyCompiledToStatus(id, null)
+    }
+  }
   return null
+}
+
+/** 这个类别是否支持热插拔（未知类别当不支持——宁可让用户重启） */
+function isHotReloadCategory(category: PluginCategory | null): boolean {
+  if (!category) return false
+  try {
+    return pluginCategorySpec(category).hotReload === true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 扫源码里的 `category: 'xxx'` 声明。只在**决定要不要即时装载**时用：
+ * 编译 markdown 插件有副作用（marked 扩展装上去摘不下来），不能拿编译去探类别。
+ */
+async function peekCategoryOf(file: string): Promise<PluginCategory | null> {
+  const src = await readSource(file)
+  if (!src.ok) return null
+  const m = /\bcategory\s*:\s*['"]([a-z-]+)['"]/.exec(src.content)
+  return (m ? (m[1] as PluginCategory) : null) ?? null
 }
 
 /** 在系统文件管理器里打开用户插件目录；成功给 null */

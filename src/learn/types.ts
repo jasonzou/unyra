@@ -475,6 +475,19 @@ export type TabRef =
    * 下一次专注开始时会再建一份。
    */
   | { kind: 'guard' }
+  /**
+   * 视频页签（见 components/video/VideoStudyTab）。两种形态：
+   * - 带 videoId：**绑定**到一个视频资源（描述在 learn/types 的 VideoResource），
+   *   页里没有输入组件，打开即自动解析；
+   * - 不带 videoId：**创建**态（全局一份），只有输入框 + 插件匹配 + 创建按钮。
+   * 页签持久化；解析结果不落盘（流地址带签名会过期，重开再解析）。
+   */
+  | { kind: 'video'; videoId?: string }
+  /**
+   * 插件开发文档页签：介绍插件契约与配置面板（见 components/plugins/PluginDoc）。
+   * 跟着页签持久化（normalize 认它），内容全是静态文档，没有要落盘的状态。
+   */
+  | { kind: 'pluginDoc' }
   /** 一份专注模式报告（只读，见 learn/focusGuard 的 FocusReport 与 FocusReportView） */
   | { kind: 'report'; reportId: string }
   /**
@@ -628,6 +641,45 @@ export type FavoriteRef =
  */
 export type FavoriteItem = FavoriteRef & { at: number; group?: string }
 
+/**
+ * 一个视频资源：**创建时确定**的「插件 + 输入 + 插件专属数据」。
+ *
+ * 与「视频页签」的关系：页签只记 id，资源记内容。所以页签关掉再开、换机器带
+ * state.json 走，都能复原；资源被删则页签显示「已删除」的占位。
+ *
+ * fields 是插件在 createFields 里声明的**每个视频各自的**数据（例如画质），
+ * 解析时与插件全局配置合并进 host.settings（同键以这里为准）——插件不需要
+ * 区分两份配置从哪来。
+ */
+export interface VideoResource {
+  id: string
+  /** 处理它的插件的声明 id（插件被删时视频仍列着，解析会报插件不存在） */
+  pluginId: string
+  /** 插件显示名的快照（列表里不依赖插件是否还装着） */
+  pluginName?: string
+  /** 创建时的输入（原样交给插件 match / resolve） */
+  input: string
+  /** createFields 的值（创建时填好，之后不再改） */
+  fields?: Record<string, string | number | boolean>
+  /** 列表显示名：创建时取输入截断，解析成功后由插件给的标题覆盖 */
+  title: string
+  /**
+   * 选集状态（**通用状态归宿主**）：用户在合集 / 分 P 列表里最终停在的那一项。
+   * source 是那一项能被插件再认领的输入串（如带 ?p=N 的链接）；没选过就是创建时
+   * 的 input。重开页签按它解析——「上次看的那一集」也在进度里，见下。
+   */
+  selection?: { source: string; title?: string }
+  /**
+   * 播放进度（**通用状态归宿主**）：上次播放到哪儿，打开绑定页签时自动跳回。
+   * source 记住这是**哪一项**的进度（换选集后旧进度不再乱套到新一集上当续播）。
+   * 播放器自身的偏好（音量 / 倍速 / 静音）属于本机，不在这里（见 VideoPlayer 的
+   * localStorage）；插件专属的状态放 fields。
+   */
+  progress?: { source?: string; positionMs: number; updatedAt: number }
+  createdAt: number
+  updatedAt?: number
+}
+
 export interface LearnStore {
   version: 2
   nodes: KnowledgeNode[]
@@ -684,6 +736,12 @@ export interface LearnStore {
    * 与「在学哪门课」无关，删掉目标也不该带走它。可选，理由同上（旧数据没有这个字段）。
    */
   schedule?: ScheduleStore
+  /**
+   * 视频资源（见 learn/videos）：用户创建的「绑定住的视频来源」。
+   * 与日程同一档——用户级、整块存 state.json、不挂任何节点；删目标不该带走它。
+   * 视频页签按 video.id 绑定；插件与输入在创建时确定，之后不再让用户重填。
+   */
+  videos?: VideoResource[]
   /**
    * 目标级资源库的清单：目标 id → 资源列表（见 learn/static）。
    * 只放元数据，文件本体在 `{目标}/static/` 下——与图片引用一样的取舍：

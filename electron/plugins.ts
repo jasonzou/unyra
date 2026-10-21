@@ -15,14 +15,14 @@
  * import 不了包），支持子目录只会让人以为可以。要给插件用的重库由宿主白名单提供
  * （见 src/lib/renderPlugins 的 PLUGIN_LIBS）。
  */
-import { ipcMain, shell } from 'electron'
+import { ipcMain, safeStorage, shell } from 'electron'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { t } from './i18n'
 import { currentRoot, pluginToggles, setPluginToggle } from './storage'
 
 import type {
-  PluginEntry, PluginListResult, PluginSourceResult,
+  PluginEntry, PluginListResult, PluginSettingsResult, PluginSourceResult,
 } from '../shared/ipc'
 
 // PluginEntry / PluginListResult / PluginSourceResult 原先在这里也写了一份
@@ -162,6 +162,106 @@ async function setPluginEnabled(file: unknown, enabled: unknown): Promise<Result
   return writeEnabled(next)
 }
 
+/* ---------- 插件配置（声明式设置面板的落盘） ---------- */
+
+/** 配置目录名：跟插件目录并排，跟着数据目录走 */
+const SETTINGS_DIR = 'plugins-settings'
+
+/** 配置文件的路径：文件名与 pluginPath 同一套校验（只认一层 .js 名） */
+function settingsPath(file: unknown): string | null {
+  const full = pluginPath(file)
+  if (!full) return null
+  return path.join(currentRoot(), SETTINGS_DIR, path.basename(full) + '.json')
+}
+
+/**
+ * 读一个插件的配置。password 字段密文存、这里解密——明文只活到渲染层内存里。
+ * 文件不存在 = 还没配过（不是错误）；解不开（换机器、系统钥匙串换了）当空串，
+ * 用户重新填一次即可。
+ */
+async function loadPluginSettings(file: unknown): Promise<PluginSettingsResult> {
+  const full = settingsPath(file)
+  if (!full) return { ok: false, error: t('插件文件名不合法') }
+  try {
+    const raw = JSON.parse(await fsp.readFile(full, 'utf-8')) as {
+      values?: Record<string, unknown>
+      secrets?: Record<string, { enc?: string; raw?: string }>
+    }
+    const values: Record<string, string | number | boolean> = {}
+    for (const [k, v] of Object.entries(raw.values ?? {})) {
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') values[k] = v
+    }
+    for (const [k, box] of Object.entries(raw.secrets ?? {})) {
+      if (typeof box?.raw === 'string') {
+        values[k] = box.raw // 系统不支持加密时的降级形态（保存时已如实标记）
+      } else if (typeof box?.enc === 'string') {
+        try {
+          values[k] = safeStorage.decryptString(Buffer.from(box.enc, 'base64'))
+        } catch {
+          values[k] = ''
+        }
+      }
+    }
+    return { ok: true, values }
+  } catch (err) {
+    if (isMissing(err)) return { ok: true, values: {} }
+    return { ok: false, error: t('插件配置读不出来：{0}', errText(err)) }
+  }
+}
+
+/**
+ * 写配置。`secrets` 列出的 key 用 safeStorage 加密（Windows 走 DPAPI）；
+ * 系统不支持加密时降级为明文并标记 `raw`——不假装存住了安全的东西，
+ * 渲染层据此在表单上提示。
+ */
+async function savePluginSettings(
+  file: unknown,
+  values: unknown,
+  secrets: unknown,
+): Promise<PluginSettingsResult> {
+  const full = settingsPath(file)
+  if (!full) return { ok: false, error: t('插件文件名不合法') }
+  const plain: Record<string, string | number | boolean> = {}
+  if (values && typeof values === 'object') {
+    for (const [k, v] of Object.entries(values as Record<string, unknown>)) {
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') plain[k] = v
+    }
+  }
+  const secretKeys = new Set(
+    Array.isArray(secrets) ? secrets.filter((k): k is string => typeof k === 'string') : [],
+  )
+  const stored: { values: Record<string, string | number | boolean>; secrets: Record<string, { enc?: string; raw?: string }> } = {
+    values: {},
+    secrets: {},
+  }
+  for (const [k, v] of Object.entries(plain)) {
+    if (!secretKeys.has(k)) {
+      stored.values[k] = v
+      continue
+    }
+    const text = String(v)
+    try {
+      if (text && safeStorage.isEncryptionAvailable()) {
+        stored.secrets[k] = { enc: safeStorage.encryptString(text).toString('base64') }
+      } else if (text) {
+        stored.secrets[k] = { raw: text }
+      }
+    } catch {
+      stored.secrets[k] = { raw: text }
+    }
+  }
+  try {
+    await fsp.mkdir(path.dirname(full), { recursive: true })
+    // 原子写：先 .tmp 再改名，写坏不至于把上一份配置弄丢
+    const tmp = full + '.tmp'
+    await fsp.writeFile(tmp, JSON.stringify({ version: 1, ...stored }, null, 2), 'utf-8')
+    await fsp.rename(tmp, full)
+    return { ok: true, values: plain }
+  } catch (err) {
+    return { ok: false, error: t('插件配置写不进去：{0}', errText(err)) }
+  }
+}
+
 /** 在系统文件管理器里打开插件目录（用户要往里放文件） */
 async function revealPlugins(): Promise<Result> {
   try {
@@ -180,6 +280,11 @@ export function registerPluginIpc(): void {
   ipcMain.handle('plugins:read', (_e, file: unknown) => readPluginSource(file))
   ipcMain.handle('plugins:setEnabled', (_e, file: unknown, enabled: unknown) => setPluginEnabled(file, enabled))
   ipcMain.handle('plugins:reveal', () => revealPlugins())
+  // 插件配置（声明式设置面板）：password 字段主进程加密，明文不落盘
+  ipcMain.handle('plugins:settingsGet', (_e, file: unknown) => loadPluginSettings(file))
+  ipcMain.handle('plugins:settingsSet', (_e, file: unknown, values: unknown, secrets: unknown) =>
+    savePluginSettings(file, values, secrets),
+  )
   // 内置插件（编译进包的那些）：全量清单在渲染层，主进程只存开关。
   // 它们跟机器走，因此落在 appdata 的 global.yaml（见 storage.ts 的 pluginToggles）。
   ipcMain.handle('plugins:toggles', () => ({ ok: true, toggles: pluginToggles() }))

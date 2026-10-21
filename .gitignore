@@ -57,3 +57,6 @@ perf-lab/tab-switch-lab*.html
 
 # 公告编辑器的本地草稿（公告正文不该进版本库；工具本身在 tools/notice-studio/）
 tools/notice-studio/draft.json
+
+# 根目录 plugins/：本地自测用的插件文件，仅开发时手动装，不进版本库也不随包分发
+plugins/

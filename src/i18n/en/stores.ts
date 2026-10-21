@@ -127,6 +127,20 @@ const dict: Record<string, string> = {
   '这个文件不是能识别的图片': 'This file is not a recognizable image',
   '当前环境无法缩放图片': 'Images cannot be scaled in this environment',
 
+  // ---------- learn/see：api.see 的取图与落库 ----------
+  '图片超过 12MB，先换一张小一点的或压缩后再试': 'The image is over 12 MB — use a smaller one or compress it first',
+  '图片字节解码失败': 'Failed to decode the image bytes',
+  '这不是一张合法的 data URL': 'This is not a valid data URL',
+  '图片数据不是合法的 base64': 'The image data is not valid base64',
+  '取图失败：{0}': 'Fetching the image failed: {0}',
+  '图片数据是空的': 'The image data is empty',
+  '这不是一张能识别的图片': 'This is not a recognizable image',
+  '图片处理失败：{0}': 'Processing the image failed: {0}',
+  '这不是一份 PDF（{0}）': 'This is not a PDF ({0})',
+  '图片与已有资源「{0}」内容相同，但它的文件读不到，请重试或换一张': 'The image matches the existing resource "{0}" but its file cannot be read; try again or use another image',
+  '找不到这个目标的目录，图片存不了': 'The folder for this goal could not be found; the image cannot be saved',
+  '图片存盘失败（清单没有改动）': 'Failed to save the image (the manifest is unchanged)',
+
   // ---------- user/fields：资料字段 ----------
   '讲解语言': 'Explanation language',
 

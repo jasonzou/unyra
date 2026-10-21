@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
+  BookOpen,
   Cpu,
   FolderOpen,
   PlugZap,
@@ -24,11 +25,16 @@ import {
   revealPluginDir,
   pluginEnableBlocker,
   setPluginEnabled,
+  reloadUserPlugin,
   type PluginStatus,
 } from '../../lib/plugins'
 import { artifactCount, clearArtifacts, loadArtifacts, silentCount } from '../../lib/codeArtifacts'
 import { t } from '../../i18n'
 import { pluginHint } from './pluginHints'
+import { native } from '../../lib/native'
+import type { PluginSettingField } from '../../lib/plugins'
+import { testVideoPlugin } from '../../lib/videoPlugins'
+import { openPluginDocTab } from '../../lib/pluginDoc'
 
 interface Props {
   onToast: (msg: string) => void
@@ -47,6 +53,7 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
     refreshPlugins().then((next) => {
       setList([...next])
       setListError(pluginListError())
+      return next
     })
 
   useEffect(() => {
@@ -79,13 +86,28 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
   const toggle = async (id: string, on: boolean) => {
     setBusy(id)
     const err = await setPluginEnabled(id, on)
-    setBusy('')
     if (err) {
+      setBusy('')
       onToast(t(err))
+      await reload()
       return
     }
+    // 热插拔类别（视频来源）即时装卸：装没装上看刷新后的那一行
+    const next = await reload()
+    setBusy('')
+    const row = next.find((p) => p.id === id)
+    if (on) onToast(row?.active ? t('已启用并生效') : t('已启用，重启后生效'))
+    else onToast(row && !row.active ? t('已停用并卸载') : t('已停用，重启后生效'))
+  }
+
+  /** 手动重新加载（视频来源这类热插拔插件：改完文件不用重启） */
+  const reloadPlugin = async (p: PluginStatus) => {
+    if (!p.file) return
+    setBusy(p.id)
+    const err = await reloadUserPlugin(p.file)
     await reload()
-    onToast(on ? t('已启用，重启后生效') : t('已停用，重启后生效'))
+    setBusy('')
+    onToast(err ? t(err) : t('已重新加载'))
   }
 
   const restartNeeded = list.some((p) => p.enabled !== p.active)
@@ -105,18 +127,29 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            void revealPluginDir().then((err) => {
-              if (err) onToast(t(err))
-            })
-          }}
-          className="flex items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 py-1.5 text-[11.5px] font-medium text-ink transition hover:border-line-strong hover:bg-card/80"
-        >
-          <FolderOpen size={13} className="text-seal" />
-          <span>{t('打开插件目录')}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 插件开发文档：开一个独立页签（可导出 .md），给写插件的人看 */}
+          <button
+            type="button"
+            onClick={() => openPluginDocTab()}
+            className="flex items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 py-1.5 text-[11.5px] font-medium text-ink transition hover:border-line-strong hover:bg-card/80"
+          >
+            <BookOpen size={13} className="text-seal" />
+            <span>{t('插件开发文档')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void revealPluginDir().then((err) => {
+                if (err) onToast(t(err))
+              })
+            }}
+            className="flex items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 py-1.5 text-[11.5px] font-medium text-ink transition hover:border-line-strong hover:bg-card/80"
+          >
+            <FolderOpen size={13} className="text-seal" />
+            <span>{t('打开插件目录')}</span>
+          </button>
+        </div>
       </div>
 
       {/* 重启提示横幅 */}
@@ -157,10 +190,8 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
                     const blocked = !p.enabled ? blockers[p.id] : undefined
 
                     return (
-                      <div
-                        key={p.id}
-                        className="flex flex-col justify-between gap-3 rounded-xl border border-line bg-card/70 p-3.5 transition-all duration-150 hover:border-line-strong sm:flex-row sm:items-center"
-                      >
+                      <div key={p.id} className="flex flex-col gap-2">
+                      <div className="flex flex-col justify-between gap-3 rounded-xl border border-line bg-card/70 p-3.5 transition-all duration-150 hover:border-line-strong sm:flex-row sm:items-center">
                         {/* 左侧：标题、状态与说明 */}
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
@@ -199,6 +230,18 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
 
                         {/* 右侧：配置按钮与开关 */}
                         <div className="flex shrink-0 items-center gap-2">
+                          {p.kind === 'user' && p.category === 'video' && p.file && (
+                            <button
+                              type="button"
+                              title={t('重新加载（改动立即生效）')}
+                              aria-label={t('重新加载（改动立即生效）')}
+                              disabled={busy === p.id}
+                              onClick={() => void reloadPlugin(p)}
+                              className="flex h-7 w-7 items-center justify-center border-0 bg-transparent text-ink-soft transition hover:text-ink disabled:opacity-40"
+                            >
+                              <RefreshCw size={14} />
+                            </button>
+                          )}
                           {p.configurable && (
                             <button
                               type="button"
@@ -220,6 +263,11 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
                             label=""
                           />
                         </div>
+                      </div>
+                      {/* 声明式配置表单：字段由插件声明，值与加密都由主进程管（见 electron/plugins） */}
+                      {p.category === 'video' && p.settings?.length ? (
+                        <PluginSettingsForm file={p.id} fields={p.settings} testable={p.testable === true} onToast={onToast} />
+                      ) : null}
                       </div>
                     )
                   })}
@@ -280,6 +328,177 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
           {t('用户放置在数据目录下的本地插件具备与应用同等的运行权限（可读取笔记内容与访问本地磁盘）。请仅安装来源可靠、内容清晰的脚本插件。内置功能性插件（如语音输入）为官方打包集成，安全隔离运行。')}
         </p>
       </div>
+    </div>
+  )
+}
+
+
+/**
+ * 视频来源插件的**声明式配置表单**（字段由插件在 manifest 里声明，见 lib/plugins 的
+ * PluginSettingField）。值存主进程（password 字段加密落盘）；插件在编译期拿快照，
+ * 所以保存后要重启才生效——这一点直接写在按钮旁边，别让用户猜。
+ */
+function PluginSettingsForm({
+  file,
+  fields,
+  testable,
+  onToast,
+}: {
+  file: string
+  fields: PluginSettingField[]
+  /** 插件声明了 onTest（设置页显示「测试连接」） */
+  testable: boolean
+  onToast: (msg: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [values, setValues] = useState<Record<string, string | number | boolean>>({})
+
+  const seed = (): Record<string, string | number | boolean> => {
+    const base: Record<string, string | number | boolean> = {}
+    for (const f of fields) {
+      if (f.default !== undefined) base[f.key] = f.default
+      else if (f.type === 'boolean') base[f.key] = false
+      else base[f.key] = ''
+    }
+    return base
+  }
+
+  const expand = () => {
+    if (!open && !loaded) {
+      void native()
+        .plugins.settingsGet(file)
+        .then((res) => {
+          setValues({ ...seed(), ...(res.ok ? res.values ?? {} : {}) })
+          setLoaded(true)
+        })
+    }
+    setOpen(!open)
+  }
+
+  const save = () => {
+    if (saving) return
+    setSaving(true)
+    const secrets = fields.filter((f) => f.type === 'password').map((f) => f.key)
+    void native()
+      .plugins.settingsSet(file, values, secrets)
+      .then(async (res) => {
+        if (!res.ok) {
+          setSaving(false)
+          onToast(res.error ?? t('没能保存'))
+          return
+        }
+        // 配置是编译期快照：存完立刻热重载，插件马上用上新值（视频来源这类热插拔类别）
+        const err = await reloadUserPlugin(file)
+        setSaving(false)
+        onToast(err ? t('已保存，但重新加载失败：{0}', err) : t('已保存并生效'))
+      })
+  }
+
+  return (
+    <div className="rounded-xl border border-dashed border-line bg-card/40 px-3.5 py-2.5">
+      <button
+        type="button"
+        onClick={expand}
+        className="flex w-full items-center gap-1.5 text-[11.5px] font-medium text-ink-soft transition hover:text-ink"
+      >
+        <Settings size={12} />
+        {t('插件配置')}
+        <span className="text-ink-faint">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-2.5">
+          {fields.map((f) => (
+            <label key={f.key} className="flex flex-col gap-1">
+              {f.type !== 'static' && (
+                <span className="text-[11.5px] font-medium text-ink">
+                  {f.label}
+                  {f.required && <span className="ml-0.5 text-seal">*</span>}
+                </span>
+              )}
+              {f.type === 'static' ? (
+                <p className="text-[11px] leading-relaxed text-ink-faint">{f.label}</p>
+              ) : f.type === 'boolean' ? (
+                <Switch
+                  bare
+                  on={values[f.key] === true}
+                  onChange={(next) => setValues((v) => ({ ...v, [f.key]: next }))}
+                  label={f.label}
+                />
+              ) : f.type === 'select' ? (
+                <select
+                  value={String(values[f.key] ?? '')}
+                  onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                  className="rounded-lg border border-line bg-card px-2 py-1.5 text-[12px] text-ink outline-none focus:border-seal/50"
+                >
+                  {(f.options ?? []).map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : f.type === 'textarea' ? (
+                <textarea
+                  value={String(values[f.key] ?? '')}
+                  placeholder={f.placeholder}
+                  rows={3}
+                  onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                  className="rounded-lg border border-line bg-card px-2 py-1.5 font-mono text-[11.5px] text-ink outline-none placeholder:text-ink-faint focus:border-seal/50"
+                />
+              ) : (
+                <input
+                  type={f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}
+                  value={String(values[f.key] ?? '')}
+                  placeholder={f.placeholder}
+                  onChange={(e) =>
+                    setValues((v) => ({
+                      ...v,
+                      [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value,
+                    }))
+                  }
+                  className="rounded-lg border border-line bg-card px-2 py-1.5 text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-seal/50"
+                />
+              )}
+              {f.help && <span className="text-[10.5px] leading-relaxed text-ink-faint">{f.help}</span>}
+            </label>
+          ))}
+          {fields.some((f) => f.type === 'password') && (
+            <p className="text-[10.5px] leading-relaxed text-ink-faint">
+              {t('密码类字段由系统加密存储（换机器后需要重新填写）。')}
+            </p>
+          )}
+          <div className="flex items-center justify-end gap-2">
+            <span className="mr-auto text-[10.5px] text-ink-faint">{t('保存后立即生效')}</span>
+            {testable && (
+              <button
+                type="button"
+                disabled={testing}
+                onClick={() => {
+                  if (testing) return
+                  setTesting(true)
+                  void testVideoPlugin(file).then((res) => {
+                    setTesting(false)
+                    onToast(res.message || (res.ok ? t('连接正常') : t('连接失败')))
+                  })
+                }}
+                className="rounded-lg border border-line px-2.5 py-1.5 text-[11.5px] text-ink-soft transition hover:bg-line/50 disabled:opacity-40"
+              >
+                {testing ? t('测试中…') : t('测试连接')}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={saving}
+              onClick={save}
+              className="rounded-lg bg-ink px-2.5 py-1.5 text-[11.5px] font-medium text-paper transition hover:bg-ink-strong disabled:opacity-40"
+            >
+              {saving ? t('保存中…') : t('保存')}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

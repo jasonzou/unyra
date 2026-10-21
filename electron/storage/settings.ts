@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { app } from 'electron'
 import { isUpdateChannel } from '../update-core'
 import { getLocale, t } from '../i18n'
 import { getUserDataDir } from './userData'
@@ -273,6 +274,54 @@ export function currentRoot(): string {
   return loadGlobal().root || defaultRoot()
 }
 
+/* ---------- 数据根 × 安装目录的风险检测 ---------- */
+
+/**
+ * 安装目录（exe 所在目录）。开发态返回 null：exe 在 node_modules 的 electron 里，
+ * 「安装目录」这个概念不存在，校验只会误伤。
+ */
+function installDirOf(): string | null {
+  if (!app.isPackaged) return null
+  try {
+    return fs.realpathSync(path.dirname(app.getPath('exe')))
+  } catch {
+    return null
+  }
+}
+
+/** 路径归一：resolve + 去尾分隔符；Windows 另做小写（不分区大小写） */
+function normPath(p: string): string {
+  const resolved = path.resolve(p).replace(/[\\/]+$/, '')
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
+/** 数据根 × 安装目录的风险类型（形状与 shared/ipc 的 RootRisk 一致） */
+export type RootRisk = 'inside-install-dir' | 'contains-install-dir'
+
+/**
+ * 数据根与安装目录的**互相包含**检测（shared/ipc 的 RootRisk）。
+ *
+ * 为什么要拦：更新走 electron-updater + NSIS 静默安装，会先静默卸载旧版本——
+ * 卸载器清整个安装目录。数据根只要与安装目录有包含关系（在里面、或者把它包住了），
+ * 更新那一刻数据就会（或可能）被一并删掉。`deleteAppDataOnUninstall: false` 只保护
+ * appdata 里的 userData（global.yaml 所在地），管不到用户自选的数据根——这正是
+ * 用户反馈「更新后数据没了」的根因。根在 `setRoot` 入口处拒绝是最便宜的解。
+ */
+export function dataRootRiskOf(root: string): RootRisk | null {
+  const installDir = installDirOf()
+  if (!installDir || !root.trim()) return null
+  let r: string
+  try {
+    r = normPath(fs.realpathSync(root))
+  } catch {
+    r = normPath(root)
+  }
+  const i = normPath(installDir)
+  if (r === i || r.startsWith(i + path.sep)) return 'inside-install-dir'
+  if (i.startsWith(r + path.sep)) return 'contains-install-dir'
+  return null
+}
+
 /**
  * 切换根目录。空串表示恢复默认。
  * 落盘前先建目录并写一个探针文件：把不可写的路径存下来，只会让之后所有读写
@@ -283,6 +332,22 @@ export function currentRoot(): string {
 export async function setRoot(dir: unknown): Promise<{ ok: boolean; root: string; error?: string }> {
   const wanted = typeof dir === 'string' ? dir.trim() : ''
   const next = wanted || defaultRoot()
+  // 安装目录的包含关系先于可写性检查：目录还没建就能判定，不必先把雷埋下去
+  const risk = dataRootRiskOf(next)
+  if (risk === 'inside-install-dir') {
+    return {
+      ok: false,
+      root: currentRoot(),
+      error: t('数据目录不能放在软件安装目录里：更新软件时安装目录会被整个清空，数据会一并删除。请选择安装目录之外的位置。'),
+    }
+  }
+  if (risk === 'contains-install-dir') {
+    return {
+      ok: false,
+      root: currentRoot(),
+      error: t('数据目录不能包含软件安装目录：更新时安装目录会被整个清空，数据同样危在旦夕。请把两者分开存放。'),
+    }
+  }
   try {
     await fsp.mkdir(next, { recursive: true })
     const probe = path.join(next, '.moji-write-test')

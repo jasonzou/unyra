@@ -28,6 +28,8 @@ import { app, BrowserWindow, protocol } from 'electron'
 import { existsSync, renameSync } from 'node:fs'
 import path from 'node:path'
 import { registerProxyProtocol } from './proxy'
+import { registerVideoIpc } from './video-net'
+import { registerMediaRelayProtocol } from './media-relay'
 import { startUpdateChecks } from './update'
 import { registerWebIpc } from './web'
 import { bootSingleInstance, initStartupTrace, lap } from './app/startup'
@@ -68,12 +70,21 @@ function main(): void {
       scheme: 'llm-proxy',
       privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
     },
+    {
+      // 视频播放的媒体中转（见 media-relay.ts）：`<video>` 发不出自定义请求头，
+      // 平台 CDN 校验 Referer，流由主进程带头转发。stream + standard 是媒体长连接的必需
+      scheme: 'media-relay',
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
+    },
   ])
 
   registerIpc()
   // 抓网页：只有 web:fetch 一个频道（见 electron/web）。放这里是因为它与其余 IPC 一样，
   // 必须在 app ready 之前就把 handler 挂上——渲染层可能很早就来问
   registerWebIpc()
+  // 视频学习（实验）：来源插件的 API 请求（video:fetch）与媒体流登记（video:openStream），
+  // 见 electron/video-net。同样是「页签随时可能来问」的挂法
+  registerVideoIpc()
   // 外部 MCP 服务的本地进程会话（stdio 传输，见 electron/mcp）：同样是「随时可能来问」
   registerMcpIpc()
   lap('main:ipc')
@@ -118,6 +129,7 @@ function main(): void {
   app.whenReady().then(() => {
     lap('main:ready')
     registerProxyProtocol()
+    registerMediaRelayProtocol()
     installLocalFileCsp()
     installAppMenu()
     registerBaseIpc()

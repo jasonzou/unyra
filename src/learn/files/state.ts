@@ -64,6 +64,12 @@ export interface LearnState {
   /** 旧字段（番茄钟那一版的数据）：只读，读回来后迁移成 focus 的新形状 */
   pomodoro?: unknown
   /**
+   * 视频资源（见 learn/types 的 VideoResource）：用户级，整块存在这里。
+   * 新字段进 state.json 要同时改三处：buildState（写）/ parseDocs（搬）/ normalize（读），
+   * 少任何一处都是「写下去了、读不回来」——videos 就是在中间这层漏过。
+   */
+  videos?: unknown
+  /**
    * 日程（见 learn/schedule）：提醒清单 + 铃声设置。同样**整块**存在这里——
    * 它是用户级数据（不挂目标），漏一个字段就等于「写下去了、读不回来」。
    */
@@ -121,6 +127,12 @@ export function buildState(store: LearnStore): Record<string, unknown> {
     ...(hasFocus(store.focus) ? { focus: store.focus } : {}),
     // 日程：有条目、或铃声被改过才写（默认铃声不值得占字段；改过就得记住）
     ...(hasSchedule(store.schedule) ? { schedule: store.schedule } : {}),
+    /*
+     * 视频资源（见 learn/types 的 VideoResource）：与日程同一条纪律——有才写。
+     * **这一行曾经漏过**：资源只在内存里，一落盘就没了（用户报「选集和进度不生效」）。
+     * 新字段进 LearnStore 时记得同时补到这里，归一那头在 normalize/index。
+     */
+    ...(store.videos?.length ? { videos: store.videos } : {}),
     /*
      * agent 栏的页签：只在真有页签时写（与 favorites 同一条纪律）。
      * 激活项跟着页签走——没有页签时的 null 是默认值，不值得占一个字段。
