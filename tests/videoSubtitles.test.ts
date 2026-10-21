@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  calculateSubtitleLayout,
   cleanSubtitleText,
   findActiveSubtitle,
   generateHardTextShadow,
@@ -159,5 +160,26 @@ Next step in WebVTT
     for (const part of custom.split(', ')) {
       expect(part).toMatch(/\s0\s#111$/)
     }
+  })
+
+  it('calculates subtitle layout dynamically based on player dimensions rather than screen size', () => {
+    // 播放器小尺寸（如分屏/侧栏展开时 480x270）
+    const small = calculateSubtitleLayout(480, 270, false, 16 / 9)
+    expect(small.fontSizePx).toBe(14) // 270 * 0.05 = 13.5 -> 14px
+    expect(small.bottomPx).toBe(16) // letterbox 0 + 270 * 0.035 (~9) -> Math.max(16, 9) = 16
+
+    // 播放器大尺寸（如 1280x720）
+    const large = calculateSubtitleLayout(1280, 720, false, 16 / 9)
+    expect(large.fontSizePx).toBe(36) // 720 * 0.05 = 36px
+    expect(large.bottomPx).toBe(25) // 720 * 0.035 (~25) -> max(16, 25) = 25
+
+    // 控制栏显示时底部距离增加避让控制栏
+    const withControls = calculateSubtitleLayout(1280, 720, true, 16 / 9)
+    expect(withControls.bottomPx).toBeGreaterThanOrEqual(64)
+
+    // 播放器高度被压缩（上下有较大黑边或高宽比较小）时，以实际视频有效画面为准
+    const letterboxed = calculateSubtitleLayout(600, 600, false, 16 / 9)
+    // 画面实际高度为 600 / (16/9) = 337.5px
+    expect(letterboxed.fontSizePx).toBe(17) // 338 * 0.05 = 17px
   })
 })

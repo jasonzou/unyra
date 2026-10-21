@@ -40,6 +40,7 @@ import {
 import { t } from '../../i18n'
 import { formatClock } from '../../video/transcript'
 import {
+  calculateSubtitleLayout,
   findActiveSubtitle,
   parseSubtitleFile,
   SUBTITLE_HARD_TEXT_SHADOW,
@@ -132,6 +133,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [buffered, setBuffered] = useState(0) // 缓冲至几秒
     const [isBuffering, setIsBuffering] = useState(false)
     const [isControlsVisible, setIsControlsVisible] = useState(true)
+    const [videoAspect, setVideoAspect] = useState(16 / 9)
 
     // 音量与倍速
     const [volume, setVolume] = useState(readStoredVolume)
@@ -146,6 +148,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [speedMenuOpen, setSpeedMenuOpen] = useState(false)
     const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false)
     const [volumeHovered, setVolumeHovered] = useState(false)
+
+    // 播放器自身尺寸（宽、高），确保字幕响应的是播放器尺寸而非屏幕尺寸
+    const [playerDimensions, setPlayerDimensions] = useState({ width: 0, height: 0 })
 
     // 字幕系统
     const [subtitleTrack, setSubtitleTrack] = useState<'off' | 'builtin' | 'external'>('builtin')
@@ -209,6 +214,32 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       video.muted = isMuted
       video.playbackRate = playbackRate
     }, [src, volume, isMuted, playbackRate])
+
+    // 监听播放器组件自身尺寸变化（与外部屏幕尺寸解耦）
+    useEffect(() => {
+      const el = containerRef.current
+      if (!el || typeof ResizeObserver === 'undefined') return
+
+      const updateSize = () => {
+        const rect = el.getBoundingClientRect()
+        if (rect.width > 0 && rect.height > 0) {
+          setPlayerDimensions({ width: Math.round(rect.width), height: Math.round(rect.height) })
+        }
+      }
+
+      updateSize()
+
+      const ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect
+          if (width > 0 && height > 0) {
+            setPlayerDimensions({ width: Math.round(width), height: Math.round(height) })
+          }
+        }
+      })
+      ro.observe(el)
+      return () => ro.disconnect()
+    }, [])
 
     // 有效总时长（优先真实元数据，次选入参预估）
     const effectiveDuration = duration > 0 ? duration : (propDurationMs && propDurationMs > 0 ? propDurationMs / 1000 : 0)
@@ -601,6 +632,14 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const currentPercent = effectiveDuration > 0 ? (currentTime / effectiveDuration) * 100 : 0
     const bufferedPercent = effectiveDuration > 0 ? (buffered / effectiveDuration) * 100 : 0
 
+    // 根据播放器自身尺寸（宽、高与视频画面比例）精确计算字幕字号与定位
+    const subtitleLayout = calculateSubtitleLayout(
+      playerDimensions.width,
+      playerDimensions.height,
+      isControlsVisible,
+      videoAspect,
+    )
+
     return (
       <div
         ref={containerRef}
@@ -658,6 +697,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           onLoadedMetadata={(e) => {
             const d = e.currentTarget.duration
             if (Number.isFinite(d) && d > 0) setDuration(d)
+            if (e.currentTarget.videoWidth && e.currentTarget.videoHeight) {
+              setVideoAspect(e.currentTarget.videoWidth / e.currentTarget.videoHeight)
+            }
           }}
           onDurationChange={(e) => {
             const d = e.currentTarget.duration
@@ -708,18 +750,19 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           </div>
         )}
 
-        {/* 屏幕字幕显示层（不受视频镜像影响）：跟随屏幕尺寸自适应缩放，无背景色，使用 text-shadow 绘制不扩散的硬描边 */}
+        {/* 屏幕字幕显示层（不受视频镜像影响）：跟随播放器自身尺寸自适应缩放，无背景色，使用 text-shadow 绘制不扩散的硬描边 */}
         {activeCue && (
           <div
             style={{
-              bottom: isControlsVisible ? 'clamp(4.2rem, 7.5cqi, 6rem)' : 'clamp(1.5rem, 4cqi, 3.5rem)',
-              transition: 'bottom 0.25s ease-out',
+              bottom: `${subtitleLayout.bottomPx}px`,
+              maxWidth: `${subtitleLayout.maxTextWidthPx}px`,
+              transition: 'bottom 0.2s ease-out',
             }}
-            className="pointer-events-none absolute z-20 w-full max-w-[90%] px-4 text-center"
+            className="pointer-events-none absolute z-20 w-full px-4 text-center"
           >
             <span
               style={{
-                fontSize: 'clamp(15px, 2.8cqi, 34px)',
+                fontSize: `${subtitleLayout.fontSizePx}px`,
                 lineHeight: 1.35,
                 textShadow: SUBTITLE_HARD_TEXT_SHADOW,
               }}

@@ -308,3 +308,63 @@ export function generateHardTextShadow(radiusEm = 0.065, color = '#000'): string
 
 /** 默认实心硬描边 text-shadow 样式 */
 export const SUBTITLE_HARD_TEXT_SHADOW = generateHardTextShadow(0.065, '#000')
+
+export interface SubtitleLayoutStyle {
+  fontSizePx: number
+  bottomPx: number
+  maxTextWidthPx: number
+}
+
+/**
+ * 根据播放器组件自身的实际宽高（非整个屏幕）计算字幕的最佳字号与定位：
+ * - 考虑视频按 object-contain 等比缩放后的有效渲染画面区域；
+ * - 字号取有效画面高度的约 5%（标准字幕视觉比例），并限制在 [13px, 38px]；
+ * - 底部边距随有效画面位置及控制栏显隐平滑调整，避开黑边与控件；
+ * - 确保纯基于播放器尺寸变化，与屏幕/窗口尺寸完全解耦。
+ */
+export function calculateSubtitleLayout(
+  playerWidth: number,
+  playerHeight: number,
+  isControlsVisible: boolean,
+  videoAspect: number = 16 / 9,
+): SubtitleLayoutStyle {
+  if (playerWidth <= 0 || playerHeight <= 0) {
+    return {
+      fontSizePx: 16,
+      bottomPx: isControlsVisible ? 64 : 24,
+      maxTextWidthPx: 800,
+    }
+  }
+
+  const safeAspect = Number.isFinite(videoAspect) && videoAspect > 0 ? videoAspect : 16 / 9
+  const containerAspect = playerWidth / playerHeight
+
+  let renderedWidth = playerWidth
+  let renderedHeight = playerHeight
+
+  if (containerAspect > safeAspect) {
+    // 左右黑边（Pillarbox）：实际画面高度撑满播放器
+    renderedHeight = playerHeight
+    renderedWidth = playerHeight * safeAspect
+  } else {
+    // 上下黑边（Letterbox）：实际画面宽度撑满播放器
+    renderedWidth = playerWidth
+    renderedHeight = playerWidth / safeAspect
+  }
+
+  // 字号比例：有效视频画面高度的 5%，限制在 13px ~ 38px
+  const fontSizePx = Math.round(Math.max(13, Math.min(38, renderedHeight * 0.05)))
+
+  // 上下黑边高度
+  const letterboxBottom = Math.max(0, (playerHeight - renderedHeight) / 2)
+
+  // 底部边距：控制栏显隐时平滑避让
+  const normalBottom = letterboxBottom + Math.round(renderedHeight * 0.035)
+  const bottomPx = isControlsVisible
+    ? Math.max(64, normalBottom + 20)
+    : Math.max(16, normalBottom)
+
+  const maxTextWidthPx = Math.round(Math.max(260, renderedWidth * 0.9))
+
+  return { fontSizePx, bottomPx, maxTextWidthPx }
+}
