@@ -44,6 +44,7 @@ import {
 import { structureFromStore } from '../../../learn/structureSeed'
 import { t } from '../../../i18n'
 import {
+  EDGE_ANCHOR_Y,
   KIND_BADGE,
   KIND_TONE,
   SLOT_ROW,
@@ -1120,11 +1121,15 @@ export const StructureCanvas = memo(function StructureCanvas({
                 <div className="truncate px-3 pb-2 text-[11px] text-ink-soft">{view.subtitle}</div>
               )}
 
+              {/*
+                连线手柄：位置必须与连线的锚点**同一个高度**（离卡片顶部 EDGE_ANCHOR_Y）。
+                按垂直居中放的话，拖出来的线会从手柄上方一截出发，看着像没连上。
+              */}
               <div
                 data-link-handle={node.id}
                 title={t('拖出去连到另一个节点')}
-                className="absolute top-1/2 -right-[7px] h-3.5 w-3.5 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-card bg-seal/70 opacity-0 transition-opacity hover:opacity-100"
-                style={{ opacity: selected || isHovered ? 1 : undefined }}
+                className="absolute -right-[7px] h-3.5 w-3.5 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-card bg-seal/70 opacity-0 transition-opacity hover:opacity-100"
+                style={{ top: EDGE_ANCHOR_Y, opacity: selected || isHovered ? 1 : undefined }}
               />
             </div>
 
