@@ -10,6 +10,8 @@
 
 import type { LearnStore } from '../../../learn/types'
 import {
+  OUTLINE_HEAD,
+  SLOT_ROW,
   defaultHeight,
   rectOf,
   type GraphKind,
@@ -110,15 +112,29 @@ function clip(text: string, max = 46): string {
  * 接入点现在挂在**文档**上（大纲的父子节点只能是文档）；`outline` 也认，是为了
  * 让上一次重构留下的老数据（slot 记在大纲节点上）不至于当场失效。
  */
-export function slotKeyOf(store: LearnStore, node: StructureNode): string | null {
-  if (node.slot) return node.slot
-  if (node.kind !== 'doc' && node.kind !== 'outline') return null
-  const owner = node.ref ? nodeById(store, node.ref) : null
-  return owner?.key ?? null
+export function slotKeyOf(_store: LearnStore, node: StructureNode): string | null {
+  /*
+   * **只认显式记下来的 slot**，不再按节点 key 回退。
+   *
+   * 回退会把「空节点」也算成占了某条目标项：拖出来一张还没写内容的文档卡，
+   * 它恰好叫「导数」，就把「导数」那条目标项点亮了——可它其实还没确定要做什么。
+   * 空节点就是「还没确定」，在图上保持灰色。
+   */
+  return node.slot ?? null
 }
 
 /**
- * 一个大纲节点卡片里要列出的目标项，以及每个接入点有没有挂上子大纲。
+ * 某条目标项在卡片里的中心 y（离卡片顶部）。
+ *
+ * 连线的「大纲那一端」要对准这条目标项，而不是卡片顶部那个固定锚点——
+ * 一眼就能看出这根线是从哪一条目标项长出来的。
+ */
+export function slotAnchorY(index: number): number {
+  return OUTLINE_HEAD + index * SLOT_ROW + SLOT_ROW / 2
+}
+
+/**
+ * 一个大纲节点卡片里要列出的目标项，以及每个接入点有没有挂上子文档。
  *
  * 「亮起」的判据是**下游有没有一个子大纲节点占了这个接入点**，不是「这个目标项有没有被学过」——
  * 图上看得见的东西就应该是图上真实存在的连接；拿学习状态来染色，会让人以为连线也在那儿。
@@ -226,6 +242,8 @@ export function edgeCurve(
   from: StructureNode,
   to: StructureNode,
   height: HeightOf = defaultHeight,
+  /** 两端的锚点离各自卡片顶部多远；省略就用 EDGE_ANCHOR_Y */
+  anchor?: { from?: number; to?: number },
 ): [Point, Point, Point, Point] {
   const fromRect = rectOf(from, height)
   const toRect = rectOf(to, height)
@@ -236,8 +254,8 @@ export function edgeCurve(
    * 同一列里两张卡片的线会一高一低地错开；固定从标题行下方出线，
    * 线在视觉上就落成一条齐平的横带，跟读图的方向一致。
    */
-  const p0 = { x: fromRect.x + fromRect.width, y: fromRect.y + EDGE_ANCHOR_Y }
-  const p3 = { x: toRect.x, y: toRect.y + EDGE_ANCHOR_Y }
+  const p0 = { x: fromRect.x + fromRect.width, y: fromRect.y + (anchor?.from ?? EDGE_ANCHOR_Y) }
+  const p3 = { x: toRect.x, y: toRect.y + (anchor?.to ?? EDGE_ANCHOR_Y) }
   const bend = Math.max(48, Math.abs(p3.x - p0.x) * 0.45)
   return [p0, { x: p0.x + bend, y: p0.y }, { x: p3.x - bend, y: p3.y }, p3]
 }
@@ -329,6 +347,7 @@ export function edgeAt(
   threshold = 8,
   height: HeightOf = defaultHeight,
   style: EdgeStyle = 'straight',
+  anchorOf?: (edge: { from: string; to: string }) => { from?: number; to?: number } | undefined,
 ): { from: string; to: string } | null {
   const byId = new Map(nodes.map((n) => [n.id, n]))
   let best: { from: string; to: string } | null = null
@@ -337,7 +356,7 @@ export function edgeAt(
     const from = byId.get(edge.from)
     const to = byId.get(edge.to)
     if (!from || !to) continue
-    const curve = edgeCurve(from, to, height)
+    const curve = edgeCurve(from, to, height, anchorOf?.(edge))
     if (style === 'straight') {
       // 折线是线段拼的：直接算「点到线段」的距离，比按 24 等分采样准得多
       const pts = edgePolyline(curve)
@@ -374,8 +393,9 @@ export function edgeDots(
   to: StructureNode,
   height: HeightOf = defaultHeight,
   style: EdgeStyle = 'straight',
+  anchor?: { from?: number; to?: number },
 ): { from: Point; to: Point } {
-  const curve = edgeCurve(from, to, height)
+  const curve = edgeCurve(from, to, height, anchor)
   return { from: edgePointAt(curve, 0.22, style), to: edgePointAt(curve, 0.78, style) }
 }
 
@@ -388,13 +408,14 @@ export function edgeDotAt(
   threshold = 11,
   height: HeightOf = defaultHeight,
   style: EdgeStyle = 'straight',
+  anchorOf?: (edge: { from: string; to: string }) => { from?: number; to?: number } | undefined,
 ): { edge: { from: string; to: string }; side: 'from' | 'to' } | null {
   const byId = new Map(nodes.map((n) => [n.id, n]))
   for (const edge of edges) {
     const from = byId.get(edge.from)
     const to = byId.get(edge.to)
     if (!from || !to) continue
-    const dots = edgeDots(from, to, height, style)
+    const dots = edgeDots(from, to, height, style, anchorOf?.(edge))
     if (Math.hypot(dots.from.x - x, dots.from.y - y) <= threshold) return { edge, side: 'from' }
     if (Math.hypot(dots.to.x - x, dots.to.y - y) <= threshold) return { edge, side: 'to' }
   }

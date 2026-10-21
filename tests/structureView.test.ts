@@ -15,6 +15,7 @@ import {
   hitTest,
   outlineSlots,
   resolveNodeView,
+  slotAnchorY,
   slotColor,
   slotKeyOf,
   splitLeafRef,
@@ -261,11 +262,17 @@ describe('结构画布：大纲的目标项（接入点）', () => {
     expect(slots[1].childId).toBeNull()
   })
 
-  it('没有显式 slot 的老数据：退回用节点的 key 对上号', () => {
-    const legacy: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', x: 0, y: 0 }
+  it('空节点不认领目标项：没有显式 slot 就一直灰着', () => {
+    // 拖出来一张还没确定做什么的文档卡，标题恰好叫「导数」
+    const unassigned: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', x: 0, y: 0 }
     const store2 = makeStore([parent, makeNode({ id: 'p2', title: '导数', key: 'a' })])
-    expect(slotKeyOf(store2, legacy)).toBe('a')
-    expect(outlineSlots(store2, parentNode, [parentNode, legacy])[0].childId).toBe('d:p2')
+    expect(slotKeyOf(store2, unassigned)).toBeNull()
+    expect(outlineSlots(store2, parentNode, [parentNode, unassigned])[0].childId).toBeNull()
+  })
+
+  it('显式记了 slot 才算占住（迁移与连线都会写这一项）', () => {
+    const assigned: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', slot: 'a', x: 0, y: 0 }
+    expect(slotKeyOf(store, assigned)).toBe('a')
   })
 
   it('大纲卡片按目标项条数长高（否则点不到后面的目标项）', () => {
@@ -376,5 +383,26 @@ describe('结构画布：对账（实体长了，图跟着补）', () => {
     const map = { version: 1 as const, nodes: [], edges: [] }
     const next = reconcileStructure(makeStore([owner, other]), 'g1', map)
     expect(next.nodes.some((n) => n.ref === 'n9')).toBe(false)
+  })
+})
+
+describe('结构画布：连线对准目标项', () => {
+  const outline: StructureNode = { id: 'o:p1', kind: 'outline', ref: 'p1', x: 0, y: 0 }
+  const doc: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', slot: 'b', x: 400, y: 100 }
+
+  it('目标项行的中心 y 按行号算', () => {
+    expect(slotAnchorY(0)).toBe(OUTLINE_HEAD + SLOT_ROW / 2)
+    expect(slotAnchorY(3) - slotAnchorY(2)).toBe(SLOT_ROW)
+  })
+
+  it('大纲那一端落在目标项上，文档那一端仍在标题行', () => {
+    const curve = edgeCurve(outline, doc, undefined, { from: slotAnchorY(2) })
+    expect(curve[0].y).toBe(slotAnchorY(2))
+    expect(curve[3].y).toBe(100 + EDGE_ANCHOR_Y)
+  })
+
+  it('不给锚点就是老样子（两端都在标题行）', () => {
+    const curve = edgeCurve(outline, doc)
+    expect(curve[0].y).toBe(EDGE_ANCHOR_Y)
   })
 })

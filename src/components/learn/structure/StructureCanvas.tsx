@@ -58,6 +58,7 @@ import {
   hitTest,
   outlineSlots,
   resolveNodeView,
+  slotAnchorY,
   slotKeyOf,
   splitLeafRef,
 } from './structureView'
@@ -191,6 +192,25 @@ export const StructureCanvas = memo(function StructureCanvas({
   /** 高度访问器：大纲卡片按目标项条数长高，有注释再加一行（见 structureView） */
   const height = useMemo(() => heightOf(store), [store])
   const bounds = useMemo(() => boundsOf(nodes, height), [nodes, height])
+
+  /**
+   * 连线的「大纲那一端」对准它占的那条目标项，而不是卡片顶部那个固定锚点。
+   *
+   * 只对 `大纲 → 子文档` 这条算：其余边（文档→自己的大纲、文档→叶子）没有目标项可言，
+   * 用默认锚点即可。
+   */
+  const anchorOf = useCallback(
+    (edge: { from: string; to: string }) => {
+      const from = nodes.find((n) => n.id === edge.from)
+      const to = nodes.find((n) => n.id === edge.to)
+      if (!from || !to || from.kind !== 'outline' || to.kind !== 'doc') return undefined
+      const key = slotKeyOf(store, to)
+      if (!key) return undefined
+      const index = outlineSlots(store, from, nodes).findIndex((s) => s.key === key)
+      return index < 0 ? undefined : { from: slotAnchorY(index) }
+    },
+    [nodes, store],
+  )
   /** 连线画法：默认直线（见 learn/structure 的 EDGE_STYLES） */
   const edgeStyle: EdgeStyle = map.edgeStyle ?? 'straight'
 
@@ -722,12 +742,12 @@ export const StructureCanvas = memo(function StructureCanvas({
       }
 
       const world = toWorld(e.clientX, e.clientY)
-      const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle)
+      const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle, anchorOf)
       if (dot) {
         centerOn(dot.side === 'from' ? dot.edge.to : dot.edge.from)
         return
       }
-      const edge = edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height, edgeStyle)
+      const edge = edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height, edgeStyle, anchorOf)
       if (edge) {
         setSelectedEdge(edge)
         setSelectedId(null)
@@ -745,7 +765,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (!g) {
         // 没有手势：算「指针附近有没有连线」，小圆点只在此时露面
         const world = toWorld(e.clientX, e.clientY)
-        const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle)
+        const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle, anchorOf)
         const edge = dot?.edge ?? edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height)
         setHoverDot(!!dot)
         setHoverEdge((prev) => (prev?.from === edge?.from && prev?.to === edge?.to ? prev : edge ?? null))
@@ -773,7 +793,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       setPaletteAt({ x: e.clientX, y: e.clientY })
       setHoverId(hitTest(nodes, world.x, world.y, height)?.id ?? null)
     },
-    [edgeStyle, edges, height, isOverTrash, nodes, toWorld],
+    [anchorOf, edgeStyle, edges, height, isOverTrash, nodes, toWorld],
   )
 
   const onPointerUp = useCallback(
@@ -955,6 +975,8 @@ export const StructureCanvas = memo(function StructureCanvas({
     [nodes, draft],
   )
   const byId = useMemo(() => new Map(displayNodes.map((n) => [n.id, n])), [displayNodes])
+
+
   const dragging = !!draft
   const menuNode = menu ? nodes.find((n) => n.id === menu.nodeId) ?? null : null
 
@@ -1003,10 +1025,11 @@ export const StructureCanvas = memo(function StructureCanvas({
               const from = byId.get(edge.from)
               const to = byId.get(edge.to)
               if (!from || !to) return null
-              const curve = edgeCurve(from, to, height).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
+              const anchor = anchorOf(edge)
+              const curve = edgeCurve(from, to, height, anchor).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
               const isSelected = selectedEdge?.from === edge.from && selectedEdge?.to === edge.to
               const color = edgeColorOf(store, displayNodes, edge)
-              const dots = edgeDots(from, to, height, edgeStyle)
+              const dots = edgeDots(from, to, height, edgeStyle, anchor)
               // 悬停目标项 → 对应的那条子大纲连线发光
               const slotKey = slotKeyOf(store, to)
               const glow =
@@ -1084,13 +1107,15 @@ export const StructureCanvas = memo(function StructureCanvas({
           const slots = node.kind === 'outline' ? outlineSlots(store, node, nodes) : []
           const openable = node.kind !== 'outline'
           const lifted = draft?.id === node.id
+          // 文档卡还没占任何目标项 = 还没确定要做什么，置灰（不点亮任何一条目标项）
+          const unassigned = node.kind === 'doc' && !slotKeyOf(store, node)
           return (
             <Fragment key={node.id}>
             <div
               data-node-id={node.id}
               className={`absolute flex flex-col rounded-xl border ${KIND_TONE[node.kind]} ${
-                empty ? 'border-dashed' : ''
-              } ${selected ? 'ring-2 ring-seal/60' : isHovered ? 'ring-1 ring-seal/35' : ''} ${
+                empty || unassigned ? 'border-dashed' : ''
+              } ${unassigned ? 'opacity-70' : ''} ${selected ? 'ring-2 ring-seal/60' : isHovered ? 'ring-1 ring-seal/35' : ''} ${
                 lifted ? 'shadow-lg' : 'shadow-sm'
               } ${flashId === node.id ? 'moji-structure-flash' : ''}`}
               style={{
