@@ -19,7 +19,7 @@
  * 翻译成「谁的坐标变了」「连了哪两个」。
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import type { LearnStore } from '../../../learn/types'
 import type { ExamActions, NodeDocActions } from '../explorer/types'
@@ -32,8 +32,10 @@ import {
   centerPan,
   clampZoom,
   fitZoom,
+  EDGE_STYLES,
   seedLayout,
   slotOrderOf,
+  type EdgeStyle,
   type GraphKind,
   type StructureMap,
   type StructureNode,
@@ -164,12 +166,18 @@ export const StructureCanvas = memo(function StructureCanvas({
   const [paletteKind, setPaletteKind] = useState<GraphKind | null>(null)
   /** 正拖着一个节点在垃圾桶上方 */
   const [overTrash, setOverTrash] = useState(false)
+  /** 镜头正在做过渡（这段时间平面带 transition，跳转才是「滑过去」而不是瞬移） */
+  const [animating, setAnimating] = useState(false)
+  const animTimer = useRef<number | null>(null)
   /** 跳转后闪一下的那张卡（900ms 后清掉） */
   const [flashId, setFlashId] = useState<string | null>(null)
   const flashTimer = useRef<number | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [menuText, setMenuText] = useState('')
 
+  /** 空格按住时左键也能拖画布（见 onPointerDown） */
+  const spaceRef = useRef(false)
+  const [spaceDown, setSpaceDown] = useState(false)
   const gestureRef = useRef<Gesture>(null)
   const seededRef = useRef(false)
   const fittedRef = useRef(false)
@@ -179,6 +187,41 @@ export const StructureCanvas = memo(function StructureCanvas({
   /** 高度访问器：大纲卡片按目标项条数长高，有注释再加一行（见 structureView） */
   const height = useMemo(() => heightOf(store), [store])
   const bounds = useMemo(() => boundsOf(nodes, height), [nodes, height])
+  /** 连线画法：默认直线（见 learn/structure 的 EDGE_STYLES） */
+  const edgeStyle: EdgeStyle = map.edgeStyle ?? 'straight'
+
+  /* ---------- 空格：按住时左键临时变成「抓手」 ---------- */
+
+  useEffect(() => {
+    const isTyping = (el: EventTarget | null) => {
+      const node = el as HTMLElement | null
+      return !!node && (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' || node.isContentEditable)
+    }
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || isTyping(e.target)) return
+      e.preventDefault() // 否则页面会往下滚
+      spaceRef.current = true
+      setSpaceDown(true)
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return
+      spaceRef.current = false
+      setSpaceDown(false)
+    }
+    // 切走窗口时按键的 keyup 收不到，回来还停在「按住空格」的状态，这里兜一下
+    const blur = () => {
+      spaceRef.current = false
+      setSpaceDown(false)
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
+    }
+  }, [])
 
   /* ---------- 视口尺寸（缩放的下限要靠它算） ---------- */
 
@@ -211,12 +254,28 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   /* ---------- 镜头 ---------- */
 
+  /**
+   * 镜头跳转：**滑过去**而不是瞬移。
+   *
+   * 做法是给平面挂 300ms 的 transition-transform，跳完再摘掉——一直挂着的话，
+   * 手动拖动与滚轮也会变成「带惯性的慢半拍」，那是另一种难受。
+   */
+  const animateCamera = useCallback((next: { x: number; y: number; zoom: number }) => {
+    setAnimating(true)
+    setCamera(next)
+    if (animTimer.current !== null) window.clearTimeout(animTimer.current)
+    animTimer.current = window.setTimeout(() => {
+      animTimer.current = null
+      setAnimating(false)
+    }, 320)
+  }, [])
+
   const fit = useCallback(() => {
     const box = boundsOf(nodes, height)
     if (!box || !view.width || !view.height) return
     const zoom = fitZoom(box, view)
-    setCamera({ ...centerPan(box, view, zoom), zoom })
-  }, [nodes, height, view])
+    animateCamera({ ...centerPan(box, view, zoom), zoom })
+  }, [nodes, height, view, animateCamera])
 
   useEffect(() => {
     if (fitNextRef.current) {
@@ -245,20 +304,26 @@ export const StructureCanvas = memo(function StructureCanvas({
     },
     [],
   )
+  useEffect(
+    () => () => {
+      if (animTimer.current !== null) window.clearTimeout(animTimer.current)
+    },
+    [],
+  )
 
   const centerOn = useCallback(
     (id: string) => {
       const node = nodes.find((n) => n.id === id)
       if (!node || !view.width) return
       const zoom = Math.max(cameraRef.current.zoom, 1)
-      setCamera({
+      animateCamera({
         ...centerPan({ x: node.x, y: node.y, width: CARD_W, height: height(node) }, view, zoom),
         zoom,
       })
       setSelectedId(id)
       flash(id)
     },
-    [nodes, view, height, flash],
+    [nodes, view, height, flash, animateCamera],
   )
 
   const lastFocusNonce = useRef<number | null>(null)
@@ -270,12 +335,12 @@ export const StructureCanvas = memo(function StructureCanvas({
       nodes.find((n) => n.ref === focusTarget.nodeId)
     if (target && view.width) {
       const zoom = Math.max(cameraRef.current.zoom, 1)
-      setCamera({ ...centerPan({ x: target.x, y: target.y, width: CARD_W, height: height(target) }, view, zoom), zoom })
+      animateCamera({ ...centerPan({ x: target.x, y: target.y, width: CARD_W, height: height(target) }, view, zoom), zoom })
       setSelectedId(target.id)
       flash(target.id)
     }
     onFocusHandled?.()
-  }, [focusTarget, nodes, view, height, onFocusHandled, flash])
+  }, [focusTarget, nodes, view, height, onFocusHandled, flash, animateCamera])
 
   /* ---------- 滚轮：平移为主，Ctrl/⌘ + 滚轮缩放（与旧导图一致） ---------- */
 
@@ -295,7 +360,10 @@ export const StructureCanvas = memo(function StructureCanvas({
         setCamera({ x: px - (px - cam.x) * k, y: py - (py - cam.y) * k, zoom: next })
         return
       }
-      setCamera({ ...cam, x: cam.x - e.deltaX, y: cam.y - e.deltaY })
+      // Shift + 滚轮：横向滚动（触控板横滑本来就给 deltaX，两种都给上）
+      const dx = e.shiftKey ? e.deltaY : e.deltaX
+      const dy = e.shiftKey ? 0 : e.deltaY
+      setCamera({ ...cam, x: cam.x - dx, y: cam.y - dy })
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -338,7 +406,8 @@ export const StructureCanvas = memo(function StructureCanvas({
       historyRef.current.push(map)
       if (historyRef.current.length > 50) historyRef.current.shift()
       setCanUndo(true)
-      onChange(next)
+      // 合并在这一处做：调用点只关心「节点/连线变了什么」，不用记得把 edgeStyle 带上
+      onChange({ ...map, ...next, version: 1 })
     },
     [map, onChange],
   )
@@ -548,16 +617,30 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (e.button !== 0) return
       const target = e.target as HTMLElement
       const el = containerRef.current
       if (!el) return
+      /*
+       * 平移画布只有两条路：**中键**，或者**按住空格 + 左键**。
+       * 左键留给节点（拖、连、选），空地上按左键不再拖动画布——
+       * 那样一不小心就会把整张图推走，还分不清是拖动还是点空了。
+       */
+      if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
+        e.preventDefault() // 中键在 Chromium 里会触发自动滚动
+        setAnimating(false)
+        el.setPointerCapture(e.pointerId)
+        const cam = cameraRef.current
+        gestureRef.current = { mode: 'pan', startX: e.clientX, startY: e.clientY, camX: cam.x, camY: cam.y }
+        return
+      }
+      if (e.button !== 0) return
       // 菜单、按钮、输入框：容器一旦捕获指针，它们就收不到 click 了
       if (target.closest('button, textarea, input, [data-menu]')) return
       if (menu) {
         setMenu(null)
         return
       }
+      setAnimating(false)
       el.setPointerCapture(e.pointerId)
 
       const paletteEl = target.closest<HTMLElement>('[data-palette-kind]')
@@ -607,19 +690,17 @@ export const StructureCanvas = memo(function StructureCanvas({
       }
 
       const world = toWorld(e.clientX, e.clientY)
-      const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height)
+      const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle)
       if (dot) {
         centerOn(dot.side === 'from' ? dot.edge.to : dot.edge.from)
         return
       }
-      const edge = edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height)
+      const edge = edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height, edgeStyle)
       if (edge) {
         setSelectedEdge(edge)
         setSelectedId(null)
         return
       }
-      const cam = cameraRef.current
-      gestureRef.current = { mode: 'pan', startX: e.clientX, startY: e.clientY, camX: cam.x, camY: cam.y }
       setSelectedId(null)
       setSelectedEdge(null)
     },
@@ -632,7 +713,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (!g) {
         // 没有手势：算「指针附近有没有连线」，小圆点只在此时露面
         const world = toWorld(e.clientX, e.clientY)
-        const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height)
+        const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle)
         const edge = dot?.edge ?? edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height)
         setHoverDot(!!dot)
         setHoverEdge((prev) => (prev?.from === edge?.from && prev?.to === edge?.to ? prev : edge ?? null))
@@ -660,7 +741,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       setPaletteAt({ x: e.clientX, y: e.clientY })
       setHoverId(hitTest(nodes, world.x, world.y, height)?.id ?? null)
     },
-    [edges, height, isOverTrash, nodes, toWorld],
+    [edgeStyle, edges, height, isOverTrash, nodes, toWorld],
   )
 
   const onPointerUp = useCallback(
@@ -859,6 +940,10 @@ export const StructureCanvas = memo(function StructureCanvas({
       ref={containerRef}
       tabIndex={0}
       onPointerDown={onPointerDown}
+      // 中键在 Chromium 里会触发「自动滚动」，pointerdown 上的 preventDefault 拦不住
+      onMouseDown={(e) => {
+        if (e.button === 1) e.preventDefault()
+      }}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
@@ -866,14 +951,16 @@ export const StructureCanvas = memo(function StructureCanvas({
       onContextMenu={onContextMenu}
       onKeyDown={onKeyDown}
       className="relative h-full w-full select-none overflow-hidden bg-paper outline-none dark:bg-card/30"
-      style={{ cursor: hoverDot ? 'pointer' : undefined }}
+      style={{ cursor: hoverDot ? 'pointer' : spaceDown ? 'grab' : undefined }}
     >
       {/*
         画布平面：纯 2D（只有平移与缩放，没有倾斜、没有 z 轴）。
         拖动时整层抬到垃圾桶之上，这样拖到删除区附近也看得见手里的节点。
       */}
       <div
-        className={`absolute top-0 left-0 origin-top-left ${dragging ? 'z-30' : 'z-0'}`}
+        className={`absolute top-0 left-0 origin-top-left ${dragging ? 'z-30' : 'z-0'} ${
+          animating ? 'transition-transform duration-300 ease-out' : ''
+        }`}
         style={{ transform: `translate3d(${camera.x}px, ${camera.y}px, 0) scale(${camera.zoom})` }}
       >
 
@@ -892,7 +979,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               const curve = edgeCurve(from, to, height).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
               const isSelected = selectedEdge?.from === edge.from && selectedEdge?.to === edge.to
               const color = edgeColorOf(store, displayNodes, edge)
-              const dots = edgeDots(from, to, height)
+              const dots = edgeDots(from, to, height, edgeStyle)
               // 悬停目标项 → 对应的那条子大纲连线发光
               const slotKey = slotKeyOf(store, to)
               const glow =
@@ -903,7 +990,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               return (
                 <g key={`${edge.from}>${edge.to}`}>
                   <path
-                    d={edgePathD(curve)}
+                    d={edgePathD(curve, edgeStyle)}
                     fill="none"
                     stroke={color ?? (isHoveredEdge ? 'var(--color-seal, #b45309)' : 'currentColor')}
                     className={color || isHoveredEdge ? '' : 'text-ink-faint/55'}
@@ -949,7 +1036,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               ).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
               return (
                 <path
-                  d={edgePathD(curve)}
+                  d={edgePathD(curve, edgeStyle)}
                   fill="none"
                   stroke="currentColor"
                   className="text-seal/70"
@@ -971,8 +1058,8 @@ export const StructureCanvas = memo(function StructureCanvas({
           const openable = node.kind !== 'outline'
           const lifted = draft?.id === node.id
           return (
+            <Fragment key={node.id}>
             <div
-              key={node.id}
               data-node-id={node.id}
               className={`absolute flex flex-col rounded-xl border ${KIND_TONE[node.kind]} ${
                 empty ? 'border-dashed' : ''
@@ -1033,13 +1120,6 @@ export const StructureCanvas = memo(function StructureCanvas({
                 <div className="truncate px-3 pb-2 text-[11px] text-ink-soft">{view.subtitle}</div>
               )}
 
-              {/* 注释标签：贴在卡片底部（右键菜单「注释」写的那句话） */}
-              {node.note && (
-                <div className="mx-2 mb-1.5 truncate rounded bg-amber-500/15 px-1.5 py-[2px] text-[10px] text-amber-700 dark:text-amber-300">
-                  {node.note}
-                </div>
-              )}
-
               <div
                 data-link-handle={node.id}
                 title={t('拖出去连到另一个节点')}
@@ -1047,6 +1127,22 @@ export const StructureCanvas = memo(function StructureCanvas({
                 style={{ opacity: selected || isHovered ? 1 : undefined }}
               />
             </div>
+
+            {/*
+              注释：**贴在卡片外面**、跟着节点走的一条便签。
+              不塞进卡片里——它会撑高卡片、把连线的锚点和自动排列都带偏；
+              挂在外面之后，它只是一个跟着坐标走的标签，节点怎么长都不影响。
+            */}
+            {node.note && (
+              <div
+                className="absolute max-w-[260px] rounded-lg border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-[10.5px] leading-snug text-amber-700 shadow-sm dark:text-amber-300"
+                style={{ left: node.x, top: node.y + h + 6, width: CARD_W }}
+                title={node.note}
+              >
+                {node.note}
+              </div>
+            )}
+            </Fragment>
           )
         })}
       </div>
@@ -1109,6 +1205,18 @@ export const StructureCanvas = memo(function StructureCanvas({
           +
         </button>
         <span className="mx-1 h-3 w-px bg-line" />
+        <button
+          type="button"
+          title={t('切换连线样式')}
+          className="rounded px-1.5 py-0.5 hover:bg-line/60"
+          onClick={() => {
+            const next = EDGE_STYLES[(EDGE_STYLES.indexOf(edgeStyle) + 1) % EDGE_STYLES.length]
+            // 只是显示口径，不进撤回栈（Ctrl+Z 不该把线拉回曲线）
+            onChange({ ...map, edgeStyle: next })
+          }}
+        >
+          {edgeStyle === 'straight' ? t('直线') : t('曲线')}
+        </button>
         <button
           type="button"
           disabled={!canUndo}

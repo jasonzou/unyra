@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CARD_H, CARD_W, type StructureNode } from '../src/learn/structure'
 import {
+  EDGE_ANCHOR_Y,
   OUTLINE_HEAD,
   SLOT_ROW,
   cardHeight,
@@ -163,26 +164,29 @@ describe('结构画布：连线的点选', () => {
   const edges = [{ from: 'a', to: 'b' }]
 
   it('点在线上算命中，离得远就不算', () => {
-    // 两张卡同一行：曲线退化成一条 y = CARD_H / 2 的水平线
-    expect(edgeAt(nodes, edges, 200, CARD_H / 2)).toEqual({ from: 'a', to: 'b' })
-    expect(edgeAt(nodes, edges, 200, CARD_H / 2 + 40)).toBeNull()
+    // 两张卡同一行：连线退化成一条 y = EDGE_ANCHOR_Y 的水平线
+    expect(edgeAt(nodes, edges, 200, EDGE_ANCHOR_Y)).toEqual({ from: 'a', to: 'b' })
+    expect(edgeAt(nodes, edges, 200, EDGE_ANCHOR_Y + 40)).toBeNull()
   })
 
   it('端点附近也算（从卡片边缘往外一点就开始算线）', () => {
-    expect(edgeAt(nodes, edges, CARD_W + 2, CARD_H / 2)).toEqual({ from: 'a', to: 'b' })
+    expect(edgeAt(nodes, edges, CARD_W + 2, EDGE_ANCHOR_Y)).toEqual({ from: 'a', to: 'b' })
   })
 
   it('两端节点不在表里的边直接跳过（不炸）', () => {
-    expect(edgeAt(nodes, [{ from: 'a', to: 'ghost' }], 200, CARD_H / 2)).toBeNull()
+    expect(edgeAt(nodes, [{ from: 'a', to: 'ghost' }], 200, EDGE_ANCHOR_Y)).toBeNull()
   })
 
   it('画线与点选用同一组控制点（不会出现看得到点不到）', () => {
     const curve = edgeCurve(nodes[0], nodes[1])
-    expect(curve[0]).toEqual({ x: CARD_W, y: CARD_H / 2 })
-    expect(curve[3]).toEqual({ x: 300, y: CARD_H / 2 })
-    // 两卡只隔 92px，bend 取了下限 48（不是按比例算出来的 41.4）
-    expect(edgePathD(curve)).toBe(
-      `M${CARD_W} ${CARD_H / 2} C${CARD_W + 48} ${CARD_H / 2}, ${300 - 48} ${CARD_H / 2}, 300 ${CARD_H / 2}`,
+    // 锚点是「离卡片顶部固定距离」，不随卡片高度居中
+    expect(curve[0]).toEqual({ x: CARD_W, y: EDGE_ANCHOR_Y })
+    expect(curve[3]).toEqual({ x: 300, y: EDGE_ANCHOR_Y })
+    // 默认直线：只有起止两点
+    expect(edgePathD(curve)).toBe(`M${CARD_W} ${EDGE_ANCHOR_Y} L300 ${EDGE_ANCHOR_Y}`)
+    // 曲线用同一组控制点（两卡只隔 92px，bend 取了下限 48）
+    expect(edgePathD(curve, 'curved')).toBe(
+      `M${CARD_W} ${EDGE_ANCHOR_Y} C${CARD_W + 48} ${EDGE_ANCHOR_Y}, ${300 - 48} ${EDGE_ANCHOR_Y}, 300 ${EDGE_ANCHOR_Y}`,
     )
   })
 })

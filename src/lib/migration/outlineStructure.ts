@@ -32,7 +32,6 @@
 import type { MigrationContext, MigrationScript, MigrationStepResult } from './types'
 import {
   CARD_H,
-  NOTE_ROW,
   OUTLINE_HEAD,
   SLOT_ROW,
   seedFromSource,
@@ -203,12 +202,11 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
     /** 目标项 key → 它在父大纲里的下标（子大纲按这个上下排） */
     const slotRank = new Map<string, number>()
     for (const item of items) item.slotKeys.forEach((key, index) => slotRank.set(key, index))
-    const height = (node: { kind: string; ref?: string; note?: string }): number => {
-      const noteRow = node.note ? NOTE_ROW : 0
-      if (node.kind !== 'outline' || !node.ref) return CARD_H + noteRow
+    const height = (node: { kind: string; ref?: string }): number => {
+      if (node.kind !== 'outline' || !node.ref) return CARD_H
       const count = slotsOf.get(node.ref) ?? 0
-      if (!count) return CARD_H + noteRow
-      return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8) + noteRow
+      if (!count) return CARD_H
+      return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8)
     }
     const map = seedFromSource(
       toSource(items, docsWithBody, examsOf),

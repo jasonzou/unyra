@@ -127,15 +127,28 @@ export interface GraphEdge {
   to: string
 }
 
+/** 连线画法：直线 / 曲线（默认直线，界面上可切换） */
+export const EDGE_STYLES = ['straight', 'curved'] as const
+export type EdgeStyle = (typeof EDGE_STYLES)[number]
+
+export function isEdgeStyle(v: unknown): v is EdgeStyle {
+  return v === 'straight' || v === 'curved'
+}
+
 /** 一个目标的结构图（落 `docs/{目标}/structure.json`） */
 export interface StructureMap {
   version: 1
   nodes: StructureNode[]
   edges: GraphEdge[]
+  /**
+   * 连线画法。跟图一起存（每门课各记各的）而不是塞进 state.json：
+   * 它是「这张图长什么样」的一部分，与节点坐标同一档。
+   */
+  edgeStyle?: EdgeStyle
 }
 
 export function emptyStructure(): StructureMap {
-  return { version: 1, nodes: [], edges: [] }
+  return { version: 1, nodes: [], edges: [], edgeStyle: 'straight' }
 }
 
 /* ---------- 查表 ---------- */
@@ -573,7 +586,7 @@ function isKind(v: unknown): v is GraphKind {
 export function normalizeStructure(raw: unknown): StructureMap {
   const out = emptyStructure()
   if (!raw || typeof raw !== 'object') return out
-  const src = raw as { nodes?: unknown; edges?: unknown }
+  const src = raw as { nodes?: unknown; edges?: unknown; edgeStyle?: unknown }
 
   const seenIds = new Set<string>()
   for (const item of Array.isArray(src.nodes) ? src.nodes : []) {
@@ -606,6 +619,7 @@ export function normalizeStructure(raw: unknown): StructureMap {
     out.edges.push({ from: e.from, to: e.to })
   }
 
+  if (isEdgeStyle(src.edgeStyle)) out.edgeStyle = src.edgeStyle
   return out
 }
 

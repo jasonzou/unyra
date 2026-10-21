@@ -25,6 +25,13 @@ import {
 export { NOTE_ROW, OUTLINE_HEAD, SLOT_ROW, cardHeight, heightOf } from '../../../learn/structure'
 import { nodeById } from '../../../learn/graph'
 
+/**
+ * 连线从卡片**顶部往下多少**出线（固定值，不随卡片高度变）。
+ *
+ * 取标题行下沿附近：线从标题旁边出去，视觉上落在一条齐平的横带上。
+ */
+export const EDGE_ANCHOR_Y = 34
+
 /** 卡片上要显示的两行字 */
 export interface NodeView {
   title: string
@@ -210,19 +217,35 @@ export function edgeCurve(
 ): [Point, Point, Point, Point] {
   const fromRect = rectOf(from, height)
   const toRect = rectOf(to, height)
-  const p0 = { x: fromRect.x + fromRect.width, y: fromRect.y + fromRect.height / 2 }
-  const p3 = { x: toRect.x, y: toRect.y + toRect.height / 2 }
+  /*
+   * 锚点离卡片**顶部**一个固定距离，而不是垂直居中。
+   *
+   * 大纲卡片的高度是内容算出来的（可能 76，也可能 228），按中心连的话，
+   * 同一列里两张卡片的线会一高一低地错开；固定从标题行下方出线，
+   * 线在视觉上就落成一条齐平的横带，跟读图的方向一致。
+   */
+  const p0 = { x: fromRect.x + fromRect.width, y: fromRect.y + EDGE_ANCHOR_Y }
+  const p3 = { x: toRect.x, y: toRect.y + EDGE_ANCHOR_Y }
   const bend = Math.max(48, Math.abs(p3.x - p0.x) * 0.45)
   return [p0, { x: p0.x + bend, y: p0.y }, { x: p3.x - bend, y: p3.y }, p3]
 }
 
-export function edgePathD(curve: readonly Point[]): string {
+/** 连线样式：默认直线（读起来干净），可以切成曲线 */
+export const EDGE_STYLES = ['straight', 'curved'] as const
+export type EdgeStyle = (typeof EDGE_STYLES)[number]
+
+export function edgePathD(curve: readonly Point[], style: EdgeStyle = 'straight'): string {
   const [p0, p1, p2, p3] = curve
+  if (style === 'straight') return `M${p0.x} ${p0.y} L${p3.x} ${p3.y}`
   return `M${p0.x} ${p0.y} C${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`
 }
 
-function bezierAt(curve: readonly Point[], t: number): Point {
+/** 线上参数 t 处的点：直线就是线性插值，曲线是三次贝塞尔 */
+export function edgePointAt(curve: readonly Point[], t: number, style: EdgeStyle = 'straight'): Point {
   const [p0, p1, p2, p3] = curve
+  if (style === 'straight') {
+    return { x: p0.x + (p3.x - p0.x) * t, y: p0.y + (p3.y - p0.y) * t }
+  }
   const u = 1 - t
   return {
     x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
@@ -243,6 +266,7 @@ export function edgeAt(
   y: number,
   threshold = 8,
   height: HeightOf = defaultHeight,
+  style: EdgeStyle = 'straight',
 ): { from: string; to: string } | null {
   const byId = new Map(nodes.map((n) => [n.id, n]))
   let best: { from: string; to: string } | null = null
@@ -253,7 +277,7 @@ export function edgeAt(
     if (!from || !to) continue
     const curve = edgeCurve(from, to, height)
     for (let i = 0; i <= 24; i++) {
-      const p = bezierAt(curve, i / 24)
+      const p = edgePointAt(curve, i / 24, style)
       const dist = Math.hypot(p.x - x, p.y - y)
       if (dist <= bestDist) {
         bestDist = dist
@@ -274,9 +298,10 @@ export function edgeDots(
   from: StructureNode,
   to: StructureNode,
   height: HeightOf = defaultHeight,
+  style: EdgeStyle = 'straight',
 ): { from: Point; to: Point } {
   const curve = edgeCurve(from, to, height)
-  return { from: bezierAt(curve, 0.22), to: bezierAt(curve, 0.78) }
+  return { from: edgePointAt(curve, 0.22, style), to: edgePointAt(curve, 0.78, style) }
 }
 
 /** 点在哪颗小圆点上（点它 = 跳到线的另一端） */
@@ -287,13 +312,14 @@ export function edgeDotAt(
   y: number,
   threshold = 11,
   height: HeightOf = defaultHeight,
+  style: EdgeStyle = 'straight',
 ): { edge: { from: string; to: string }; side: 'from' | 'to' } | null {
   const byId = new Map(nodes.map((n) => [n.id, n]))
   for (const edge of edges) {
     const from = byId.get(edge.from)
     const to = byId.get(edge.to)
     if (!from || !to) continue
-    const dots = edgeDots(from, to, height)
+    const dots = edgeDots(from, to, height, style)
     if (Math.hypot(dots.from.x - x, dots.from.y - y) <= threshold) return { edge, side: 'from' }
     if (Math.hypot(dots.to.x - x, dots.to.y - y) <= threshold) return { edge, side: 'to' }
   }
