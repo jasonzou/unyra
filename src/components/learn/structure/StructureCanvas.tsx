@@ -41,7 +41,7 @@ import {
   type StructureNode,
   type ViewSize,
 } from '../../../learn/structure'
-import { structureFromStore } from '../../../learn/structureSeed'
+import { reconcileStructure, structureFromStore } from '../../../learn/structureSeed'
 import { t } from '../../../i18n'
 import {
   EDGE_ANCHOR_Y,
@@ -253,6 +253,14 @@ export const StructureCanvas = memo(function StructureCanvas({
     onChange(seeded)
   }, [nodes.length, store, goalId, onChange])
 
+  /* ---------- 对账：实体长了（agent 写了文档、新建了笔记），图跟着补 ---------- */
+
+  useEffect(() => {
+    const next = reconcileStructure(store, goalId, map)
+    // 返回同一个对象 = 没变化，不写回（否则会自己触发自己）
+    if (next !== map) onChange(next)
+  }, [store, goalId, map, onChange])
+
   /* ---------- 镜头 ---------- */
 
   /**
@@ -432,11 +440,22 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   const removeNode = useCallback(
     (id: string) => {
+      const node = nodes.find((n) => n.id === id)
       const next = nodes.filter((n) => n.id !== id)
-      commit({ version: 1, nodes: next, edges: edges.filter((e) => e.from !== id && e.to !== id) })
+      /*
+       * 记一笔「这个节点是我拿掉的」：图会跟着实体自动补齐，不记的话下一次对账
+       * 又把它加回来（用户会看到自己删掉的卡自己长回去）。撤回会把这一笔一起退回。
+       */
+      const hidden = node ? [...new Set([...(map.hidden ?? []), node.id])] : map.hidden
+      commit({
+        version: 1,
+        nodes: next,
+        edges: edges.filter((e) => e.from !== id && e.to !== id),
+        ...(hidden ? { hidden } : {}),
+      })
       setSelectedId(null)
     },
-    [nodes, edges, commit],
+    [nodes, edges, map, commit],
   )
 
   const addEdge = useCallback(

@@ -145,6 +145,14 @@ export interface StructureMap {
    * 它是「这张图长什么样」的一部分，与节点坐标同一档。
    */
   edgeStyle?: EdgeStyle
+  /**
+   * 被用户**主动从画布上移除**的实体（存的是 ref，不是节点 id）。
+   *
+   * 图会跟着实体自动补齐（agent 新写了教学文档就该冒出文档节点），
+   * 但「我就是要把它从画布上拿掉」这件事得记下来，否则下一次对账又把它加回来。
+   * 撤回（Ctrl+Z）会连这一笔一起退回。
+   */
+  hidden?: string[]
 }
 
 export function emptyStructure(): StructureMap {
@@ -586,7 +594,7 @@ function isKind(v: unknown): v is GraphKind {
 export function normalizeStructure(raw: unknown): StructureMap {
   const out = emptyStructure()
   if (!raw || typeof raw !== 'object') return out
-  const src = raw as { nodes?: unknown; edges?: unknown; edgeStyle?: unknown }
+  const src = raw as { nodes?: unknown; edges?: unknown; edgeStyle?: unknown; hidden?: unknown }
 
   const seenIds = new Set<string>()
   for (const item of Array.isArray(src.nodes) ? src.nodes : []) {
@@ -620,6 +628,8 @@ export function normalizeStructure(raw: unknown): StructureMap {
   }
 
   if (isEdgeStyle(src.edgeStyle)) out.edgeStyle = src.edgeStyle
+  const hidden = Array.isArray(src.hidden) ? src.hidden.filter((v): v is string => typeof v === 'string' && !!v) : []
+  if (hidden.length) out.hidden = hidden
   return out
 }
 

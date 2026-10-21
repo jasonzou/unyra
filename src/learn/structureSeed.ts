@@ -7,7 +7,22 @@
  */
 
 import type { LearnStore } from './types'
-import { heightOf, seedFromSource, slotOrderOf, type SeedSourceNode, type StructureMap } from './structure'
+import {
+  CARD_H,
+  CARD_W,
+  COL_GAP,
+  docGid,
+  examGid,
+  heightOf,
+  noteGid,
+  outlineGid,
+  seedFromSource,
+  slotOrderOf,
+  superdocGid,
+  type SeedSourceNode,
+  type StructureMap,
+  type StructureNode,
+} from './structure'
 
 /**
  * 把一个目标的旧结构铺成图。
@@ -49,4 +64,104 @@ export function structureFromStore(store: LearnStore, goalId: string): Structure
   }))
 
   return seedFromSource(source, heightOf(store), slotOrderOf(store, goalId))
+}
+
+/* ---------- 对账：让图跟上实体 ---------- */
+
+/**
+ * 把「实体」与「画布上的节点」对一遍，缺的补上。
+ *
+ * 为什么需要它：图是一份**快照**（structure.json），而实体是会自己长出来的——
+ * agent 写了一份教学文档、在资源管理器里新建了一份笔记、出了一份试卷……
+ * 这些都不经过画布。没有对账的话，画布就永远停在第一次铺出来的那一刻，
+ * 用户会问「为什么生成的文档没有出现在画布上」（问过一次了）。
+ *
+ * 三条规矩：
+ * 1. **只补不删**：实体没了不自动清节点（用户可能只是暂时删了内容，位置还要留着）；
+ * 2. **补的时候带上连线**：一张孤零零的文档卡没有意义，边一定跟着补；
+ * 3. **用户删过的不再补**：`map.hidden` 记着那些被主动移除的节点 id。
+ */
+export function reconcileStructure(store: LearnStore, goalId: string, map: StructureMap): StructureMap {
+  const nodes = [...map.nodes]
+  const edges = [...map.edges]
+  const hidden = new Set(map.hidden ?? [])
+  const ids = new Set(nodes.map((n) => n.id))
+  const linked = new Set(edges.map((e) => `${e.from}>${e.to}`))
+  let changed = false
+
+  /** 找一个没被占的落点：同一位置有卡就往下挪一格 */
+  const spot = (x: number, y: number) => {
+    let yy = y
+    for (let i = 0; i < 40; i++) {
+      if (!nodes.some((n) => Math.abs(n.x - x) < 1 && Math.abs(n.y - yy) < 1)) break
+      yy += CARD_H + 24
+    }
+    return { x, y: yy }
+  }
+
+  const add = (node: StructureNode, from?: string) => {
+    nodes.push(node)
+    ids.add(node.id)
+    changed = true
+    if (from && !linked.has(`${from}>${node.id}`)) {
+      edges.push({ from, to: node.id })
+      linked.add(`${from}>${node.id}`)
+    }
+  }
+
+  const goalNodes = store.nodes.filter((n) => n.goalId === goalId)
+
+  for (const owner of goalNodes) {
+    // 1. 大纲节点：每个学习节点都应该在图上有一块
+    const oid = outlineGid(owner.id)
+    let outline = nodes.find((n) => n.id === oid) ?? null
+    if (!outline && !hidden.has(oid)) {
+      const parentNodeId = store.edges.find((e) => e.to === owner.id)?.from
+      const parent = parentNodeId ? nodes.find((n) => n.id === outlineGid(parentNodeId)) : undefined
+      const at = spot(parent ? parent.x + COL_GAP : 0, parent ? parent.y : 0)
+      outline = { id: oid, kind: 'outline', ref: owner.id, slot: owner.key, x: at.x, y: at.y }
+      add(outline, parent?.id)
+    }
+    if (!outline) continue
+
+    // 2. 文档节点：有正文（或有下游）才建，与首次铺图同一条规矩
+    const exams = store.exams.filter((e) => e.nodeId === owner.id)
+    const needDoc =
+      owner.docs.teaching.trim().length > 0 ||
+      owner.notes.length > 0 ||
+      (owner.superdocs ?? []).length > 0 ||
+      exams.length > 0
+    const did = docGid(owner.id)
+    let doc = nodes.find((n) => n.id === did) ?? null
+    if (!doc && needDoc && !hidden.has(did)) {
+      const at = spot(outline.x + CARD_W + 96, outline.y)
+      doc = { id: did, kind: 'doc', ref: owner.id, x: at.x, y: at.y }
+      add(doc, outline.id)
+    }
+    if (!doc) continue
+
+    // 3. 叶子：笔记 / 超级文档 / 试卷，挂在文档下面
+    for (const note of owner.notes) {
+      const gid = noteGid(owner.id, note.name)
+      if (ids.has(gid) || hidden.has(gid)) continue
+      const at = spot(doc.x + CARD_W + 96, doc.y)
+      add({ id: gid, kind: 'note', ref: `${owner.id}:${note.name}`, x: at.x, y: at.y }, doc.id)
+    }
+    for (const sdoc of owner.superdocs ?? []) {
+      const gid = superdocGid(owner.id, sdoc.name)
+      if (ids.has(gid) || hidden.has(gid)) continue
+      const at = spot(doc.x + CARD_W + 96, doc.y)
+      add({ id: gid, kind: 'superdoc', ref: `${owner.id}:${sdoc.name}`, x: at.x, y: at.y }, doc.id)
+    }
+    for (const exam of exams) {
+      const gid = examGid(exam.id)
+      if (ids.has(gid) || hidden.has(gid)) continue
+      const at = spot(doc.x + CARD_W + 96, doc.y)
+      add({ id: gid, kind: 'exam', ref: exam.id, x: at.x, y: at.y }, doc.id)
+    }
+  }
+
+  // 没有任何变化时返回**同一个对象**：调用方的 effect 靠这个判断要不要写回，避免死循环
+  if (!changed) return map
+  return { ...map, nodes, edges }
 }

@@ -19,7 +19,7 @@ import {
   slotKeyOf,
   splitLeafRef,
 } from '../src/components/learn/structure/structureView'
-import { structureFromStore } from '../src/learn/structureSeed'
+import { reconcileStructure, structureFromStore } from '../src/learn/structureSeed'
 import { emptyLearnStore } from '../src/learn/store/empty'
 import { emptyOutline, type KnowledgeNode, type LearnStore } from '../src/learn/types'
 
@@ -302,5 +302,56 @@ describe('结构画布：连线两端的小圆点', () => {
     expect(edgeDotAt(nodes, edges, dots.from.x, dots.from.y)).toEqual({ edge: edges[0], side: 'from' })
     expect(edgeDotAt(nodes, edges, dots.to.x, dots.to.y)).toEqual({ edge: edges[0], side: 'to' })
     expect(edgeDotAt(nodes, edges, 150, 400)).toBeNull()
+  })
+})
+
+describe('结构画布：对账（实体长了，图跟着补）', () => {
+  const owner = makeNode({
+    id: 'n1',
+    title: '极限',
+    docs: { teaching: '正文' },
+    notes: [{ name: '错题', content: 'x', createdAt: NOW, updatedAt: NOW }],
+  })
+  const store = makeStore([owner])
+
+  it('agent 写出的教学文档会补出文档节点，并连到大纲', () => {
+    // 图上只有大纲节点（就像「文档刚生成完」的那一刻）
+    const map = { version: 1 as const, nodes: [{ id: 'o:n1', kind: 'outline' as const, ref: 'n1', x: 0, y: 0 }], edges: [] }
+    const next = reconcileStructure(store, 'g1', map)
+    expect(next).not.toBe(map)
+    expect(next.nodes.some((n) => n.id === 'd:n1')).toBe(true)
+    expect(next.edges).toContainEqual({ from: 'o:n1', to: 'd:n1' })
+  })
+
+  it('已有的节点不会重复补（返回同一个对象，调用方据此不写回）', () => {
+    const map = structureFromStore(store, 'g1')
+    expect(reconcileStructure(store, 'g1', map)).toBe(map)
+  })
+
+  it('笔记实体补成叶子节点，挂在文档下面', () => {
+    const map = { version: 1 as const, nodes: [{ id: 'o:n1', kind: 'outline' as const, ref: 'n1', x: 0, y: 0 }], edges: [] }
+    const next = reconcileStructure(store, 'g1', map)
+    expect(next.nodes.some((n) => n.id === 'n:n1:错题')).toBe(true)
+    expect(next.edges).toContainEqual({ from: 'd:n1', to: 'n:n1:错题' })
+  })
+
+  it('被用户主动移除的（hidden）不再补回来', () => {
+    const map = {
+      version: 1 as const,
+      nodes: [{ id: 'o:n1', kind: 'outline' as const, ref: 'n1', x: 0, y: 0 }],
+      edges: [],
+      hidden: ['d:n1'],
+    }
+    const next = reconcileStructure(store, 'g1', map)
+    expect(next.nodes.some((n) => n.id === 'd:n1')).toBe(false)
+    // 文档没补，叶子也就无处可挂
+    expect(next.nodes.some((n) => n.id === 'n:n1:错题')).toBe(false)
+  })
+
+  it('别的目标不掺和', () => {
+    const other = makeNode({ id: 'n9', title: '别的', goalId: 'g2', docs: { teaching: '正文' } })
+    const map = { version: 1 as const, nodes: [], edges: [] }
+    const next = reconcileStructure(makeStore([owner, other]), 'g1', map)
+    expect(next.nodes.some((n) => n.ref === 'n9')).toBe(false)
   })
 })
