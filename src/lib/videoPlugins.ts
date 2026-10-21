@@ -18,6 +18,7 @@ import { t } from '../i18n'
 import {
   currentCompileHost,
   definePluginCategory,
+  pluginOriginOf,
   pluginsOf,
   type PluginBase,
   type PluginHost,
@@ -163,6 +164,14 @@ function ctxOf(plugin: VideoPlugin): VideoPluginCtx {
   const host = plugin.host
   if (!host) throw new Error(t('插件「{0}」没有装载上下文（重启应用后重试）', plugin.name ?? plugin.id))
   return host
+}
+
+/** 设置页「测试连接」：按文件找到已装载的视频插件，跑它的 onTest（没声明就算不支持） */
+export async function testVideoPlugin(file: string): Promise<{ ok: boolean; message?: string }> {
+  const plugin = videoSourcePlugins().find((p) => pluginOriginOf(p.id) === file)
+  if (!plugin) return { ok: false, message: t('这个插件还没装载（重启应用后重试）') }
+  if (!plugin.onTest) return { ok: false, message: t('这个插件不支持测试连接') }
+  return plugin.onTest(ctxOf(plugin))
 }
 
 /** 找出认领这个输入的插件；插件自己抛错只当不匹配（错误不外溢） */

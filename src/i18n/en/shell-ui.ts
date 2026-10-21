@@ -178,6 +178,11 @@ const dict: Record<string, string> = {
   '密码类字段由系统加密存储（换机器后需要重新填写）。':
     'Secret fields are encrypted by the OS (fill them in again on another machine).',
   '保存后需重启应用才生效': 'Takes effect after restart',
+  '测试中…': 'Testing…',
+  '连接正常': 'Connection OK',
+  '连接失败': 'Connection failed',
+  '这个插件不支持测试连接': 'This plugin does not support connection tests',
+  '这个插件还没装载（重启应用后重试）': 'This plugin is not loaded yet (restart the app and retry)',
   '保存中…': 'Saving…',
   '往里放一个 .js 就多一个插件：文件里调用': 'Drop a .js file in to add a plugin: the file calls',
   '交出插件对象（认领一种围栏语言，或给几条正文文字规则）。目录：': 'to hand over the plugin object (claiming a fenced language or text rules). Folder:',

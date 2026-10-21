@@ -31,6 +31,7 @@ import { t } from '../../i18n'
 import { pluginHint } from './pluginHints'
 import { native } from '../../lib/native'
 import type { PluginSettingField } from '../../lib/plugins'
+import { testVideoPlugin } from '../../lib/videoPlugins'
 
 interface Props {
   onToast: (msg: string) => void
@@ -223,7 +224,7 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
                       </div>
                       {/* 声明式配置表单：字段由插件声明，值与加密都由主进程管（见 electron/plugins） */}
                       {p.category === 'video' && p.settings?.length ? (
-                        <PluginSettingsForm file={p.id} fields={p.settings} onToast={onToast} />
+                        <PluginSettingsForm file={p.id} fields={p.settings} testable={p.testable === true} onToast={onToast} />
                       ) : null}
                       </div>
                     )
@@ -298,15 +299,19 @@ export function PluginsPanel({ onToast, onOpenConfig }: Props) {
 function PluginSettingsForm({
   file,
   fields,
+  testable,
   onToast,
 }: {
   file: string
   fields: PluginSettingField[]
+  /** 插件声明了 onTest（设置页显示「测试连接」） */
+  testable: boolean
   onToast: (msg: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
   const [values, setValues] = useState<Record<string, string | number | boolean>>({})
 
   const seed = (): Record<string, string | number | boolean> => {
@@ -417,6 +422,23 @@ function PluginSettingsForm({
           )}
           <div className="flex items-center justify-end gap-2">
             <span className="mr-auto text-[10.5px] text-ink-faint">{t('保存后需重启应用才生效')}</span>
+            {testable && (
+              <button
+                type="button"
+                disabled={testing}
+                onClick={() => {
+                  if (testing) return
+                  setTesting(true)
+                  void testVideoPlugin(file).then((res) => {
+                    setTesting(false)
+                    onToast(res.message || (res.ok ? t('连接正常') : t('连接失败')))
+                  })
+                }}
+                className="rounded-lg border border-line px-2.5 py-1.5 text-[11.5px] text-ink-soft transition hover:bg-line/50 disabled:opacity-40"
+              >
+                {testing ? t('测试中…') : t('测试连接')}
+              </button>
+            )}
             <button
               type="button"
               disabled={saving}

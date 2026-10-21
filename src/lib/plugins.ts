@@ -229,6 +229,8 @@ export interface PluginStatus {
   configurable?: boolean
   /** 声明式配置字段（仅已装载的插件拿得到 schema） */
   settings?: PluginSettingField[]
+  /** 支持「测试连接」（插件声明了 onTest） */
+  testable?: boolean
   /** 插件版本 */
   version?: string
 }
@@ -398,6 +400,20 @@ function describeOf(plugin: PluginBase): string[] {
 /** 编译器当前正在装的插件所属宿主（编译是同步的，单线程下一格就够） */
 let compileHostRef: PluginHost | null = null
 
+/**
+ * 插件 id → 来源文件：设置页拿到的是**文件名**（用户插件的状态行 id 就是文件），
+ * 而注册表里的插件按声明 id 收；两边要能对上（测试连接、按文件找插件都靠它）。
+ */
+const pluginOrigins = new Map<string, string>()
+
+export function notePluginOrigin(id: string, file: string): void {
+  pluginOrigins.set(id, file)
+}
+
+export function pluginOriginOf(id: string): string | undefined {
+  return pluginOrigins.get(id)
+}
+
 /** 类别模块在 normalize 里取一份当前编译的宿主（video 插件把它缝进插件对象） */
 export function currentCompileHost(): PluginHost | null {
   return compileHostRef
@@ -505,6 +521,8 @@ export async function loadPlugins(): Promise<void> {
       status.summary = describeOf(plugin)
       if (plugin.settings?.length) status.settings = plugin.settings
       if (plugin.version) status.version = plugin.version
+      notePluginOrigin(plugin.id, status.file as string)
+      if (typeof (plugin as { onTest?: unknown }).onTest === 'function') status.testable = true
     } catch (err) {
       status.error = err instanceof Error ? err.message : String(err)
     }
