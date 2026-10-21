@@ -21,6 +21,7 @@ import { openRelayStream, resolveSource, resolveTranscriptOnly } from '../../vid
 import { buildPagesMarkdown, type PagesExportEntry } from '../../video/export'
 import { formatClock, segmentIndexAt } from '../../video/transcript'
 import type { Transcript, VideoSource } from '../../video/types'
+import VideoPlayer, { type VideoPlayerHandle } from './VideoPlayer'
 
 /** SESSDATA 存放键：实验期存 localStorage（跟浏览器 profile 走），正式形态挪进设置页 */
 const SESSDATA_KEY = 'moji.video.sessdata'
@@ -83,7 +84,7 @@ export default function VideoStudyTab() {
   /** 合集字幕批量导出进度；null = 没在导出 */
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null)
 
-  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const playerRef = useRef<VideoPlayerHandle | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
   const rowRefs = useRef<Array<HTMLDivElement | null>>([])
   const edges = useScrollEdges(listRef)
@@ -177,12 +178,7 @@ export default function VideoStudyTab() {
 
   /** 点转录段 → 播放器 seek 到段首并起播 */
   const seekMs = useCallback((ms: number) => {
-    const video = videoRef.current
-    if (!video) return
-    video.currentTime = ms / 1000
-    void video.play().catch(() => {
-      // 自动播放被策略拦下时静默：位置已经到了，用户按一下播放就好
-    })
+    playerRef.current?.seekMs(ms)
   }, [])
 
   /** 当前段变了就把那行滚进视野（在视野里就别动——读着读着被拽走很烦） */
@@ -342,15 +338,19 @@ export default function VideoStudyTab() {
           <div className="flex min-h-0 flex-1">
             <div className="min-h-0 min-w-0 flex-1 bg-black">
               {/* key 绑流地址：重新解析换一条流时整只元素重建，播放状态清零是最诚实的表现 */}
-              <video
+              <VideoPlayer
                 key={relayUrl}
-                ref={videoRef}
+                ref={playerRef}
                 src={relayUrl}
-                controls
-                autoPlay
-                onTimeUpdate={(e) => setCurrentMs(e.currentTarget.currentTime * 1000)}
-                onSeeked={(e) => setCurrentMs(e.currentTarget.currentTime * 1000)}
-                className="h-full w-full object-contain"
+                title={source.title}
+                durationMs={source.durationMs}
+                transcript={transcript}
+                onTimeUpdate={(ms) => setCurrentMs(ms)}
+                onSeeked={(ms) => setCurrentMs(ms)}
+                onExternalSubtitleLoaded={(extTranscript) => {
+                  setTranscript(extTranscript)
+                  setTranscriptNote(null)
+                }}
               />
             </div>
             {(source.collection || source.pages) && (
