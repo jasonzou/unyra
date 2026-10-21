@@ -421,16 +421,21 @@ export function compilePlugin(source: string, file: string, host?: PluginHost): 
       mod.exports,
       host ?? {},
     )
+    const candidate = declared ?? mod.exports
+    const value =
+      candidate && typeof candidate === 'object' && 'default' in (candidate as Record<string, unknown>)
+        ? (candidate as Record<string, unknown>).default
+        : candidate
+    if (!value || typeof value !== 'object') throw new Error(t('插件没有交出对象（需要调用 register({…})）'))
+    /*
+     * 注册（normalize 里读 currentCompileHost 缝宿主）必须在**还原之前**完成：
+     * 放在 finally 外面的话宿主引用已经还原成 null，插件装载成功却拿不到 settings/fetch
+     * （用户实测报「插件没有装载上下文」——就是这个顺序错的）。
+     */
+    return registerPlugin(value, file.replace(/\.js$/i, ''))
   } finally {
     compileHostRef = prevHost
   }
-  const candidate = declared ?? mod.exports
-  const value =
-    candidate && typeof candidate === 'object' && 'default' in (candidate as Record<string, unknown>)
-      ? (candidate as Record<string, unknown>).default
-      : candidate
-  if (!value || typeof value !== 'object') throw new Error(t('插件没有交出对象（需要调用 register({…})）'))
-  return registerPlugin(value, file.replace(/\.js$/i, ''))
 }
 
 /**
