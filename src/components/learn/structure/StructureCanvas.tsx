@@ -33,6 +33,7 @@ import {
   clampZoom,
   fitZoom,
   seedLayout,
+  slotOrderOf,
   type GraphKind,
   type StructureMap,
   type StructureNode,
@@ -471,7 +472,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         ...(n.note ? { note: n.note } : {}),
       })),
       edges,
-    }, height)
+    }, height, slotOrderOf(store, goalId))
     const pos = new Map(laid.nodes.map((n) => [n.id, { x: n.x, y: n.y }]))
     fitNextRef.current = true
     commit({
@@ -482,7 +483,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       }),
       edges,
     })
-  }, [nodes, edges, height, commit])
+  }, [nodes, edges, height, store, goalId, commit])
 
   /* ---------- 右键菜单的三个动作 ---------- */
 

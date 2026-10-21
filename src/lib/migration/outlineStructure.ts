@@ -57,8 +57,11 @@ interface Collected {
   downstream: string[]
   notes: string[]
   superdocs: string[]
-  /** 大纲里的目标项条数：决定这张卡在画布上多高（见 learn/structure 的 cardHeight） */
-  slots: number
+  /**
+   * 大纲里目标项的 key，**按顺序**。两个用途：
+   * 条数决定卡片高度；次序决定同列里子大纲的上下顺序。
+   */
+  slotKeys: string[]
 }
 
 function asArray(v: unknown): unknown[] {
@@ -116,7 +119,9 @@ async function collectMetas(ctx: MigrationContext, goalDir: string): Promise<Col
           .filter(Boolean),
         notes: [...new Set([...metaNotes, ...diskNotes])],
         superdocs: [...new Set([...metaSuperdocs, ...diskSuperdocs])],
-        slots: asArray(outline?.children).length,
+        slotKeys: asArray(outline?.children)
+          .map((c) => str((c as { key?: unknown } | null)?.key))
+          .filter(Boolean),
       })
     }
     // 子目录里也可能有节点（旧模型允许节点嵌在节点目录里）
@@ -189,7 +194,10 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
      * 高度要跟着数据走：大纲卡片的行数就是目标项条数，不传高度的话
      * 迁移铺出来的图会像「按固定行距排」那样叠在一起。
      */
-    const slotsOf = new Map(items.map((i) => [i.id, i.slots]))
+    const slotsOf = new Map(items.map((i) => [i.id, i.slotKeys.length]))
+    /** 目标项 key → 它在父大纲里的下标（子大纲按这个上下排） */
+    const slotRank = new Map<string, number>()
+    for (const item of items) item.slotKeys.forEach((key, index) => slotRank.set(key, index))
     const height = (node: { kind: string; ref?: string; note?: string }): number => {
       const noteRow = node.note ? NOTE_ROW : 0
       if (node.kind !== 'outline' || !node.ref) return CARD_H + noteRow
@@ -197,7 +205,11 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
       if (!count) return CARD_H + noteRow
       return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8) + noteRow
     }
-    const map = seedFromSource(toSource(items, docsWithBody, examsOf), height)
+    const map = seedFromSource(
+      toSource(items, docsWithBody, examsOf),
+      height,
+      (node) => (node.slot ? slotRank.get(node.slot) ?? 0 : 0),
+    )
     if (!map.nodes.length) {
       ctx.log(`跳过「${goal.name}」：铺出来是空的`)
       continue

@@ -304,6 +304,32 @@ export function heightOf(store: LearnStore): HeightOf {
   return (node) => cardHeight(store, node)
 }
 
+/**
+ * 同列排序的「兄弟次序」：越小越靠上。
+ *
+ * 子大纲的上下顺序要跟**父大纲的目标项列表**一致——目标项第 1 条对应的子大纲在最上面。
+ * 只按父节点的 y 排是排不出来的：兄弟们的父节点是同一个，y 全一样，最后就退化成比 uuid，
+ * 那个顺序对人是随机的。所以次序由调用方算好传进来（它才知道大纲里有哪几条）。
+ */
+export type SiblingOrder = (node: { kind: GraphKind; ref?: string; slot?: string }) => number
+
+const NO_ORDER: SiblingOrder = () => 0
+
+/**
+ * 从 store 造一个「兄弟次序」：目标项 key → 它在父大纲里的下标。
+ *
+ * 遍历整个目标的节点而不是只看出现在画布上的那几个：子大纲挂的是哪一条目标项，
+ * 取决于**父节点的大纲**，父节点可能还没放到画布上。
+ */
+export function slotOrderOf(store: LearnStore, goalId: string): SiblingOrder {
+  const rank = new Map<string, number>()
+  for (const node of store.nodes) {
+    if (node.goalId !== goalId) continue
+    for (const [i, entry] of (node.outline?.children ?? []).entries()) rank.set(entry.key, i)
+  }
+  return (n) => (n.slot ? rank.get(n.slot) ?? 0 : 0)
+}
+
 /** 同一列里类型的先后：大纲 → 文档 → 叶子（读图时从上往下就是这个顺序） */
 const KIND_RANK: Record<GraphKind, number> = { outline: 0, doc: 1, note: 2, exam: 2, superdoc: 2 }
 
@@ -363,6 +389,7 @@ export const examGid = (examId: string): string => `e:${examId}`
 export function seedFromSource(
   source: readonly SeedSourceNode[],
   heightOf: HeightOf = defaultHeight,
+  siblingOrder: SiblingOrder = NO_ORDER,
 ): StructureMap {
   const seedNodes: SeedGraph['nodes'] = []
   const seedEdges: GraphEdge[] = []
@@ -400,7 +427,7 @@ export function seedFromSource(
     }
   }
 
-  return seedLayout({ nodes: seedNodes, edges: seedEdges }, heightOf)
+  return seedLayout({ nodes: seedNodes, edges: seedEdges }, heightOf, siblingOrder)
 }
 
 /**
@@ -413,7 +440,11 @@ export function seedFromSource(
  * 它只负责「第一次摆得像话」，之后位置由用户拖、存进 structure.json，不再重算。
  * 根节点（没有入边）在第 0 列；同列内按「父节点的 y」再按 id 排序，尽量让兄弟挨着。
  */
-export function seedLayout(seed: SeedGraph, heightOf: HeightOf = defaultHeight): StructureMap {
+export function seedLayout(
+  seed: SeedGraph,
+  heightOf: HeightOf = defaultHeight,
+  siblingOrder: SiblingOrder = NO_ORDER,
+): StructureMap {
   const nodes = seed.nodes
   const byId = new Map(nodes.map((n) => [n.id, n]))
   /** 有效边：两端都在表里才认（迁移时旧数据里可能有指向已删节点的依赖） */
@@ -467,6 +498,7 @@ export function seedLayout(seed: SeedGraph, heightOf: HeightOf = defaultHeight):
       (a, b) =>
         anchorY(a.id) - anchorY(b.id) ||
         KIND_RANK[a.kind] - KIND_RANK[b.kind] ||
+        siblingOrder(a) - siblingOrder(b) ||
         (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
     )
     /*

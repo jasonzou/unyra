@@ -17,6 +17,7 @@ import {
   minZoomOf,
   normalizeStructure,
   seedLayout,
+  slotOrderOf,
   wouldCycle,
   type StructureNode,
 } from '../src/learn/structure'
@@ -185,6 +186,55 @@ describe('结构图：初始铺排', () => {
     // o2 与 d1 同列，o2 在上：d1 的顶必须落在 o2 的底之下（含空隙）
     expect(at('d1').x).toBe(at('o2').x)
     expect(at('d1').y).toBeGreaterThanOrEqual(at('o2').y + 240)
+  })
+
+  it('同列的子大纲按父大纲目标项的顺序排（不是按 uuid）', () => {
+    // 目标项顺序：a(0) → b(1) → c(2)，但节点在表里是乱序的
+    const order = (n: { slot?: string }) => (n.slot === 'c' ? 2 : n.slot === 'b' ? 1 : 0)
+    const map = seedLayout(
+      {
+        nodes: [
+          { id: 'o1', kind: 'outline' },
+          { id: 'c1', kind: 'outline', slot: 'c' },
+          { id: 'b1', kind: 'outline', slot: 'b' },
+        ],
+        edges: [
+          { from: 'o1', to: 'c1' },
+          { from: 'o1', to: 'b1' },
+        ],
+      },
+      undefined,
+      order,
+    )
+    const at = (id: string) => map.nodes.find((n) => n.id === id)!
+    expect(at('b1').x).toBe(at('c1').x)
+    expect(at('b1').y).toBeLessThan(at('c1').y)
+  })
+
+  it('slotOrderOf：目标项 key → 它在父大纲里的下标', () => {
+    const store = {
+      nodes: [
+        {
+          goalId: 'g1',
+          outline: {
+            intro: '',
+            updatedAt: 0,
+            children: [
+              { key: 'a', title: 'A', summary: '' },
+              { key: 'b', title: 'B', summary: '' },
+            ],
+          },
+        },
+        { goalId: 'g2', outline: { intro: '', updatedAt: 0, children: [{ key: 'x', title: 'X', summary: '' }] } },
+      ],
+    } as unknown as Parameters<typeof slotOrderOf>[0]
+    const order = slotOrderOf(store, 'g1')
+    expect(order({ kind: 'outline', slot: 'b' })).toBe(1)
+    expect(order({ kind: 'outline', slot: 'a' })).toBe(0)
+    // 别的目标的目标项不算进来
+    expect(order({ kind: 'outline', slot: 'x' })).toBe(0)
+    // 没有 slot（根大纲）恒为 0
+    expect(order({ kind: 'outline' })).toBe(0)
   })
 
   it('每个节点都拿到坐标，一个不落', () => {
