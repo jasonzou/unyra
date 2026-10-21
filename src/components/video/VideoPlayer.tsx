@@ -29,9 +29,9 @@ import {
   Loader2,
   Maximize,
   Minimize,
+  ListVideo,
   Pause,
   Play,
-  Plus,
   RotateCcw,
   Upload,
   Volume1,
@@ -64,8 +64,10 @@ export interface VideoPlayerProps {
    * 这是它不进外层布局的原因（全屏只显示 containerRef 的子树）。
    */
   sidePanel?: React.ReactNode
-  /** 底部控件栏的「新建视频」入口（打开创建态页签；不传就不画） */
-  onNewVideo?: () => void
+  /** 底部控件栏的「选集 / 合集列表」开关（没有列表时不传，按钮不画） */
+  onToggleSidePanel?: () => void
+  /** 列表此刻是否展开（决定按钮高亮与提示语） */
+  sidePanelOpen?: boolean
   className?: string
 }
 
@@ -143,7 +145,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       onSeeked,
       onExternalSubtitleLoaded,
       sidePanel,
-      onNewVideo,
+      onToggleSidePanel,
+      sidePanelOpen = false,
       className = '',
     },
     ref,
@@ -936,15 +939,19 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
 
             {/* 右侧功能控制集合 */}
             <div className="flex items-center gap-1.5">
-              {/* 新建视频：回到创建态页签（入口用户定的就在控件栏里） */}
-              {onNewVideo && (
+              {/* 选集 / 合集列表开关（用户定的：这就是「视频空间栏」里要放的那个入口） */}
+              {onToggleSidePanel && (
                 <button
                   type="button"
-                  onClick={onNewVideo}
-                  title={t('新建视频')}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/20 hover:text-white"
+                  onClick={onToggleSidePanel}
+                  title={sidePanelOpen ? t('收起选集列表') : t('展开选集列表')}
+                  aria-expanded={sidePanelOpen}
+                  className={
+                    'flex h-8 w-8 items-center justify-center rounded-lg transition hover:bg-white/20 ' +
+                    (sidePanelOpen ? 'bg-white/20 text-seal' : 'text-white/80 hover:text-white')
+                  }
                 >
-                  <Plus size={16} />
+                  <ListVideo size={16} />
                 </button>
               )}
 

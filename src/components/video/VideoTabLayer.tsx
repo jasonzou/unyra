@@ -34,11 +34,9 @@ interface Props {
   onProgress: (videoId: string, positionMs: number, source: string) => void
   /** 选集切换：把「停在的那一项」写进资源（重开页签回到同一集） */
   onSelection: (videoId: string, source: string, title: string) => void
-  /** 控件栏的「新建视频」入口 */
-  onNewVideo: () => void
 }
 
-export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onResolved, onProgress, onSelection, onNewVideo }: Props) {
+export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onResolved, onProgress, onSelection }: Props) {
   return (
     <>
       {tabs.map((tab) => {
@@ -72,7 +70,6 @@ export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onReso
                 onSelection={(source, title) => {
                   if (videoId) onSelection(videoId, source, title)
                 }}
-                onNewVideo={onNewVideo}
               />
             )}
           </div>

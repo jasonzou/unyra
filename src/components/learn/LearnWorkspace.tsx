@@ -4717,7 +4717,6 @@ export default function LearnWorkspace({
                   ),
                 })
               }}
-              onNewVideo={() => openTab({ kind: 'video' })}
               onSelection={(videoId, source, title) => {
                 const latest = getLatest()
                 const list = latest.videos ?? []
