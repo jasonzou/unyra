@@ -167,6 +167,8 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
   }, [collapsed, collapsePanel])
   /** 合集字幕批量导出进度；null = 没在导出 */
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null)
+  /** 换集幕布：点下一集时先冻结当前帧，新流首帧到了由播放器淡出 */
+  const [switchStill, setSwitchStill] = useState<{ token: string; src: string } | null>(null)
 
   const playerRef = useRef<VideoPlayerHandle | null>(null)
   /** 上次上报进度时的位置：节流用（每 5 秒最多写一次存档） */
@@ -188,6 +190,10 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
   const runResolve = useCallback(
     async (text: string, fields?: Record<string, string | number | boolean>) => {
       if (!text || busy) return
+      // 换集过渡：先冻结当前帧（此刻抓，解析期间旧画面照播）；播放器会在新流挂上、
+      // 首帧未到时才把这帧亮出来盖住黑屏
+      const frame = playerRef.current?.captureFrame() ?? null
+      if (frame) setSwitchStill({ token: Math.random().toString(36).slice(2), src: frame })
       setBusy(true)
       setError(null)
       setTranscriptNote(null)
@@ -608,6 +614,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
                 transcript={transcript}
                 sidePanel={sidePanel}
                 subLabel={pageLabel}
+                transitionStill={switchStill}
                 // 选集列表开关：有列表才给按钮（没有列表时控件栏不画这一颗）
                 onToggleSidePanel={sidePanel ? toggleCollapsed : undefined}
                 sidePanelOpen={!collapsed}

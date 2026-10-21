@@ -64,6 +64,11 @@ export interface VideoPlayerProps {
    * 这是它不进外层布局的原因（全屏只显示 containerRef 的子树）。
    */
   sidePanel?: React.ReactNode
+  /**
+   * 切换选集时的「冻结帧」幕布：token 变化即显示 src（上一集的最后一帧），
+   * 新流首帧就绪（loadeddata）后淡出。只影响视觉，不参与播放逻辑。
+   */
+  transitionStill?: { token: string; src: string } | null
   /** 底部控件栏的「选集 / 合集列表」开关（没有列表时不传，按钮不画） */
   onToggleSidePanel?: () => void
   /** 列表此刻是否展开（决定按钮高亮与提示语） */
@@ -73,6 +78,8 @@ export interface VideoPlayerProps {
 
 export interface VideoPlayerHandle {
   seekMs: (ms: number) => void
+  /** 抓当前画面为 dataURL：切换选集前冻结上一帧，盖住新流首帧到来前的黑屏 */
+  captureFrame: () => string | null
   play: () => Promise<void>
   pause: () => void
   getVideoElement: () => HTMLVideoElement | null
@@ -145,6 +152,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       onSeeked,
       onExternalSubtitleLoaded,
       sidePanel,
+      transitionStill,
       onToggleSidePanel,
       sidePanelOpen = false,
       className = '',
@@ -206,6 +214,12 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [centerIndicator, setCenterIndicator] = useState<'play' | 'pause' | null>(null)
     const [toastMessage, setToastMessage] = useState<string | null>(null)
 
+    /** 换集幕布（冻结上一帧）：token 变了才换图；新流首帧到了再淡出 */
+    const [still, setStill] = useState<{ token: string; src: string } | null>(null)
+    const [stillFading, setStillFading] = useState(false)
+    const stillRef = useRef<{ token: string; src: string } | null>(null)
+    const stillTokenRef = useRef('')
+
     const hideTimerRef = useRef<number | null>(null)
     const toastTimerRef = useRef<number | null>(null)
     const centerTimerRef = useRef<number | null>(null)
@@ -219,10 +233,36 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       }, 2200)
     }, [])
 
+    /**
+     * 抓当前帧（dataURL JPEG）：给「切换选集」当过渡幕布用。
+     * 与截图同一套画布逻辑（含镜像），只是编码成 JPEG 省内存。
+     */
+    const captureFrame = useCallback((): string | null => {
+      const video = videoRef.current
+      if (!video || !video.videoWidth || !video.videoHeight) return null
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return null
+        if (isMirrored) {
+          ctx.translate(canvas.width, 0)
+          ctx.scale(-1, 1)
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+        return canvas.toDataURL('image/jpeg', 0.7)
+      } catch {
+        // 画布被跨域污染（不该发生：流走 media-relay 同源）：没有幕布也能用
+        return null
+      }
+    }, [isMirrored])
+
     // 暴露给父组件的引用方法
     useImperativeHandle(
       ref,
       () => ({
+        captureFrame,
         seekMs: (ms: number) => {
           const video = videoRef.current
           if (!video) return
@@ -239,8 +279,35 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         },
         getVideoElement: () => videoRef.current,
       }),
-      [],
+      [captureFrame],
     )
+
+    /**
+     * 父组件传来幕布：**只排队，不立刻显示**。点击下一集时旧画面还在播，
+     * 提前盖上就成了「画面冻住 1~2 秒」；等 src 真正切换那一刻（见下）再亮出来。
+     */
+    const pendingStillRef = useRef<{ token: string; src: string } | null>(null)
+    useEffect(() => {
+      if (transitionStill) pendingStillRef.current = transitionStill
+    }, [transitionStill])
+
+    /** 新流首帧就绪后淡出幕布；重复调用无害 */
+    const releaseStill = useCallback(() => {
+      if (!stillRef.current) return
+      stillRef.current = null
+      setStillFading(true)
+      window.setTimeout(() => {
+        setStill(null)
+        setStillFading(false)
+      }, 220)
+    }, [])
+
+    /** 兜底：流卡住时别让幕布永久盖着画面（8 秒） */
+    useEffect(() => {
+      if (!still) return
+      const timer = window.setTimeout(() => releaseStill(), 8000)
+      return () => window.clearTimeout(timer)
+    }, [still, releaseStill])
 
     /**
      * 换流（切换选集 / 换来源）：**在同一只 <video> 上重载**，不重建组件——
@@ -253,6 +320,14 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       prevSrcRef.current = src
       const video = videoRef.current
       if (!video) return
+      // 幕布就在这一刻亮出来：新 src 已挂上、首帧还没到，正是不该看见黑屏的窗口
+      const pending = pendingStillRef.current
+      if (pending && pending.token !== stillTokenRef.current) {
+        stillTokenRef.current = pending.token
+        stillRef.current = pending
+        setStill(pending)
+        setStillFading(false)
+      }
       setCurrentTime(0)
       setBuffered(0)
       setCenterIndicator(null)
@@ -773,6 +848,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             setCurrentTime(cur)
             if (onSeeked) onSeeked(cur * 1000)
           }}
+          onLoadedData={() => releaseStill()}
           onLoadedMetadata={(e) => {
             const d = e.currentTarget.duration
             if (Number.isFinite(d) && d > 0) setDuration(d)
@@ -795,6 +871,19 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           onCanPlay={() => setIsBuffering(false)}
           className="h-full w-full object-contain"
         />
+
+        {/* 换集幕布：盖住新流首帧到来前的黑屏（z-10：在视频之上、控件与字幕之下） */}
+        {still && (
+          <img
+            src={still.src}
+            alt=""
+            aria-hidden="true"
+            className={
+              'pointer-events-none absolute inset-0 z-10 h-full w-full object-contain transition-opacity duration-200 ' +
+              (stillFading ? 'opacity-0' : 'opacity-100')
+            }
+          />
+        )}
 
         {/* 隐藏的离屏预览视频（用于进度条悬停帧预览） */}
         <video
