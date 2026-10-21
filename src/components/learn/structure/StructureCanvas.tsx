@@ -1135,7 +1135,7 @@ export const StructureCanvas = memo(function StructureCanvas({
             */}
             {node.note && (
               <div
-                className="absolute max-w-[260px] rounded-lg border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-[10.5px] leading-snug text-amber-700 shadow-sm dark:text-amber-300"
+                className="absolute max-w-[260px] text-[10.5px] leading-snug text-ink-soft"
                 style={{ left: node.x, top: node.y + h + 6, width: CARD_W }}
                 title={node.note}
               >

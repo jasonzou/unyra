@@ -230,21 +230,71 @@ export function edgeCurve(
   return [p0, { x: p0.x + bend, y: p0.y }, { x: p3.x - bend, y: p3.y }, p3]
 }
 
-/** 连线样式：默认直线（读起来干净），可以切成曲线 */
+/** 连线样式：默认折线（横平竖直，读起来干净），可以切成曲线 */
 export const EDGE_STYLES = ['straight', 'curved'] as const
 export type EdgeStyle = (typeof EDGE_STYLES)[number]
 
+/** 折线的拐点：右出 → 竖直 → 右进。两卡上下错开时，线走成一个「Z」 */
+function edgePolyline(curve: readonly Point[]): Point[] {
+  const [p0, , , p3] = curve
+  /*
+   * 拐点取两卡中间。往回连（目标在左边）时中间点会落到源卡里面，
+   * 于是改成「先往右伸出去 40px 再绕回来」，避免线从卡片身上穿过去。
+   */
+  // 同一行：折线退化成一条横线，不必留拐点（留了也是三点共线）
+  if (Math.abs(p0.y - p3.y) < 0.5) return [p0, p3]
+  const midX = p3.x > p0.x + 48 ? (p0.x + p3.x) / 2 : p0.x + 40
+  const raw = [p0, { x: midX, y: p0.y }, { x: midX, y: p3.y }, p3]
+  // 同一行时竖直段长度为 0，去掉重合点，路径与「按长度取点」都干净
+  return raw.filter(
+    (p, i) => i === 0 || Math.abs(p.x - raw[i - 1].x) > 0.5 || Math.abs(p.y - raw[i - 1].y) > 0.5,
+  )
+}
+
+/** 点 (x,y) 到线段 ab 的距离 */
+function distanceToSegment(x: number, y: number, a: Point, b: Point): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
+  if (len2 < 0.0001) return Math.hypot(x - a.x, y - a.y)
+  const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2))
+  return Math.hypot(x - (a.x + dx * t), y - (a.y + dy * t))
+}
+
 export function edgePathD(curve: readonly Point[], style: EdgeStyle = 'straight'): string {
   const [p0, p1, p2, p3] = curve
-  if (style === 'straight') return `M${p0.x} ${p0.y} L${p3.x} ${p3.y}`
+  if (style === 'straight') {
+    return edgePolyline(curve)
+      .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`)
+      .join(' ')
+  }
   return `M${p0.x} ${p0.y} C${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`
 }
 
-/** 线上参数 t 处的点：直线就是线性插值，曲线是三次贝塞尔 */
+/**
+ * 线上参数 t 处的点：折线按**累计长度**取（不是按拐点序号），曲线是三次贝塞尔。
+ *
+ * 按长度取才和视觉一致：拐点两侧的线段长短不一，按序号取会让两颗小圆点一密一疏。
+ */
 export function edgePointAt(curve: readonly Point[], t: number, style: EdgeStyle = 'straight'): Point {
   const [p0, p1, p2, p3] = curve
   if (style === 'straight') {
-    return { x: p0.x + (p3.x - p0.x) * t, y: p0.y + (p3.y - p0.y) * t }
+    const pts = edgePolyline(curve)
+    const segs = pts.slice(1).map((p, i) => Math.hypot(p.x - pts[i].x, p.y - pts[i].y))
+    const total = segs.reduce((a, b) => a + b, 0)
+    if (total < 0.5) return pts[0]
+    let left = t * total
+    for (let i = 0; i < segs.length; i++) {
+      if (left <= segs[i] || i === segs.length - 1) {
+        const k = segs[i] < 0.5 ? 0 : Math.min(1, left / segs[i])
+        return {
+          x: pts[i].x + (pts[i + 1].x - pts[i].x) * k,
+          y: pts[i].y + (pts[i + 1].y - pts[i].y) * k,
+        }
+      }
+      left -= segs[i]
+    }
+    return pts[pts.length - 1]
   }
   const u = 1 - t
   return {
@@ -276,6 +326,19 @@ export function edgeAt(
     const to = byId.get(edge.to)
     if (!from || !to) continue
     const curve = edgeCurve(from, to, height)
+    if (style === 'straight') {
+      // 折线是线段拼的：直接算「点到线段」的距离，比按 24 等分采样准得多
+      const pts = edgePolyline(curve)
+      let dist = Infinity
+      for (let i = 1; i < pts.length; i++) {
+        dist = Math.min(dist, distanceToSegment(x, y, pts[i - 1], pts[i]))
+      }
+      if (dist <= bestDist) {
+        bestDist = dist
+        best = edge
+      }
+      continue
+    }
     for (let i = 0; i <= 24; i++) {
       const p = edgePointAt(curve, i / 24, style)
       const dist = Math.hypot(p.x - x, p.y - y)

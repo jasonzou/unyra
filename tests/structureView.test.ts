@@ -11,6 +11,7 @@ import {
   edgeDotAt,
   edgeDots,
   edgePathD,
+  edgePointAt,
   hitTest,
   outlineSlots,
   resolveNodeView,
@@ -156,6 +157,41 @@ describe('从 store 铺图', () => {
   })
 })
 
+describe('结构画布：折线的拐点', () => {
+  const nodes: StructureNode[] = [
+    { id: 'a', kind: 'outline', x: 0, y: 0 },
+    { id: 'b', kind: 'doc', x: 300, y: 200 },
+  ]
+
+  it('上下错开时走成 Z：右出 → 竖直 → 右进', () => {
+    const curve = edgeCurve(nodes[0], nodes[1])
+    const midX = (CARD_W + 300) / 2
+    expect(edgePathD(curve)).toBe(
+      `M${CARD_W} ${EDGE_ANCHOR_Y} L${midX} ${EDGE_ANCHOR_Y} L${midX} ${200 + EDGE_ANCHOR_Y} L300 ${200 + EDGE_ANCHOR_Y}`,
+    )
+  })
+
+  it('按累计长度取点：两颗小圆点都落在折线上，且一前一后', () => {
+    const curve = edgeCurve(nodes[0], nodes[1])
+    const a = edgePointAt(curve, 0.22)
+    const b = edgePointAt(curve, 0.78)
+    // 折线总长 = 横 46 + 竖 200 + 横 46，0.22 处已经拐进竖直段了——
+    // 所以这里只验「在线上」和「前后关系」，不假设它停在哪一段
+    expect(a.y).toBeGreaterThan(EDGE_ANCHOR_Y)
+    expect(b.y).toBeGreaterThan(a.y)
+    // 阈值用 8：edgeAt 是按 24 等分采样的，总长约 292，采样间隔就有 12
+    const edges = [{ from: 'a', to: 'b' }]
+    expect(edgeAt(nodes, edges, a.x, a.y, 8)).toEqual({ from: 'a', to: 'b' })
+    expect(edgeAt(nodes, edges, b.x, b.y, 8)).toEqual({ from: 'a', to: 'b' })
+  })
+
+  it('往回连（目标在左边）时先向右绕出去，不穿过卡片', () => {
+    const back = edgeCurve(nodes[1], nodes[0])
+    const d = edgePathD(back)
+    expect(d).toContain(`L${300 + CARD_W + 40} `)
+  })
+})
+
 describe('结构画布：连线的点选', () => {
   const nodes: StructureNode[] = [
     { id: 'a', kind: 'outline', x: 0, y: 0 },
@@ -182,7 +218,7 @@ describe('结构画布：连线的点选', () => {
     // 锚点是「离卡片顶部固定距离」，不随卡片高度居中
     expect(curve[0]).toEqual({ x: CARD_W, y: EDGE_ANCHOR_Y })
     expect(curve[3]).toEqual({ x: 300, y: EDGE_ANCHOR_Y })
-    // 默认直线：只有起止两点
+    // 默认折线：同一行时竖直段为 0，退化成一条横线
     expect(edgePathD(curve)).toBe(`M${CARD_W} ${EDGE_ANCHOR_Y} L300 ${EDGE_ANCHOR_Y}`)
     // 曲线用同一组控制点（两卡只隔 92px，bend 取了下限 48）
     expect(edgePathD(curve, 'curved')).toBe(
