@@ -34,6 +34,13 @@ export interface AgentOpsDeps {
    */
   web?: WebOps
   /**
+   * 看图（顶层 api.see，见 learn/see）：不注入就没有这个顶层 api。
+   *
+   * 它要 DOM（归一化图片）与原生桥（取网络图片字节），所以由界面层注入；
+   * Node 探针里用桩补位（名单检查只问「api 在不在」）。
+   */
+  see?: SandboxOptions['see']
+  /**
    * wf.invoke 的落点（见 WorkflowOps.invoke）：沙箱里触发工作流只是**排队**，
    * 真正起那一轮的是宿主（一轮对话里就是 useAgent 的 runWorkflow）。
    *

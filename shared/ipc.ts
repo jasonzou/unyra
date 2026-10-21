@@ -600,6 +600,29 @@ export type WebFetchResult =
     }
   | { ok: false; error: string }
 
+/**
+ * 抓一个**网络二进制**（图片 / PDF）的结果（通道 web:fetchBinary，主进程 electron/web.ts 的 fetchBinary）。
+ *
+ * 与 web:fetch 分开的原因：那边只回 HTML / 纯文本（图片与 PDF 会被当成 kind:'other' 拒掉），
+ * 而这里要的是原始字节——走 data URL（base64）过 IPC，渲染层拿到后再按用途校验
+ * （图片看魔数、PDF 看头四个字节）。通道本身不做内容类型限制。
+ * 谁在用：preload 的 web.fetchBinary，渲染层 src/learn/see.ts（api.see 的宿主实现）。
+ */
+export type WebBinaryFetchResult =
+  | {
+      ok: true
+      url: string
+      finalUrl: string
+      status: number
+      contentType: string
+      /** 响应头或魔数认定的 mime（仅报告用；内容是否合格由调用方校验） */
+      mime: string
+      bytes: number
+      /** `data:<mime>;base64,…` 形式的字节 */
+      dataUrl: string
+    }
+  | { ok: false; error: string }
+
 /* ---------- 基础文件系统与进程管理 (base.files.* / base.process.*) ---------- */
 
 export interface BaseFileEntry {

@@ -103,14 +103,15 @@ export const API_GROUPS: ApiGroupDoc[] = [
   g(
     'core',
     '执行控制',
-    'wait / ask / tiktok / help / compact / fetch：顶层函数，不挂在某个组下。',
+    'wait / ask / tiktok / help / compact / fetch / see：顶层函数，不挂在某个组下。',
     `这一组不是对象，直接写在 api 上：
 - api.wait(ms)：睡一会儿（0~120000ms），只在等页面/等用户时用。
 - api.ask({ title?, questions })：弹表单并阻塞到用户提交；每题 { type: 'single'|'multiple'|'short', prompt, options?, when?, userInfo? }。
 - api.tiktok()：响一声提示音。
 - api.help()：api 集总览（与 api.__help() 同义）。
 - api.compact({ summary, tasks? })：提交交接摘要；本轮结束后生效。
-- api.fetch(url | { url })：抓网页转 Markdown（等同 api.web.fetch）。`,
+- api.fetch(url | { url })：抓网页转 Markdown（等同 api.web.fetch）。
+- api.see(图片地址 | base64 | { url?, base64?, mime?, name? } | { pdf?, page? })：看一张图或一份 PDF 的指定页，它们附在你的下一步里。`,
     [
       a('help', 'help()', 'api 集总览', '任何时候都能调。返回的是组名与一句说明，不含具体签名；具体用法用 api.<组>.__help()。', 'const overview = await api.help()'),
       a('wait', 'wait(ms | { seconds })', '等一段时间再继续', '等异步结果、等页面加载、等用户操作时用；上限 120 秒。纯计算不要用它拖时间。', 'await api.wait(800)'),
@@ -127,6 +128,21 @@ export const API_GROUPS: ApiGroupDoc[] = [
       a('tiktok', 'tiktok()', '响一声系统提示音', '需要把用户视线叫回来时用；不要连续响。', 'await api.tiktok()'),
       a('compact', 'compact({ summary, tasks? })', '提交上下文交接摘要', '只在本轮是压缩轮时调用；summary 是正文摘要，tasks 是未完成事项。本轮结束后旧消息才失活。', `await api.compact({ summary: '## 已讲清\\n- 极限的定义', tasks: ['继续讲夹逼定理'] })`),
       a('fetch', 'fetch(url | { url })', '抓网页并转 Markdown', '返回 { ok, title, content, error? }。失败不抛异常，先判 ok；不要对同一 URL 死循环重试。', `const page = await api.fetch({ url: 'https://example.com/spec' })`),
+      a(
+        'see',
+        'see(url | base64 | { url?, base64?, mime?, name? } | { pdf?, page?, name? })',
+        '看一张图或一份 PDF 的指定页（附在你的下一步里）',
+        '需要亲眼看一样东西时用：网页或接口里发现的图片链接、代码/文件里的 base64 图片、工作区文件里的 data URL、' +
+          '论文/讲义/扫描件 PDF 里的图表与排版。图片走图像通道（与 res.read 读图同一机制），回执本身不含图片内容，' +
+          '不要把 base64 写进返回值。字符串收三种写法：http(s) 图片地址、data:image/...;base64,...、裸 base64（按 mime 参数或魔数认格式）。' +
+          '**看 PDF 用 { pdf, page }**：pdf 收 http(s) 地址、资源库引用 moji:static/<uuid>（先 res.list() 找）' +
+          '或相对用户的文件路径；page 从 1 起，单个或数组（一次最多 4 页），省略看第 1 页——只渲染页面为图，不提供文字层；' +
+          '个别字体未内嵌的 CJK PDF 可能缺字。图片上限 12MB、PDF 上限 32MB，过大的图先压缩到长边 1568 再入库；' +
+          '同内容的图自动复用资源库已有那条。多页内容逐页调，先看你最需要的那几页。',
+        `const r = await api.see('https://example.com/chart.png')
+if (r.ok) { /* 图片已在你的下一步里，直接描述它即可 */ }
+const p = await api.see({ pdf: 'moji:static/<uuid>', page: [1, 3] })`,
+      ),
     ],
   ),
 
@@ -435,15 +451,17 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
   g(
     'web',
     '网页抓取与搜索',
-    '抓网页转 Markdown、联网搜索并提炼摘要（创作类交付要查证，写代码与调试不用）。',
+    '抓网页转 Markdown、联网搜索并提炼摘要（创作类交付与涉网编码要查证，纯本地调试不用）。',
     `先想清楚该不该搜：创建目标 / 规划大纲 / 写讲义 / 出试卷这类创作**要查证**权威资料；
-写代码、调试、格式转换、计算与整理这类确定性工作**不要搜**，用户明确要求查的除外。一次够用就停。
+纯算法、本地逻辑、调试自己的代码、格式转换、计算与整理这类确定性工作**不要搜**。
+**例外：写的代码要调第三方接口或依赖协议 / 规范 / SDK 行为时必须搜**——查官方文档读原文再落笔，
+接口行为猜不得。一次够用就停。
 查证要真读原文：search 之后挑 1~3 篇最权威的用 fetch 读正文，只看着摘要下笔等于走个形式。
 抓取失败不抛异常（{ ok:false, error }）；搜索默认 5 条，每条约 1.5k~2k 字符。
 严禁把多个 query 的原始结果整段塞回上下文——先筛选字段再返回。`,
     [
-      a('fetch', 'web.fetch(url | { url })', '抓网页转 Markdown', '与 api.fetch 同义；**5 秒硬超时**，超时或失败就换来源，不要对同一 URL 重试。创作类调研用它读权威原文（摘要不算依据）。', `const page = await api.web.fetch('https://example.com/spec')`),
-      a('search', 'web.search({ query, count?, need_content? } | query, opts?)', '联网搜索', '回 { ok, results: [{ title, url, snippet, summary, rerank_score, authority?, content? }] }。宽泛词加领域限定词。**创作类交付（目标 / 大纲 / 讲义 / 试卷）要调**；写代码、调试、计算、格式转换不要调。', `const r = await api.web.search({ query: '夹逼定理 教材 讲解', count: 5 })`),
+      a('fetch', 'web.fetch(url | { url })', '抓网页转 Markdown', '与 api.fetch 同义；**5 秒硬超时**，超时或失败就换来源，不要对同一 URL 重试。创作类调研与涉网编码都用它读权威原文（摘要不算依据）。', `const page = await api.web.fetch('https://example.com/spec')`),
+      a('search', 'web.search({ query, count?, need_content? } | query, opts?)', '联网搜索', '回 { ok, results: [{ title, url, snippet, summary, rerank_score, authority?, content? }] }。宽泛词加领域限定词。**创作类交付（目标 / 大纲 / 讲义 / 试卷）与涉网编码（接口 / 协议 / 规范 / SDK）要调**；纯算法、本地调试、计算、格式转换不要调。', `const r = await api.web.search({ query: '夹逼定理 教材 讲解', count: 5 })`),
     ],
   ),
   g(

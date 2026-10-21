@@ -880,6 +880,42 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     wrapApi(api, 'tiktok', () => Promise.resolve(tiktok()).then(() => ({ ok: true, note: '已响铃' })), log)
   }
 
+  // 看图 / 看 PDF 页（顶层 api）：字符串与对象两种写法都收，图片本身由宿主挂到下一跳（见 learn/see）
+  if (opts.see) {
+    const see = opts.see
+    wrapApi(api, 'see', (args) => {
+      const first = args[0]
+      if (typeof first === 'string') return see({ raw: first })
+      const obj = asRecord(first)
+      if (!Object.keys(obj).length) {
+        return {
+          error:
+            'see 需要一张图或一份 PDF：api.see(\'https://…/图.png\')、api.see({ pdf: \'https://…/论文.pdf\', page: 3 })、' +
+            "api.see({ base64: '…', mime: 'image/png', name: '叫什么' })。",
+        }
+      }
+      const rawPage = obj.page
+      const page = Array.isArray(rawPage)
+        ? rawPage.map((v) => Number(v)).filter((v) => Number.isFinite(v))
+        : typeof rawPage === 'number' || typeof rawPage === 'string'
+          ? Number(rawPage)
+          : undefined
+      return see({
+        ...(obj.raw !== undefined ? { raw: asText(obj.raw) } : {}),
+        ...(obj.url !== undefined || obj.link !== undefined || obj.href !== undefined
+          ? { url: asText(obj.url ?? obj.link ?? obj.href) }
+          : {}),
+        ...(obj.base64 !== undefined || obj.dataUrl !== undefined || obj.b64 !== undefined
+          ? { base64: asText(obj.base64 ?? obj.dataUrl ?? obj.b64) }
+          : {}),
+        ...(obj.mime !== undefined ? { mime: asText(obj.mime) } : {}),
+        ...(obj.name !== undefined ? { name: asText(obj.name) } : {}),
+        ...(obj.pdf !== undefined ? { pdf: asText(obj.pdf) } : {}),
+        ...(page !== undefined && (!Array.isArray(page) || page.length) ? { page } : {}),
+      })
+    }, log)
+  }
+
   if (opts.ui) {
     const ui = opts.ui
     if (ui.toast) {

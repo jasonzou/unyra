@@ -18,7 +18,7 @@ import type {
   NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
   UpdatePhase, UpdateState, VideoApiFetchResult, VideoStreamOpenResult, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
-  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebLogDetailResult,
+  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebBinaryFetchResult, WebLogDetailResult,
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
   WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
@@ -33,7 +33,7 @@ export type {
   NoticeSettings, PluginEntry, PluginTogglesResult, SaveFilter,
   SilentMark, StorageEntry, StorageFail, StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail,
   UpdatePhase, UpdateState, VideoApiFetchResult, VideoStreamOpenResult, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus,
-  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebLogDetailResult,
+  VoiceTranscribeRequest, VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult, WebFetchResult, WebBinaryFetchResult, WebLogDetailResult,
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
   WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
@@ -377,6 +377,8 @@ export interface NativeBridge {
    */
   web: {
     fetch(url: string): Promise<WebFetchResult>
+    /** 抓一个网络二进制（图片 / PDF，字节以 base64 data URL 过 IPC）；api.see 的取字节通道（见 learn/see） */
+    fetchBinary(url: string): Promise<WebBinaryFetchResult>
   }
   /**
    * 视频学习（实验）：来源插件的两条通道（见 shared/ipc 的说明与 electron/video-net）。

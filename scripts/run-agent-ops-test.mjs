@@ -5,19 +5,28 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import { bundleAndImport } from './lib/bundle-import.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '..')
 
-/** ?raw 导入：把文件内容当字符串默认导出（与 vite 的行为一致） */
+/**
+ * ?raw 导入：把文件内容当字符串默认导出（与 vite 的行为一致）。
+ * 相对路径按 resolveDir 拼接；裸模块名（如 pdfjs-dist/build/pdf.worker.min.mjs?raw）
+ * 走 Node 的解析规则找到真实文件。
+ */
 const rawPlugin = {
   name: 'raw',
   setup(build) {
-    build.onResolve({ filter: /\?raw$/ }, (args) => ({
-      path: path.resolve(args.resolveDir, args.path.replace(/\?raw$/, '')),
-      namespace: 'raw',
-    }))
+    const nodeResolve = createRequire(path.join(root, 'package.json'))
+    build.onResolve({ filter: /\?raw$/ }, (args) => {
+      const target = args.path.replace(/\?raw$/, '')
+      if (target.startsWith('./') || target.startsWith('../')) {
+        return { path: path.resolve(args.resolveDir, target), namespace: 'raw' }
+      }
+      return { path: nodeResolve.resolve(target), namespace: 'raw' }
+    })
     build.onLoad({ filter: /.*/, namespace: 'raw' }, async (args) => ({
       contents: 'export default ' + JSON.stringify(await fs.promises.readFile(args.path, 'utf8')),
       loader: 'js',
@@ -39,4 +48,12 @@ const urlPlugin = {
   },
 }
 
-await bundleAndImport(path.join(root, 'scripts/agent-ops.test.ts'), { plugins: [rawPlugin, urlPlugin] })
+/**
+ * pdfjs-dist 保持 external：探针里 api.see 是桩（名单检查只问「api 在不在」），
+ * pdf 分支永远不会真的跑。若打进包里，1.5MB 的 pdf.js 会白白拖慢每次探针启动；
+ * 而 data URL 模块里未执行的动态 import 留成外部引用毫无副作用。
+ */
+await bundleAndImport(path.join(root, 'scripts/agent-ops.test.ts'), {
+  plugins: [rawPlugin, urlPlugin],
+  external: ['pdfjs-dist'],
+})

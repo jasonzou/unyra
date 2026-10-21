@@ -31,7 +31,7 @@ import type {
   StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail, UpdatePhase, UpdateState,
   VideoApiFetchResult, VideoStreamOpenResult, VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
   VoiceTranscribeResult, WebDomOpResult, WebFastTranslateResult,
-  WebFetchResult, WebLogDetailResult, WebLogsOpts, WebLogsResult, WebPageFetchReq,
+  WebFetchResult, WebBinaryFetchResult, WebLogDetailResult, WebLogsOpts, WebLogsResult, WebPageFetchReq,
   WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult, WebScrollReq,
   WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
 } from '../shared/ipc'
@@ -51,7 +51,7 @@ export type {
   StorageInfo, StorageOk, StorageRootResult, UpdateChannel, UpdateFail, UpdatePhase, UpdateState,
   VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
   VoiceTranscribeResult, WebDomOpResult,
-  WebFetchResult, WebPointResult, WebReadHtmlResult, WebSnapshotResult,
+  WebFetchResult, WebBinaryFetchResult, WebPointResult, WebReadHtmlResult, WebSnapshotResult,
 }
 
 /* ---------- 只在 preload 这一侧用到的形状 ---------- */
@@ -570,6 +570,8 @@ const api = {
    */
   web: {
     fetch: (url: string): Promise<WebFetchResult> => ipcRenderer.invoke('web:fetch', url),
+    /** 抓一个网络二进制（图片/PDF，web:fetchBinary）：字节以 base64 data URL 过 IPC，api.see 的取字节通道 */
+    fetchBinary: (url: string): Promise<WebBinaryFetchResult> => ipcRenderer.invoke('web:fetchBinary', url),
   },
 
   /**

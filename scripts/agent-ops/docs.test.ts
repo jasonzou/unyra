@@ -208,6 +208,9 @@ export async function apiNameTests() {
     // 网络搜索与网页抓取（基于 DeepSeek 官方 Search API 与 Fetch API）
     'fetch': "{ url: 'https://example.com/a' }",
     'web.search': "{ query: '勾股定理' }",
+    // 看图（顶层 api）：宿主给一份桩——只问「名字真的注册了吗」，
+    // 取图 / 落库 / 挂下一跳的真行为在渲染层（learn/see，要 DOM 与原生桥，Node 探针跑不了）
+    'see': "'https://example.com/pic.png'",
     // 子代理管理（导师专用）：宿主是桩；这组断言只问「api 在不在」——
     // 并发、等待与介入的行为在 tests/subagent.test.ts 里钉
     'subagent.create': "{ key: 'probe', name: '探针代理', system: '探针用的子代理定义，长度足以通过校验。' }",
@@ -419,6 +422,8 @@ export async function apiNameTests() {
     wait: async () => {},
     ask: async () => ({ ok: true, cancelled: false, answers: [] }),
     tiktok: async () => {},
+    // 看图（顶层 api）：桩——行为断言在渲染层，这里只证明 api 存在且能通
+    see: async () => ({ ok: true, uuid: 'see-probe', name: '探针图', note: '（桩）图片已附在你的下一步里', images: [] }),
     // 交付账：桩——名单检查只问「这个 api 在不在」，真正的登记与落库在宿主（useAgent 收口）
     delivery: { submit: () => ({ ok: true, files: 0, sources: 0 }) },
     ui: {

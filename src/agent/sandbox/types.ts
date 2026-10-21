@@ -200,6 +200,15 @@ export interface SandboxOptions {
   focus?: FocusOps
   /** 读网页（web.*，见 learn/webDocs）；未注入就没有这一组 */
   web?: WebOps
+  /**
+   * 看图（see，顶层 api，见 learn/see）：把一张「模型递过来的图」转存进资源库并挂到
+   * 下一跳。未注入就没有这个顶层 api（自由聊天、子代理都没有——前者没有目标资源库，
+   * 后者刻意不敞）。
+   *
+   * 与 res.read 读图是**同一条图像通道**：图片不进返回值文本（文本通道会把 base64
+   * 截成乱码），宿主存好图后在返回值上挂 images，由 execute 收集、运行时送上下一跳。
+   */
+  see?: (input: SeeRequest) => Promise<unknown>
   /** 上下文压缩（compact，见 learn/compact）；未注入就没有它 */
   compact?: CompactOps
   userInfo?: UserInfoOps
@@ -517,6 +526,24 @@ export interface WebOps {
    * query/opts 或 { query, count?, ori_question?, localization?, need_content? }
    */
   search?: (queryOrArgs: unknown, opts?: Record<string, unknown>) => Promise<unknown>
+}
+
+/**
+ * see 的入参（顶层 api，见 SandboxOptions.see 与 learn/see）。
+ *
+ * raw 是字符串写法：http(s) 图片地址、`data:image/...;base64,…`、或裸 base64；
+ * 对象写法把字段拆开，还能补 mime（裸 base64 没有前缀时靠它，或靠魔数嗅探）与 name。
+ * pdf 分支看一份 PDF 的页面：pdf 收 http(s) 地址 / moji:static/<uuid> / 用户相对路径，
+ * page 从 1 起（单个或数组，一次最多 4 页），只渲染成图、不提取文字层。
+ */
+export interface SeeRequest {
+  raw?: string
+  url?: string
+  base64?: string
+  mime?: string
+  name?: string
+  pdf?: string
+  page?: number | number[]
 }
 
 /**

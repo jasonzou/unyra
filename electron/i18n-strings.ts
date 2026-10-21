@@ -90,6 +90,9 @@ const dict: Record<string, string> = {
   '这不是能读的网页（{0}）：只读 HTML 与纯文本': "This isn't a readable web page ({0}): only HTML and plain text",
   '抓取超时（超过 {0} 秒）：这个站点太慢或连不上': 'Fetching timed out (over {0} s): the site is too slow or unreachable',
   '抓取失败：{0}': 'Fetching failed: {0}',
+  /* web.ts fetchBinary（api.see 的取字节通道：图片 / PDF） */
+  '抓取的内容超过 {0}MB 上限': 'The fetched content is over the {0} MB limit',
+  '内容字节编码失败': 'Failed to encode the fetched bytes',
 
   /* ---------- storage/files.ts ---------- */
   '路径不合法': 'Invalid path',

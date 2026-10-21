@@ -13,6 +13,7 @@
 
 import { ipcMain } from 'electron'
 import { t } from './i18n'
+import type { WebBinaryFetchResult } from '../shared/ipc'
 import {
   WEB_MAX_BYTES,
   WEB_TIMEOUT_MS,
@@ -173,7 +174,114 @@ function decodeBody(body: Uint8Array, contentType: string, kind: WebKind): strin
 
 export function registerWebIpc(): void {
   ipcMain.handle('web:fetch', (_e, url: unknown) => fetchPage(url))
+  ipcMain.handle('web:fetchBinary', (_e, url: unknown) => fetchBinary(url))
 }
 
 export { fetchPage }
+
+/* ---------- 二进制抓取（web:fetchBinary，api.see 的取图 / 取 PDF 通道） ---------- */
+
+/** 一次抓取的上限：与资源库单文件上限同口径（PDF 会比图片大，取 32MB） */
+const BINARY_MAX_BYTES = 32 * 1024 * 1024
+
+/** 常见二进制格式的魔数：响应头没给 content-type 时用来**报告** mime（校验由调用方做） */
+function sniffMime(head: Uint8Array): string | null {
+  if (head.length >= 8 && head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return 'image/png'
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg'
+  if (head.length >= 6 && head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) return 'image/gif'
+  if (head.length >= 12 && head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46 && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50) return 'image/webp'
+  if (head.length >= 2 && head[0] === 0x42 && head[1] === 0x4d) return 'image/bmp'
+  if (head.length >= 5 && head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) return 'application/pdf'
+  return null
+}
+
+/**
+ * 抓一个网络二进制（图片 / PDF），回 base64 data URL。
+ *
+ * 与 fetchPage 共用同一套纪律（webUrlBlockReason 拦内网、浏览器指纹、20 秒总时限）。
+ * **这里不做内容类型校验**——图片还是 PDF 由调用方（learn/see）按魔数判定，
+ * 通道只负责「把字节安全地拿回来」：上限 32MB、边读边数、超了当场停。
+ */
+async function fetchBinary(raw: unknown): Promise<WebBinaryFetchResult> {
+  const url = typeof raw === 'string' ? raw.trim() : ''
+  const blocked = webUrlBlockReason(url)
+  if (blocked) return { ok: false, error: blocked }
+
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), WEB_TIMEOUT_MS)
+  try {
+    let res = await attempt(url, 'chrome', ac.signal)
+    if (shouldRetryWithAlt(res.status)) {
+      res = await attempt(url, 'firefox', ac.signal).catch(() => res)
+    }
+    if (!res.ok) return { ok: false, error: t('这个地址回了 {0}（{1}）', res.status, res.statusText) }
+
+    // 边读边数：超过上限当场停——32MB 是资源库单文件的口径，更大的东西不该进这条通道
+    const reader = res.body?.getReader()
+    const chunks: Uint8Array[] = []
+    let bytes = 0
+    let over = false
+    if (reader) {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!value?.byteLength) continue
+        if (bytes + value.byteLength > BINARY_MAX_BYTES) {
+          chunks.push(value.subarray(0, BINARY_MAX_BYTES - bytes))
+          bytes = BINARY_MAX_BYTES
+          over = true
+          await reader.cancel().catch(() => {})
+          break
+        }
+        chunks.push(value)
+        bytes += value.byteLength
+      }
+    } else {
+      const buf = new Uint8Array(await res.arrayBuffer())
+      over = buf.byteLength > BINARY_MAX_BYTES
+      chunks.push(over ? buf.subarray(0, BINARY_MAX_BYTES) : buf)
+      bytes = Math.min(buf.byteLength, BINARY_MAX_BYTES)
+    }
+    if (over) return { ok: false, error: t('抓取的内容超过 {0}MB 上限', Math.round(BINARY_MAX_BYTES / 1024 / 1024)) }
+
+    const body = new Uint8Array(bytes)
+    let at = 0
+    for (const c of chunks) {
+      body.set(c, at)
+      at += c.byteLength
+    }
+
+    const contentType = (res.headers.get('content-type') ?? '').toLowerCase()
+    const mime = contentType && contentType !== 'application/octet-stream'
+      ? contentType.split(';')[0].trim()
+      : (sniffMime(body) ?? contentType.split(';')[0].trim())
+
+    let base64: string
+    try {
+      base64 = Buffer.from(body).toString('base64')
+    } catch {
+      base64 = ''
+    }
+    if (!base64) return { ok: false, error: t('内容字节编码失败') }
+
+    return {
+      ok: true,
+      url,
+      finalUrl: res.url || url,
+      status: res.status,
+      contentType,
+      mime,
+      bytes,
+      dataUrl: `data:${mime || 'application/octet-stream'};base64,${base64}`,
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (ac.signal.aborted) return { ok: false, error: t('抓取超时（超过 {0} 秒）：这个站点太慢或连不上', Math.round(WEB_TIMEOUT_MS / 1000)) }
+    return { ok: false, error: t('抓取失败：{0}', msg) }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export { fetchBinary }
 
