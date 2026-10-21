@@ -10,7 +10,7 @@
 import { readJson, userRel, writeJson } from '../storage'
 import type { SchemaMeta } from './types'
 
-export const LATEST_SCHEMA_VERSION = '0.6.3'
+export const LATEST_SCHEMA_VERSION = '0.7.0'
 
 export const SCHEMA_FILE = 'schema.json'
 export const STATE_FILE = 'state.json'

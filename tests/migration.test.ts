@@ -23,40 +23,48 @@ describe('Migration System', () => {
     })
 
     it('plans chain when future scripts are registered', () => {
+      // 用一段**没有真实脚本占用**的版本区间：0.6.3 → 0.7.0 已经有真脚本
+      // （大纲树 → 结构图，见 lib/migration/outlineStructure），拿它当桩会撞车
       const mockScript1: MigrationScript = {
-        id: 'm_test_0_6_3_to_0_7_0',
-        fromVersion: '0.6.3',
-        toVersion: '0.7.0',
-        title: 'Upgrade to 0.7.0',
+        id: 'm_test_0_8_0_to_0_9_0',
+        fromVersion: '0.8.0',
+        toVersion: '0.9.0',
+        title: 'Upgrade to 0.9.0',
         summary: 'Test script 1',
         changes: ['Update field A'],
-        migrate: async () => ({ ok: true, fromVersion: '0.6.3', toVersion: '0.7.0', modifiedFiles: [] }),
+        migrate: async () => ({ ok: true, fromVersion: '0.8.0', toVersion: '0.9.0', modifiedFiles: [] }),
       }
 
       const mockScript2: MigrationScript = {
-        id: 'm_test_0_7_0_to_0_8_0',
-        fromVersion: '0.7.0',
-        toVersion: '0.8.0',
-        title: 'Upgrade to 0.8.0',
+        id: 'm_test_0_9_0_to_1_0_0',
+        fromVersion: '0.9.0',
+        toVersion: '1.0.0',
+        title: 'Upgrade to 1.0.0',
         summary: 'Test script 2',
         changes: ['Update field B'],
-        migrate: async () => ({ ok: true, fromVersion: '0.7.0', toVersion: '0.8.0', modifiedFiles: [] }),
+        migrate: async () => ({ ok: true, fromVersion: '0.9.0', toVersion: '1.0.0', modifiedFiles: [] }),
       }
 
       registerMigrationScript(mockScript1)
       registerMigrationScript(mockScript2)
 
-      const plan = planChain('0.6.3', '0.8.0')
+      const plan = planChain('0.8.0', '1.0.0')
       expect(plan.isUpToDate).toBe(false)
       expect(plan.scripts.length).toBe(2)
-      expect(plan.scripts[0].id).toBe('m_test_0_6_3_to_0_7_0')
-      expect(plan.scripts[1].id).toBe('m_test_0_7_0_to_0_8_0')
+      expect(plan.scripts[0].id).toBe('m_test_0_8_0_to_0_9_0')
+      expect(plan.scripts[1].id).toBe('m_test_0_9_0_to_1_0_0')
 
       // Clean up test scripts
       const idx1 = MIGRATION_SCRIPTS.findIndex((s) => s.id === mockScript1.id)
       if (idx1 >= 0) MIGRATION_SCRIPTS.splice(idx1, 1)
       const idx2 = MIGRATION_SCRIPTS.findIndex((s) => s.id === mockScript2.id)
       if (idx2 >= 0) MIGRATION_SCRIPTS.splice(idx2, 1)
+    })
+
+    it('真脚本在册：0.6.3 的数据会被规划到「大纲树 → 结构图」那一步', () => {
+      const plan = planChain('0.6.3', '0.7.0')
+      expect(plan.isUpToDate).toBe(false)
+      expect(plan.scripts.map((s) => s.id)).toEqual(['m_0_6_3_to_0_7_0'])
     })
   })
 

@@ -8,6 +8,7 @@
  */
 
 import type { MigrationScript } from './types'
+import { outlineToStructure } from './outlineStructure'
 
 /**
  * 迁移脚本清单。
@@ -23,7 +24,7 @@ import type { MigrationScript } from './types'
  *   migrate: async (ctx) => { ... }
  * }
  */
-export const MIGRATION_SCRIPTS: MigrationScript[] = []
+export const MIGRATION_SCRIPTS: MigrationScript[] = [outlineToStructure]
 
 /** 供外部或插件动态注册迁移脚本 */
 export function registerMigrationScript(script: MigrationScript): void {

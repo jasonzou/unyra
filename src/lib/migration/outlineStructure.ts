@@ -1,0 +1,251 @@
+/**
+ * 这个文件负责什么：**把旧的大纲树铺成结构图**（数据迁移脚本 m_0_6_3_to_0_7_0 的实现）。
+ *
+ * ## 为什么是一个迁移脚本，而不是业务代码里的兼容分支
+ *
+ * 结构页从「算出来的树」改成「拖出来的图」，数据形状变了：节点有坐标、有显式连线。
+ * 这类改变如果写进 parseDocs / normalize 里（「读到老数据就顺手折一下」），
+ * 就会变成永远删不掉的兼容分支——每加一个字段都要问一句「老的怎么算」。
+ * 所以按这个仓库既定的路子走：**迁移脚本一次性搬完，业务代码只认新形状**。
+ *
+ * ## 搬什么
+ *
+ * 旧模型里一个 KnowledgeNode 同时拥有「大纲 + 教学文档 + 若干笔记/试卷/超级文档」。
+ * 新模型里它们必须是**各自独立的节点**（需求：大纲和文档不能是一个节点），于是：
+ *
+ * | 旧数据 | 新节点 | 连线 |
+ * |---|---|---|
+ * | `{节点}.meta.json` | 大纲节点 | 依赖边 → 大纲 → 大纲 |
+ * | `{节点}.md`（有正文） | 文档节点 | 大纲 → 文档 |
+ * | `{节点}.notes/{名字}.md` | 笔记节点 | 文档 → 笔记 |
+ * | `{节点}/exams/{id}.json` | 试卷节点 | 文档 → 试卷 |
+ * | meta.superdocs[] | 超级文档节点 | 文档 → 超级文档 |
+ *
+ * 教学文档是空的不建文档节点：旧模型里每个节点都有一个空的 `.md`，
+ * 全建出来等于让画布上一半是空盒子。想要就拖一个——这正是新架构的用法。
+ *
+ * ## 幂等
+ *
+ * 已经有 `structure.json` 且里面有节点时直接跳过：迁移重跑一次不该把用户摆好的位置冲掉。
+ */
+
+import type { MigrationContext, MigrationScript, MigrationStepResult } from './types'
+import { seedLayout, type GraphKind, type StructureMap } from '../../learn/structure'
+
+/** meta.json 里迁移用得到的部分（其余字段搬不过来也不影响结构图） */
+interface MetaLike {
+  id?: unknown
+  dependencies?: unknown
+  notes?: unknown
+  superdocs?: unknown
+}
+
+interface Collected {
+  /** 节点目录（相对数据根，含 users/{uid}/ 前缀） */
+  dir: string
+  /** 文件名主干（`{base}.meta.json` 的 base） */
+  base: string
+  id: string
+  /** 依赖指向的节点 id（旧树就是靠它表达的） */
+  deps: string[]
+  notes: string[]
+  superdocs: string[]
+}
+
+function asArray(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : []
+}
+
+function str(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+/** 递归收集一个目标目录下的全部 meta（目标目录 = docs/{一级目录}） */
+async function collectMetas(ctx: MigrationContext, goalDir: string): Promise<Collected[]> {
+  const out: Collected[] = []
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await ctx.storage.listDir(dir)
+    const dirs: string[] = []
+    for (const entry of entries) {
+      if (entry.dir) {
+        dirs.push(entry.name)
+        continue
+      }
+      // 只要 `{base}.meta.json`：同目录下还有 .md / .outline.json / exams/ 等
+      if (!entry.name.endsWith('.meta.json')) continue
+      const base = entry.name.slice(0, -'.meta.json'.length)
+      const meta = await ctx.storage.readJson<MetaLike>(`${dir}/${entry.name}`)
+      if (!meta || typeof meta !== 'object') continue
+      const id = str(meta.id)
+      if (!id) continue
+      /**
+       * 笔记与超级文档**两头都看**：meta 里登记的名字，以及目录里真实存在的文件。
+       *
+       * 只信 meta 会漏：手改过目录、或者某个版本写 meta 时漏了登记，文件就在那儿却搬不过去。
+       * 只信目录也会漏：超级文档在新版里是整份存 meta 的（不落独立文件）。
+       * 两边取并集、按名字去重——迁移宁可多搬一个真文件，也不要丢掉用户写过的东西。
+       */
+      const metaNotes = asArray(meta.notes)
+        .map((n) => str((n as { name?: unknown } | null)?.name))
+        .filter(Boolean)
+      const diskNotes = (await ctx.storage.listDir(`${dir}/${base}.notes`))
+        .filter((e) => !e.dir && e.name.endsWith('.md'))
+        .map((e) => e.name.slice(0, -3))
+      const metaSuperdocs = asArray(meta.superdocs)
+        .map((s) => str((s as { name?: unknown } | null)?.name))
+        .filter(Boolean)
+      const diskSuperdocs = (await ctx.storage.listDir(`${dir}/superdocs`))
+        .filter((e) => !e.dir && e.name.endsWith('.html'))
+        .map((e) => e.name.slice(0, -5))
+      out.push({
+        dir,
+        base,
+        id,
+        deps: asArray(meta.dependencies)
+          .map((d) => str((d as { to?: unknown } | null)?.to))
+          .filter(Boolean),
+        notes: [...new Set([...metaNotes, ...diskNotes])],
+        superdocs: [...new Set([...metaSuperdocs, ...diskSuperdocs])],
+      })
+    }
+    // 子目录里也可能有节点（旧模型允许节点嵌在节点目录里）
+    for (const name of dirs) await walk(`${dir}/${name}`)
+  }
+  await walk(goalDir)
+  return out
+}
+
+/** 这个节点有没有正文（空 .md 不建文档节点，理由见文件头） */
+async function hasTeaching(ctx: MigrationContext, item: Collected): Promise<boolean> {
+  const text = await ctx.storage.readText(`${item.dir}/${item.base}.md`)
+  return !!text && text.trim().length > 0
+}
+
+/** 这个节点下的试卷 id 清单（`{节点}/exams/{id}.json`） */
+async function examIds(ctx: MigrationContext, item: Collected): Promise<string[]> {
+  const entries = await ctx.storage.listDir(`${item.dir}/exams`)
+  return entries.filter((e) => !e.dir && e.name.endsWith('.json')).map((e) => e.name.slice(0, -'.json'.length))
+}
+
+/** 把一批节点铺成图（节点 id 与 ref 都用确定性写法，重跑得到同一张图） */
+function buildGraph(items: Collected[], docsWithBody: Set<string>, examsOf: Map<string, string[]>): StructureMap {
+  const seedNodes: Array<{ id: string; kind: GraphKind; ref?: string }> = []
+  const seedEdges: Array<{ from: string; to: string }> = []
+  const outlineId = (id: string) => `o:${id}`
+  const docId = (id: string) => `d:${id}`
+  const known = new Set(items.map((i) => i.id))
+
+  for (const item of items) {
+    seedNodes.push({ id: outlineId(item.id), kind: 'outline', ref: item.id })
+
+    // 文档节点：有正文，或者下面挂着笔记/试卷/超级文档（它们是文档的下游，没有文档就无处可挂）
+    const exams = examsOf.get(item.id) ?? []
+    const needDoc = docsWithBody.has(item.id) || item.notes.length > 0 || item.superdocs.length > 0 || exams.length > 0
+    if (!needDoc) continue
+
+    seedNodes.push({ id: docId(item.id), kind: 'doc', ref: item.id })
+    seedEdges.push({ from: outlineId(item.id), to: docId(item.id) })
+
+    // ref 指回现有实体：内容永远只存一份，图里只存引用（见 learn/structure 的不变量 2）
+    for (const name of item.notes) {
+      seedNodes.push({ id: `n:${item.id}:${name}`, kind: 'note', ref: `${item.id}:${name}` })
+      seedEdges.push({ from: docId(item.id), to: `n:${item.id}:${name}` })
+    }
+    for (const name of item.superdocs) {
+      seedNodes.push({ id: `s:${item.id}:${name}`, kind: 'superdoc', ref: `${item.id}:${name}` })
+      seedEdges.push({ from: docId(item.id), to: `s:${item.id}:${name}` })
+    }
+    for (const examId of exams) {
+      seedNodes.push({ id: `e:${examId}`, kind: 'exam', ref: examId })
+      seedEdges.push({ from: docId(item.id), to: `e:${examId}` })
+    }
+  }
+
+  // 旧树的父子关系：依赖边 → 大纲 → 大纲（指向已删节点的边在 seedLayout 里会被丢掉）
+  for (const item of items) {
+    for (const dep of item.deps) {
+      if (!known.has(dep)) continue
+      seedEdges.push({ from: outlineId(item.id), to: outlineId(dep) })
+    }
+  }
+
+  return seedLayout({ nodes: seedNodes, edges: seedEdges })
+}
+
+export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<MigrationStepResult> {
+  const modifiedFiles: string[] = []
+  const docsRoot = `${ctx.userDir}/docs`
+  const goals = (await ctx.storage.listDir(docsRoot)).filter((e) => e.dir)
+  ctx.log(`发现 ${goals.length} 个目标目录`)
+
+  for (const goal of goals) {
+    const goalDir = `${docsRoot}/${goal.name}`
+    const target = `${goalDir}/structure.json`
+
+    // 幂等：已经有图就跳过（重跑不该冲掉用户摆好的位置）
+    const existing = await ctx.storage.readJson<{ nodes?: unknown[] }>(target)
+    if (existing && Array.isArray(existing.nodes) && existing.nodes.length) {
+      ctx.log(`跳过「${goal.name}」：已经有结构图（${existing.nodes.length} 个节点）`)
+      continue
+    }
+
+    const items = await collectMetas(ctx, goalDir)
+    if (!items.length) {
+      ctx.log(`跳过「${goal.name}」：没有节点`)
+      continue
+    }
+
+    const docsWithBody = new Set<string>()
+    const examsOf = new Map<string, string[]>()
+    for (const item of items) {
+      if (await hasTeaching(ctx, item)) docsWithBody.add(item.id)
+      const ids = await examIds(ctx, item)
+      if (ids.length) examsOf.set(item.id, ids)
+    }
+
+    const map = buildGraph(items, docsWithBody, examsOf)
+    if (!map.nodes.length) {
+      ctx.log(`跳过「${goal.name}」：铺出来是空的`)
+      continue
+    }
+
+    const ok = await ctx.storage.writeJson(target, map)
+    if (!ok) {
+      return {
+        ok: false,
+        fromVersion: '0.6.3',
+        toVersion: '0.7.0',
+        modifiedFiles,
+        error: `写入 ${target} 失败`,
+      }
+    }
+    modifiedFiles.push(target)
+    ctx.log(`「${goal.name}」铺好：${map.nodes.length} 个节点、${map.edges.length} 条连线`)
+  }
+
+  return {
+    ok: true,
+    fromVersion: '0.6.3',
+    toVersion: '0.7.0',
+    modifiedFiles,
+    details: modifiedFiles.length ? `为 ${modifiedFiles.length} 个目标铺出了结构图` : '没有需要迁移的目标',
+  }
+}
+
+export const outlineToStructure: MigrationScript = {
+  id: 'm_0_6_3_to_0_7_0',
+  fromVersion: '0.6.3',
+  toVersion: '0.7.0',
+  title: '大纲树 → 结构图',
+  summary:
+    '结构页从「算出来的大纲树」改成「拖出来的节点图」：为每个目标生成 structure.json，' +
+    '把每个学习节点拆成大纲节点 + 文档节点，笔记/试卷/超级文档各自成为文档的下游节点。',
+  changes: [
+    '每个目标新增 docs/{目标}/structure.json（节点坐标 + 连线）',
+    '一个学习节点拆成「大纲节点」与「文档节点」两个独立节点（有正文或有下游时才建文档节点）',
+    '笔记 / 试卷 / 超级文档各成为一个节点，挂在文档节点下游',
+    '旧的依赖边转成「大纲 → 大纲」的连线；指向已删节点的边丢弃',
+    '已有结构图的目标跳过（可重复执行）',
+  ],
+  migrate: migrateOutlineToStructure,
+}

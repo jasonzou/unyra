@@ -248,6 +248,15 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
       if (goalEssays.length || goalCommits.length) {
         files.set(`${path}/essay.json`, jsonText({ version: 2, essays: goalEssays, commits: goalCommits }))
       }
+      /**
+       * 结构图（见 learn/structure）同样是**目标级**的：这门课的节点摆在哪儿、谁连着谁，
+       * 目标没了就该跟着没。一个节点都没铺过时不写文件——空图等于「还没铺」，
+       * 写个空壳只会让读盘时多一次「有文件但没内容」的判断。
+       */
+      const structure = store.structure?.[goal.id]
+      if (structure && structure.nodes.length) {
+        files.set(`${path}/structure.json`, jsonText(structure))
+      }
     }
     /**
      * 临时变量（Agent 的大块中间数据）写在 chat.json 旁边。

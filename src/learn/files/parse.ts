@@ -21,6 +21,7 @@ import { normalizeOutline } from '../outline'
 import { parseManifest } from '../static/manifest'
 import type { StaticResource } from '../static/types'
 import type { ReadingStore } from '../reading'
+import type { StructureMap } from '../structure'
 import { DOCS_DIR, MANIFEST_FILE, NOTES_SUFFIX, STATIC_DIR } from '../layout'
 import { LEGACY_NOTE_SUFFIX, docFileName, outlineFileName } from './names'
 import { at, parseJson, type MetaFile } from './meta'
@@ -69,6 +70,8 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
   const essaysByGoal: Record<string, EssayEntry[]> = {}
   /** 目标 id → 随笔提交记录（见 learn/essayCommits，与随笔同一份文件） */
   const essayCommitsByGoal: Record<string, EssayCommit[]> = {}
+  /** 目标 id → 结构图（见 learn/structure；迁移脚本铺出来的那一份） */
+  const structureByGoal: Record<string, StructureMap> = {}
 
   // 目标目录必须是顶层（docs/{seg}）且自己那份 meta 在：结构不完整就整棵树跳过
   for (const [dir, { meta }] of metas) {
@@ -145,6 +148,13 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
     if (Array.isArray(essayFile?.commits) && essayFile.commits.length) {
       essayCommitsByGoal[goal.id] = essayFile.commits
     }
+    /*
+     * 结构图同上（structure.json，与 reading.json 同层同纪律）：没铺过就不写文件。
+     * 这里只把原样读进来——逐节点校验交给 normalizeLearnStore（坏坐标、违规边在那边丢），
+     * 与其余目标级账本走同一条路，不在这里另开一套判断。
+     */
+    const structureFile = parseJson<StructureMap>(files.get(`${dir}/structure.json`))
+    if (structureFile) structureByGoal[goal.id] = structureFile
     // 1. 读回超级文档：扫描 ${dir}/superdocs/*.html
     const superdocsPrefix = `${dir}/superdocs/`
     const sdocsFromFiles: SuperDocFile[] = []
@@ -297,6 +307,8 @@ export function parseDocs(files: Map<string, string>, state: unknown): LearnStor
     essays: essaysByGoal,
     // 提交记录与随笔同一份文件，归一化时同样按「目标还活着吗」筛（见 learn/essayCommits）
     essayCommits: essayCommitsByGoal,
+    // 结构图按目标存在各自目录（structure.json）：目标没了那张图跟着没（normalize 里校验）
+    structure: structureByGoal,
     // 随笔窗口的几何是界面状态：跟着 state.json 走（与 docScroll / docArea 同一类）
     essayDock: s.essayDock ?? null,
     focus: s.focus ?? s.pomodoro ?? null,

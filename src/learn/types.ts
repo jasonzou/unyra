@@ -7,6 +7,7 @@ import type { FocusStore } from './focus'
 import type { ScheduleStore } from './schedule'
 import type { ReadingBook } from './reading'
 import type { StaticResource } from './static'
+import type { StructureMap } from './structure'
 
 /**
  * 探索式学习数据模型（v2）。
@@ -729,6 +730,15 @@ export interface LearnStore {
   reading?: ReadingBook
   /** 专注模式（见 learn/focus）：正在跑的那一场 + 结束过的记录。可选，理由同上 */
   focus?: FocusStore
+  /**
+   * 结构图（见 learn/structure）：目标 id → 那个目标的节点表与连线。
+   *
+   * 它替代了旧的「大纲树布局」——树的位置是算出来的，图的位置是用户拖的，必须存下来。
+   * 落盘在各自的目标目录（`{目标}/structure.json`），与 reading.json / essay.json 同一层：
+   * 它是「这门课的结构」，目标没了就该跟着没。可选字段：旧数据没有它，
+   * 由数据迁移脚本（见 lib/migration 的 m_0_6_3_to_0_7_0）从旧树铺出来。
+   */
+  structure?: Record<string, StructureMap>
   /**
    * 日程（见 learn/schedule）：用户级的提醒清单 + 铃声设置。
    *

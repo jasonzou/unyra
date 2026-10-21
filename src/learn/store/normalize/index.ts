@@ -21,6 +21,7 @@ import { normalizeEssayDock, normalizeEssays } from '../../essays'
 import { normalizeEssayCommits } from '../../essayCommits'
 import { normalizeFocus } from '../../focus'
 import { normalizeSchedule } from '../../schedule'
+import { normalizeStructureBook } from '../../structure'
 import type { VideoResource } from '../../types'
 import { normalizeMemoryStore } from '../../memory'
 import { normalizeResourceList, retargetStaticRefs, type StaticResource } from '../../static'
@@ -290,6 +291,15 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       schedule: normalizeSchedule(d.schedule),
       // 视频资源（见 learn/types 的 VideoResource）：用户级、不按目标过滤，坏条目逐条丢
       ...(normalizeVideos(d.videos).length ? { videos: normalizeVideos(d.videos) } : {}),
+      /*
+       * 结构图（见 learn/structure）：按目标存的节点表与连线。逐张过一遍——
+       * 坏坐标、认不出的类型、违规的边都在 normalizeStructure 里丢掉，
+       * 目标已经不在的整张丢掉（它是那门课的结构，课没了结构也不该留着）。
+       */
+      ...(() => {
+        const structure = normalizeStructureBook(d.structure, goalIds)
+        return Object.keys(structure).length ? { structure } : {}
+      })(),
       activeGoalId,
       activeNodeId: nextActiveNodeId,
       activeConversationId,
@@ -323,7 +333,7 @@ export function parseLearnStore(raw: string): LearnStore | null {
     console.error('[learn] 备份数据解析失败：', err)
     return null
   }
-}
+}
 
 
 /**
