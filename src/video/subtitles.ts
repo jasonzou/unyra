@@ -318,7 +318,8 @@ export interface SubtitleLayoutStyle {
 /**
  * 根据播放器组件自身的实际宽高（非整个屏幕）计算字幕的最佳字号与定位：
  * - 考虑视频按 object-contain 等比缩放后的有效渲染画面区域；
- * - 字号取有效画面高度的约 5%（标准字幕视觉比例），并限制在 [13px, 38px]；
+ * - 字号取有效画面高度的约 5.8%（主流播放器如 B 站/YouTube 全屏舒适阅读比例），不设低上限（支持 4K/2K 高清屏放量）；
+ * - 支持可选的 fontScale 字号倍率（偏小 0.8x / 标准 1.0x / 偏大 1.25x / 特大 1.5x）；
  * - 底部边距随有效画面位置及控制栏显隐平滑调整，避开黑边与控件；
  * - 确保纯基于播放器尺寸变化，与屏幕/窗口尺寸完全解耦。
  */
@@ -327,11 +328,14 @@ export function calculateSubtitleLayout(
   playerHeight: number,
   isControlsVisible: boolean,
   videoAspect: number = 16 / 9,
+  fontScale: number = 1.0,
 ): SubtitleLayoutStyle {
+  const safeScale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1.0
+
   if (playerWidth <= 0 || playerHeight <= 0) {
     return {
-      fontSizePx: 16,
-      bottomPx: isControlsVisible ? 64 : 24,
+      fontSizePx: Math.round(22 * safeScale),
+      bottomPx: isControlsVisible ? 68 : 24,
       maxTextWidthPx: 800,
     }
   }
@@ -352,19 +356,20 @@ export function calculateSubtitleLayout(
     renderedHeight = playerWidth / safeAspect
   }
 
-  // 字号比例：有效视频画面高度的 5%，限制在 13px ~ 38px
-  const fontSizePx = Math.round(Math.max(13, Math.min(38, renderedHeight * 0.05)))
+  // 有效画面高度的 5.8%，下限 14px，上限放宽到 140px（满足 4K/2K 全屏清晰大字需求）
+  const rawSize = renderedHeight * 0.058 * safeScale
+  const fontSizePx = Math.round(Math.max(14, Math.min(140, rawSize)))
 
   // 上下黑边高度
   const letterboxBottom = Math.max(0, (playerHeight - renderedHeight) / 2)
 
   // 底部边距：控制栏显隐时平滑避让
-  const normalBottom = letterboxBottom + Math.round(renderedHeight * 0.035)
+  const normalBottom = letterboxBottom + Math.round(renderedHeight * 0.04)
   const bottomPx = isControlsVisible
-    ? Math.max(64, normalBottom + 20)
-    : Math.max(16, normalBottom)
+    ? Math.max(68, normalBottom + 24)
+    : Math.max(18, normalBottom)
 
-  const maxTextWidthPx = Math.round(Math.max(260, renderedWidth * 0.9))
+  const maxTextWidthPx = Math.round(Math.max(260, renderedWidth * 0.92))
 
   return { fontSizePx, bottomPx, maxTextWidthPx }
 }

@@ -105,6 +105,20 @@ const readStoredRate = (): number => {
   return 1.0
 }
 
+const SUBTITLE_SCALE_STORAGE_KEY = 'moji.video.subtitleScale'
+const readStoredSubtitleScale = (): number => {
+  try {
+    const s = localStorage.getItem(SUBTITLE_SCALE_STORAGE_KEY)
+    if (s !== null) {
+      const num = parseFloat(s)
+      if (Number.isFinite(num) && num >= 0.5 && num <= 2.5) return num
+    }
+  } catch {
+    // 忽略
+  }
+  return 1.0
+}
+
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
   function VideoPlayer(
     {
@@ -157,6 +171,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [externalSegments, setExternalSegments] = useState<TranscriptSegment[]>([])
     const [externalName, setExternalName] = useState<string>('')
     const [subtitleOffsetMs, setSubtitleOffsetMs] = useState(0) // 字幕时间偏移
+    const [subtitleScale, setSubtitleScale] = useState(readStoredSubtitleScale) // 字幕字号缩放倍率
 
     // 进度条悬停与预览
     const [hoverPercent, setHoverPercent] = useState<number | null>(null)
@@ -444,6 +459,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       }
     }, [currentTime, isMirrored, showToast, title])
 
+    // 字幕字号缩放微调
+    const changeSubtitleScale = useCallback((scale: number) => {
+      setSubtitleScale(scale)
+      try {
+        localStorage.setItem(SUBTITLE_SCALE_STORAGE_KEY, String(scale))
+      } catch {
+        // 忽略
+      }
+      showToast(t('字幕大小：{0}x', String(scale)))
+    }, [showToast])
+
     // 导入外挂字幕文件 (.srt / .vtt / .json)
     const handleSubtitleFile = useCallback(
       (file: File) => {
@@ -638,6 +664,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       playerDimensions.height,
       isControlsVisible,
       videoAspect,
+      subtitleScale,
     )
 
     return (
@@ -1023,6 +1050,37 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                           >
                             +1s
                           </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 字幕字号倍率调节 */}
+                    {subtitleTrack !== 'off' && (
+                      <div className="mt-1 pt-1 border-t border-line/60">
+                        <div className="flex items-center justify-between px-2 text-[10.5px] text-ink-faint">
+                          <span>{t('字幕字号')}</span>
+                          <span className="font-mono text-seal font-medium">{subtitleScale}x</span>
+                        </div>
+                        <div className="mt-1 grid grid-cols-4 gap-1 px-1">
+                          {[
+                            { label: t('小'), scale: 0.8 },
+                            { label: t('标准'), scale: 1.0 },
+                            { label: t('大'), scale: 1.25 },
+                            { label: t('特大'), scale: 1.5 },
+                          ].map((item) => (
+                            <button
+                              key={item.scale}
+                              type="button"
+                              onClick={() => changeSubtitleScale(item.scale)}
+                              className={`rounded py-0.5 text-center text-[10px] transition ${
+                                subtitleScale === item.scale
+                                  ? 'bg-seal text-white font-medium shadow-xs'
+                                  : 'bg-line/40 text-ink hover:bg-line'
+                              }`}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     )}

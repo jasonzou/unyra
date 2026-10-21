@@ -165,21 +165,29 @@ Next step in WebVTT
   it('calculates subtitle layout dynamically based on player dimensions rather than screen size', () => {
     // 播放器小尺寸（如分屏/侧栏展开时 480x270）
     const small = calculateSubtitleLayout(480, 270, false, 16 / 9)
-    expect(small.fontSizePx).toBe(14) // 270 * 0.05 = 13.5 -> 14px
-    expect(small.bottomPx).toBe(16) // letterbox 0 + 270 * 0.035 (~9) -> Math.max(16, 9) = 16
+    expect(small.fontSizePx).toBe(16) // 270 * 0.058 = 15.66 -> 16px
+    expect(small.bottomPx).toBe(18) // letterbox 0 + 270 * 0.04 (~11) -> Math.max(18, 11) = 18
 
     // 播放器大尺寸（如 1280x720）
     const large = calculateSubtitleLayout(1280, 720, false, 16 / 9)
-    expect(large.fontSizePx).toBe(36) // 720 * 0.05 = 36px
-    expect(large.bottomPx).toBe(25) // 720 * 0.035 (~25) -> max(16, 25) = 25
+    expect(large.fontSizePx).toBe(42) // 720 * 0.058 = 41.76 -> 42px
+    expect(large.bottomPx).toBe(29) // 720 * 0.04 (~29) -> max(18, 29) = 29
+
+    // 全屏尺寸（1920x1080）：验证不再受原先 38px 上限限制，字号达到舒适全屏尺寸
+    const fullscreen1080p = calculateSubtitleLayout(1920, 1080, false, 16 / 9)
+    expect(fullscreen1080p.fontSizePx).toBe(63) // 1080 * 0.058 = 62.64 -> 63px
+
+    // 全屏尺寸 + 用户选择放大倍率（1.5x 特大）
+    const fullscreenLarge = calculateSubtitleLayout(1920, 1080, false, 16 / 9, 1.5)
+    expect(fullscreenLarge.fontSizePx).toBe(94) // 1080 * 0.058 * 1.5 = 93.96 -> 94px
 
     // 控制栏显示时底部距离增加避让控制栏
     const withControls = calculateSubtitleLayout(1280, 720, true, 16 / 9)
-    expect(withControls.bottomPx).toBeGreaterThanOrEqual(64)
+    expect(withControls.bottomPx).toBeGreaterThanOrEqual(68)
 
     // 播放器高度被压缩（上下有较大黑边或高宽比较小）时，以实际视频有效画面为准
     const letterboxed = calculateSubtitleLayout(600, 600, false, 16 / 9)
     // 画面实际高度为 600 / (16/9) = 337.5px
-    expect(letterboxed.fontSizePx).toBe(17) // 338 * 0.05 = 17px
+    expect(letterboxed.fontSizePx).toBe(20) // 337.5 * 0.058 = 19.58 -> 20px
   })
 })
