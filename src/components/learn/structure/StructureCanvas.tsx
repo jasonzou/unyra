@@ -242,6 +242,8 @@ export const StructureCanvas = memo(function StructureCanvas({
       const target = e.target as HTMLElement
       const el = containerRef.current
       if (!el) return
+      // 右下角那几个按钮：容器一旦捕获指针，它们就收不到 click 了，所以直接放行
+      if (target.closest('button')) return
       el.setPointerCapture(e.pointerId)
 
       const paletteEl = target.closest<HTMLElement>('[data-palette-kind]')
@@ -387,7 +389,8 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (!node) return
       if (node.kind === 'outline' || node.kind === 'doc') {
         if (node.ref) onOpenNode(node.ref)
-        else onFillNode?.(node)
+        else if (onFillNode) onFillNode(node)
+        else onToast?.(t('空节点还没有内容：等它自己决定生成什么这条链接上之后，双击就能生成'))
         return
       }
       // 笔记 / 试卷 / 超级文档的打开入口还在接（它们各自有自己的页签）
