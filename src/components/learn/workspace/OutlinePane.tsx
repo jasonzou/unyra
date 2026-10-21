@@ -24,6 +24,7 @@ export interface OutlinePaneProps {
   exams: ExamActions
   onCreateNote?: (nodeId: string) => string | null
   onRenameNote?: (nodeId: string, from: string, to: string) => void
+  onAddOutlineEntry?: (nodeId: string, title: string) => void
   onToast?: (msg: string) => void
   focusTarget?: { nodeId: string; nonce: number } | null
   onFocusHandled?: () => void
@@ -57,6 +58,7 @@ export const OutlinePane = memo(function OutlinePane({
   exams,
   onCreateNote,
   onRenameNote,
+  onAddOutlineEntry,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -75,6 +77,7 @@ export const OutlinePane = memo(function OutlinePane({
         exams={exams}
         onCreateNote={onCreateNote}
         onRenameNote={onRenameNote}
+        onAddOutlineEntry={onAddOutlineEntry}
         onToast={onToast}
         focusTarget={focusTarget}
         onFocusHandled={onFocusHandled}

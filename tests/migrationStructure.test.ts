@@ -85,10 +85,11 @@ describe('数据迁移：大纲树 → 结构图', () => {
       'o:n1': 'outline',
       'd:n1': 'doc',
       'n:n1:错题': 'note',
-      'o:n2': 'outline',
       'd:n2': 'doc',
       'e:e1': 'exam',
     })
+    // n2 没有目标项、也不是根 → 不建大纲卡（空大纲只是空壳）
+    expect(kinds['o:n2']).toBeUndefined()
     expect(map!.edges).toEqual(
       expect.arrayContaining([
         // 先文档再大纲
@@ -96,7 +97,6 @@ describe('数据迁移：大纲树 → 结构图', () => {
         { from: 'd:n1', to: 'n:n1:错题' },
         // 父的**大纲** → 子的**文档**（大纲之间不再直接相连）
         { from: 'o:n1', to: 'd:n2' },
-        { from: 'd:n2', to: 'o:n2' },
         { from: 'd:n2', to: 'e:e1' },
       ]),
     )

@@ -137,6 +137,7 @@ import {
 import type { AgentTabRef } from '../../learn/types'
 import type { StructureMap } from '../../learn/structure'
 import { createNote } from '../../learn/graph'
+import { writeOutline } from '../../learn/outline'
 import type { TabCloseMode } from '../../learn/tabs'
 import { attemptBrief, examAttempted, examTotalPoints } from '../../learn/exam'
 import type { Exam } from '../../learn/exam'
@@ -3653,6 +3654,34 @@ export default function LearnWorkspace({
     [getLatest, set],
   )
 
+  /**
+   * 结构画布上给大纲手动加一条目标项。
+   *
+   * 走 writeOutline（整份大纲替换）：它负责 key 归一化与去重，直接在数组上 push
+   * 会漏掉「同名目标项」这一层，图上就会冒出两条 key 相同的接入点。
+   */
+  const addOutlineEntry = useCallback(
+    (nodeId: string, title: string) => {
+      const s = getLatest()
+      const node = nodeById(s, nodeId)
+      if (!node) return
+      const current = node.outline?.children ?? []
+      const r = writeOutline(
+        s,
+        nodeId,
+        { intro: node.outline?.intro ?? '', children: [...current, { title, summary: '' }] },
+        Date.now(),
+      )
+      if (!r.ok) {
+        onToast(r.error)
+        return
+      }
+      set(r.store)
+      onToast(t('已添加目标项「{0}」', title))
+    },
+    [getLatest, set, onToast],
+  )
+
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
   const getNoteActions = useCallback(
     (tabId: string, node: KnowledgeNode, source: DocSource): ComponentProps<typeof DocPane>['note'] => {
@@ -4660,6 +4689,7 @@ export default function LearnWorkspace({
                   exams={explorerExams}
                   onCreateNote={createStructureNote}
                   onRenameNote={renameNodeNote}
+                  onAddOutlineEntry={addOutlineEntry}
                   onToast={onToast}
                   focusTarget={outlineFocus}
                   onFocusHandled={handleOutlineFocusHandled}

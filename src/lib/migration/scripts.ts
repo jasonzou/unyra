@@ -8,7 +8,7 @@
  */
 
 import type { MigrationScript } from './types'
-import { outlineToStructure } from './outlineStructure'
+import { outlineToStructure, structureTopology } from './outlineStructure'
 
 /**
  * 迁移脚本清单。
@@ -24,7 +24,7 @@ import { outlineToStructure } from './outlineStructure'
  *   migrate: async (ctx) => { ... }
  * }
  */
-export const MIGRATION_SCRIPTS: MigrationScript[] = [outlineToStructure]
+export const MIGRATION_SCRIPTS: MigrationScript[] = [outlineToStructure, structureTopology]
 
 /** 供外部或插件动态注册迁移脚本 */
 export function registerMigrationScript(script: MigrationScript): void {

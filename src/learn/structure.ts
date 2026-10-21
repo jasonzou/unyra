@@ -398,8 +398,16 @@ export interface SeedGraph {
 export interface SeedSourceNode {
   /** 学习节点的 id */
   id: string
-  /** 归一化去重键（= 父大纲里那条目标项的 key），用来给子大纲写上 slot */
+  /** 归一化去重键（= 父大纲里那条目标项的 key），用来给子文档写上 slot */
   key?: string
+  /**
+   * 这个节点要不要一张大纲卡。
+   *
+   * 规矩：**只有总目标无条件有**，其余节点在它真的有目标项（outline.children 非空）时才有。
+   * 空大纲卡片除了占地方没有意义——而且它是「先文档再大纲」里那一环，
+   * 一旦凭空出现，整条链就会多出一截空壳。
+   */
+  hasOutline: boolean
   /** 旧树里「我 → 下游」的那些边（依赖边 from=我、to=下游） */
   downstream: string[]
   /** 笔记名 */
@@ -441,8 +449,11 @@ export function seedFromSource(
    */
   for (const item of source) {
     seedNodes.push({ id: docGid(item.id), kind: 'doc', ref: item.id })
-    seedNodes.push({ id: outlineGid(item.id), kind: 'outline', ref: item.id })
-    seedEdges.push({ from: docGid(item.id), to: outlineGid(item.id) })
+    // 大纲卡：只有总目标、或者这个节点真的有目标项时才建（见 hasOutline）
+    if (item.hasOutline) {
+      seedNodes.push({ id: outlineGid(item.id), kind: 'outline', ref: item.id })
+      seedEdges.push({ from: docGid(item.id), to: outlineGid(item.id) })
+    }
 
     // ref 指回现有实体：内容永远只存一份，图里只存引用（见不变量 2）
     for (const name of item.notes) {
@@ -464,6 +475,8 @@ export function seedFromSource(
    * 大纲之间不再直接相连（大纲的父子节点只能是文档），中间必须隔一层文档。
    */
   for (const item of source) {
+    // 父没有大纲卡就接不上子节点——但那种父本来也不会有子（没有目标项就没有接入点）
+    if (!item.hasOutline) continue
     for (const dep of item.downstream) {
       if (!known.has(dep)) continue
       seedEdges.push({ from: outlineGid(item.id), to: docGid(dep) })

@@ -352,6 +352,25 @@ describe('结构画布：对账（实体长了，图跟着补）', () => {
     expect(next.nodes.some((n) => n.id === 'n:n1:错题')).toBe(false)
   })
 
+  it('删掉的边不会被对账补回来（边是拓扑，不是包含）', () => {
+    const full = structureFromStore(store, 'g1')
+    // 模拟用户把「文档 → 大纲」这条删了
+    const cut = { ...full, edges: full.edges.filter((e) => !(e.from === 'd:n1' && e.to === 'o:n1')) }
+    const next = reconcileStructure(store, 'g1', cut)
+    expect(next.edges.some((e) => e.from === 'd:n1' && e.to === 'o:n1')).toBe(false)
+  })
+
+  it('只有总目标自动有大纲卡：子节点没有目标项就没有大纲', () => {
+    const root = makeNode({ id: 'n1', title: '根' })
+    const child = makeNode({ id: 'n2', title: '子', key: 'a' })
+    const store2 = makeStore([root, child], { edges: [{ from: 'n1', to: 'n2', createdAt: NOW }] })
+    const map = structureFromStore(store2, 'g1')
+    expect(map.nodes.some((n) => n.id === 'o:n1')).toBe(true)
+    expect(map.nodes.some((n) => n.id === 'o:n2')).toBe(false)
+    // 子文档接在父大纲下面
+    expect(map.edges).toContainEqual({ from: 'o:n1', to: 'd:n2' })
+  })
+
   it('别的目标不掺和', () => {
     const other = makeNode({ id: 'n9', title: '别的', goalId: 'g2', docs: { teaching: '正文' } })
     const map = { version: 1 as const, nodes: [], edges: [] }

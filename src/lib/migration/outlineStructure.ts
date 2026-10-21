@@ -36,6 +36,7 @@ import {
   SLOT_ROW,
   seedFromSource,
   type SeedSourceNode,
+  type StructureMap,
 } from '../../learn/structure'
 
 /** meta.json 里迁移用得到的部分（其余字段搬不过来也不影响结构图） */
@@ -142,9 +143,12 @@ async function examIds(ctx: MigrationContext, item: Collected): Promise<string[]
 
 /** 把收集到的文件信息拼成装配输入（装配规则在 learn/structure 的 seedFromSource，不在这里） */
 function toSource(items: readonly Collected[], examsOf: ReadonlyMap<string, string[]>): SeedSourceNode[] {
+  // 根 = 没有别人把它列成下游的那个（迁移时拿不到 goal.rootNodeId，只能这么认）
+  const hasParent = new Set(items.flatMap((i) => i.downstream))
   return items.map((item) => ({
     id: item.id,
     key: item.key,
+    hasOutline: !hasParent.has(item.id) || item.slotKeys.length > 0,
     downstream: item.downstream,
     notes: item.notes,
     superdocs: item.superdocs,
@@ -244,4 +248,111 @@ export const outlineToStructure: MigrationScript = {
     '已有结构图的目标跳过（可重复执行）',
   ],
   migrate: migrateOutlineToStructure,
+}
+
+/* ---------- 0.7.0 → 0.7.1：把图重建到新拓扑（文档 ↔ 大纲） ---------- */
+
+/**
+ * 上一次重构把类型规则反了过来（文档 ↔ 大纲、大纲不再连大纲），但存盘的图还是旧的：
+ * 大纲 → 大纲 的边、缺文档节点、接入点记在大纲上……读盘时旧边会被丢掉，
+ * 整张图就散成一堆孤岛。这个脚本按新规则**重建**一遍。
+ *
+ * 重建而不是修补：旧图里「谁是父、谁占哪条目标项」这些信息本来就来自实体
+ * （meta 的 dependencies 与 outline 的 children），从文件重算一定比在脏图上推更准。
+ * **坐标保留**：同一个节点 id 在旧图里有位置就用旧的，用户摆过的位置不该被冲掉。
+ */
+export async function migrateStructureTopology(ctx: MigrationContext): Promise<MigrationStepResult> {
+  const modifiedFiles: string[] = []
+  const docsRoot = `${ctx.userDir}/docs`
+  const goals = (await ctx.storage.listDir(docsRoot)).filter((e) => e.dir)
+  ctx.log(`发现 ${goals.length} 个目标目录`)
+
+  for (const goal of goals) {
+    const goalDir = `${docsRoot}/${goal.name}`
+    const target = `${goalDir}/structure.json`
+    const items = await collectMetas(ctx, goalDir)
+    if (!items.length) continue
+
+    const examsOf = new Map<string, string[]>()
+    for (const item of items) {
+      const ids = await examIds(ctx, item)
+      if (ids.length) examsOf.set(item.id, ids)
+    }
+    const slotsOf = new Map(items.map((i) => [i.id, i.slotKeys.length]))
+    const slotRank = new Map<string, number>()
+    for (const item of items) item.slotKeys.forEach((key, index) => slotRank.set(key, index))
+    const height = (node: { kind: string; ref?: string }): number => {
+      if (node.kind !== 'outline' || !node.ref) return CARD_H
+      const count = slotsOf.get(node.ref) ?? 0
+      if (!count) return CARD_H
+      return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8)
+    }
+
+    const rebuilt = seedFromSource(
+      toSource(items, examsOf),
+      height,
+      (node) => (node.slot ? slotRank.get(node.slot) ?? 0 : 0),
+    )
+    if (!rebuilt.nodes.length) continue
+
+    const old = await ctx.storage.readJson<StructureMap>(target)
+    const oldPos = new Map((old?.nodes ?? []).map((n) => [n.id, n]))
+    const hidden = new Set(old?.hidden ?? [])
+    const nodes = rebuilt.nodes
+      // 用户主动删掉的卡不要再长回来
+      .filter((n) => !hidden.has(n.id))
+      .map((n) => {
+        const prev = oldPos.get(n.id)
+        return prev ? { ...n, x: prev.x, y: prev.y } : n
+      })
+    const ids = new Set(nodes.map((n) => n.id))
+    const next: StructureMap = {
+      version: 1,
+      nodes,
+      edges: rebuilt.edges.filter((e) => ids.has(e.from) && ids.has(e.to)),
+      ...(old?.edgeStyle ? { edgeStyle: old.edgeStyle } : {}),
+      ...(old?.hidden?.length ? { hidden: old.hidden } : {}),
+    }
+
+    const ok = await ctx.storage.writeJson(target, next)
+    if (!ok) {
+      return {
+        ok: false,
+        fromVersion: '0.7.0',
+        toVersion: '0.7.1',
+        modifiedFiles,
+        error: `写入 ${target} 失败`,
+      }
+    }
+    modifiedFiles.push(target)
+    ctx.log(`「${goal.name}」重建：${next.nodes.length} 个节点、${next.edges.length} 条连线`)
+  }
+
+  return {
+    ok: true,
+    fromVersion: '0.7.0',
+    toVersion: '0.7.1',
+    modifiedFiles,
+    details: modifiedFiles.length ? `重建了 ${modifiedFiles.length} 张结构图` : '没有需要重建的目标',
+  }
+}
+
+export const structureTopology: MigrationScript = {
+  id: 'm_0_7_0_to_0_7_1',
+  fromVersion: '0.7.0',
+  toVersion: '0.7.1',
+  title: '结构图拓扑重建（文档 ↔ 大纲）',
+  summary:
+    '类型规则反过来了：大纲的父子节点只能是文档，链条变成「文档 → 大纲 → 子文档 → 子大纲」。' +
+    '这个脚本按新规则重建每个目标的 structure.json：补上文档节点、把「大纲 → 大纲」换成' +
+    '「父大纲 → 子文档」、把接入点记到文档上，并保留你已经摆好的坐标。',
+  changes: [
+    '每个学习节点都补一张文档卡（它是把子树接上去的连接件）',
+    '大纲卡只在「总目标」或「这个节点真的有目标项」时保留',
+    '旧的「大纲 → 大纲」边换成「父大纲 → 子文档」',
+    '新增「文档 → 大纲」边（先文档再大纲）',
+    '接入点（目标项）改记在文档上，连线按目标项染色',
+    '保留原有坐标；用户主动删掉的卡（hidden）不再补回来',
+  ],
+  migrate: migrateStructureTopology,
 }

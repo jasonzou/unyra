@@ -81,6 +81,8 @@ export interface StructureCanvasProps {
   onCreateNote?: (nodeId: string) => string | null
   /** 改笔记名（名字就是文件名，页签也会跟着改） */
   onRenameNote?: (nodeId: string, from: string, to: string) => void
+  /** 给某个节点的大纲手动加一条目标项（大纲卡底部的「+」） */
+  onAddOutlineEntry?: (nodeId: string, title: string) => void
   /** 双击空节点：交给上层去生成内容（这一版还没接，先提示） */
   onFillNode?: (node: StructureNode) => void
   onToast?: (msg: string) => void
@@ -116,8 +118,8 @@ interface MenuState {
   x: number
   y: number
   nodeId: string
-  /** actions = 三个动作；note = 写注释；rename = 改笔记名 */
-  mode: 'actions' | 'note' | 'rename'
+  /** actions = 三个动作；note = 写注释；rename = 改笔记名；slot = 新加一条目标项 */
+  mode: 'actions' | 'note' | 'rename' | 'slot'
 }
 
 export const StructureCanvas = memo(function StructureCanvas({
@@ -128,6 +130,7 @@ export const StructureCanvas = memo(function StructureCanvas({
   exams,
   onCreateNote,
   onRenameNote,
+  onAddOutlineEntry,
   onFillNode,
   onToast,
   focusTarget,
@@ -673,6 +676,14 @@ export const StructureCanvas = memo(function StructureCanvas({
         return
       }
 
+      const addEl = target.closest<HTMLElement>('[data-add-slot]')
+      if (addEl) {
+        const nodeId = addEl.dataset.addSlot as string
+        setMenuText('')
+        setMenu({ x: e.clientX, y: e.clientY, nodeId, mode: 'slot' })
+        return
+      }
+
       const slotEl = target.closest<HTMLElement>('[data-slot-key]')
       if (slotEl) {
         onSlotClick(slotEl.dataset.slotParent ?? '', slotEl.dataset.slotKey ?? '')
@@ -1131,6 +1142,15 @@ export const StructureCanvas = memo(function StructureCanvas({
                       </span>
                     </div>
                   ))}
+                  {/* 手动加一条目标项：这是大纲内容，不是画布节点 */}
+                  <div
+                    data-add-slot={node.id}
+                    title={t('给这份大纲加一条目标项')}
+                    className="flex cursor-pointer items-center gap-1.5 rounded px-1 text-[11px] text-ink-faint hover:bg-seal/[0.08] hover:text-seal"
+                    style={{ height: SLOT_ROW }}
+                  >
+                    ＋ {t('添加目标项')}
+                  </div>
                 </div>
               ) : (
                 <div className="truncate px-3 pb-2 text-[11px] text-ink-soft">{view.subtitle}</div>
@@ -1323,7 +1343,11 @@ export const StructureCanvas = memo(function StructureCanvas({
           ) : (
             <div className="flex flex-col gap-1.5 p-1">
               <div className="text-[10px] text-ink-faint">
-                {menu.mode === 'note' ? t('写一句注释，贴在卡片底部') : t('改笔记名（文件名一起改）')}
+                {menu.mode === 'note'
+                  ? t('写一句注释，贴在卡片底部')
+                  : menu.mode === 'rename'
+                    ? t('改笔记名（文件名一起改）')
+                    : t('新的目标项标题')}
               </div>
               <textarea
                 autoFocus
@@ -1345,7 +1369,12 @@ export const StructureCanvas = memo(function StructureCanvas({
                   className="rounded bg-seal/15 px-2 py-1 text-[11px] text-seal-deep hover:bg-seal/25"
                   onClick={() => {
                     if (menu.mode === 'note') saveNote(menuNode.id, menuText)
-                    else saveRename(menuNode, menuText)
+                    else if (menu.mode === 'rename') saveRename(menuNode, menuText)
+                    else {
+                      const title = menuText.trim()
+                      if (title) onAddOutlineEntry?.(menuNode.id, title)
+                      setMenu(null)
+                    }
                   }}
                 >
                   {t('保存')}

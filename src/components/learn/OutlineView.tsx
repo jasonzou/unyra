@@ -30,6 +30,8 @@ export interface OutlineViewProps {
   onCreateNote?: (nodeId: string) => string | null
   /** 改笔记名 */
   onRenameNote?: (nodeId: string, from: string, to: string) => void
+  /** 给某个节点的大纲手动加一条目标项 */
+  onAddOutlineEntry?: (nodeId: string, title: string) => void
   onToast?: (msg: string) => void
   /** 外部指定的聚焦目标（如 chip 路由） */
   focusTarget?: { nodeId: string; nonce: number } | null
@@ -53,6 +55,7 @@ export default memo(function OutlineView({
   exams,
   onCreateNote,
   onRenameNote,
+  onAddOutlineEntry,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -70,6 +73,7 @@ export default memo(function OutlineView({
           exams={exams}
           onCreateNote={onCreateNote}
           onRenameNote={onRenameNote}
+          onAddOutlineEntry={onAddOutlineEntry}
           onToast={onToast}
           focusTarget={focusTarget}
           onFocusHandled={onFocusHandled}
