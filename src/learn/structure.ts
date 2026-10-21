@@ -41,15 +41,21 @@ export const GRAPH_KIND_LABEL: Record<GraphKind, string> = {
 /**
  * 允许的连线：`from` 把上下文交给 `to`。
  *
- * 需求原话：「大纲连大纲，大纲连文档，但文档不能（下游）连大纲；笔记/试卷/超级文档
- * 只能作为文档的下游」。**空数组 = 它是叶子**，不允许再往下连。
+ * 需求原话（2026-10-21 第二次重构）：「不再是大纲-文档 大纲-大纲，改为文档-大纲，
+ * 先文档再大纲。文档可以是大纲的父节点也可以是子节点，但大纲的父子节点只能是文档」。
  *
- * 层级严格递增有一个免费的好处：除了「大纲 → 大纲」这一条，其余边都不可能成环，
- * 所以环检测只需要在大纲之间做（见 wouldCycle）。
+ * 于是：
+ * - **大纲只和文档相连**：`outline → doc`（大纲列目标项、文档去落地）与
+ *   `doc → outline`（这份文档自己的大纲）；
+ * - **大纲 → 大纲不再允许**：大纲的父子节点只能是文档；
+ * - 叶子（笔记 / 试卷 / 超级文档）仍然只挂在文档下面。
+ *
+ * 层级不再严格递增（doc ↔ outline 可以来回），所以**环检测对每一类边都要做**——
+ * 见 canAddEdge 里的 wouldCycle，它不按类型特判。
  */
 export const GRAPH_EDGE_RULES: Record<GraphKind, readonly GraphKind[]> = {
-  outline: ['outline', 'doc'],
-  doc: ['note', 'exam', 'superdoc'],
+  outline: ['doc'],
+  doc: ['outline', 'note', 'exam', 'superdoc'],
   note: [],
   exam: [],
   superdoc: [],
@@ -103,10 +109,11 @@ export interface StructureNode {
    */
   ref?: string
   /**
-   * 这个大纲节点占的是父大纲的**哪一个接入点**（= 目标项的 key，见 OutlineEntry）。
+   * 这个**文档节点**占的是父大纲的哪一个接入点（= 目标项的 key，见 OutlineEntry）。
    *
-   * 只有「子大纲」有这一项：父大纲提供的接入点数量是固定的（有几个目标项就有几个），
-   * 每个接入点只能挂一个子大纲；文档那一侧不受这个限制。
+   * 接入点挂的是文档：大纲列出目标项，每一条目标项由一个文档去落地
+   * （「先文档再大纲」——文档是父，大纲是它自己的展开）。
+   * 接入点数量是固定的（有几个目标项就有几个），一个接入点只挂一个文档。
    * 记 key 而不是序号：目标项重排、改名（key 跟着标题归一化）都不会把挂接关系弄丢。
    */
   slot?: string
@@ -393,8 +400,6 @@ export interface SeedSourceNode {
   id: string
   /** 归一化去重键（= 父大纲里那条目标项的 key），用来给子大纲写上 slot */
   key?: string
-  /** 教学文档有没有正文（没有正文、也没有下游时不建文档节点） */
-  hasDoc: boolean
   /** 旧树里「我 → 下游」的那些边（依赖边 from=我、to=下游） */
   downstream: string[]
   /** 笔记名 */
@@ -427,14 +432,17 @@ export function seedFromSource(
   const seedEdges: GraphEdge[] = []
   const known = new Set(source.map((n) => n.id))
 
+  /*
+   * 每个学习节点拆成**两张卡**：一张文档、一张大纲，边是 `文档 → 大纲`
+   * （「先文档再大纲」：文档在前，大纲是它自己的展开）。
+   *
+   * 文档这次是**无条件建**的，哪怕还没有正文：它是把子树接上去的**连接件**——
+   * 大纲的父子节点只能是文档，没有文档，子节点就挂不上来。
+   */
   for (const item of source) {
-    seedNodes.push({ id: outlineGid(item.id), kind: 'outline', ref: item.id })
-
-    const needDoc = item.hasDoc || item.notes.length > 0 || item.superdocs.length > 0 || item.exams.length > 0
-    if (!needDoc) continue
-
     seedNodes.push({ id: docGid(item.id), kind: 'doc', ref: item.id })
-    seedEdges.push({ from: outlineGid(item.id), to: docGid(item.id) })
+    seedNodes.push({ id: outlineGid(item.id), kind: 'outline', ref: item.id })
+    seedEdges.push({ from: docGid(item.id), to: outlineGid(item.id) })
 
     // ref 指回现有实体：内容永远只存一份，图里只存引用（见不变量 2）
     for (const name of item.notes) {
@@ -451,16 +459,19 @@ export function seedFromSource(
     }
   }
 
-  // 旧树的父子关系：依赖边 → 大纲 → 大纲（指向已删节点的边在 seedLayout 里会被丢掉）
+  /*
+   * 旧树的父子关系：父的**大纲** → 子的**文档**。
+   * 大纲之间不再直接相连（大纲的父子节点只能是文档），中间必须隔一层文档。
+   */
   for (const item of source) {
     for (const dep of item.downstream) {
       if (!known.has(dep)) continue
-      seedEdges.push({ from: outlineGid(item.id), to: outlineGid(dep) })
+      seedEdges.push({ from: outlineGid(item.id), to: docGid(dep) })
     }
   }
 
   /*
-   * 顺手把 slot 写上：有入边的大纲节点就是「子大纲」，它占的是父大纲里 key 相同的那条目标项。
+   * 接入点：子文档认领父大纲里 key 相同的那条目标项。
    *
    * 不写也能靠 `slotOrderOf` 按 key 回退对上号（老数据就是这么活的），但一旦节点改名、
    * key 变了，回退就断了；显式记下来之后，排顺序只认这一条，与标题怎么改无关。
@@ -468,8 +479,9 @@ export function seedFromSource(
   const keyOf = new Map(source.filter((s) => s.key).map((s) => [s.id, s.key as string]))
   const byId = new Map(seedNodes.map((n) => [n.id, n]))
   for (const edge of seedEdges) {
+    const parent = byId.get(edge.from)
     const child = byId.get(edge.to)
-    if (child?.kind !== 'outline' || !child.ref) continue
+    if (parent?.kind !== 'outline' || child?.kind !== 'doc' || !child.ref) continue
     const key = keyOf.get(child.ref)
     if (key) child.slot = key
   }

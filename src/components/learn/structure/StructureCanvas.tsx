@@ -467,16 +467,16 @@ export const StructureCanvas = memo(function StructureCanvas({
        * 大纲 → 子大纲 还要多过一关：父大纲提供的接入点**数量固定**（有几个目标项就有几个），
        * 一个接入点只挂一个子大纲。文档那一侧不受这个限制。
        */
-      if (fromNode?.kind === 'outline' && toNode?.kind === 'outline') {
+      if (fromNode?.kind === 'outline' && toNode?.kind === 'doc') {
         const slots = outlineSlots(store, fromNode, nodes)
         const key = slotKeyOf(store, toNode)
         const slot = key ? slots.find((s) => s.key === key) : undefined
         if (!slot) {
-          onToast?.(t('这张大纲没有这个接入点：子大纲只能挂在它的某个目标项上'))
+          onToast?.(t('这张大纲没有这个接入点：子文档只能挂在它的某个目标项上'))
           return false
         }
         if (slot.childId && slot.childId !== to) {
-          onToast?.(t('「{0}」这个目标项已经挂了一个子大纲', slot.title))
+          onToast?.(t('「{0}」这个目标项已经挂了一个文档', slot.title))
           return false
         }
         const patched = key === toNode.slot ? nodes : nodes.map((n) => (n.id === to ? { ...n, slot: key ?? undefined } : n))
@@ -503,14 +503,15 @@ export const StructureCanvas = memo(function StructureCanvas({
       }
       const child: StructureNode = {
         id: crypto.randomUUID(),
-        kind: 'outline',
+        // 接入点挂的是文档：大纲的父子节点只能是文档
+        kind: 'doc',
         slot: slot.key,
         x: parent.x + CARD_W + 112,
         y: parent.y + slot.index * (CARD_H + 24),
       }
       commit({ version: 1, nodes: [...nodes, child], edges: [...edges, { from: parent.id, to: child.id }] })
       setSelectedId(child.id)
-      onToast?.(t('「{0}」的空子大纲已就位：双击它可以开始生成内容', slot.title))
+      onToast?.(t('「{0}」的子文档已就位：双击它可以开始生成内容', slot.title))
     },
     [centerOn, edges, nodes, commit, onToast, store],
   )
@@ -853,18 +854,13 @@ export const StructureCanvas = memo(function StructureCanvas({
         const nextNodes = [...nodes, node]
         const nextEdges = [...edges]
         if (target) {
-          const free =
-            target.kind === 'outline' && node.kind === 'outline'
-              ? outlineSlots(store, target, nodes).find((s) => !s.childId)
-              : null
+          const occupying = target.kind === 'outline' && node.kind === 'doc'
+          const free = occupying ? outlineSlots(store, target, nodes).find((s) => !s.childId) : null
           if (free) node.slot = free.key
-          const allowed =
-            target.kind === 'outline' && node.kind === 'outline'
-              ? !!free
-              : canAddEdge(nextNodes, nextEdges, target.id, node.id)
+          const allowed = occupying ? !!free : canAddEdge(nextNodes, nextEdges, target.id, node.id)
           if (allowed) {
             nextEdges.push({ from: target.id, to: node.id })
-          } else if (target.kind === 'outline' && node.kind === 'outline') {
+          } else if (occupying) {
             onToast?.(t('这张大纲的目标项都挂满了：先给它加目标项，才有新的接入点'))
           }
         }

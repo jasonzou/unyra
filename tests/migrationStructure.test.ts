@@ -91,10 +91,12 @@ describe('数据迁移：大纲树 → 结构图', () => {
     })
     expect(map!.edges).toEqual(
       expect.arrayContaining([
-        { from: 'o:n1', to: 'd:n1' },
+        // 先文档再大纲
+        { from: 'd:n1', to: 'o:n1' },
         { from: 'd:n1', to: 'n:n1:错题' },
-        { from: 'o:n1', to: 'o:n2' },
-        { from: 'o:n2', to: 'd:n2' },
+        // 父的**大纲** → 子的**文档**（大纲之间不再直接相连）
+        { from: 'o:n1', to: 'd:n2' },
+        { from: 'd:n2', to: 'o:n2' },
         { from: 'd:n2', to: 'e:e1' },
       ]),
     )
@@ -109,14 +111,15 @@ describe('数据迁移：大纲树 → 结构图', () => {
     expect(byId.get('e:e1')?.ref).toBe('e1')
   })
 
-  it('教学文档是空的、也没有下游时不建文档节点（不往画布上撒空盒子）', async () => {
+  it('文档节点无条件建：它是把子树接上去的连接件', async () => {
+    // 大纲的父子节点只能是文档，没有文档，子节点就挂不上来
     const seed = {
       [`${GOAL}/高数.meta.json`]: meta('n1'),
       [`${GOAL}/高数.md`]: '',
     }
     const { map } = await run(seed)
-    expect(map!.nodes.map((n) => n.id)).toEqual(['o:n1'])
-    expect(map!.edges).toEqual([])
+    expect(map!.nodes.map((n) => n.id).sort()).toEqual(['d:n1', 'o:n1'])
+    expect(map!.edges).toEqual([{ from: 'd:n1', to: 'o:n1' }])
   })
 
   it('每个节点都有坐标，且连线不会成环', async () => {

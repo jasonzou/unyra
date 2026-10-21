@@ -134,12 +134,6 @@ async function collectMetas(ctx: MigrationContext, goalDir: string): Promise<Col
   return out
 }
 
-/** 这个节点有没有正文（空 .md 不建文档节点，理由见文件头） */
-async function hasTeaching(ctx: MigrationContext, item: Collected): Promise<boolean> {
-  const text = await ctx.storage.readText(`${item.dir}/${item.base}.md`)
-  return !!text && text.trim().length > 0
-}
-
 /** 这个节点下的试卷 id 清单（`{节点}/exams/{id}.json`） */
 async function examIds(ctx: MigrationContext, item: Collected): Promise<string[]> {
   const entries = await ctx.storage.listDir(`${item.dir}/exams`)
@@ -147,15 +141,10 @@ async function examIds(ctx: MigrationContext, item: Collected): Promise<string[]
 }
 
 /** 把收集到的文件信息拼成装配输入（装配规则在 learn/structure 的 seedFromSource，不在这里） */
-function toSource(
-  items: readonly Collected[],
-  docsWithBody: ReadonlySet<string>,
-  examsOf: ReadonlyMap<string, string[]>,
-): SeedSourceNode[] {
+function toSource(items: readonly Collected[], examsOf: ReadonlyMap<string, string[]>): SeedSourceNode[] {
   return items.map((item) => ({
     id: item.id,
     key: item.key,
-    hasDoc: docsWithBody.has(item.id),
     downstream: item.downstream,
     notes: item.notes,
     superdocs: item.superdocs,
@@ -186,10 +175,8 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
       continue
     }
 
-    const docsWithBody = new Set<string>()
     const examsOf = new Map<string, string[]>()
     for (const item of items) {
-      if (await hasTeaching(ctx, item)) docsWithBody.add(item.id)
       const ids = await examIds(ctx, item)
       if (ids.length) examsOf.set(item.id, ids)
     }
@@ -209,7 +196,7 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
       return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8)
     }
     const map = seedFromSource(
-      toSource(items, docsWithBody, examsOf),
+      toSource(items, examsOf),
       height,
       (node) => (node.slot ? slotRank.get(node.slot) ?? 0 : 0),
     )

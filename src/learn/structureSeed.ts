@@ -10,7 +10,6 @@ import type { LearnStore } from './types'
 import {
   CARD_H,
   CARD_W,
-  COL_GAP,
   docGid,
   examGid,
   heightOf,
@@ -56,7 +55,6 @@ export function structureFromStore(store: LearnStore, goalId: string): Structure
   const source: SeedSourceNode[] = nodes.map((node) => ({
     id: node.id,
     key: node.key,
-    hasDoc: node.docs.teaching.trim().length > 0,
     downstream: downstream.get(node.id) ?? [],
     notes: node.notes.map((n) => n.name),
     superdocs: (node.superdocs ?? []).map((s) => s.name),
@@ -99,65 +97,75 @@ export function reconcileStructure(store: LearnStore, goalId: string, map: Struc
     return { x, y: yy }
   }
 
-  const add = (node: StructureNode, from?: string) => {
+  const add = (node: StructureNode) => {
     nodes.push(node)
     ids.add(node.id)
     changed = true
-    if (from && !linked.has(`${from}>${node.id}`)) {
-      edges.push({ from, to: node.id })
-      linked.add(`${from}>${node.id}`)
-    }
+    return node
+  }
+
+  /** 补一条边（两端都在图上才补） */
+  const link = (from: string, to: string) => {
+    if (!ids.has(from) || !ids.has(to) || linked.has(`${from}>${to}`)) return
+    edges.push({ from, to })
+    linked.add(`${from}>${to}`)
+    changed = true
   }
 
   const goalNodes = store.nodes.filter((n) => n.goalId === goalId)
 
   for (const owner of goalNodes) {
-    // 1. 大纲节点：每个学习节点都应该在图上有一块
-    const oid = outlineGid(owner.id)
-    let outline = nodes.find((n) => n.id === oid) ?? null
-    if (!outline && !hidden.has(oid)) {
-      const parentNodeId = store.edges.find((e) => e.to === owner.id)?.from
-      const parent = parentNodeId ? nodes.find((n) => n.id === outlineGid(parentNodeId)) : undefined
-      const at = spot(parent ? parent.x + COL_GAP : 0, parent ? parent.y : 0)
-      outline = { id: oid, kind: 'outline', ref: owner.id, slot: owner.key, x: at.x, y: at.y }
-      add(outline, parent?.id)
-    }
-    if (!outline) continue
-
-    // 2. 文档节点：有正文（或有下游）才建，与首次铺图同一条规矩
-    const exams = store.exams.filter((e) => e.nodeId === owner.id)
-    const needDoc =
-      owner.docs.teaching.trim().length > 0 ||
-      owner.notes.length > 0 ||
-      (owner.superdocs ?? []).length > 0 ||
-      exams.length > 0
     const did = docGid(owner.id)
+    const oid = outlineGid(owner.id)
+    const parentId = store.edges.find((e) => e.to === owner.id)?.from
+    const parentOutline = parentId ? nodes.find((n) => n.id === outlineGid(parentId)) : undefined
+    const parentDoc = parentId ? nodes.find((n) => n.id === docGid(parentId)) : undefined
+
+    // 1. 文档：连接件，无条件存在
     let doc = nodes.find((n) => n.id === did) ?? null
-    if (!doc && needDoc && !hidden.has(did)) {
-      const at = spot(outline.x + CARD_W + 96, outline.y)
-      doc = { id: did, kind: 'doc', ref: owner.id, x: at.x, y: at.y }
-      add(doc, outline.id)
+    if (!doc && !hidden.has(did)) {
+      const base = parentOutline ?? parentDoc
+      const at = spot(base ? base.x + CARD_W + 96 : 0, base ? base.y : 0)
+      doc = add({ id: did, kind: 'doc', ref: owner.id, x: at.x, y: at.y })
     }
     if (!doc) continue
 
-    // 3. 叶子：笔记 / 超级文档 / 试卷，挂在文档下面
-    for (const note of owner.notes) {
-      const gid = noteGid(owner.id, note.name)
-      if (ids.has(gid) || hidden.has(gid)) continue
+    // 2. 大纲：挂在这份文档右边（先文档再大纲）
+    let outline = nodes.find((n) => n.id === oid) ?? null
+    if (!outline && !hidden.has(oid)) {
       const at = spot(doc.x + CARD_W + 96, doc.y)
-      add({ id: gid, kind: 'note', ref: `${owner.id}:${note.name}`, x: at.x, y: at.y }, doc.id)
+      outline = add({ id: oid, kind: 'outline', ref: owner.id, x: at.x, y: at.y })
     }
-    for (const sdoc of owner.superdocs ?? []) {
-      const gid = superdocGid(owner.id, sdoc.name)
-      if (ids.has(gid) || hidden.has(gid)) continue
-      const at = spot(doc.x + CARD_W + 96, doc.y)
-      add({ id: gid, kind: 'superdoc', ref: `${owner.id}:${sdoc.name}`, x: at.x, y: at.y }, doc.id)
+    if (!outline) continue
+    link(doc.id, outline.id)
+
+    // 3. 父大纲 → 这份文档（顺便认领接入点）
+    if (parentId) {
+      const pid = outlineGid(parentId)
+      if (ids.has(pid)) {
+        link(pid, doc.id)
+        if (!doc.slot && owner.key) {
+          const idx = nodes.findIndex((n) => n.id === doc!.id)
+          nodes[idx] = { ...nodes[idx], slot: owner.key }
+          doc = nodes[idx]
+          changed = true
+        }
+      }
     }
-    for (const exam of exams) {
-      const gid = examGid(exam.id)
-      if (ids.has(gid) || hidden.has(gid)) continue
+
+    // 4. 叶子：笔记 / 超级文档 / 试卷，挂在文档下面
+    const leaves: Array<{ gid: string; kind: 'note' | 'superdoc' | 'exam'; ref: string }> = [
+      ...owner.notes.map((note) => ({ gid: noteGid(owner.id, note.name), kind: 'note' as const, ref: `${owner.id}:${note.name}` })),
+      ...(owner.superdocs ?? []).map((sd) => ({ gid: superdocGid(owner.id, sd.name), kind: 'superdoc' as const, ref: `${owner.id}:${sd.name}` })),
+      ...store.exams
+        .filter((e) => e.nodeId === owner.id)
+        .map((exam) => ({ gid: examGid(exam.id), kind: 'exam' as const, ref: exam.id })),
+    ]
+    for (const leaf of leaves) {
+      if (ids.has(leaf.gid) || hidden.has(leaf.gid)) continue
       const at = spot(doc.x + CARD_W + 96, doc.y)
-      add({ id: gid, kind: 'exam', ref: exam.id, x: at.x, y: at.y }, doc.id)
+      add({ id: leaf.gid, kind: leaf.kind, ref: leaf.ref, x: at.x, y: at.y })
+      link(doc.id, leaf.gid)
     }
   }
 

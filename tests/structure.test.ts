@@ -27,14 +27,15 @@ function node(id: string, kind: StructureNode['kind'], x = 0, y = 0, ref?: strin
 }
 
 describe('结构图：连线规则', () => {
-  it('大纲能连大纲与文档，文档只能连笔记/试卷/超级文档', () => {
-    expect(canConnect('outline', 'outline')).toBe(true)
+  it('大纲只连文档；文档可以连大纲（父或子）与叶子', () => {
+    // 2026-10-21 第二次重构：大纲的父子节点只能是文档
     expect(canConnect('outline', 'doc')).toBe(true)
+    expect(canConnect('doc', 'outline')).toBe(true)
+    expect(canConnect('outline', 'outline')).toBe(false)
+    // 叶子仍然只挂在文档下面
     expect(canConnect('doc', 'note')).toBe(true)
     expect(canConnect('doc', 'exam')).toBe(true)
     expect(canConnect('doc', 'superdoc')).toBe(true)
-    // 需求里点名的那条：下游不能回流
-    expect(canConnect('doc', 'outline')).toBe(false)
     expect(canConnect('note', 'outline')).toBe(false)
     expect(canConnect('note', 'doc')).toBe(false)
     expect(canConnect('exam', 'superdoc')).toBe(false)
@@ -48,21 +49,29 @@ describe('结构图：连线规则', () => {
   })
 
   it('自连、重复边、跨类型边都加不进去', () => {
-    const nodes = [node('o1', 'outline'), node('d1', 'doc'), node('n1', 'note')]
+    const nodes = [node('o1', 'outline'), node('o2', 'outline'), node('d1', 'doc'), node('n1', 'note')]
     expect(canAddEdge(nodes, [], 'o1', 'o1')).toBe(false)
     expect(canAddEdge(nodes, [{ from: 'o1', to: 'd1' }], 'o1', 'd1')).toBe(false)
-    expect(canAddEdge(nodes, [], 'd1', 'o1')).toBe(false)
-    expect(canAddEdge(nodes, [], 'n1', 'o1')).toBe(false)
+    // 大纲 → 大纲 已经不允许了
+    expect(canAddEdge(nodes, [], 'o1', 'o2')).toBe(false)
+    // 大纲 ↔ 文档 两个方向都行
     expect(canAddEdge(nodes, [], 'o1', 'd1')).toBe(true)
+    expect(canAddEdge(nodes, [], 'd1', 'o1')).toBe(true)
+    // 叶子不能有下游
+    expect(canAddEdge(nodes, [], 'n1', 'o1')).toBe(false)
   })
 
-  it('大纲之间会成环的组合被拦下（其余类型的层级递增，天然无环）', () => {
-    const edges = [{ from: 'o1', to: 'o2' }]
-    expect(wouldCycle(edges, 'o2', 'o1')).toBe(true)
-    expect(wouldCycle(edges, 'o1', 'o3')).toBe(false)
-    const nodes = [node('o1', 'outline'), node('o2', 'outline'), node('o3', 'outline')]
-    expect(canAddEdge(nodes, edges, 'o2', 'o1')).toBe(false)
-    expect(canAddEdge(nodes, edges, 'o2', 'o3')).toBe(true)
+  it('环检测对每一类边都做（文档 ↔ 大纲 可以来回，所以必须查）', () => {
+    // d1 → o1 → d2 → o2，再连 o2 → d1 就成环
+    const edges = [
+      { from: 'd1', to: 'o1' },
+      { from: 'o1', to: 'd2' },
+      { from: 'd2', to: 'o2' },
+    ]
+    const nodes = [node('o1', 'outline'), node('o2', 'outline'), node('d1', 'doc'), node('d2', 'doc')]
+    expect(wouldCycle(edges, 'o2', 'd1')).toBe(true)
+    expect(canAddEdge(nodes, edges, 'o2', 'd1')).toBe(false)
+    expect(wouldCycle(edges, 'o2', 'd1')).toBe(true)
   })
 })
 
@@ -314,15 +323,17 @@ describe('结构图：读盘校验', () => {
     const map = normalizeStructure({
       version: 1,
       nodes: [
-        { id: 'o', kind: 'outline', x: 0, y: 0 },
-        { id: 'd', kind: 'doc', x: 0, y: 100 },
+        { id: 'o1', kind: 'outline', x: 0, y: 0 },
+        { id: 'o2', kind: 'outline', x: 0, y: 100 },
+        { id: 'd', kind: 'doc', x: 0, y: 200 },
       ],
       edges: [
-        { from: 'd', to: 'o' },
-        { from: 'o', to: 'd' },
+        // 大纲 → 大纲：旧规则下合法，新规则下不合法，读盘时丢掉
+        { from: 'o1', to: 'o2' },
+        { from: 'o1', to: 'd' },
       ],
     })
-    expect(map.edges).toEqual([{ from: 'o', to: 'd' }])
+    expect(map.edges).toEqual([{ from: 'o1', to: 'd' }])
   })
 
   it('空值与非对象输入给一张空图，不抛异常', () => {

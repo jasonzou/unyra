@@ -140,7 +140,8 @@ describe('从 store 铺图', () => {
     const kinds = Object.fromEntries(map.nodes.map((n) => [n.kind, n.ref]))
     expect(kinds).toMatchObject({ outline: 'n1', doc: 'n1', note: 'n1:错题' })
     expect(map.edges).toHaveLength(2)
-    expect(map.edges).toContainEqual({ from: 'o:n1', to: 'd:n1' })
+    // 先文档再大纲：边是「文档 → 大纲」
+    expect(map.edges).toContainEqual({ from: 'd:n1', to: 'o:n1' })
     expect(map.edges).toContainEqual({ from: 'd:n1', to: 'n:n1:错题' })
   })
 
@@ -243,7 +244,8 @@ describe('结构画布：大纲的目标项（接入点）', () => {
   const store = makeStore([parent])
 
   const parentNode: StructureNode = { id: 'o:p1', kind: 'outline', ref: 'p1', x: 0, y: 0 }
-  const childNode: StructureNode = { id: 'o:p2', kind: 'outline', ref: 'p2', slot: 'a', x: 400, y: 0 }
+  // 接入点挂的是**文档**（大纲的父子节点只能是文档）
+  const childNode: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', slot: 'a', x: 400, y: 0 }
   const graph = [parentNode, childNode]
 
   it('每个目标项一行，颜色各不相同', () => {
@@ -253,17 +255,17 @@ describe('结构画布：大纲的目标项（接入点）', () => {
     expect(slots[0].color).toBe(slotColor(0))
   })
 
-  it('下游有子大纲占了这个接入点 → 亮起（childId 有值），其余是空的', () => {
+  it('下游有子文档占了这个接入点 → 亮起（childId 有值），其余是空的', () => {
     const slots = outlineSlots(store, parentNode, graph)
-    expect(slots[0].childId).toBe('o:p2')
+    expect(slots[0].childId).toBe('d:p2')
     expect(slots[1].childId).toBeNull()
   })
 
   it('没有显式 slot 的老数据：退回用节点的 key 对上号', () => {
-    const legacy: StructureNode = { id: 'o:p2', kind: 'outline', ref: 'p2', x: 0, y: 0 }
+    const legacy: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', x: 0, y: 0 }
     const store2 = makeStore([parent, makeNode({ id: 'p2', title: '导数', key: 'a' })])
     expect(slotKeyOf(store2, legacy)).toBe('a')
-    expect(outlineSlots(store2, parentNode, [parentNode, legacy])[0].childId).toBe('o:p2')
+    expect(outlineSlots(store2, parentNode, [parentNode, legacy])[0].childId).toBe('d:p2')
   })
 
   it('大纲卡片按目标项条数长高（否则点不到后面的目标项）', () => {
@@ -275,10 +277,11 @@ describe('结构画布：大纲的目标项（接入点）', () => {
     expect(cardHeight(bare, { kind: 'outline', ref: 'p9' })).toBe(CARD_H)
   })
 
-  it('大纲 → 子大纲 的连线取那个接入点的颜色；别的连线没有颜色', () => {
-    expect(edgeColorOf(store, graph, { from: 'o:p1', to: 'o:p2' })).toBe(slotColor(0))
-    const docNode: StructureNode = { id: 'd:p1', kind: 'doc', ref: 'p1', x: 400, y: 200 }
-    expect(edgeColorOf(store, [parentNode, docNode], { from: 'o:p1', to: 'd:p1' })).toBeNull()
+  it('大纲 → 子文档 的连线取那个接入点的颜色；别的连线没有颜色', () => {
+    expect(edgeColorOf(store, graph, { from: 'o:p1', to: 'd:p2' })).toBe(slotColor(0))
+    // 这份文档自己的大纲（没有占接入点）不染色
+    const ownDoc: StructureNode = { id: 'd:p1', kind: 'doc', ref: 'p1', x: 400, y: 200 }
+    expect(edgeColorOf(store, [parentNode, ownDoc], { from: 'o:p1', to: 'd:p1' })).toBeNull()
   })
 })
 
@@ -314,13 +317,14 @@ describe('结构画布：对账（实体长了，图跟着补）', () => {
   })
   const store = makeStore([owner])
 
-  it('agent 写出的教学文档会补出文档节点，并连到大纲', () => {
+  it('agent 写出的教学文档会补出文档节点，并接到大纲前面', () => {
     // 图上只有大纲节点（就像「文档刚生成完」的那一刻）
     const map = { version: 1 as const, nodes: [{ id: 'o:n1', kind: 'outline' as const, ref: 'n1', x: 0, y: 0 }], edges: [] }
     const next = reconcileStructure(store, 'g1', map)
     expect(next).not.toBe(map)
     expect(next.nodes.some((n) => n.id === 'd:n1')).toBe(true)
-    expect(next.edges).toContainEqual({ from: 'o:n1', to: 'd:n1' })
+    // 先文档再大纲
+    expect(next.edges).toContainEqual({ from: 'd:n1', to: 'o:n1' })
   })
 
   it('已有的节点不会重复补（返回同一个对象，调用方据此不写回）', () => {

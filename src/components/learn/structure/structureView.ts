@@ -104,10 +104,15 @@ function clip(text: string, max = 46): string {
   return s.length > max ? `${s.slice(0, max)}…` : s
 }
 
-/** 这个大纲节点占的是哪个接入点：先看显式 slot，老数据退回去用节点的 key */
+/**
+ * 这个节点占的是哪个接入点：先看显式 slot，老数据退回去用节点的 key。
+ *
+ * 接入点现在挂在**文档**上（大纲的父子节点只能是文档）；`outline` 也认，是为了
+ * 让上一次重构留下的老数据（slot 记在大纲节点上）不至于当场失效。
+ */
 export function slotKeyOf(store: LearnStore, node: StructureNode): string | null {
-  if (node.kind !== 'outline') return null
   if (node.slot) return node.slot
+  if (node.kind !== 'doc' && node.kind !== 'outline') return null
   const owner = node.ref ? nodeById(store, node.ref) : null
   return owner?.key ?? null
 }
@@ -122,7 +127,14 @@ export function outlineSlots(store: LearnStore, node: StructureNode, nodes: read
   const owner = node.ref ? nodeById(store, node.ref) : null
   const entries = owner?.outline?.children ?? []
   return entries.map((entry, index) => {
-    const child = nodes.find((n) => n.id !== node.id && n.kind === 'outline' && slotKeyOf(store, n) === entry.key)
+    const child = nodes.find(
+      (n) =>
+        n.id !== node.id &&
+        n.kind === 'doc' &&
+        // 排除这张大纲自己的那份文档（它的 ref 与大纲相同），只看下游文档
+        n.ref !== node.ref &&
+        slotKeyOf(store, n) === entry.key,
+    )
     return { key: entry.key, title: entry.title, index, color: slotColor(index), childId: child?.id ?? null }
   })
 }
@@ -402,7 +414,8 @@ export function edgeColorOf(
 ): string | null {
   const from = nodes.find((n) => n.id === edge.from)
   const to = nodes.find((n) => n.id === edge.to)
-  if (!from || !to || from.kind !== 'outline' || to.kind !== 'outline') return null
+  // 只有「大纲 → 子文档」这条有颜色（子文档占了一条目标项）
+  if (!from || !to || from.kind !== 'outline' || to.kind !== 'doc') return null
   const key = slotKeyOf(store, to)
   if (!key) return null
   return outlineSlots(store, from, nodes).find((s) => s.key === key)?.color ?? null
