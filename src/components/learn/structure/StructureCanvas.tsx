@@ -1106,17 +1106,21 @@ export const StructureCanvas = memo(function StructureCanvas({
   useLayoutEffect(() => {
     const root = planeRef.current
     if (!root) return
+    const zoom = cameraRef.current.zoom || 1
     const next: Record<string, number> = {}
     for (const el of root.querySelectorAll<HTMLElement>('[data-slot-dot]')) {
       const card = el.closest<HTMLElement>('[data-node-id]')
       if (!card) continue
-      let y = el.offsetHeight / 2
-      let cur: HTMLElement | null = el
-      while (cur && cur !== card) {
-        y += cur.offsetTop
-        cur = cur.offsetParent as HTMLElement | null
-      }
-      next[`${el.dataset.slotDotParent ?? ''}|${el.dataset.slotDot ?? ''}`] = y
+      /*
+       * 必须用 getBoundingClientRect，不能用 offsetTop：
+       * offsetTop 只反映「计算出来的 top」，**不含 transform**，而圆点是靠
+       * `translateY(-50%)` 居中的——按 offsetTop 量会整整低半个圆点（5px）。
+       * 两个 rect 都在同一层变换里，相减再除以 zoom 就是世界坐标。
+       */
+      const cardRect = card.getBoundingClientRect()
+      const rect = el.getBoundingClientRect()
+      next[`${el.dataset.slotDotParent ?? ''}|${el.dataset.slotDot ?? ''}`] =
+        (rect.top + rect.height / 2 - cardRect.top) / zoom
     }
     setDotY((prev) => {
       const keys = Object.keys(next)
@@ -1124,7 +1128,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         keys.length === Object.keys(prev).length && keys.every((k) => Math.abs((prev[k] ?? -1) - next[k]) < 0.5)
       return same ? prev : next
     })
-  }, [displayNodes, height, dotY])
+  }, [displayNodes, height, dotY, camera.zoom])
 
 
   const dragging = !!draft
@@ -1232,6 +1236,11 @@ export const StructureCanvas = memo(function StructureCanvas({
               if (!from) return null
               // 从目标项圆点上拉出来的线，起点要落在**那颗圆点**上（用实测值，不用算）
               const measured = linkSlot ? dotY[`${from.id}|${linkSlot}`] : undefined
+              // 虚线的颜色跟着拉出来的那条目标项（圆点是什么色，线就是什么色）
+              const linkColor =
+                linkSlot && from.kind === 'outline'
+                  ? outlineSlots(store, from, nodes).find((s) => s.key === linkSlot)?.color
+                  : undefined
               const slotIndex =
                 measured == null && linkSlot && from.kind === 'outline'
                   ? outlineSlots(store, from, nodes).findIndex((s) => s.key === linkSlot)
@@ -1247,8 +1256,9 @@ export const StructureCanvas = memo(function StructureCanvas({
                 <path
                   d={edgePathD(curve, edgeStyle)}
                   fill="none"
-                  stroke="currentColor"
-                  className="text-seal/70"
+                  // 虚线颜色跟着接入点走：拉的是哪一条，线就是那条的颜色
+                  stroke={linkColor ?? 'currentColor'}
+                  className={linkColor ? '' : 'text-seal/70'}
                   strokeWidth={1.5}
                   strokeDasharray="6 4"
                 />
@@ -1337,7 +1347,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                         data-slot-dot={slot.key}
                         data-slot-dot-parent={node.id}
                         title={slot.childId ? t('已挂文档：拖出去可换一份') : t('从圆点拖出去挂一份文档')}
-                        className="absolute top-1/2 -right-[5px] h-2.5 w-2.5 -translate-y-1/2 cursor-crosshair rounded-full border-2"
+                        className="absolute top-1/2 -right-px h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 cursor-crosshair rounded-full border-2"
                         style={{
                           borderColor: slot.color,
                           background: slot.childId ? slot.color : 'var(--color-card, #fff)',
