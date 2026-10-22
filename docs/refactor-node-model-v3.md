@@ -207,7 +207,7 @@ export const NODE_KINDS = {
 
 > 每个阶段都是"可独立交付、可独立回滚"的。**不要跨阶段混做。**
 
-### P0 · 地基（行为零变化）
+### P0 · 地基（行为零变化）—— **已完成**
 
 **目标**：把查找索引与类型登记表建起来，但**不改变任何行为与磁盘格式**。
 
@@ -215,14 +215,20 @@ export const NODE_KINDS = {
 
 | 文件 | 做什么 |
 |---|---|
-| `src/learn/graph/lookup.ts` | `nodeById` 改走 `Map`；索引用 `WeakMap<nodes[], Map>` |
-| `src/learn/graph/edges.ts` | `prereqIds` / `parentIds` 改走邻接索引 |
-| `src/learn/nodeKinds/*` | 新建；六种类型的 `NodeKindSpec` 先只填 `type/label/targets`，**规则表暂时仍从 `structure.ts` 读** |
-| `src/learn/structure.ts` | `GRAPH_EDGE_RULES` 改为从登记表派生（结果必须与现在逐项相同） |
+| `src/learn/graph/lookup.ts` | `nodeById` 改走 `Map`；索引用 `WeakMap<nodes[], Map>`（数组引用当版本号） |
+| `src/learn/graph/edges.ts` | `prereqIds` / `parentIds` 改走邻接索引（`WeakMap<edges[], Adjacency>`） |
+| `src/learn/nodeKinds/*` | 新建；一种类型一个文件（`outline/doc/note/exam/superdoc`），`index.ts` 汇总 |
+| `src/learn/structure.ts` | `GRAPH_KINDS` / `GRAPH_KIND_LABEL` / `GRAPH_EDGE_RULES` / `KIND_RANK` 全部改为从登记表派生；`isKind` 改走 `isGraphKind` |
+| `tests/graphIndex.test.ts` | 新增 11 条：索引与线性查找逐项一致、重复 id 取第一个、数组换了索引跟着换、登记表派生关系、连线拓扑没被改动 |
 
-**验收**
-- `npm test` 全绿，且 `structure.test.ts` 里关于连线规则的用例一条不改就过。
-- 加一个临时 kind（`flashcard`）只写一个文件 + 一行注册，**类型检查通过**（不需要任何其他改动）——证明登记表真的自洽。测完删掉。
+**验收（已过）**
+- `npm test` 全绿（133 文件 / 1573 用例），`structure.test.ts` 里关于连线规则的用例**一条没改**就过。
+- 登记表自洽：`satisfies Record<string, NodeKindSpec>` 保证漏字段编译期报错；加一种类型 = 一个文件 + 一行注册。
+
+**遗留说明**
+- 只登记了画布上的**五种**类型。`goal`（目标本身作为节点）等 P1 真正引入时再登记——
+  P0 必须行为零变化，提前把它塞进 `GRAPH_KINDS` 会让读盘时多接受一种原本会被丢掉的类型。
+- 索引返回的是**缓存数组本身**，调用方只读、不要原地 `sort`/`push`（已在 `edges.ts` 注明）。
 
 **风险**：低。**回滚**：直接 revert。
 

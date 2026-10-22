@@ -25,18 +25,16 @@
 
 import type { LearnStore } from './types'
 import { nodeById } from './graph'
+import { GRAPH_EDGE_RULES, KIND_RANK, isGraphKind } from './nodeKinds'
+import type { GraphKind } from './nodeKinds'
 
-/** 节点类型。顺序即「层级」：越靠后越下游（见 GRAPH_EDGE_RULES） */
-export const GRAPH_KINDS = ['outline', 'doc', 'note', 'exam', 'superdoc'] as const
-export type GraphKind = (typeof GRAPH_KINDS)[number]
-
-export const GRAPH_KIND_LABEL: Record<GraphKind, string> = {
-  outline: '大纲',
-  doc: '文档',
-  note: '笔记',
-  exam: '试卷',
-  superdoc: '超级文档',
-}
+/**
+ * 类型清单、显示名、连线规则、同列权重**都不在这个文件里了**——
+ * 它们在 `learn/nodeKinds/`，一种类型一个文件。这里只保留几何与铺排。
+ *
+ * 下面这两行是给老调用方留的出口（`StructureCanvas` 一直从这里取显示名）。
+ */
+export { GRAPH_KINDS, GRAPH_KIND_LABEL, GRAPH_EDGE_RULES, type GraphKind } from './nodeKinds'
 
 /**
  * 允许的连线：`from` 把上下文交给 `to`。
@@ -50,17 +48,12 @@ export const GRAPH_KIND_LABEL: Record<GraphKind, string> = {
  * - **大纲 → 大纲不再允许**：大纲的父子节点只能是文档；
  * - 叶子（笔记 / 试卷 / 超级文档）仍然只挂在文档下面。
  *
+ * 规则本身现在写在各自的类型文件里（`nodeKinds/outline.ts` 的 `targets` 等），
+ * 这里只做查表——**改一条规则请改类型文件，别在这里加分支**。
+ *
  * 层级不再严格递增（doc ↔ outline 可以来回），所以**环检测对每一类边都要做**——
  * 见 canAddEdge 里的 wouldCycle，它不按类型特判。
  */
-export const GRAPH_EDGE_RULES: Record<GraphKind, readonly GraphKind[]> = {
-  outline: ['doc'],
-  doc: ['outline', 'note', 'exam', 'superdoc'],
-  note: [],
-  exam: [],
-  superdoc: [],
-}
-
 export function canConnect(from: GraphKind, to: GraphKind): boolean {
   return GRAPH_EDGE_RULES[from].includes(to)
 }
@@ -408,7 +401,7 @@ export function slotOrderOf(store: LearnStore, goalId: string): SiblingOrder {
 }
 
 /** 同一列里类型的先后：大纲 → 文档 → 叶子（读图时从上往下就是这个顺序） */
-const KIND_RANK: Record<GraphKind, number> = { outline: 0, doc: 1, note: 2, exam: 2, superdoc: 2 }
+/** 同列里类型的先后（大纲 → 文档 → 叶子）：由各类型的 `rank` 派生，见 nodeKinds/index.ts */
 
 /** 列间距（世界坐标）：卡片宽 + 连线留白 */
 export const COL_GAP = CARD_W + 112
@@ -644,7 +637,7 @@ function isFiniteNumber(v: unknown): v is number {
 }
 
 function isKind(v: unknown): v is GraphKind {
-  return typeof v === 'string' && (GRAPH_KINDS as readonly string[]).includes(v)
+  return isGraphKind(v)
 }
 
 /**

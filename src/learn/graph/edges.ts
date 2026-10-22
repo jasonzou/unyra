@@ -4,14 +4,48 @@
 import type { DependencyEdge, KnowledgeNode, LearnStore } from '../types'
 import { nodeById } from './lookup'
 
+/**
+ * 邻接索引：`from → to`（前置）与 `to → from`（父）两个方向各一张表。
+ *
+ * 原来 `prereqIds` / `parentIds` 每次调用都 `store.edges.filter(...)` 扫全表，
+ * 而它们在渲染、铺排、保存里被反复调用。索引挂在**边数组的引用**上（`WeakMap`）：
+ * store 不可变，引用就是版本号，引用没变索引一定还对，引用变了旧索引跟着回收。
+ *
+ * 返回的是**缓存数组本身**，调用方只读、不要原地改（`sort`/`push` 会污染别的调用方）。
+ */
+interface Adjacency {
+  out: Map<string, string[]>
+  in: Map<string, string[]>
+}
+
+const adjacencyCache = new WeakMap<readonly DependencyEdge[], Adjacency>()
+
+function adjacency(edges: readonly DependencyEdge[]): Adjacency {
+  let index = adjacencyCache.get(edges)
+  if (index) return index
+  const out = new Map<string, string[]>()
+  const inn = new Map<string, string[]>()
+  for (const e of edges) {
+    const o = out.get(e.from)
+    if (o) o.push(e.to)
+    else out.set(e.from, [e.to])
+    const i = inn.get(e.to)
+    if (i) i.push(e.from)
+    else inn.set(e.to, [e.from])
+  }
+  index = { out, in: inn }
+  adjacencyCache.set(edges, index)
+  return index
+}
+
 /** 前置节点（下层）：沿 from → to */
 export function prereqIds(store: LearnStore, id: string): string[] {
-  return store.edges.filter((e) => e.from === id).map((e) => e.to)
+  return adjacency(store.edges).out.get(id) ?? []
 }
 
 /** 父节点（上层）：沿 to → from */
 export function parentIds(store: LearnStore, id: string): string[] {
-  return store.edges.filter((e) => e.to === id).map((e) => e.from)
+  return adjacency(store.edges).in.get(id) ?? []
 }
 
 export function isUnlocked(store: LearnStore, id: string): boolean {
