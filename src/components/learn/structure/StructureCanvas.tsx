@@ -19,7 +19,7 @@
  * 翻译成「谁的坐标变了」「连了哪两个」。
  */
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import type { LearnStore } from '../../../learn/types'
 import type { ExamActions, NodeDocActions } from '../explorer/types'
@@ -179,6 +179,10 @@ export const StructureCanvas = memo(function StructureCanvas({
   const [linkAt, setLinkAt] = useState<{ x: number; y: number } | null>(null)
   /** 这次连线是从哪条目标项拉出来的（跟手的线要从那一行出发） */
   const [linkSlot, setLinkSlot] = useState<string | null>(null)
+
+  /** 目标项圆点的**实测**高度（离卡片顶部），key = `节点 id|目标项 key` */
+  const [dotY, setDotY] = useState<Record<string, number>>({})
+  const planeRef = useRef<HTMLDivElement | null>(null)
   /** 从列表拖出来的那一下：指针的屏幕坐标 */
   const [paletteAt, setPaletteAt] = useState<{ x: number; y: number } | null>(null)
   const [paletteKind, setPaletteKind] = useState<GraphKind | null>(null)
@@ -219,10 +223,12 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (!from || !to || from.kind !== 'outline' || to.kind !== 'doc') return undefined
       const key = slotKeyOf(store, to)
       if (!key) return undefined
+      const measured = dotY[`${from.id}|${key}`]
+      if (measured != null) return { from: measured }
       const index = outlineSlots(store, from, nodes).findIndex((s) => s.key === key)
       return index < 0 ? undefined : { from: slotAnchorY(index) }
     },
-    [nodes, store],
+    [nodes, store, dotY],
   )
   /** 连线画法：默认直线（见 learn/structure 的 EDGE_STYLES） */
   const edgeStyle: EdgeStyle = map.edgeStyle ?? 'straight'
@@ -1091,6 +1097,35 @@ export const StructureCanvas = memo(function StructureCanvas({
   )
   const byId = useMemo(() => new Map(displayNodes.map((n) => [n.id, n])), [displayNodes])
 
+  /*
+   * 量一遍目标项圆点的真实位置。
+   *
+   * 连线端点原来按 `slotAnchorY(i)` 算，卡片里只要多一个 padding、边框或行高变化就会偏，
+   * 已经偏过两次。这里直接读 DOM 的 offsetTop —— 圆点在哪，线的起点就在哪。
+   */
+  useLayoutEffect(() => {
+    const root = planeRef.current
+    if (!root) return
+    const next: Record<string, number> = {}
+    for (const el of root.querySelectorAll<HTMLElement>('[data-slot-dot]')) {
+      const card = el.closest<HTMLElement>('[data-node-id]')
+      if (!card) continue
+      let y = el.offsetHeight / 2
+      let cur: HTMLElement | null = el
+      while (cur && cur !== card) {
+        y += cur.offsetTop
+        cur = cur.offsetParent as HTMLElement | null
+      }
+      next[`${el.dataset.slotDotParent ?? ''}|${el.dataset.slotDot ?? ''}`] = y
+    }
+    setDotY((prev) => {
+      const keys = Object.keys(next)
+      const same =
+        keys.length === Object.keys(prev).length && keys.every((k) => Math.abs((prev[k] ?? -1) - next[k]) < 0.5)
+      return same ? prev : next
+    })
+  }, [displayNodes, height, dotY])
+
 
   const dragging = !!draft
   const menuNode = menu ? nodes.find((n) => n.id === menu.nodeId) ?? null : null
@@ -1122,6 +1157,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         拖动时整层抬到垃圾桶之上，这样拖到删除区附近也看得见手里的节点。
       */}
       <div
+        ref={planeRef}
         className={`absolute top-0 left-0 origin-top-left ${dragging ? 'z-30' : 'z-0'} ${
           animating ? 'transition-transform duration-300 ease-out' : ''
         }`}
@@ -1194,16 +1230,18 @@ export const StructureCanvas = memo(function StructureCanvas({
             {linkAt && linkFrom && (() => {
               const from = byId.get(linkFrom)
               if (!from) return null
-              // 从目标项圆点上拉出来的线，起点要落在那一行（不是卡片顶部那个锚点）
+              // 从目标项圆点上拉出来的线，起点要落在**那颗圆点**上（用实测值，不用算）
+              const measured = linkSlot ? dotY[`${from.id}|${linkSlot}`] : undefined
               const slotIndex =
-                linkSlot && from.kind === 'outline'
+                measured == null && linkSlot && from.kind === 'outline'
                   ? outlineSlots(store, from, nodes).findIndex((s) => s.key === linkSlot)
                   : -1
+              const anchorFrom = measured ?? (slotIndex >= 0 ? slotAnchorY(slotIndex) : undefined)
               const curve = edgeCurve(
                 from,
                 { id: '', kind: from.kind, x: linkAt.x, y: linkAt.y - CARD_H / 2 },
                 height,
-                slotIndex >= 0 ? { from: slotAnchorY(slotIndex) } : undefined,
+                anchorFrom == null ? undefined : { from: anchorFrom },
               ).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
               return (
                 <path
@@ -1270,7 +1308,8 @@ export const StructureCanvas = memo(function StructureCanvas({
 
               {node.kind === 'outline' && slots.length > 0 ? (
                 /* 容器不带左右内边距：行自己带，圆点才能贴到卡片右边框上 */
-                <div className="flex flex-col overflow-hidden pb-2">
+                /* 不能加 overflow-hidden：圆点要伸出卡片右边框半颗，裁了连点击都收不到 */
+                <div className="flex flex-col pb-2">
                   {slots.map((slot) => (
                     <div
                       key={slot.key}
