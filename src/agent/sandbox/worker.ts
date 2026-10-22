@@ -14,14 +14,14 @@ import type { SandboxReply, SandboxRequest } from './types'
  * 这里把「叫什么」直接翻成「现在怎么写」。
  */
 export const RENAMED_API_HINT: Record<string, string> = {
-  'note.read': 'files.read("docs/.../节点.notes/笔记名.md")',
-  'note.write': 'files.write("docs/.../节点.notes/笔记名.md", content)',
-  'doc.read': 'files.read("docs/.../节点名.md")',
-  'doc.write': 'files.write("docs/.../节点名.md", content)',
+  'note.read': 'content.read({ path, part: "note:笔记名" })',
+  'note.write': 'content.write({ path, part: "note:笔记名" }, content)',
+  'doc.read': 'content.read(path)',
+  'doc.write': 'content.write(path, content)',
   'doc.list': 'graph.read(path)（里面列出该节点的文档与字数）',
-  'doc.search': 'files.read(path) 获取内容后在 JS 内存中检索',
-  read_note: 'files.read("docs/.../节点.notes/笔记名.md")',
-  update_note: 'files.write("docs/.../节点.notes/笔记名.md", content)',
+  'doc.search': 'content.find(path, 要找的文字)',
+  read_note: 'content.read({ path, part: "note:笔记名" })',
+  update_note: 'content.write({ path, part: "note:笔记名" }, content)',
   set_title: 'graph.rename(path, title)',
   rename_node: 'graph.rename(path, title)',
   create_node: 'graph.create({ parent, title, description })',

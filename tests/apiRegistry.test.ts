@@ -42,7 +42,7 @@ describe('注册表形状', () => {
     const names = exposedApiNames()
     for (const name of [
       'doc.read', 'doc.write', 'doc.replace', 'doc.append',
-      'graph.read', 'graph.update', 'graph.create', 'graph.paths', 'graph.relations', 'graph.link',
+      'graph.read', 'graph.update', 'graph.create', 'graph.paths', 'graph.relations',
       'outline.read', 'outline.write',
       'state.read', 'state.update', 'state.mistake', 'state.check',
       'exam.create', 'exam.read', 'exam.grade', 'exam.explain',
@@ -58,11 +58,12 @@ describe('注册表形状', () => {
     }
   })
 
-  it('兼容层（description）不进名单；旧的 mind 组已整组移除', () => {
+  it('退役的组整组移除：description / mind 都不在了', () => {
     const names = exposedApiNames()
+    // description.* 被 graph.update 取代；它不是「隐藏」而是**整组删掉**了
     expect(names).not.toContain('description.read')
-    // 但登记还在（wrapApi 的实现仍能找到元数据）
-    expect(apiDocOf('description.read')).not.toBeNull()
+    expect(apiDocOf('description.read')).toBeNull()
+    expect(apiDocOf('description.update')).toBeNull()
     // mind.* 被 memory.* 取代：不留兼容层——它从来没进过名单，也没有对话会真的调它
     expect(names.some((n) => n.startsWith('mind.'))).toBe(false)
     expect(apiDocOf('mind.list')).toBeNull()

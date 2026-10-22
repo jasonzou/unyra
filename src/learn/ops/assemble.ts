@@ -648,7 +648,7 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
       annotate: (nodeId, input) => {
         const term = input.term.trim()
         if (!term) {
-          return { ok: false, content: '词条为空：api.doc.annotate({ term, body }) 里的 term 是正文里那一小段文字' }
+          return { ok: false, content: '词条为空：api.graph.annotate({ term, body }) 里的 term 是正文里那一小段文字' }
         }
         if (!input.body.trim()) {
           return { ok: false, content: '注解正文为空：body 写两三句 Markdown，说清它在这篇文档里是什么意思' }

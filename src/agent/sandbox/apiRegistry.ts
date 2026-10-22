@@ -127,7 +127,7 @@ export const API_GROUPS: ApiGroupDoc[] = [
       ),
       a('tiktok', 'tiktok()', '响一声系统提示音', '需要把用户视线叫回来时用；不要连续响。', 'await api.tiktok()'),
       a('compact', 'compact({ summary, tasks? })', '提交上下文交接摘要', '只在本轮是压缩轮时调用；summary 是正文摘要，tasks 是未完成事项。本轮结束后旧消息才失活。', `await api.compact({ summary: '## 已讲清\\n- 极限的定义', tasks: ['继续讲夹逼定理'] })`),
-      a('fetch', 'fetch(url | { url })', '抓网页并转 Markdown', '返回 { ok, title, content, error? }。失败不抛异常，先判 ok；不要对同一 URL 死循环重试。', `const page = await api.fetch({ url: 'https://example.com/spec' })`),
+      a('fetch', 'fetch(url | { url })', '抓网页并转 Markdown（web.fetch 的别名）', '与 api.web.fetch 完全等价，提示词里教的就是这个名字。回 { ok, title, content, error? }，失败不抛异常，先判 ok。', `const page = await api.fetch({ url: 'https://example.com/spec' })`),
       a(
         'see',
         'see(url | base64 | { url?, base64?, mime?, name? } | { pdf?, page?, name? })',
@@ -197,15 +197,6 @@ path 找不到时回执会列候选子节点，照着改一次就对。
           'prereqs 是「先学谁」。想知道「这个节点挂在哪、下面有什么」就用它，不要靠遍历 graph.list() 自己推。',
         `const rel = await api.graph.relations('极限')`,
       ),
-      a(
-        'link',
-        'graph.link(parent, child)',
-        '把 child 挂到 parent 之下（绑定拓扑）',
-        '等价于 graph.move(child, parent)：树的父子是**唯一**的拓扑，绑一个新父就等于换父。' +
-          '根节点不能挂到别人下面，跨目标与成环会被拒。解绑不单独提供——树上的节点必须有父，' +
-          '要「摘下来」就挂到别的节点下。',
-        `await api.graph.link('微积分', '夹逼定理')`,
-      ),
       a('delete', 'graph.delete(path, { cascade?, dryRun? })', '删除节点', '学习目标本身不能删；cascade 连子节点一起删，dryRun 只回影响面。删用户内容前先确认。', `await api.graph.delete('草稿节点')`),
     ],
   ),
@@ -226,7 +217,6 @@ path 找不到时回执会列候选子节点，照着改一次就对。
       a('write', 'doc.write(path?, content)', '整篇写入文档', '不存在就新建（笔记同理）；空内容会被拒绝。整篇覆盖前先读，不要覆盖用户已有内容。', `await api.doc.write('极限', '# 极限\\n\\n从数列极限开始……')`),
       a('replace', 'doc.replace(path?, { start?, end?, content, expected? })', '按区间改文档', '给 start/end 或 expected（原文字符串，必须先匹配）再替换。改一处用 replace，不要整篇重写。', `await api.doc.replace('极限', { expected: '旧的一句话', content: '新的一句话' })`),
       a('append', 'doc.append(path?, content)', '追加到文档末尾', '不覆盖已有正文；适合补一段。', `await api.doc.append('极限', '\\n\\n## 补充：夹逼定理的几何直觉')`),
-      a('annotate', 'doc.annotate(path?, { term, occurrence?, body })', '写正文划线注解', '与 node.annotate 同义，保留给按文档寻址的旧写法。', `await api.doc.annotate('极限', { term: '夹逼定理', body: '用两个边界函数夹住目标函数。' })`),
     ],
   ),
   g(
@@ -274,6 +264,34 @@ path 找不到时回执会列候选子节点，照着改一次就对。
         '追加到末尾',
         '只有正文与笔记能追加；大纲 / 超级文档请整份 write。',
         `await api.content.append('极限', '\\n\\n## 补充：夹逼定理的几何直觉')`,
+      ),
+      a(
+        'readRange',
+        'content.readRange(target, start?, end?)',
+        '分段读一份内容',
+        '整篇太长时按字符区间读：默认从 0 读 1500 字。回 { text, start, end, total }，用 end < total 判断还有没有下一段。',
+        `const seg = await api.content.readRange('极限', 0, 2000)`,
+      ),
+      a(
+        'replace',
+        'content.replace(target, { start?, end?, content, expected? })',
+        '按区间改一份内容',
+        '只支持正文与笔记。expected 是「改之前这儿应该是什么」——对不上就不改（防并发覆盖）。整篇重写用 content.write。',
+        `await api.content.replace('极限', { expected: '两个边界函数', content: '两个收敛到同一值的函数' })`,
+      ),
+      a(
+        'list',
+        'content.list(target)',
+        '这个节点有哪些内容',
+        '回 { path, parts: [{ 文档, 字数, 空 }] }：正文、每份笔记、每份超级文档、试卷都在里面。想知道「有没有那份笔记」先看它，别靠猜。',
+        `const parts = await api.content.list('极限')`,
+      ),
+      a(
+        'remove',
+        'content.remove(target)',
+        '删一份内容',
+        '**只删超级文档**（part 写 "superdoc:名字"）。正文清空用 content.write(path, "")；笔记与节点本身走 graph.delete。',
+        `await api.content.remove({ node: '极限', part: 'superdoc:旧讲义' })`,
       ),
     ],
   ),
@@ -694,16 +712,6 @@ files.* 碰到它们会被拒绝，并提示该用哪一组。`,
   ),
 
   /* ---------- 兼容/内部：不进 Worker 名单 ---------- */
-  g(
-    'description',
-    '节点描述（兼容）',
-    '旧的 description.* 兼容层；新写法用 node.update。',
-    `保留实现是为了老对话与老探针；新编排不要用。请直接 api.graph.update(path, { description })。`,
-    [
-      a('read', 'description.read(path?)', '读节点描述', '等价于 node.read(path).description。', `const d = await api.description.read('极限')`, { exposed: false, deprecated: '用 api.graph.update(path, { description })' }),
-      a('update', 'description.update(path?, content)', '改节点描述', '等价于 node.update(path, { description })。', `await api.description.update('极限', '新描述')`, { exposed: false, deprecated: '用 api.graph.update(path, { description })' }),
-    ],
-  ),
 ]
 
 /** full → doc 的索引：wrapApi、__help、目录共用 */

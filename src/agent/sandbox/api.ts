@@ -226,21 +226,6 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     return opts.docOps.append(r.ref.id, r.ref.kind, r.ref.note, asText(value))
   }, log)
 
-  wrapApi(api, 'doc.annotate', (args) => {
-    // 两种写法都收：doc.annotate({ term, body }) 与 doc.annotate(path, { term, body })
-    const first = args[0]
-    const payloadFirst = !!first && typeof first === 'object'
-    const r = docRef(payloadFirst ? '' : first)
-    if ('error' in r) return { error: r.error }
-    const a = asRecord(payloadFirst ? first : args[1])
-    return opts.docOps.annotate(r.ref.id, {
-      term: asText(a.term),
-      occurrence: asIndex(a.occurrence),
-      // 正文允许几种写法：模型对字段名的猜测从来不止一种（同 exam.explain）
-      body: asText(a.body ?? a.content ?? a.text),
-    })
-  }, log)
-
   wrapApi(api, 'graph.list', () => opts.nodeOps.list(), log)
 
   wrapApi(api, 'graph.read', (args) => {
@@ -380,36 +365,11 @@ wrapApi(api, 'graph.relations', (args) => {
     }
   }, log)
 
-  wrapApi(api, 'graph.link', (args) => {
-    const pr = nodeRef(args[0])
-    if ('error' in pr) return { error: pr.error }
-    const cr = nodeRef(args[1])
-    if ('error' in cr) return { error: cr.error }
-    // 树上父子唯一：绑定新父 = 换父
-    return opts.nodeOps.move(cr.ref.id, pr.ref.id)
-  }, log)
-
     wrapApi(api, 'graph.delete', (args) => {
     const r = nodeRef(args[0])
     if ('error' in r) return { error: r.error }
     const opt = args.length > 1 ? asRecord(args[1]) : undefined
     return opts.nodeOps.remove(r.ref.id, opt ? { cascade: opt.cascade === true, dryRun: opt.dryRun === true } : undefined)
-  }, log)
-
-  wrapApi(api, 'description.read', (args) => {
-    const r = nodeRef(args[0])
-    if ('error' in r) return { error: r.error }
-    return { path: r.ref.label, description: (opts.nodeOps.read(r.ref.id) as { description?: string }).description ?? '' }
-  }, log)
-
-  wrapApi(api, 'description.update', (args) => {
-    // 兼容只有内容的旧写法：description.update(内容) 改的是当前节点
-    const hasPath = args.length >= 2
-    const r = nodeRef(hasPath ? args[0] : '')
-    if ('error' in r) return { error: r.error }
-    const content = hasPath ? asText(args[1]) : asText(args[0])
-    if (!content.trim()) return { error: '内容为空，未做修改' }
-    return opts.nodeOps.update(r.ref.id, { description: content })
   }, log)
 
   /**
@@ -552,6 +512,69 @@ wrapApi(api, 'graph.relations', (args) => {
     if (t.part === 'teaching') return opts.docOps.append(t.nodeId, 'teaching', undefined, body)
     if (t.part === 'note') return opts.docOps.append(t.nodeId, 'note', t.name, body)
     return { error: '只有正文与笔记能追加；大纲 / 超级文档请整份 content.write' }
+  }, log)
+
+  wrapApi(api, 'content.readRange', (args) => {
+    const t = partTarget(args[0])
+    if (!t.ok) return { error: t.error }
+    const got = contentText(t)
+    if ('error' in got) return { error: got.error }
+    const start = asIndex(args[1]) ?? 0
+    const end = asIndex(args[2]) ?? Math.min(got.text.length, start + 1500)
+    return {
+      path: t.label,
+      part: t.part,
+      text: got.text.slice(start, end),
+      start,
+      end: Math.min(end, got.text.length),
+      total: got.text.length,
+    }
+  }, log)
+
+  wrapApi(api, 'content.replace', (args) => {
+    const t = partTarget(args[0])
+    if (!t.ok) return { error: t.error }
+    if (t.part !== 'teaching' && t.part !== 'note') {
+      return { error: '只有正文与笔记能按区间改；大纲 / 超级文档请整份 content.write' }
+    }
+    const a = asRecord(args[1])
+    return opts.docOps.replace(t.nodeId, t.part === 'note' ? 'note' : 'teaching', t.name, {
+      start: asIndex(a.start),
+      end: asIndex(a.end),
+      content: asText(a.content),
+      expected: typeof a.expected === 'string' ? a.expected : undefined,
+    })
+  }, log)
+
+  /**
+   * content.list：这个节点有哪些内容。
+   *
+   * 走 `nodeOps.read` 已经算好的文档摘要（正文 / 每份笔记 / 每份超级文档 / 试卷），
+   * 不再另开一套遍历——**列清单与看详情必须是同一份数据**，否则模型会看到两套说法。
+   */
+  wrapApi(api, 'content.list', (args) => {
+    const t = partTarget(args[0])
+    if (!t.ok) return { error: t.error }
+    const detail = opts.nodeOps.read(t.nodeId) as Record<string, unknown> | null
+    if (!detail) return { error: '这个节点已经不在了' }
+    if (typeof detail.error === 'string') return { error: detail.error }
+    return {
+      path: detail.title ?? t.label,
+      parts: Array.isArray(detail.docs) ? detail.docs : [],
+    }
+  }, log)
+
+  wrapApi(api, 'content.remove', (args) => {
+    const t = partTarget(args[0])
+    if (!t.ok) return { error: t.error }
+    if (t.part === 'superdoc') {
+      if (!opts.superdocs) return { error: '这一轮没有超级文档能力（宿主未注入 superdocs）' }
+      if (!t.name) return { error: '删超级文档要带名字：part 写 "superdoc:讲义"' }
+      return opts.superdocs.remove(t.nodeId, t.name)
+    }
+    return {
+      error: 'content.remove 只删超级文档。正文清空用 content.write(path, "")；笔记与节点的删除走 graph.delete',
+    }
   }, log)
 
   if (opts.outline) {
@@ -827,6 +850,7 @@ wrapApi(api, 'graph.relations', (args) => {
       return web.fetch(typeof first === 'object' && first !== null ? { ...first, url } : { url })
     }
     // 支持 api.fetch 与 api.web.fetch
+    // 顶层 fetch 是 web.fetch 的快捷别名：提示词里教的就是 api.fetch，别删
     wrapApi(api, 'fetch', handleFetch, log)
     wrapApi(api, 'web.fetch', handleFetch, log)
 
