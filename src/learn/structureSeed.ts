@@ -8,16 +8,11 @@
 
 import type { LearnStore } from './types'
 import {
-  CARD_H,
   CARD_W,
-  docGid,
-  examGid,
   heightOf,
-  noteGid,
-  outlineGid,
   seedFromSource,
   slotOrderOf,
-  superdocGid,
+  type GraphEdge,
   type SeedSourceNode,
   type StructureMap,
   type StructureNode,
@@ -67,113 +62,114 @@ export function structureFromStore(store: LearnStore, goalId: string): Structure
   return seedFromSource(source, heightOf(store), slotOrderOf(store, goalId))
 }
 
-/* ---------- 对账：让图跟上实体 ---------- */
+/* ---------- 视图：把「实体 + 存过的那份图」算成一张能画的图 ---------- */
 
 /**
- * 把「实体」与「画布上的节点」对一遍，缺的补上。
+ * 结构图的**唯一来源**：`(store, 存过的那份)` → 一张能画的图。
  *
- * 为什么需要它：图是一份**快照**（structure.json），而实体是会自己长出来的——
- * agent 写了一份教学文档、在资源管理器里新建了一份笔记、出了一份试卷……
- * 这些都不经过画布。没有对账的话，画布就永远停在第一次铺出来的那一刻，
- * 用户会问「为什么生成的文档没有出现在画布上」（问过一次了）。
+ * ## 为什么改成纯函数
  *
- * 三条规矩：
- * 1. **只补不删**：实体没了不自动清节点（用户可能只是暂时删了内容，位置还要留着）；
- * 2. **补的时候带上连线**：一张孤零零的文档卡没有意义，边一定跟着补；
- * 3. **用户删过的不再补**：`map.hidden` 记着那些被主动移除的节点 id。
+ * 以前是「第一次进来铺一张」+「每次 store 变化对账补节点」两个 effect 叠加：
+ * 图是一份独立快照，靠增量补偿跟实体对齐。副作用有三条路——首帧、store 变化、
+ * 用户拖拽——谁先谁后都会影响结果，出了问题很难复现（"生成的文档不出现在画布上"
+ * 就是这么来的）。
+ *
+ * 现在只有一个入口：**每次渲染从头算**。派生出来的卡片一定在，存过的坐标一定被尊重，
+ * 用户删掉的卡片（`hidden`）一定不在。没有中间状态，也就没有对不齐的可能。
+ *
+ * ## 三条规矩
+ *
+ * 1. **卡片 = 派生出来的 + 存过但派生不出来的**。后者是用户从左侧拖出来的自由卡片
+ *    （还没有 ref 的那种），派生不出来但必须留着，否则一刷新就没了。
+ * 2. **坐标以存过的那份为准**；没存过的新卡片落在父卡片右边（与以前的落点一致）。
+ * 3. **派生出来的边只给「这次才出现的卡片」补**。两张卡都在存过的图里时，那条线
+ *    用户可能已经删了——再补回来就是以前那个"删不掉的线"的 bug。
  */
-export function reconcileStructure(store: LearnStore, goalId: string, map: StructureMap): StructureMap {
-  const nodes = [...map.nodes]
-  const edges = [...map.edges]
-  const hidden = new Set(map.hidden ?? [])
-  const ids = new Set(nodes.map((n) => n.id))
-  const linked = new Set(edges.map((e) => `${e.from}>${e.to}`))
-  const rootNodeId = store.goals.find((g) => g.id === goalId)?.rootNodeId ?? null
-  let changed = false
+export function structureViewOf(
+  store: LearnStore,
+  goalId: string,
+  saved: StructureMap | undefined,
+): StructureMap {
+  const seeded = structureFromStore(store, goalId)
+  if (!saved) return seeded
 
-  /** 找一个没被占的落点：同一位置有卡就往下挪一格 */
-  const spot = (x: number, y: number) => {
-    let yy = y
-    for (let i = 0; i < 40; i++) {
-      if (!nodes.some((n) => Math.abs(n.x - x) < 1 && Math.abs(n.y - yy) < 1)) break
-      yy += CARD_H + 24
-    }
-    return { x, y: yy }
+  const hidden = new Set(saved.hidden ?? [])
+  const savedNodes = new Map(saved.nodes.map((n) => [n.id, n]))
+  const seededIds = new Set(seeded.nodes.map((n) => n.id))
+
+  // 1. 卡片：派生的用存过的坐标，自由卡片原样留着
+  const nodes: StructureNode[] = []
+  for (const n of seeded.nodes) {
+    if (hidden.has(n.id)) continue
+    const prev = savedNodes.get(n.id)
+    nodes.push(
+      prev ? { ...n, x: prev.x, y: prev.y, ...(prev.note ? { note: prev.note } : {}) } : { ...n },
+    )
   }
+  for (const n of saved.nodes) {
+    if (hidden.has(n.id) || seededIds.has(n.id)) continue
+    nodes.push(n)
+  }
+
+  // 2. 边：先补「新卡片自己那条」，再原样接上存过的边
+  const ids = new Set(nodes.map((n) => n.id))
+  const edges: GraphEdge[] = []
+  const seen = new Set<string>()
+  const push = (e: GraphEdge): void => {
+    const key = `${e.from}>${e.to}`
+    if (seen.has(key) || !ids.has(e.from) || !ids.has(e.to)) return
+    seen.add(key)
+    edges.push(e)
+  }
+  for (const e of seeded.edges) {
+    if (savedNodes.has(e.from) && savedNodes.has(e.to)) continue
+    push(e)
+  }
+  for (const e of saved.edges) push(e)
 
   /**
-   * 补一张卡，顺手补**它自己那一条**入边。
+   * 3. 挂不上的新卡片不出现。
    *
-   * 边只在「这张卡是新长出来的」时候补——这是「拓扑」不是「包含」：
-   * 用户把线删掉就该真的没了，不能下一帧又给接回来（之前就是这么删不掉的）。
+   * 派生出来的卡片必须有一条来自**还在的**父卡片的入边——文档卡被用户删掉（hidden）时，
+   * 它下面的笔记 / 大纲 / 试卷也就无处可挂，一起不出现（旧的对账就是这个口径）。
+   * 循环到不再变化：删掉文档卡会让它的子卡片跟着失去入边。
+   * **存过的自由卡片不受这条约束**（用户从左侧拖出来、还没有 ref 的那种，本来就没边）。
    */
-  /** 这一轮新补出来的节点（只有它们的边才会被补） */
-  const justCreated = new Set<string>()
-
-  const add = (node: StructureNode, from?: string) => {
-    nodes.push(node)
-    ids.add(node.id)
-    justCreated.add(node.id)
-    changed = true
-    if (from && ids.has(from) && !linked.has(`${from}>${node.id}`)) {
-      edges.push({ from, to: node.id })
-      linked.add(`${from}>${node.id}`)
-    }
-    return node
-  }
-
-  const goalNodes = store.nodes.filter((n) => n.goalId === goalId)
-
-  for (const owner of goalNodes) {
-    const did = docGid(owner.id)
-    const oid = outlineGid(owner.id)
-    // 大纲卡：总目标无条件有；其余节点只有真的有目标项时才有（空大纲卡只是空壳）
-    const hasOutline = owner.id === rootNodeId || (owner.outline?.children.length ?? 0) > 0
-    const parentId = store.edges.find((e) => e.to === owner.id)?.from
-    const parentOutline = parentId ? nodes.find((n) => n.id === outlineGid(parentId)) : undefined
-    const parentDoc = parentId ? nodes.find((n) => n.id === docGid(parentId)) : undefined
-
-    // 1. 文档：连接件，无条件存在；父大纲在就接在它下面
-    let doc = nodes.find((n) => n.id === did) ?? null
-    if (!doc && !hidden.has(did)) {
-      const base = parentOutline ?? parentDoc
-      const at = spot(base ? base.x + CARD_W + 96 : 0, base ? base.y : 0)
-      doc = add({ id: did, kind: 'doc', ref: owner.id, x: at.x, y: at.y }, parentOutline?.id)
-    }
-    if (!doc) continue
-
-    // 2. 大纲：先文档再大纲
-    if (hasOutline) {
-      const outline = nodes.find((n) => n.id === oid)
-      if (!outline) {
-        if (!hidden.has(oid)) {
-          const at = spot(doc.x + CARD_W + 96, doc.y)
-          add({ id: oid, kind: 'outline', ref: owner.id, x: at.x, y: at.y }, doc.id)
-        }
-      } else if (justCreated.has(doc.id) && !linked.has(`${doc.id}>${oid}`)) {
-        // 文档是刚补出来的、大纲早就在：把这条「先文档再大纲」的边补上
-        edges.push({ from: doc.id, to: oid })
-        linked.add(`${doc.id}>${oid}`)
-        changed = true
-      }
-    }
-
-    // 3. 叶子：笔记 / 超级文档 / 试卷，挂在文档下面
-    const leaves: Array<{ gid: string; kind: 'note' | 'superdoc' | 'exam'; ref: string }> = [
-      ...owner.notes.map((note) => ({ gid: noteGid(owner.id, note.name), kind: 'note' as const, ref: `${owner.id}:${note.name}` })),
-      ...(owner.superdocs ?? []).map((sd) => ({ gid: superdocGid(owner.id, sd.name), kind: 'superdoc' as const, ref: `${owner.id}:${sd.name}` })),
-      ...store.exams
-        .filter((e) => e.nodeId === owner.id)
-        .map((exam) => ({ gid: examGid(exam.id), kind: 'exam' as const, ref: exam.id })),
-    ]
-    for (const leaf of leaves) {
-      if (ids.has(leaf.gid) || hidden.has(leaf.gid)) continue
-      const at = spot(doc.x + CARD_W + 96, doc.y)
-      add({ id: leaf.gid, kind: leaf.kind, ref: leaf.ref, x: at.x, y: at.y }, doc.id)
+  for (let changed = true; changed; ) {
+    changed = false
+    const alive = new Set(nodes.map((n) => n.id))
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i]
+      if (savedNodes.has(n.id)) continue
+      // 文档卡是连接件：它是子树的挂点，本来就没有入边，不能按「挂不上」处理
+      if (n.kind === 'doc') continue
+      const attached = edges.some((e) => e.to === n.id && alive.has(e.from))
+      if (attached) continue
+      nodes.splice(i, 1)
+      alive.delete(n.id)
+      changed = true
     }
   }
 
-  // 没有任何变化时返回**同一个对象**：调用方的 effect 靠这个判断要不要写回，避免死循环
-  if (!changed) return map
-  return { ...map, nodes, edges }
+  const kept = new Set(nodes.map((n) => n.id))
+  const finalEdges = edges.filter((e) => kept.has(e.from) && kept.has(e.to))
+
+  // 4. 新卡片落在父卡片右边（以前对账的落点），免得叠在别人身上
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  for (const n of nodes) {
+    if (savedNodes.has(n.id)) continue
+    const parentEdge = finalEdges.find((e) => e.to === n.id)
+    const parent = parentEdge ? byId.get(parentEdge.from) : undefined
+    if (!parent) continue
+    n.x = parent.x + CARD_W + 96
+    n.y = parent.y
+  }
+
+  return {
+    version: 1,
+    nodes,
+    edges: finalEdges,
+    ...(saved.edgeStyle ? { edgeStyle: saved.edgeStyle } : {}),
+  }
 }
+

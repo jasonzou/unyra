@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildDocs, parseDocs } from '../src/learn/files'
 import { emptyLearnStore } from '../src/learn/store/empty'
-import { reconcileStructure, structureFromStore } from '../src/learn/structureSeed'
+import { structureViewOf, structureFromStore } from '../src/learn/structureSeed'
 import {
   docGid,
   examGid,
@@ -18,7 +18,7 @@ const NOW = 1700000000000
  * 这一组测的是**「用户在画布上看到的东西」**，不是某个函数怎么实现。
  *
  * 为什么单独拉一份：`structure.json` 现在是「节点 + 坐标 + 连线」的独立快照，
- * 靠 `reconcileStructure` 跟实体对账；下一步要把它改成「节点与边从 store 派生、只留坐标」。
+ * 靠 `structureViewOf` 跟实体对账；下一步要把它改成「节点与边从 store 派生、只留坐标」。
  * 那次改动会换掉实现，但下面这些行为一条都不能变：
  *
  * 1. 存盘再读回，图**逐项一样**（坐标按节点 id 存，不按路径）；
@@ -196,7 +196,7 @@ describe('结构画布：跟实体对账', () => {
           : n,
       ),
     }
-    const next = reconcileStructure(grown, 'g1', pinned)
+    const next = structureViewOf(grown, 'g1', pinned)
     expect(next).not.toBe(pinned)
     expect(next.nodes.some((n) => n.id === noteGid('n1', '复盘'))).toBe(true)
     expect(next.edges).toContainEqual({ from: docGid('n1'), to: noteGid('n1', '复盘') })
@@ -206,10 +206,16 @@ describe('结构画布：跟实体对账', () => {
     }
   })
 
-  it('没有变化时返回同一个对象（调用方靠它判断要不要写回，否则会自激）', () => {
+  it('没有变化时算出来的图与存的一模一样（不会漂，也不会自己触发自己）', () => {
     const store = baseStore()
     const map = structureFromStore(store, 'g1')
-    expect(reconcileStructure(store, 'g1', map)).toBe(map)
+    const next = structureViewOf(store, 'g1', map)
+    expect(next.nodes.map((n) => `${n.id}@${n.x},${n.y}`).sort()).toEqual(
+      map.nodes.map((n) => `${n.id}@${n.x},${n.y}`).sort(),
+    )
+    expect(next.edges.map((e) => `${e.from}>${e.to}`).sort()).toEqual(
+      map.edges.map((e) => `${e.from}>${e.to}`).sort(),
+    )
   })
 
   it('用户删掉的卡不会自己回来（hidden 记着它）', () => {
@@ -222,7 +228,7 @@ describe('结构画布：跟实体对账', () => {
       edges: map.edges.filter((e) => e.to !== gone),
       hidden: [gone],
     }
-    const next = reconcileStructure(store, 'g1', hidden)
+    const next = structureViewOf(store, 'g1', hidden)
     expect(next.nodes.some((n) => n.id === gone)).toBe(false)
   })
 

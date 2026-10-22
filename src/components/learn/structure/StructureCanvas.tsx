@@ -42,7 +42,7 @@ import {
   type StructureNode,
   type ViewSize,
 } from '../../../learn/structure'
-import { reconcileStructure, structureFromStore } from '../../../learn/structureSeed'
+import { structureViewOf } from '../../../learn/structureSeed'
 import { t } from '../../../i18n'
 import {
   CARD_PAD_B,
@@ -107,8 +107,6 @@ export interface StructureCanvasProps {
   onFocusHandled?: () => void
 }
 
-const EMPTY: StructureMap = { version: 1, nodes: [], edges: [] }
-
 /** 从左侧列表拖出来时，那几张卡（顺序即层级，见 GRAPH_EDGE_RULES） */
 const PALETTE: GraphKind[] = ['outline', 'doc', 'note', 'exam', 'superdoc']
 
@@ -154,7 +152,13 @@ export const StructureCanvas = memo(function StructureCanvas({
   focusTarget,
   onFocusHandled,
 }: StructureCanvasProps) {
-  const map = store.structure?.[goalId] ?? EMPTY
+  /**
+   * 图是**算出来的**，不是存出来的一份快照（见 structureSeed 的 structureViewOf）：
+   * 派生出来的卡片一定在、存过的坐标一定被尊重、用户删掉的卡片一定不在。
+   * 因此这里不再需要「首帧铺一张」与「store 变了就对账」两个 effect。
+   */
+  const saved = store.structure?.[goalId]
+  const map = useMemo(() => structureViewOf(store, goalId, saved), [store, goalId, saved])
   const nodes = map.nodes
   const edges = map.edges
 
@@ -207,7 +211,6 @@ export const StructureCanvas = memo(function StructureCanvas({
   const spaceRef = useRef(false)
   const [spaceDown, setSpaceDown] = useState(false)
   const gestureRef = useRef<Gesture>(null)
-  const seededRef = useRef(false)
   const fittedRef = useRef(false)
   /** 下一次 nodes 变了之后要不要自动对镜头（自动排列之后用） */
   const fitNextRef = useRef(false)
@@ -318,28 +321,6 @@ export const StructureCanvas = memo(function StructureCanvas({
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-
-  /* ---------- 第一次进来：没有图就先铺一张 ---------- */
-
-  useEffect(() => {
-    if (seededRef.current) return
-    if (nodes.length) {
-      seededRef.current = true
-      return
-    }
-    const seeded = structureFromStore(store, goalId)
-    if (!seeded.nodes.length) return
-    seededRef.current = true
-    onChange(seeded)
-  }, [nodes.length, store, goalId, onChange])
-
-  /* ---------- 对账：实体长了（agent 写了文档、新建了笔记），图跟着补 ---------- */
-
-  useEffect(() => {
-    const next = reconcileStructure(store, goalId, map)
-    // 返回同一个对象 = 没变化，不写回（否则会自己触发自己）
-    if (next !== map) onChange(next)
-  }, [store, goalId, map, onChange])
 
   /* ---------- 一次性升级：已挂目标项但还是「空节点」的文档卡，补成带标题的壳 ---------- */
 

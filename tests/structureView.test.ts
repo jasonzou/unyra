@@ -28,7 +28,7 @@ import {
   slotKeyOf,
   splitLeafRef,
 } from '../src/components/learn/structure/structureView'
-import { reconcileStructure, structureFromStore } from '../src/learn/structureSeed'
+import { structureViewOf, structureFromStore } from '../src/learn/structureSeed'
 import { emptyLearnStore } from '../src/learn/store/empty'
 import { emptyOutline, type KnowledgeNode, type LearnStore } from '../src/learn/types'
 
@@ -416,21 +416,27 @@ describe('结构画布：对账（实体长了，图跟着补）', () => {
   it('agent 写出的教学文档会补出文档节点，并接到大纲前面', () => {
     // 图上只有大纲节点（就像「文档刚生成完」的那一刻）
     const map = { version: 1 as const, nodes: [{ id: 'o:n1', kind: 'outline' as const, ref: 'n1', x: 0, y: 0 }], edges: [] }
-    const next = reconcileStructure(store, 'g1', map)
+    const next = structureViewOf(store, 'g1', map)
     expect(next).not.toBe(map)
     expect(next.nodes.some((n) => n.id === 'd:n1')).toBe(true)
     // 先文档再大纲
     expect(next.edges).toContainEqual({ from: 'd:n1', to: 'o:n1' })
   })
 
-  it('已有的节点不会重复补（返回同一个对象，调用方据此不写回）', () => {
+  it('没有变化时算出来的图与存的一模一样（不会漂）', () => {
     const map = structureFromStore(store, 'g1')
-    expect(reconcileStructure(store, 'g1', map)).toBe(map)
+    const next = structureViewOf(store, 'g1', map)
+    expect(next.nodes.map((n) => `${n.id}@${n.x},${n.y}`).sort()).toEqual(
+      map.nodes.map((n) => `${n.id}@${n.x},${n.y}`).sort(),
+    )
+    expect(next.edges.map((e) => `${e.from}>${e.to}`).sort()).toEqual(
+      map.edges.map((e) => `${e.from}>${e.to}`).sort(),
+    )
   })
 
   it('笔记实体补成叶子节点，挂在文档下面', () => {
     const map = { version: 1 as const, nodes: [{ id: 'o:n1', kind: 'outline' as const, ref: 'n1', x: 0, y: 0 }], edges: [] }
-    const next = reconcileStructure(store, 'g1', map)
+    const next = structureViewOf(store, 'g1', map)
     expect(next.nodes.some((n) => n.id === 'n:n1:错题')).toBe(true)
     expect(next.edges).toContainEqual({ from: 'd:n1', to: 'n:n1:错题' })
   })
@@ -442,7 +448,7 @@ describe('结构画布：对账（实体长了，图跟着补）', () => {
       edges: [],
       hidden: ['d:n1'],
     }
-    const next = reconcileStructure(store, 'g1', map)
+    const next = structureViewOf(store, 'g1', map)
     expect(next.nodes.some((n) => n.id === 'd:n1')).toBe(false)
     // 文档没补，叶子也就无处可挂
     expect(next.nodes.some((n) => n.id === 'n:n1:错题')).toBe(false)
@@ -452,7 +458,7 @@ describe('结构画布：对账（实体长了，图跟着补）', () => {
     const full = structureFromStore(store, 'g1')
     // 模拟用户把「文档 → 大纲」这条删了
     const cut = { ...full, edges: full.edges.filter((e) => !(e.from === 'd:n1' && e.to === 'o:n1')) }
-    const next = reconcileStructure(store, 'g1', cut)
+    const next = structureViewOf(store, 'g1', cut)
     expect(next.edges.some((e) => e.from === 'd:n1' && e.to === 'o:n1')).toBe(false)
   })
 
@@ -470,7 +476,7 @@ describe('结构画布：对账（实体长了，图跟着补）', () => {
   it('别的目标不掺和', () => {
     const other = makeNode({ id: 'n9', title: '别的', goalId: 'g2', docs: { teaching: '正文' } })
     const map = { version: 1 as const, nodes: [], edges: [] }
-    const next = reconcileStructure(makeStore([owner, other]), 'g1', map)
+    const next = structureViewOf(makeStore([owner, other]), 'g1', map)
     expect(next.nodes.some((n) => n.ref === 'n9')).toBe(false)
   })
 })
