@@ -1,22 +1,22 @@
 /**
  * 启动期自动数据迁移调度器。
  *
- * 作用：
- * 当应用更新到新版本启动时，若检测到用户当前存储数据版本落后于应用目标版本，
- * 在加载教学文档 (hydrateLearnStore) 之前自动触发链式迁移，实现跨版本无感升级；
- * 避免用户因未手动进入设置页执行迁移而导致新代码读取旧结构报错。
+ * 当应用更新到新版本启动时，若检测到用户数据落后于当前代码的迁移序号，
+ * 在加载教学文档 (hydrateLearnStore) **之前**自动触发链式迁移，实现无感升级；
+ * 避免用户因未手动进入设置页执行迁移而导致新代码读旧结构报错。
+ *
+ * 失败**不阻断启动**：只记日志并返回 `migrated: false`。旧数据原样留在盘上，
+ * 旧解析器照常能读——这条是迁移安全的最后一道保险，别改成抛错。
  */
 
 import { planChain, runChain } from './engine'
-import {
-  detectSchemaVersion,
-  LATEST_SCHEMA_VERSION,
-} from './version'
+import { latestStep } from './scripts'
+import { detectSchemaStep } from './version'
 
 export interface AutoMigrateResult {
   migrated: boolean
-  fromVersion?: string
-  toVersion?: string
+  fromStep?: number
+  toStep?: number
   error?: string
 }
 
@@ -31,48 +31,36 @@ export async function autoMigrateIfNeeded(
   const logger = onLog || ((msg: string) => console.log(`[auto-migrate] ${msg}`))
 
   try {
-    const { version: currentVersion, meta } = await detectSchemaVersion(uid)
+    const { step: currentStep, meta } = await detectSchemaStep(uid)
+    const targetStep = latestStep()
 
     // 用户显式关闭了自动迁移
     if (meta?.autoMigrate === false) {
-      logger(`用户已配置关闭自动迁移 (autoMigrate=false)，保持当前数据结构 v${currentVersion}`)
-      return { migrated: false, fromVersion: currentVersion, toVersion: currentVersion }
+      logger(`用户已配置关闭自动迁移 (autoMigrate=false)，保持当前数据序号 #${currentStep}`)
+      return { migrated: false, fromStep: currentStep, toStep: currentStep }
     }
 
-    // 规划迁移链
-    const plan = planChain(currentVersion, LATEST_SCHEMA_VERSION)
+    const plan = planChain(currentStep, targetStep)
     if (plan.isUpToDate || plan.scripts.length === 0) {
-      return { migrated: false, fromVersion: currentVersion, toVersion: currentVersion }
+      return { migrated: false, fromStep: currentStep, toStep: currentStep }
     }
 
     logger(
-      `检测到数据结构落后 (v${currentVersion} < v${LATEST_SCHEMA_VERSION})，正在启动启动期自动链式迁移（共 ${plan.scripts.length} 个阶段）…`,
+      `检测到数据落后 (第 ${currentStep} 次 → 第 ${targetStep} 次)，正在启动启动期自动链式迁移（共 ${plan.scripts.length} 个阶段）…`,
     )
 
     const res = await runChain(uid, plan.scripts, undefined, logger)
 
     if (res.ok) {
-      logger(`自动链式迁移成功完成，数据结构已对齐至最新 v${LATEST_SCHEMA_VERSION}。`)
-      return {
-        migrated: true,
-        fromVersion: currentVersion,
-        toVersion: LATEST_SCHEMA_VERSION,
-      }
-    } else {
-      logger(`自动迁移执行遇到异常中断：${res.error}`)
-      return {
-        migrated: false,
-        fromVersion: currentVersion,
-        toVersion: currentVersion,
-        error: res.error,
-      }
+      logger(`自动链式迁移成功完成，数据已对齐至第 ${targetStep} 次。`)
+      return { migrated: true, fromStep: currentStep, toStep: targetStep }
     }
+
+    logger(`自动迁移执行遇到异常中断：${res.error}`)
+    return { migrated: false, fromStep: currentStep, toStep: currentStep, error: res.error }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     logger(`自动迁移探测失败：${msg}`)
-    return {
-      migrated: false,
-      error: msg,
-    }
+    return { migrated: false, error: msg }
   }
 }

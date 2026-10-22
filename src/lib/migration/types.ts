@@ -1,11 +1,25 @@
 /**
  * 链式数据迁移系统契约定义。
  *
- * 核心目标：
- * 1. 规避散落在代码各处、随版本迭代逐渐臃肿混乱的 ad-hoc 迁移代码；
- * 2. 链式拓扑规划：无论用户从哪个历史版本跨越升级（如 0.5.0 -> 0.6.3），
- *    自动规划最优迁移链路并顺序逐步执行（0.5.0 -> 0.5.6 -> 0.6.2 -> 0.6.3）；
- * 3. 显式版本溯源：通过 schema.json 记录当前版本、迁移时间戳与各阶段执行历史。
+ * ## 为什么用「序号」而不是「版本号」
+ *
+ * 早先每个迁移脚本写的是 `fromVersion → toVersion`，于是**每加一次迁移就得涨一次版本号**
+ * ——数据格式改三回，发版号就被推到 0.8、0.9，而线上其实才 0.6.7。版本号一旦被迁移绑架，
+ * 就再也没法用它表达「这次发版改了什么」，而且发版前想合并几次迁移还得重排版本区间。
+ *
+ * 现在改成**纯序号**：
+ * - `step` 从 1 起、单调递增，只表示「第几次迁移」，与发版号完全解耦；
+ * - 数据里记的是 `schemaStep`（已应用到第几次），不是版本字符串；
+ * - 上线前要合并几次迁移，只要把 `step > RELEASED_SCHEMA_STEP` 的脚本合成一个、
+ *   保留最小的那个序号即可（规则见 `scripts.ts` 顶部）。
+ *
+ * 版本号从此只属于「应用发版」，数据只认序号。
+ *
+ * ## 三条不变量
+ *
+ * 1. **序号唯一且递增**：同一序号只能有一个脚本，执行顺序就是序号顺序。
+ * 2. **已发布的脚本不许改**：用户数据里已经有它的执行记录，改了就是两套行为。
+ * 3. **每个脚本自己保证幂等**：重跑一次不该把用户摆好的东西冲掉。
  */
 
 import type { StorageEntry } from '../native'
@@ -29,17 +43,22 @@ export interface MigrationContext {
 
 export interface MigrationStepResult {
   ok: boolean
-  fromVersion: string
-  toVersion: string
+  /** 这一步的序号（与 `MigrationScript.step` 一致） */
+  step: number
   modifiedFiles: string[]
   details?: string
   error?: string
 }
 
 export interface MigrationScript {
+  /**
+   * 序号：从 1 起、单调递增，决定执行顺序。
+   *
+   * **它不跟发版号走**：加一次迁移才 +1，发版不涨。上线前合并迁移时保留最小的那个序号。
+   */
+  step: number
+  /** 稳定标识：只用于历史记录与日志，不再编码版本区间 */
   id: string
-  fromVersion: string
-  toVersion: string
   title: string
   summary: string
   changes: string[]
@@ -48,9 +67,12 @@ export interface MigrationScript {
 }
 
 export interface MigrationHistoryItem {
+  /** 新记录一定有序号；0.7.1 及更早写的旧记录没有，只有下面的 fromVersion/toVersion */
+  step?: number
   scriptId: string
-  fromVersion: string
-  toVersion: string
+  /** 旧字段，只为把老历史记录读出来显示 */
+  fromVersion?: string
+  toVersion?: string
   migratedAt: number
   success: boolean
   modifiedFiles: string[]
@@ -59,16 +81,24 @@ export interface MigrationHistoryItem {
 }
 
 export interface SchemaMeta {
-  schemaVersion: string
+  /** 已应用到第几次迁移；0 = 一次都没跑过 */
+  schemaStep: number
   updatedAt: number
   /** 是否开启应用启动时自动检测并执行数据迁移（默认开启） */
   autoMigrate?: boolean
   history: MigrationHistoryItem[]
+  /**
+   * 旧字段：0.7.1 及更早写的是版本号。
+   *
+   * **只读**：用来把老数据折算成 `schemaStep`（见 `version.ts` 的 `stepOfLegacyVersion`），
+   * 折算完就按新形状写回，不再产出这个字段。
+   */
+  schemaVersion?: string
 }
 
 export interface ChainPlan {
-  currentVersion: string
-  targetVersion: string
+  currentStep: number
+  targetStep: number
   scripts: MigrationScript[]
   isUpToDate: boolean
 }

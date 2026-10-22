@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { compareVersions } from '../src/lib/migration/version'
+import { compareVersions, stepOfLegacyVersion } from '../src/lib/migration/version'
 import { planChain } from '../src/lib/migration/engine'
-import { registerMigrationScript, MIGRATION_SCRIPTS } from '../src/lib/migration/scripts'
+import {
+  LATEST_SCHEMA_STEP,
+  latestStep,
+  MIGRATION_SCRIPTS,
+  RELEASED_SCHEMA_STEP,
+  registerMigrationScript,
+} from '../src/lib/migration/scripts'
 import type { MigrationContext, MigrationScript } from '../src/lib/migration/types'
 
 describe('Migration System', () => {
@@ -15,56 +21,94 @@ describe('Migration System', () => {
     })
   })
 
+  /**
+   * 迁移系统改成了**序号制**（见 lib/migration/types.ts 的文件头）：
+   * 序号只跟「数据形状改了几回」走，不再跟发版号走。所以这里钉死的是序号，
+   * 而不是「0.6.3 会被规划到 0.7.0」这种版本区间断言。
+   */
+  describe('序号制：脚本清单的不变量', () => {
+    it('序号从 1 起、连续、唯一、升序', () => {
+      const steps = MIGRATION_SCRIPTS.map((s) => s.step)
+      expect(steps.length).toBeGreaterThan(0)
+      expect(new Set(steps).size).toBe(steps.length)
+      expect(steps).toEqual([...steps].sort((a, b) => a - b))
+      expect(steps).toEqual(steps.map((_, i) => i + 1))
+    })
+
+    it('LATEST_SCHEMA_STEP 是从清单算出来的，不是手写常量', () => {
+      const max = Math.max(...MIGRATION_SCRIPTS.map((s) => s.step))
+      expect(LATEST_SCHEMA_STEP).toBe(max)
+      expect(latestStep()).toBe(max)
+    })
+
+    it('RELEASED_SCHEMA_STEP 不超过最新序号（发版后要把它推到当时的最新）', () => {
+      expect(RELEASED_SCHEMA_STEP).toBeLessThanOrEqual(LATEST_SCHEMA_STEP)
+      expect(RELEASED_SCHEMA_STEP).toBeGreaterThanOrEqual(0)
+    })
+
+    it('真脚本在册：第 1 次是「大纲树 → 结构图」、第 2 次是拓扑重建', () => {
+      expect(MIGRATION_SCRIPTS.map((s) => s.id)).toEqual([
+        'm1-outline-to-structure',
+        'm2-structure-topology',
+      ])
+      expect(MIGRATION_SCRIPTS.map((s) => s.step)).toEqual([1, 2])
+    })
+
+    it('同一序号或同一 id 不能注册两次（否则执行顺序没有意义）', () => {
+      const dup: MigrationScript = {
+        step: 1,
+        id: 'm-dup-step',
+        title: '重复序号',
+        summary: '',
+        changes: [],
+        migrate: async () => ({ ok: true, step: 1, modifiedFiles: [] }),
+      }
+      const before = MIGRATION_SCRIPTS.length
+      registerMigrationScript(dup)
+      expect(MIGRATION_SCRIPTS.length).toBe(before)
+    })
+  })
+
+  describe('stepOfLegacyVersion：老 schema.json 的版本号折算', () => {
+    it('0.7.0 之前算 0（一次迁移都没跑过）', () => {
+      expect(stepOfLegacyVersion('0.6.3')).toBe(0)
+      expect(stepOfLegacyVersion('')).toBe(0)
+    })
+
+    it('0.7.0 / 0.7.1 分别折算成第 1 / 第 2 次', () => {
+      expect(stepOfLegacyVersion('0.7.0')).toBe(1)
+      expect(stepOfLegacyVersion('0.7.1')).toBe(2)
+    })
+
+    it('比已知版本更新的一律算最新（不会因为版本号没登记就漏跑）', () => {
+      expect(stepOfLegacyVersion('0.9.9')).toBe(2)
+    })
+  })
+
   describe('planChain', () => {
-    it('returns empty chain when already at target version', () => {
-      const plan = planChain('0.6.3', '0.6.3')
+    it('已是最新时返回空链', () => {
+      const plan = planChain(LATEST_SCHEMA_STEP, LATEST_SCHEMA_STEP)
       expect(plan.isUpToDate).toBe(true)
       expect(plan.scripts.length).toBe(0)
     })
 
-    it('plans chain when future scripts are registered', () => {
-      // 用一段**没有真实脚本占用**的版本区间：0.6.3 → 0.7.0 已经有真脚本
-      // （大纲树 → 结构图，见 lib/migration/outlineStructure），拿它当桩会撞车
-      const mockScript1: MigrationScript = {
-        id: 'm_test_0_8_0_to_0_9_0',
-        fromVersion: '0.8.0',
-        toVersion: '0.9.0',
-        title: 'Upgrade to 0.9.0',
-        summary: 'Test script 1',
-        changes: ['Update field A'],
-        migrate: async () => ({ ok: true, fromVersion: '0.8.0', toVersion: '0.9.0', modifiedFiles: [] }),
-      }
-
-      const mockScript2: MigrationScript = {
-        id: 'm_test_0_9_0_to_1_0_0',
-        fromVersion: '0.9.0',
-        toVersion: '1.0.0',
-        title: 'Upgrade to 1.0.0',
-        summary: 'Test script 2',
-        changes: ['Update field B'],
-        migrate: async () => ({ ok: true, fromVersion: '0.9.0', toVersion: '1.0.0', modifiedFiles: [] }),
-      }
-
-      registerMigrationScript(mockScript1)
-      registerMigrationScript(mockScript2)
-
-      const plan = planChain('0.8.0', '1.0.0')
+    it('从 0 开始会把全部脚本按序排出来', () => {
+      const plan = planChain(0, LATEST_SCHEMA_STEP)
       expect(plan.isUpToDate).toBe(false)
-      expect(plan.scripts.length).toBe(2)
-      expect(plan.scripts[0].id).toBe('m_test_0_8_0_to_0_9_0')
-      expect(plan.scripts[1].id).toBe('m_test_0_9_0_to_1_0_0')
-
-      // Clean up test scripts
-      const idx1 = MIGRATION_SCRIPTS.findIndex((s) => s.id === mockScript1.id)
-      if (idx1 >= 0) MIGRATION_SCRIPTS.splice(idx1, 1)
-      const idx2 = MIGRATION_SCRIPTS.findIndex((s) => s.id === mockScript2.id)
-      if (idx2 >= 0) MIGRATION_SCRIPTS.splice(idx2, 1)
+      expect(plan.scripts.map((s) => s.step)).toEqual([1, 2].slice(0, LATEST_SCHEMA_STEP))
+      expect(plan.currentStep).toBe(0)
+      expect(plan.targetStep).toBe(LATEST_SCHEMA_STEP)
     })
 
-    it('真脚本在册：0.6.3 的数据会被规划到「大纲树 → 结构图」那一步', () => {
-      const plan = planChain('0.6.3', '0.7.0')
-      expect(plan.isUpToDate).toBe(false)
-      expect(plan.scripts.map((s) => s.id)).toEqual(['m_0_6_3_to_0_7_0'])
+    it('只跑比当前序号大的（重跑不会把老脚本再跑一遍）', () => {
+      const plan = planChain(1, LATEST_SCHEMA_STEP)
+      expect(plan.scripts.map((s) => s.step)).toEqual([2].filter((n) => n <= LATEST_SCHEMA_STEP))
+    })
+
+    it('目标序号是上限：给了 1 就只跑到第 1 次', () => {
+      const plan = planChain(0, 1)
+      expect(plan.scripts.map((s) => s.step)).toEqual([1])
+      expect(plan.targetStep).toBe(1)
     })
   })
 
@@ -98,9 +142,8 @@ describe('Migration System', () => {
       }
 
       const testScript: MigrationScript = {
-        id: 'test_upgrade',
-        fromVersion: '0.6.3',
-        toVersion: '0.7.0',
+        step: 99,
+        id: 'test-upgrade',
         title: 'Test Upgrade',
         summary: 'Test data migration',
         changes: ['Update dataVersion to new'],
@@ -112,8 +155,7 @@ describe('Migration System', () => {
           }
           return {
             ok: true,
-            fromVersion: '0.6.3',
-            toVersion: '0.7.0',
+            step: 99,
             modifiedFiles: ['users/test/state.json'],
           }
         },
@@ -121,7 +163,8 @@ describe('Migration System', () => {
 
       const res = await testScript.migrate(ctx)
       expect(res.ok).toBe(true)
-      expect((store['users/test/state.json'] as any).dataVersion).toBe('new')
+      expect(res.step).toBe(99)
+      expect((store['users/test/state.json'] as { dataVersion?: string }).dataVersion).toBe('new')
     })
   })
 })

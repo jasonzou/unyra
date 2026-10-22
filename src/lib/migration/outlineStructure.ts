@@ -1,5 +1,6 @@
 /**
- * 这个文件负责什么：**把旧的大纲树铺成结构图**（数据迁移脚本 m_0_6_3_to_0_7_0 的实现）。
+ * 这个文件负责什么：**把旧的大纲树铺成结构图**（第 1 次迁移 `m1-outline-to-structure` 的实现，
+ * 以及第 2 次 `m2-structure-topology` 的拓扑重建）。
  *
  * ## 为什么是一个迁移脚本，而不是业务代码里的兼容分支
  *
@@ -210,8 +211,7 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
     if (!ok) {
       return {
         ok: false,
-        fromVersion: '0.6.3',
-        toVersion: '0.7.0',
+        step: 1,
         modifiedFiles,
         error: `写入 ${target} 失败`,
       }
@@ -222,17 +222,15 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
 
   return {
     ok: true,
-    fromVersion: '0.6.3',
-    toVersion: '0.7.0',
+    step: 1,
     modifiedFiles,
     details: modifiedFiles.length ? `为 ${modifiedFiles.length} 个目标铺出了结构图` : '没有需要迁移的目标',
   }
 }
 
 export const outlineToStructure: MigrationScript = {
-  id: 'm_0_6_3_to_0_7_0',
-  fromVersion: '0.6.3',
-  toVersion: '0.7.0',
+  step: 1,
+  id: 'm1-outline-to-structure',
   title: '大纲树 → 结构图',
   summary:
     '结构页从「算出来的大纲树」改成「拖出来的节点图」：为每个目标生成 structure.json，' +
@@ -247,7 +245,7 @@ export const outlineToStructure: MigrationScript = {
   migrate: migrateOutlineToStructure,
 }
 
-/* ---------- 0.7.0 → 0.7.1：把图重建到新拓扑（文档 ↔ 大纲） ---------- */
+/* ---------- 第 2 次迁移：把图重建到新拓扑（文档 ↔ 大纲） ---------- */
 
 /**
  * 上一次重构把类型规则反了过来（文档 ↔ 大纲、大纲不再连大纲），但存盘的图还是旧的：
@@ -313,8 +311,7 @@ export async function migrateStructureTopology(ctx: MigrationContext): Promise<M
     if (!ok) {
       return {
         ok: false,
-        fromVersion: '0.7.0',
-        toVersion: '0.7.1',
+        step: 2,
         modifiedFiles,
         error: `写入 ${target} 失败`,
       }
@@ -325,17 +322,15 @@ export async function migrateStructureTopology(ctx: MigrationContext): Promise<M
 
   return {
     ok: true,
-    fromVersion: '0.7.0',
-    toVersion: '0.7.1',
+    step: 2,
     modifiedFiles,
     details: modifiedFiles.length ? `重建了 ${modifiedFiles.length} 张结构图` : '没有需要重建的目标',
   }
 }
 
 export const structureTopology: MigrationScript = {
-  id: 'm_0_7_0_to_0_7_1',
-  fromVersion: '0.7.0',
-  toVersion: '0.7.1',
+  step: 2,
+  id: 'm2-structure-topology',
   title: '结构图拓扑重建（文档 ↔ 大纲）',
   summary:
     '类型规则反过来了：大纲的父子节点只能是文档，链条变成「文档 → 大纲 → 子文档 → 子大纲」。' +

@@ -59,8 +59,9 @@
 | **D8** | api 三分：`graph.*` 管结构 / `content.*` 管内容 / `state.*` 管状态；`exam.*` 只留出卷判卷 | 新挂件零 api 改动 |
 | **D9** | 磁盘路径不再承担身份；`key` 降级为显示别名 | 去掉"标题唯一"这条硬不变量 |
 | **D10** | 目标本身就是一个节点：`goal.json`（`type: 'goal'`），`goalId` 就是它自己的 uuid | 消掉 `goal.id` 与 `rootNodeId` 两个 uuid 指一件事 |
-| **D11** | **单写，不做双写过渡**。迁移由 `m_0_7_1_to_0_8_0` 一次性完成（用户 2026-10-22 定） | 不产生运行时数据冗余；代价是迁移必须一次成功，所以要有校验与降落伞（见 5.1.4） |
+| **D11** | **单写，不做双写过渡**。迁移由「第 3 次迁移」（`step: 3`）一次性完成（用户 2026-10-22 定） | 不产生运行时数据冗余；代价是迁移必须一次成功，所以要有校验与降落伞（见 5.1.4） |
 | **D12** | 目标 uuid **沿用根节点的 uuid**（`rootNodeId`），丢弃 `goal.id`，把按目标归档的键一次性重写 | 根节点 uuid 被页签/收藏/reading/tmp/exams/structure 引用得更多；只重写"目标级账本"的键更省（清单见 5.1.3） |
+| **D13** | 迁移系统改成**序号制**（已完成）：脚本只有 `step`，`schema.json` 记 `schemaStep`，发版不涨序号 | 用户 2026-10-22：线上才 0.6.7，迁移却把版本号推到 0.8；序号制还能在上线前合并未发布的迁移（见 `scripts.ts` 顶部） |
 
 ---
 
@@ -71,7 +72,7 @@
 ```
 {root}/users/{uid}/
 ├─ state.json                      不变
-├─ schema.json                     版本标记，写 0.8.0
+├─ schema.json                     迁移序号标记：{ schemaStep: 3 }（不记版本号）
 └─ docs/
    ├─ index.md                     生成物：全部目标清单（标题 → uuid）
    └─ {goalUuid}/
@@ -242,11 +243,11 @@ export const NODE_KINDS = {
 | `src/learn/files/names.ts` | 只留 `sanitizeSegment`（笔记/超管不再有独立文件名） |
 | `src/lib/migration/types.ts` | `MigrationContext.storage` 加 `movePath(from, to)` |
 | `src/lib/migration/engine.ts` | 注入 `movePath`（底层已有 `lib/storage.movePath`） |
-| `src/lib/migration/v3Nodes.ts` | 新增迁移脚本 `m_0_7_1_to_0_8_0`（规格见 5.1） |
-| `src/lib/migration/scripts.ts` | 注册上面的脚本；`LATEST_SCHEMA_VERSION` → `0.8.0` |
+| `src/lib/migration/v3Nodes.ts` | 新增第 3 次迁移（`step: 3`，规格见 5.1） |
+| `src/lib/migration/scripts.ts` | 把脚本接进 `MIGRATION_SCRIPTS`（`step: 3`）；`LATEST_SCHEMA_STEP` 自动变成 3，不用改常量 |
 | `src/components/settings/*` | 设置 → 存储里加一行"上次迁移的备份 · 占用 X MB · 删除" |
 
-### 5.1 迁移脚本规格（P1 的主体，`m_0_7_1_to_0_8_0`）
+### 5.1 迁移脚本规格（P1 的主体，第 3 次迁移）
 
 > **单写，不做双写过渡**（D11）。迁移一次跑完，跑完之后磁盘上只有新格式。
 > 所以这个脚本是 P1 的**主体**，不是收尾工作。**先写脚本、先用真实数据演练，再改业务代码。**
@@ -256,9 +257,9 @@ export const NODE_KINDS = {
 | 项 | 值 |
 |---|---|
 | 文件 | `src/lib/migration/v3Nodes.ts` |
-| id | `m_0_7_1_to_0_8_0` |
-| from → to | `0.7.1` → `0.8.0` |
-| 注册 | `src/lib/migration/scripts.ts` 的 `MIGRATION_SCRIPTS`；`version.ts` 的 `LATEST_SCHEMA_VERSION` → `0.8.0` |
+| step | `3`（序号，见 `scripts.ts` 顶部的序号制说明） |
+| id | `m3-node-single-file` |
+| 注册 | `src/lib/migration/scripts.ts` 的 `MIGRATION_SCRIPTS`；`LATEST_SCHEMA_STEP` 由清单自动算出，**不要手改** |
 | 新增能力 | `MigrationContext.storage.movePath(from, to)` —— 契约加一行（`types.ts`），engine 注入一行（`engine.ts`），底层已有 `lib/storage.movePath`（`storage:move` → `electron/storage/files.ts` 的 `movePath`，同卷 rename、不删源） |
 | 可复用的业务代码 | `files/parse.ts` 的 `parseDocs`、`files/build.ts` 的新 `buildDocsV3`（迁移脚本可以 import `learn/` 领域层——`outlineStructure.ts` 已经这么做了） |
 
@@ -340,7 +341,7 @@ D11 是单写，所以**没有双写可以退回**。失败时的退路只有两
 // src/lib/migration/v3Nodes.ts
 export async function migrateToV3Nodes(ctx: MigrationContext): Promise<MigrationStepResult> {
   const fail = (error: string): MigrationStepResult => ({
-    ok: false, fromVersion: '0.7.1', toVersion: '0.8.0', modifiedFiles: [], error,
+    ok: false, step: 3, modifiedFiles: [], error,
   })
   const docsRoot = `${ctx.userDir}/docs`
   const goals = (await ctx.storage.listDir(docsRoot)).filter((e) => e.dir)
@@ -354,13 +355,12 @@ export async function migrateToV3Nodes(ctx: MigrationContext): Promise<Migration
   // 6. 搬二进制（movePath，目标已存在就跳过）
   // 7. 校验（5.1.4）
   // 8. movePath(旧目标目录, `${docsRoot}.legacy-${Date.now()}`)
-  return { ok: true, fromVersion: '0.7.1', toVersion: '0.8.0', modifiedFiles, details }
+  return { ok: true, step: 3, modifiedFiles, details }
 }
 
 export const toV3Nodes: MigrationScript = {
-  id: 'm_0_7_1_to_0_8_0',
-  fromVersion: '0.7.1',
-  toVersion: '0.8.0',
+  step: 3,
+  id: 'm3-node-single-file',
   title: '节点数据合并为单文件',
   summary: '……（照 outlineStructure.ts 的写法：讲清"为什么是迁移脚本而不是兼容分支"）',
   changes: ['每个目标改为 docs/{目标uuid}/', '一个节点一个 nodes/{uuid}.json', '……'],
