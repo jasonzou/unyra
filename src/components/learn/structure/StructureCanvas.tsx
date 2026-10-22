@@ -296,6 +296,27 @@ export const StructureCanvas = memo(function StructureCanvas({
     if (next !== map) onChange(next)
   }, [store, goalId, map, onChange])
 
+  /* ---------- 一次性升级：已挂目标项但还是「空节点」的文档卡，补成带标题的壳 ---------- */
+
+  const upgradedRef = useRef(false)
+  useEffect(() => {
+    if (upgradedRef.current || !onCreateChildDoc) return
+    const stale = nodes.filter((n) => n.kind === 'doc' && n.slot && !n.ref)
+    if (!stale.length) return
+    upgradedRef.current = true
+    let next = nodes
+    for (const node of stale) {
+      const parentId = edges.find((e) => e.to === node.id)?.from
+      const parent = parentId ? nodes.find((n) => n.id === parentId) : null
+      if (!parent?.ref) continue
+      const title = outlineSlots(store, parent, nodes).find((s) => s.key === node.slot)?.title
+      if (!title) continue
+      const entityId = onCreateChildDoc(parent.ref, title)
+      if (entityId) next = next.map((n) => (n.id === node.id ? { ...n, ref: entityId } : n))
+    }
+    if (next !== nodes) onChange({ ...map, nodes: next })
+  }, [nodes, edges, store, map, onChange, onCreateChildDoc])
+
   /* ---------- 镜头 ---------- */
 
   /**
