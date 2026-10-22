@@ -412,6 +412,148 @@ wrapApi(api, 'graph.relations', (args) => {
     return opts.nodeOps.update(r.ref.id, { description: content })
   }, log)
 
+  /**
+   * content.*：**一份内容的读 / 写 / 追加 / 查找只有这一套写法**。
+   *
+   * 为什么要有它：以前正文归 doc.*、大纲归 outline.*、超级文档归 sdoc.*，三组的读写形状
+   * 高度重复——模型每碰一种内容就要多记一组 api，而数据侧「加一种挂件」已经只是 parts 里
+   * 多一条（见 learn/files/nodeFile）。这里把内容读写也收敛成一套：**位置由 part 表达**，
+   * 新增挂件不需要新 api。
+   *
+   * 两种写法都收：
+   *   content.read('极限/笔记/错题本')                 // 字符串沿用原来的 path 语法
+   *   content.read({ node: '极限', part: 'outline' })  // 显式 part
+   * part 取值：teaching（默认）/ note:<名字> / outline / superdoc:<名字>。
+   *
+   * **试卷不在这里**：它是「出卷 / 作答 / 判分」的业务对象，用 exam.*。
+   */
+  const partTarget = (
+    arg: unknown,
+  ): { ok: true; nodeId: string; label: string; part: string; name?: string } | { ok: false; error: string } => {
+    if (arg === undefined || typeof arg === 'string') {
+      const r = opts.resolveDoc(arg ?? '')
+      if (!r.ok) return { ok: false, error: r.message }
+      if (r.ref.kind === 'note') {
+        return {
+          ok: true,
+          nodeId: r.ref.id,
+          label: r.ref.docLabel,
+          part: 'note',
+          ...(r.ref.note ? { name: r.ref.note } : {}),
+        }
+      }
+      return { ok: true, nodeId: r.ref.id, label: r.ref.docLabel, part: 'teaching' }
+    }
+    const o = asRecord(arg)
+    const path = typeof o.path === 'string' ? o.path : typeof o.node === 'string' ? o.node : ''
+    const r = opts.resolveNode(path)
+    if (!r.ok) return { ok: false, error: r.message }
+    const raw = typeof o.part === 'string' && o.part.trim() ? o.part.trim() : 'teaching'
+    const cut = raw.indexOf(':')
+    const part = cut < 0 ? raw : raw.slice(0, cut)
+    const name = cut < 0 ? undefined : raw.slice(cut + 1).trim() || undefined
+    return { ok: true, nodeId: r.ref.id, label: r.ref.label + '/' + raw, part, ...(name ? { name } : {}) }
+  }
+
+  /** 内容读出来一律是字符串（大纲是 JSON 文本，方便模型直接看结构） */
+  const contentText = (t: { nodeId: string; part: string; name?: string }): { text: string } | { error: string } => {
+    if (t.part === 'teaching') return { text: opts.docOps.read(t.nodeId, 'teaching') }
+    if (t.part === 'note') return { text: opts.docOps.read(t.nodeId, 'note', t.name) }
+    if (t.part === 'outline') {
+      if (!opts.outline) return { error: '这一轮没有大纲能力（宿主未注入 outline）' }
+      const doc = opts.outline.read(t.nodeId)
+      return { text: doc ? JSON.stringify(doc, null, 2) : '' }
+    }
+    if (t.part === 'superdoc') {
+      if (!opts.superdocs) return { error: '这一轮没有超级文档能力（宿主未注入 superdocs）' }
+      if (!t.name) return { error: '超级文档要带名字：part 写 "superdoc:讲义"' }
+      const got = opts.superdocs.read(t.nodeId, t.name) as { ok?: boolean; html?: unknown; error?: string }
+      if (got && got.ok === false) return { error: got.error ?? '读不到这份超级文档' }
+      return { text: typeof got?.html === 'string' ? got.html : '' }
+    }
+    if (t.part === 'exam') {
+      return { error: '试卷用 exam.read（读一份卷子与作答记录）；content.* 只管正文 / 大纲 / 笔记 / 超级文档' }
+    }
+    return { error: `不认识的 part：「${t.part}」。可用：teaching / note:<名字> / outline / superdoc:<名字>` }
+  }
+
+  wrapApi(api, 'content.read', (args) => {
+    const t = partTarget(args[0])
+    if (!t.ok) return { error: t.error }
+    const got = contentText(t)
+    if ('error' in got) return { error: got.error }
+    return { path: t.label, part: t.part, ...(t.name ? { name: t.name } : {}), chars: got.text.length, content: got.text }
+  }, log)
+
+  wrapApi(api, 'content.find', (args) => {
+    const t = partTarget(args[0])
+    if (!t.ok) return { error: t.error }
+    const got = contentText(t)
+    if ('error' in got) return { error: got.error }
+    const needle = asText(args[1])
+    if (!needle) return { error: '要找的内容为空' }
+    const opt = asRecord(args[2])
+    const from = asIndex(opt.from) ?? 0
+    const limit = Math.min(asIndex(opt.limit) ?? 10, 50)
+    const hits: Array<{ start: number; end: number; around: string }> = []
+    let idx = got.text.indexOf(needle, from)
+    while (idx >= 0 && hits.length < limit) {
+      hits.push({
+        start: idx,
+        end: idx + needle.length,
+        around: got.text.slice(Math.max(0, idx - 40), Math.min(got.text.length, idx + needle.length + 40)),
+      })
+      idx = got.text.indexOf(needle, idx + Math.max(1, needle.length))
+    }
+    return { path: t.label, part: t.part, query: needle, total: got.text.length, matches: hits.length, hits }
+  }, log)
+
+  wrapApi(api, 'content.write', (args) => {
+    const first = args[0]
+    // 两种写法：content.write(target, body) 与 content.write({ node, part, body })
+    const inline = first && typeof first === 'object' && !Array.isArray(first) && 'body' in (first as object)
+    const t = partTarget(first)
+    if (!t.ok) return { error: t.error }
+    const body = inline ? (first as Record<string, unknown>).body : args[1]
+
+    if (t.part === 'teaching') return opts.docOps.write(t.nodeId, 'teaching', undefined, asText(body))
+    if (t.part === 'note') return opts.docOps.write(t.nodeId, 'note', t.name, asText(body))
+    if (t.part === 'outline') {
+      if (!opts.outline) return { error: '这一轮没有大纲能力（宿主未注入 outline）' }
+      let payload: unknown = body
+      if (typeof body === 'string') {
+        try {
+          payload = JSON.parse(body)
+        } catch {
+          return { error: '大纲要写成对象：{ intro, children: [{ title, summary }] }（传字符串时必须是合法 JSON）' }
+        }
+      }
+      if (!payload || typeof payload !== 'object') {
+        return { error: '大纲要写成对象：{ intro, children: [{ title, summary }] }' }
+      }
+      const a = asRecord(payload)
+      return opts.outline.write(t.nodeId, { intro: a.intro, children: a.children })
+    }
+    if (t.part === 'superdoc') {
+      if (!opts.superdocs) return { error: '这一轮没有超级文档能力（宿主未注入 superdocs）' }
+      if (!t.name) return { error: '超级文档要带名字：part 写 "superdoc:讲义"' }
+      return opts.superdocs.write(t.nodeId, t.name, asText(body))
+    }
+    if (t.part === 'exam') {
+      return { error: '试卷不能这样写：出卷用 exam.create，判分用 exam.grade' }
+    }
+    return { error: `不认识的 part：「${t.part}」。可用：teaching / note:<名字> / outline / superdoc:<名字>` }
+  }, log)
+
+  wrapApi(api, 'content.append', (args) => {
+    const t = partTarget(args[0])
+    if (!t.ok) return { error: t.error }
+    const body = asText(args[1])
+    if (t.part === 'teaching') return opts.docOps.append(t.nodeId, 'teaching', undefined, body)
+    if (t.part === 'note') return opts.docOps.append(t.nodeId, 'note', t.name, body)
+    return { error: '只有正文与笔记能追加；大纲 / 超级文档请整份 content.write' }
+  }, log)
+
   if (opts.outline) {
     const outline = opts.outline
     wrapApi(api, 'outline.read', (args) => {

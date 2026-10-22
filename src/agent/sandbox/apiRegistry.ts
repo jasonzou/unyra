@@ -213,7 +213,8 @@ path 找不到时回执会列候选子节点，照着改一次就对。
     'doc',
     '教学文档与笔记',
     '教学文档与笔记的读、分段读、查找、整篇写、区间改、追加、注解。',
-    `doc.* 是应用数据里最常用的读写口：
+    `**读写内容请优先用 content.***（这一组是旧写法，等价、保留兼容）：
+正文与笔记的读、分段读、查找、整篇写、区间改、追加、注解。
 - 省略 path = 当前节点的教学文档；
 - '极限/笔记' = 该节点的笔记（第一份）；'极限/笔记/错题本' = 指定名字的笔记；
 - 笔记不存在时 write 会自动新建。
@@ -226,6 +227,54 @@ path 找不到时回执会列候选子节点，照着改一次就对。
       a('replace', 'doc.replace(path?, { start?, end?, content, expected? })', '按区间改文档', '给 start/end 或 expected（原文字符串，必须先匹配）再替换。改一处用 replace，不要整篇重写。', `await api.doc.replace('极限', { expected: '旧的一句话', content: '新的一句话' })`),
       a('append', 'doc.append(path?, content)', '追加到文档末尾', '不覆盖已有正文；适合补一段。', `await api.doc.append('极限', '\\n\\n## 补充：夹逼定理的几何直觉')`),
       a('annotate', 'doc.annotate(path?, { term, occurrence?, body })', '写正文划线注解', '与 node.annotate 同义，保留给按文档寻址的旧写法。', `await api.doc.annotate('极限', { term: '夹逼定理', body: '用两个边界函数夹住目标函数。' })`),
+    ],
+  ),
+  g(
+    'content',
+    '内容读写',
+    '一份内容的读 / 写 / 追加 / 查找：正文、大纲、笔记、超级文档共用这一套，按 part 区分。',
+    `**这是读写内容的唯一入口**（doc.* / outline.* / sdoc.* 是旧写法，保留兼容、等价）。
+
+位置由 \`part\` 表达：
+- 省略 part = 正文（教学文档）；
+- 'note:错题本' = 某个节点的一份笔记；
+- 'outline' = 大纲（对象，不是 Markdown）；
+- 'superdoc:讲义' = 一份超级文档（完整 HTML）。
+
+两种写法都收：
+  content.read('极限/笔记/错题本')                 // 字符串沿用 path 语法
+  content.read({ node: '极限', part: 'outline' })  // 显式 part
+
+**试卷不在这里**：出卷 / 作答 / 判分是业务动作，用 exam.*。`,
+    [
+      a(
+        'read',
+        'content.read(target)',
+        '读一份内容',
+        '回 { path, part, chars, content }。大纲以 JSON 文本返回；超级文档回 HTML。整篇很长时用 content.find 定位，别整篇读进上下文。',
+        `const body = await api.content.read('极限')`,
+      ),
+      a(
+        'find',
+        'content.find(target, 要找的文字, { from?, limit? }?)',
+        '在一份内容里找文字',
+        '回命中位置与前后 40 字上下文；limit 最多 50。改一处措辞前先用它定位。',
+        `const hits = await api.content.find({ node: '极限', part: 'note:错题本' }, '夹逼')`,
+      ),
+      a(
+        'write',
+        'content.write(target, body)',
+        '整份写入一份内容',
+        '正文/笔记是字符串；大纲是对象 { intro, children }（也可以传 JSON 字符串）；超级文档是完整 HTML。整篇覆盖前先读，别覆盖用户写过的东西。',
+        `await api.content.write({ node: '极限', part: 'outline' }, { intro: '先补前置', children: [{ title: '夹逼定理', summary: '两个边界函数' }] })`,
+      ),
+      a(
+        'append',
+        'content.append(target, body)',
+        '追加到末尾',
+        '只有正文与笔记能追加；大纲 / 超级文档请整份 write。',
+        `await api.content.append('极限', '\\n\\n## 补充：夹逼定理的几何直觉')`,
+      ),
     ],
   ),
   g(
