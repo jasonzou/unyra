@@ -412,7 +412,23 @@ export const toV3Nodes: MigrationScript = {
 
 ---
 
-### P2 · api 收敛（破坏性）
+### P2 · api 收敛（破坏性）—— **已完成**
+
+**落地方式比原计划保守，但目标达成：**
+
+- 新增 `content.read / find / write / append` 一组，位置由 `part` 表达
+  （省略 = 正文、`note:错题本`、`outline`、`superdoc:讲义`）。
+- `doc.*` / `outline.*` / `sdoc.*` **保留为兼容写法**（计划里本来就是「保留一个版本的薄别名」），
+  `doc` 组的说明改成「优先用 content.*」。没有硬删——删了之后模型手上的旧写法会直接失败。
+- 试卷不进 `content.*`：它是「出卷 / 作答 / 判分」的业务对象，留在 `exam.*`。
+- 底层复用原有的 `docOps` / `outline` / `superdocs` 能力，没有重写一套读写逻辑——
+  收敛的是「模型看到的入口」，不是又造一层实现。
+
+**没做**：`graph.tree()` 与 `graph.expand()`。`graph.list()` 已经能给全表、
+`graph.relations()` 已经能给单个节点的上下级，先用这两条；真要一步建「目标项 + 子节点 + 连线」
+时再加，届时必须先把「部分成功怎么回滚」定清楚。
+
+### P2 原计划（留档）
 
 **目标**：agent 的 api 从 6 组变 3 组；新挂件零 api 改动。
 
