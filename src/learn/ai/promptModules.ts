@@ -34,12 +34,11 @@ export const PROMPT_MODULES: PromptModule[] = [
     title: '超级文档',
     text: `超级文档（Superdoc）——自包含单页交互应用（HTML / SVG / JS / CSS），独立渲染在主文档区页签：
 
-一、物理路径体系与命名契约
-- 节点超级文档（推荐）：每个知识点节点下可包含多个超级文档，物理存放于 docs/.../superdocs/<名称>.html。
-  - 获取当前节点路径：先调用 const p = await api.graph.paths()，返回对象中包含 dir、superdocsDir。
-  - 完整物理文件路径形如：\`\${p.dir}/superdocs/\${name}.html\`（例如 docs/微积分/superdocs/极限动态演化.html）。
-- 目标根级超级文档：存放于 \`superdocs/\${name}.html\`。
-- 命名契约：文件名强制以 .html 结尾；在界面中与 api.ui.superdoc 中引用的名称 name 不含 .html 后缀。
+一、存放位置
+- 超级文档**不是独立文件**：它和正文、大纲、笔记、试卷一起存在这个节点的「节点名.node.json」里
+  （parts 数组中的一条，kind 为 superdoc）。
+- 想知道节点文件在哪：const p = await api.graph.paths()，用 p.file。
+- 名字契约：界面里与 api.ui.superdoc 引用的 name 不含 .html 后缀；不要自己拼磁盘路径。
 
 二、怎么读与怎么写（核心动线，全部走 api.sdoc.*）
 1. 读取已有超级文档：
@@ -69,8 +68,8 @@ export const PROMPT_MODULES: PromptModule[] = [
 四、读写边界与严禁行为
 - ✅ 能写：纯 HTML/CSS/JS 代码、SVG 矢量动画、moji-markdown 讲解、调用 window.api.method.call。
 - ✅ 读写一律走 api.sdoc.*（list / read / write / delete）；用前先 await api.sdoc.__help() 查用法。
-- ❌ 严禁用 api.files.* 直接读写 superdocs/ 下的 HTML——那是应用数据，files 通道会被拒绝。
-- ❌ 严禁写入非法路径：不要脱离 superdocs/ 目录写未归档的 HTML 文件。`,
+- ❌ 严禁用 api.files.* 直接读写节点文件（docs/ 下的 .node.json）——那是应用数据，files 通道会被拒绝。
+- ❌ 不要自己拼磁盘路径：超级文档只通过 api.sdoc.* / api.content.* 读写。`,
   },
   {
     key: 'browser',
@@ -202,12 +201,12 @@ export const PROMPT_MODULES: PromptModule[] = [
 - 试卷是严密的【两层分离结构】：
   - Exam（试卷本体）：题目、类型、难度、时限，是静态试题模板。
   - ExamAttempt（历次考试记录）：用户的实际作答、击键流水、耗时统计、切屏记录与判分结论。同一试卷可反复考核，历次记录按 startedAt 升序保存在 attempts 数组中。
-- 读写一律走 api.exam.*（先 await api.exam.__help() 查用法），**不要用 api.files.* 碰 exams/ 目录**——那是应用数据，files 通道会被拒绝。
+- 读写一律走 api.exam.*（先 await api.exam.__help() 查用法），**不要用 api.files.* 碰节点文件**——那是应用数据，files 通道会被拒绝。
 
 二、完整 JSON Schema 规范
-试卷文件必须严格符合以下 JSON 契约：
+试卷必须严格符合以下 JSON 契约（它存在节点文件的 parts 里，不是独立文件）：
 {
-  "id": "exam_uuid", // 试卷唯一 ID（与文件名一致）
+  "id": "exam_uuid", // 试卷唯一 ID
   "nodeId": "node_id", // 所属知识点节点 ID
   "goalId": "goal_id", // 所属学习目标 ID
   "title": "试卷标题",
@@ -257,7 +256,7 @@ export const PROMPT_MODULES: PromptModule[] = [
   - attempt.summary：综合成绩与掌握分析（字符串）；
   - attempt.explanation：针对错题的详尽步骤推导与 Markdown 解析。
 - ❌ 严禁行为：
-  - 绝不用 api.files.* 直接读写 exams/ 目录（那是应用数据，files 通道会被拒绝），试卷读写一律走 api.exam.*；
+  - 绝不用 api.files.* 直接读写节点文件（那是应用数据，files 通道会被拒绝），试卷读写一律走 api.exam.*；
   - 绝不改写用户作答事实（answers / inputs / dwell / blurs）；
   - 绝不改动或覆盖之前的历史 attempts 作答轮次。`,
   },

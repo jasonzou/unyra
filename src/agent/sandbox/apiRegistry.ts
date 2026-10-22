@@ -182,7 +182,7 @@ path 找不到时回执会列候选子节点，照着改一次就对。
       a('list', 'graph.list()', '本目标全部节点', '回 path / id / title / status / 描述摘要 / 字数 / 掌握度。规划路线、找父节点、核对是否存在时先调它。', 'const all = await api.graph.list()'),
       a('read', 'graph.read(path?)', '单个节点详情', '含描述、状态、各文档字数、上级/下级、学习状态。想知道「这个节点写过什么」先看它，不要整篇读文档。', `const n = await api.graph.read('极限')`),
       a('title', 'graph.title(path?)', '读节点标题', '只回标题，用于轻量确认；要看描述/状态/字数用 graph.read。', `const t = await api.graph.title('极限')`),
-      a('paths', 'graph.paths(path?)', '节点路径索引', '回 { id, title, path, dir, doc, notesDir, outline, meta, superdocsDir, examsDir, workspaceDir }。需要引用真实文件时用它取，不要自己拼目录名。', `const p = await api.graph.paths()`),
+      a('paths', 'graph.paths(path?)', '节点文件在磁盘上的落点', '回 { id, title, path, dir, file, tmp, workspaceDir }。**一个节点一个文件**：正文/大纲/笔记/试卷/超级文档都在 file 这一份里，所以不要再去找 notesDir / superdocsDir / examsDir（它们已经不存在了）。需要引用真实文件时用它取，不要自己拼目录名。', `const p = await api.graph.paths()`),
       a('create', 'graph.create({ parent, title, description?, status? })', '新建子节点', 'parent 必填（标题 / 路径 / #id），不接受「当前」这种隐式起点；同名节点会被拒绝。建完教学文档与大纲同时就位。', `await api.graph.create({ parent: '微积分', title: '夹逼定理', description: '用两个边界函数夹住目标函数求极限' })`),
       a('createTree', 'graph.createTree({ parent?, tree })', '批量/递归建大纲树', 'tree 每项 { title, description?, status?, content?, outline?, children? }。规划式/完整式目标一次建整棵树时用；不要拿它建重复节点。', `await api.graph.createTree({ parent: '微积分', tree: [{ title: '极限', children: [{ title: '夹逼定理' }] }] })`),
       a('rename', 'graph.rename(path, 新标题)', '改节点标题', '标题就是路径，改名等于换目录；同目标重名会被拒绝。', `await api.graph.rename('极限', '极限与连续')`),

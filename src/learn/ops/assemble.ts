@@ -29,7 +29,7 @@ import {
 import { nodePathOf, docsInfoOf, docPathOf, resolveDoc, resolveNode, type PathScope } from '../paths'
 import { writeOutline } from '../outline'
 import { nodeLayout } from '../layout'
-import { docFileName } from '../files/names'
+import { NODE_FILE_SUFFIX } from '../files/nodeFile'
 import { clipText } from './text'
 import { createLearningOps } from './learning'
 import { createSuperDocOps } from './superdoc'
@@ -196,7 +196,10 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     const n = nodeById(s, nodeId)
     if (!n) return { error: '这个节点已经不存在了（可能刚被删除）' }
     const layout = nodeLayout(s).get(n.id)
-    const docPath = layout ? 'docs/' + layout.dir.join('/') + '/' + docFileName(layout.base) : undefined
+    // 一个节点一个文件之后，正文 / 大纲 / 笔记 / 试卷 / 超级文档都在这一份里
+    const docPath = layout
+      ? 'docs/' + layout.dir.join('/') + '/' + layout.base + NODE_FILE_SUFFIX
+      : undefined
     return {
       path: nodePathOf(s, deps.goalId(), n.id),
       docPath,
@@ -221,7 +224,12 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
   }
 
   /**
-   * 节点的标准物理路径索引：给出该节点的全部磁盘路径。
+   * 节点的标准物理路径索引：给出该节点在磁盘上的真实落点。
+   *
+   * **一个节点一个文件之后这里只剩三样**：节点文件（正文 / 大纲 / 笔记 / 试卷 /
+   * 超级文档全在里面）、它的临时变量、它的工作区目录。以前那套
+   * `doc / notesDir / outline / meta / superdocsDir / examsDir` 指向的文件已经不存在了，
+   * 留着只会让模型去读一个不存在的路径。
    */
   const nodePaths = (nodeId: string): unknown => {
     const s = store0()
@@ -229,27 +237,16 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     if (!n) return { ok: false, error: '这个节点已经不存在了' }
     const layout = nodeLayout(s).get(n.id)
     const dir = layout ? 'docs/' + layout.dir.join('/') : 'docs/' + n.title
-    const doc = layout ? dir + '/' + docFileName(layout.base) : dir + '/' + n.title + '.md'
-    const notesDir = layout ? dir + '/' + layout.base + '.notes' : dir + '/' + n.title + '.notes'
-    const outline = layout ? dir + '/' + layout.base + '.outline.json' : dir + '/' + n.title + '.outline.json'
-    const meta = layout ? dir + '/' + layout.base + '.meta.json' : dir + '/' + n.title + '.meta.json'
-    const superdocsDir = dir + '/superdocs'
-    const examsDir = dir + '/exams'
-    const workspaceDir = dir + '/workspace'
-    const path = nodePathOf(s, deps.goalId(), n.id)
+    const base = layout ? layout.base : n.title
     return {
       ok: true,
       id: n.id,
       title: n.title,
-      path,
+      path: nodePathOf(s, deps.goalId(), n.id),
       dir,
-      doc,
-      notesDir,
-      outline,
-      meta,
-      superdocsDir,
-      examsDir,
-      workspaceDir,
+      file: `${dir}/${base}${NODE_FILE_SUFFIX}`,
+      tmp: `${dir}/tmp.json`,
+      workspaceDir: `${dir}/workspace`,
     }
   }
 
