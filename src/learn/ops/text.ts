@@ -32,9 +32,20 @@ export function clipText(text: string, limit: number): string {
  */
 export function currentNodeBlock(store: LearnStore, goalId: string, nodeId: string): string {
   const node = nodeById(store, nodeId)
-  if (!node) return '【当前节点】已不存在（可能刚被删除）。'
+  /**
+   * 目标问题从系统提示词搬到这里（2026-10-22）。
+   *
+   * 它曾经是系统提示词里唯一的会话标识，代价是**每个目标一份不同的前缀**——
+   * 开新目标、切目标，那段上万 token 的规范就整段重算。搬到消息层之后，
+   * 所有目标共用同一份系统提示词前缀，目标是谁由每条消息自己交代。
+   * 用 `question`（用户原话）而不是目标标题：Agent 改标题也不会动到这段话。
+   */
+  const goalQuestion = store.goals.find((g) => g.id === goalId)?.question?.trim() ?? ''
+  const goalLine = '【学习目标】' + (goalQuestion || '（学习者没有写下具体问题）')
+  if (!node) return goalLine + '\n【当前节点】已不存在（可能刚被删除）。'
   const isGoal = store.goals.some((g) => g.rootNodeId === node.id)
   const lines = [
+    goalLine,
     '【当前节点】「' + node.title + '」（路径 ' + nodePathOf(store, goalId, node.id) + '，id #' + node.id + '）',
     /*
      * 写入目标一条说死：省略 path 的文档写入落在哪里，不再让模型拿「当前节点」

@@ -840,7 +840,6 @@ export function useAgent(opts: {
            * （见 currentNodeBlock）。目标问题取自用户原话，Agent 之后改标题也不会动它。
            */
           system: buildTeacherSystem({
-            goalQuestion: getLatest().goals.find((g) => g.id === target.goalId)?.question ?? '',
             // 画像**不在这里传**：导师要贴合这个人时自己 api.userInfo.get() 取（见 ai 的说明）
             extraSystemPrompt:
               agentSettings.extraSystemPromptEnabled && agentSettings.extraSystemPrompt?.trim()

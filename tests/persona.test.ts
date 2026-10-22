@@ -100,7 +100,7 @@ describe('那条隐藏消息本身', () => {
 
 describe('不进系统提示词', () => {
   it('系统提示词里一个字都不提人格（换人格不该让前缀缓存作废）', () => {
-    const system = buildTeacherSystem({ goalQuestion: '我想弄懂微积分' })
+    const system = buildTeacherSystem()
     for (const p of PERSONAS) {
       expect(system).not.toContain(p.label)
       expect(system).not.toContain(p.instruction.slice(0, 24))

@@ -140,25 +140,14 @@ describe('Agent Skill 路径感知与读写权限测试', () => {
     expect(prompt).toContain('api.skill.paths(id?)')
   })
 
-  it('buildTeacherSystem 系统提示词保持恒定，绝不因技能增删修改而破坏前缀缓存', () => {
-    const baseSystem = buildTeacherSystem({ goalQuestion: '学习量子力学' })
+  it('buildTeacherSystem 完全固定：与目标、技能、节点都无关（前缀才能跨目标复用）', () => {
+    const baseSystem = buildTeacherSystem()
 
-    // 无论技能列表如何变动，buildTeacherSystem 结果完全一致
-    const systemWithSkills = buildTeacherSystem({
-      goalQuestion: '学习量子力学',
-      skills: [
-        {
-          id: 'new-skill',
-          name: '新技能',
-          description: '刚刚安装的技能',
-          instructions: '不要把我看进系统提示词',
-          enabled: true,
-        },
-      ],
-      skillsRoot: 'C:\\Users\\test\\skills',
-    })
-
-    expect(systemWithSkills).toBe(baseSystem)
+    // 同样的代码永远同样的字节：没有任何入参能让它变
+    expect(buildTeacherSystem()).toBe(baseSystem)
+    expect(buildTeacherSystem({})).toBe(baseSystem)
+    // 目标问题已经移到消息层（每条用户消息的【学习目标】），系统提示词里不该再出现它
+    expect(baseSystem).not.toContain('我想弄懂微积分')
   })
 
   it('易变技能列表通过动态上下文消息按需注入，且在新技能产生时增量更新', () => {

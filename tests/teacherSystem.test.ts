@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import { buildTeacherSystem } from '../src/learn/ai/teacherSystem'
 
-const system = buildTeacherSystem({ goalQuestion: '我想弄懂微积分' })
+const system = buildTeacherSystem()
 
 describe('产物归属规则（用户定的）', () => {
   it('非文档类产物统一进工作区：规则在系统提示词里，且给了准确路径出处', () => {

@@ -167,7 +167,7 @@ describe('模块消息', () => {
 })
 
 describe('系统提示词确实瘦了（减负的验收线）', () => {
-  const system = buildTeacherSystem({ goalQuestion: '我想弄懂微积分' })
+  const system = buildTeacherSystem()
 
   it('系统提示词只给 api 集：组索引在场，具体签名靠 __help 现查', () => {
     // 组索引在场（模型必须知道能力存在）
