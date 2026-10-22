@@ -136,7 +136,7 @@ import {
 } from '../../learn/agentTabs'
 import type { AgentTabRef } from '../../learn/types'
 import type { StructureMap } from '../../learn/structure'
-import { createNote } from '../../learn/graph'
+import { createNodeUnder, createNote } from '../../learn/graph'
 import { writeOutline } from '../../learn/outline'
 import type { TabCloseMode } from '../../learn/tabs'
 import { attemptBrief, examAttempted, examTotalPoints } from '../../learn/exam'
@@ -3655,6 +3655,34 @@ export default function LearnWorkspace({
   )
 
   /**
+   * 结构画布：在某个目标项上挂一份**带标题的空文档**（壳）。
+   *
+   * 只建实体、不写正文——正文要 AI 写、还要用户确认，所以卡片上留一颗「生成文档」。
+   * 返回新节点 id（同名节点已存在时直接复用），画布据此把卡片的 ref 接上。
+   */
+  const createChildDoc = useCallback(
+    (ownerNodeId: string, title: string): string | null => {
+      const s = getLatest()
+      const owner = nodeById(s, ownerNodeId)
+      if (!owner) return null
+      // createNodeUnder 一手包了「建实体 + 挂父线」，同名节点直接复用
+      const r = createNodeUnder(s, ownerNodeId, { title, origin: 'user' })
+      if (r.created) set(r.store)
+      return r.node.id
+    },
+    [getLatest, set],
+  )
+
+  /** 空文档卡上的「生成文档」：复用正文区那颗按钮同一条路径 */
+  const generateDocForNode = useCallback(
+    (nodeId: string) => {
+      const n = nodeById(getLatest(), nodeId)
+      if (n) generateDocRef.current(n)
+    },
+    [getLatest],
+  )
+
+  /**
    * 结构画布上给大纲手动加一条目标项。
    *
    * 走 writeOutline（整份大纲替换）：它负责 key 归一化与去重，直接在数组上 push
@@ -4690,6 +4718,8 @@ export default function LearnWorkspace({
                   onCreateNote={createStructureNote}
                   onRenameNote={renameNodeNote}
                   onAddOutlineEntry={addOutlineEntry}
+                  onCreateChildDoc={createChildDoc}
+                  onGenerateDoc={generateDocForNode}
                   onToast={onToast}
                   focusTarget={outlineFocus}
                   onFocusHandled={handleOutlineFocusHandled}

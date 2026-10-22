@@ -318,13 +318,20 @@ export const NOTE_ROW = 20
  * 大纲卡片必须能装下全部目标项——装不下的部分如果做成滚动或省略号，
  * 「点目标项生成子大纲」这个主要入口就有一半是点不到的。
  */
+/** 有正文的文档卡：标题行 + 两行摘要 */
+export const DOC_BODY_H = 104
+
 export function cardHeight(store: LearnStore, node: { kind: GraphKind; ref?: string; note?: string }): number {
-  const noteRow = node.note ? NOTE_ROW : 0
-  if (node.kind !== 'outline') return CARD_H + noteRow
+  if (node.kind === 'doc') {
+    // 有正文的文档卡多两行摘要的高度；空文档还是标准高度（它要放「生成文档」按钮）
+    const owner = node.ref ? nodeById(store, node.ref) : null
+    return owner?.docs.teaching.trim() ? DOC_BODY_H : CARD_H
+  }
+  if (node.kind !== 'outline') return CARD_H
   const owner = node.ref ? nodeById(store, node.ref) : null
   const count = owner?.outline?.children.length ?? 0
-  if (!count) return CARD_H + noteRow
-  return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8) + noteRow
+  if (!count) return CARD_H
+  return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8)
 }
 
 /** 把 store 包成一个高度访问器：布局与几何函数只认这个函数，不认 store */

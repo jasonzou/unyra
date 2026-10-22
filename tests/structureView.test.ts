@@ -15,8 +15,11 @@ import {
   hitTest,
   outlineSlots,
   resolveNodeView,
+  DOC_BODY_H,
+  SLOT_DOT_R,
   slotAnchorY,
   slotColor,
+  slotDotPos,
   slotKeyOf,
   splitLeafRef,
 } from '../src/components/learn/structure/structureView'
@@ -404,5 +407,35 @@ describe('结构画布：连线对准目标项', () => {
   it('不给锚点就是老样子（两端都在标题行）', () => {
     const curve = edgeCurve(outline, doc)
     expect(curve[0].y).toBe(EDGE_ANCHOR_Y)
+  })
+})
+
+describe('文档卡：摘要与生成按钮、目标项圆点', () => {
+  const withBody = makeNode({ id: 'n1', title: '极限', docs: { teaching: '# 标题\n\n第一段正文\n\n第二段正文' } })
+  const empty = makeNode({ id: 'n2', title: '导数', docs: { teaching: '' } })
+  const store = makeStore([withBody, empty])
+
+  it('有正文：给两行摘要，卡片长高；没有正文：只给 blank 标记', () => {
+    const a = resolveNodeView(store, { id: 'd:n1', kind: 'doc', ref: 'n1', x: 0, y: 0 })
+    expect(a.blank).toBe(false)
+    expect(a.excerpt).toContain('第一段正文')
+    // 摘要去掉标题井号，不然第一行永远是「# 标题」
+    expect(a.excerpt).not.toContain('#')
+    expect(cardHeight(store, { kind: 'doc', ref: 'n1' })).toBe(DOC_BODY_H)
+
+    const b = resolveNodeView(store, { id: 'd:n2', kind: 'doc', ref: 'n2', x: 0, y: 0 })
+    expect(b.blank).toBe(true)
+    expect(b.excerpt).toBeUndefined()
+    expect(cardHeight(store, { kind: 'doc', ref: 'n2' })).toBe(CARD_H)
+  })
+
+  it('目标项圆点贴在卡片右边框上，垂直对准那一行', () => {
+    const node: StructureNode = { id: 'o:p1', kind: 'outline', ref: 'p1', x: 100, y: 50 }
+    const p0 = slotDotPos(node, 0)
+    const p2 = slotDotPos(node, 2)
+    expect(p0.x).toBe(100 + CARD_W)
+    expect(p0.y).toBe(50 + slotAnchorY(0))
+    expect(p2.y - p0.y).toBe(SLOT_ROW * 2)
+    expect(SLOT_DOT_R).toBeGreaterThan(0)
   })
 })

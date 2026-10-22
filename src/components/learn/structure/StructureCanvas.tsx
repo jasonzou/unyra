@@ -33,6 +33,7 @@ import {
   clampZoom,
   fitZoom,
   EDGE_STYLES,
+  docGid,
   seedLayout,
   slotOrderOf,
   type EdgeStyle,
@@ -58,7 +59,9 @@ import {
   hitTest,
   outlineSlots,
   resolveNodeView,
+  SLOT_DOT_R,
   slotAnchorY,
+  slotDotPos,
   slotKeyOf,
   splitLeafRef,
 } from './structureView'
@@ -84,6 +87,13 @@ export interface StructureCanvasProps {
   onRenameNote?: (nodeId: string, from: string, to: string) => void
   /** 给某个节点的大纲手动加一条目标项（大纲卡底部的「+」） */
   onAddOutlineEntry?: (nodeId: string, title: string) => void
+  /**
+   * 在某个大纲的目标项上「挂一份文档」：建出带标题的空文档（壳），返回新节点 id。
+   * 只建壳不写内容——内容要 AI 生成、还得用户确认。
+   */
+  onCreateChildDoc?: (ownerNodeId: string, title: string) => string | null
+  /** 给一个空文档卡点「生成文档」：交给 AI 写正文 */
+  onGenerateDoc?: (nodeId: string) => void
   /** 双击空节点：交给上层去生成内容（这一版还没接，先提示） */
   onFillNode?: (node: StructureNode) => void
   onToast?: (msg: string) => void
@@ -110,7 +120,7 @@ type Gesture =
       /** 按下的是标题：没拖动的话松手就打开它 */
       openTitle: boolean
     }
-  | { mode: 'link'; from: string }
+  | { mode: 'link'; from: string; slotKey?: string; moved?: boolean }
   | { mode: 'palette'; kind: GraphKind }
   | null
 
@@ -132,6 +142,8 @@ export const StructureCanvas = memo(function StructureCanvas({
   onCreateNote,
   onRenameNote,
   onAddOutlineEntry,
+  onCreateChildDoc,
+  onGenerateDoc,
   onFillNode,
   onToast,
   focusTarget,
@@ -512,6 +524,47 @@ export const StructureCanvas = memo(function StructureCanvas({
     [nodes, edges, commit, onToast, store],
   )
 
+  /** 把某份文档挂到某条目标项上（连线时用；一个接入点只挂一份） */
+  const assignSlot = useCallback(
+    (outlineId: string, docId: string, key: string) => {
+      const outline = nodes.find((n) => n.id === outlineId)
+      const doc = nodes.find((n) => n.id === docId)
+      if (!outline || !doc || doc.kind !== 'doc') return false
+      const slot = outlineSlots(store, outline, nodes).find((s) => s.key === key)
+      if (!slot) {
+        onToast?.(t('这张大纲没有这个接入点'))
+        return false
+      }
+      if (slot.childId && slot.childId !== docId) {
+        onToast?.(t('「{0}」这个目标项已经挂了一个文档', slot.title))
+        return false
+      }
+      if (slot.childId === docId) return true
+      const nextNodes = nodes.map((n) => (n.id === docId ? { ...n, slot: key } : n))
+      const linked = edges.some((e) => e.from === outlineId && e.to === docId)
+      commit({ version: 1, nodes: nextNodes, edges: linked ? edges : [...edges, { from: outlineId, to: docId }] })
+      return true
+    },
+    [nodes, edges, store, commit, onToast],
+  )
+
+  /** 指针压在哪颗目标项圆点上（世界坐标） */
+  const dotAt = useCallback(
+    (world: { x: number; y: number }) => {
+      for (const node of nodes) {
+        if (node.kind !== 'outline') continue
+        for (const slot of outlineSlots(store, node, nodes)) {
+          const p = slotDotPos(node, slot.index)
+          if (Math.hypot(p.x - world.x, p.y - world.y) <= SLOT_DOT_R + 8) {
+            return { parentId: node.id, key: slot.key, slot }
+          }
+        }
+      }
+      return null
+    },
+    [nodes, store],
+  )
+
   /* ---------- 点目标项 ---------- */
 
   const onSlotClick = useCallback(
@@ -524,17 +577,29 @@ export const StructureCanvas = memo(function StructureCanvas({
         centerOn(slot.childId)
         return
       }
+      /*
+       * 点目标项 = 给它挂一份**带标题的空文档**（壳）。
+       *
+       * 只建壳不写正文：正文要 AI 写、还得用户确认，所以卡片上留一颗「生成文档」。
+       * 实体建出来之后节点 id 用 docGid(实体 id)，对账认得它，不会又补一张重复的卡。
+       */
+      const ownerId = parent.ref ?? ''
+      const entityId = onCreateChildDoc?.(ownerId, slot.title) ?? null
       const child: StructureNode = {
-        id: crypto.randomUUID(),
-        // 接入点挂的是文档：大纲的父子节点只能是文档
+        id: entityId ? docGid(entityId) : crypto.randomUUID(),
         kind: 'doc',
+        ...(entityId ? { ref: entityId } : {}),
         slot: slot.key,
         x: parent.x + CARD_W + 112,
         y: parent.y + slot.index * (CARD_H + 24),
       }
       commit({ version: 1, nodes: [...nodes, child], edges: [...edges, { from: parent.id, to: child.id }] })
       setSelectedId(child.id)
-      onToast?.(t('「{0}」的子文档已就位：双击它可以开始生成内容', slot.title))
+      onToast?.(
+        entityId
+          ? t('「{0}」的文档已建好（还是空的），点卡片上的「生成文档」让 AI 来写', slot.title)
+          : t('「{0}」的子文档已就位：双击它可以开始生成内容', slot.title),
+      )
     },
     [centerOn, edges, nodes, commit, onToast, store],
   )
@@ -696,6 +761,16 @@ export const StructureCanvas = memo(function StructureCanvas({
         return
       }
 
+      const dotEl = target.closest<HTMLElement>('[data-slot-dot]')
+      if (dotEl) {
+        const from = dotEl.dataset.slotDotParent as string
+        gestureRef.current = { mode: 'link', from, slotKey: dotEl.dataset.slotDot as string, moved: false }
+        setLinkFrom(from)
+        setLinkAt(toWorld(e.clientX, e.clientY))
+        setSelectedId(from)
+        return
+      }
+
       const addEl = target.closest<HTMLElement>('[data-add-slot]')
       if (addEl) {
         const nodeId = addEl.dataset.addSlot as string
@@ -786,6 +861,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         return
       }
       if (g.mode === 'link') {
+        g.moved = true
         setLinkAt(world)
         setHoverId(hitTest(nodes, world.x, world.y, height)?.id ?? null)
         return
@@ -829,6 +905,24 @@ export const StructureCanvas = memo(function StructureCanvas({
 
       if (g.mode === 'link') {
         const world = toWorld(e.clientX, e.clientY)
+        // 从圆点上按下但没拖动 = 点了一下这条目标项
+        if (!g.moved && g.slotKey) {
+          onSlotClick(g.from, g.slotKey)
+          setLinkFrom(null)
+          setLinkAt(null)
+          setHoverId(null)
+          return
+        }
+        // 一、把线拖到某颗目标项圆点上：由那条目标项接住
+        const dot = dotAt(world)
+        if (dot) {
+          if (g.from !== dot.parentId) assignSlot(dot.parentId, g.from, dot.key)
+          setLinkFrom(null)
+          setLinkAt(null)
+          setHoverId(null)
+          return
+        }
+        // 二、普通落点：连到那张卡上
         const target = hitTest(nodes, world.x, world.y, height)
         if (target && target.id !== g.from && !addEdge(g.from, target.id)) {
           onToast?.(t('这两个节点不能这样连：下游不能回流，笔记/试卷/超级文档只能挂在文档下面'))
@@ -1155,10 +1249,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                       className="flex cursor-pointer items-center gap-1.5 rounded px-1 hover:bg-seal/[0.08]"
                       style={{ height: SLOT_ROW }}
                     >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full border"
-                        style={{ borderColor: slot.color, background: slot.childId ? slot.color : 'transparent' }}
-                      />
+                      <span className="h-2 w-2 shrink-0" />
                       <span
                         className="truncate text-[11.5px]"
                         style={{ color: slot.childId ? slot.color : undefined, opacity: slot.childId ? 1 : 0.55 }}
@@ -1177,6 +1268,21 @@ export const StructureCanvas = memo(function StructureCanvas({
                     ＋ {t('添加目标项')}
                   </div>
                 </div>
+              ) : node.kind === 'doc' && view.excerpt ? (
+                /* 有正文：两行摘要，溢出省略 */
+                <div className="line-clamp-2 px-3 pb-2 text-[11px] leading-snug text-ink-soft">{view.excerpt}</div>
+              ) : node.kind === 'doc' && node.ref ? (
+                /* 空文档（壳）：给一颗「生成文档」，正文交给 AI 写、用户确认 */
+                <div className="flex items-center justify-between gap-2 px-3 pb-2">
+                  <span className="text-[11px] text-ink-faint">{t('还没有正文')}</span>
+                  <button
+                    type="button"
+                    className="rounded bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
+                    onClick={() => onGenerateDoc?.(node.ref as string)}
+                  >
+                    {t('生成文档')}
+                  </button>
+                </div>
               ) : (
                 <div className="truncate px-3 pb-2 text-[11px] text-ink-soft">{view.subtitle}</div>
               )}
@@ -1192,6 +1298,34 @@ export const StructureCanvas = memo(function StructureCanvas({
                 style={{ top: EDGE_ANCHOR_Y, opacity: selected || isHovered ? 1 : undefined }}
               />
             </div>
+
+            {/*
+              目标项圆点：贴在卡片右边框上（半进半出），垂直对准那一行。
+              它不只是指示灯——从这里拖出去可以连一份文档，把线拖到它上面也能接住。
+            */}
+            {node.kind === 'outline' &&
+              slots.map((slot) => {
+                const p = slotDotPos(node, slot.index)
+                return (
+                  <div
+                    key={`dot-${slot.key}`}
+                    data-slot-dot={slot.key}
+                    data-slot-dot-parent={node.id}
+                    title={
+                      slot.childId ? t('「{0}」已挂文档：拖出去可换一份', slot.title) : t('从圆点拖出去挂一份文档')
+                    }
+                    className="absolute -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2"
+                    style={{
+                      left: p.x,
+                      top: p.y,
+                      width: SLOT_DOT_R * 2,
+                      height: SLOT_DOT_R * 2,
+                      borderColor: slot.color,
+                      background: slot.childId ? slot.color : 'var(--color-card, #fff)',
+                    }}
+                  />
+                )
+              })}
 
             {/*
               注释：**贴在卡片外面**、跟着节点走的一条便签。

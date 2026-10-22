@@ -32,6 +32,10 @@ export interface OutlineViewProps {
   onRenameNote?: (nodeId: string, from: string, to: string) => void
   /** 给某个节点的大纲手动加一条目标项 */
   onAddOutlineEntry?: (nodeId: string, title: string) => void
+  /** 在目标项上挂一份带标题的空文档（壳），返回新节点 id */
+  onCreateChildDoc?: (ownerNodeId: string, title: string) => string | null
+  /** 空文档卡上的「生成文档」：交给 AI 写正文 */
+  onGenerateDoc?: (nodeId: string) => void
   onToast?: (msg: string) => void
   /** 外部指定的聚焦目标（如 chip 路由） */
   focusTarget?: { nodeId: string; nonce: number } | null
@@ -56,6 +60,8 @@ export default memo(function OutlineView({
   onCreateNote,
   onRenameNote,
   onAddOutlineEntry,
+  onCreateChildDoc,
+  onGenerateDoc,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -74,6 +80,8 @@ export default memo(function OutlineView({
           onCreateNote={onCreateNote}
           onRenameNote={onRenameNote}
           onAddOutlineEntry={onAddOutlineEntry}
+          onCreateChildDoc={onCreateChildDoc}
+          onGenerateDoc={onGenerateDoc}
           onToast={onToast}
           focusTarget={focusTarget}
           onFocusHandled={onFocusHandled}

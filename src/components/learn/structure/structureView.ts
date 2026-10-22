@@ -10,6 +10,7 @@
 
 import type { LearnStore } from '../../../learn/types'
 import {
+  CARD_W,
   OUTLINE_HEAD,
   SLOT_ROW,
   defaultHeight,
@@ -24,7 +25,7 @@ import {
  * （自动排列按实际高度往下排），放在组件层会让领域层反向依赖界面。
  * 这里 re-export 一份，调用方从 structureView 取的习惯不变。
  */
-export { NOTE_ROW, OUTLINE_HEAD, SLOT_ROW, cardHeight, heightOf } from '../../../learn/structure'
+export { DOC_BODY_H, NOTE_ROW, OUTLINE_HEAD, SLOT_ROW, cardHeight, heightOf } from '../../../learn/structure'
 import { nodeById } from '../../../learn/graph'
 
 /**
@@ -38,6 +39,10 @@ export const EDGE_ANCHOR_Y = 34
 export interface NodeView {
   title: string
   subtitle: string
+  /** 文档卡上的两行正文摘要（只给有正文的文档节点） */
+  excerpt?: string
+  /** 有 ref、但正文还是空的：卡片上给一颗「生成文档」 */
+  blank?: boolean
   /** ref 指向的实体已经不在了（节点删了、笔记改名了） */
   missing: boolean
 }
@@ -133,6 +138,19 @@ export function slotAnchorY(index: number): number {
   return OUTLINE_HEAD + index * SLOT_ROW + SLOT_ROW / 2
 }
 
+/** 目标项圆点的半径（世界坐标） */
+export const SLOT_DOT_R = 5
+
+/**
+ * 目标项圆点的世界坐标：**贴右边框、半进半出**，垂直对准那一行。
+ *
+ * 圆点既是「这条目标项占了没有」的指示灯，也是连线的手柄：
+ * 从它拖出去连一份文档，或者把线拖到它上面来接住。
+ */
+export function slotDotPos(node: StructureNode, index: number): { x: number; y: number } {
+  return { x: node.x + CARD_W, y: node.y + slotAnchorY(index) }
+}
+
 /**
  * 一个大纲节点卡片里要列出的目标项，以及每个接入点有没有挂上子文档。
  *
@@ -182,6 +200,9 @@ export function resolveNodeView(store: LearnStore, node: StructureNode): NodeVie
     return {
       title: owner.title,
       subtitle: body ? `${body.length} 字` : '还没有正文',
+      // 摘要给两行：去掉标题井号与多余空行，不然第一行永远是「# 标题」
+      excerpt: body ? body.replace(/^#{1,6}\s*/gm, '').replace(/\n{2,}/g, '\n').trim().slice(0, 220) : undefined,
+      blank: !body,
       missing: false,
     }
   }
