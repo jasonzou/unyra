@@ -312,26 +312,320 @@ export function edgeCurve(
   return [p0, { x: p0.x + bend, y: p0.y }, { x: p3.x - bend, y: p3.y }, p3]
 }
 
-/** 连线样式：默认折线（横平竖直，读起来干净），可以切成曲线 */
+/* ---------- 直角路由：绕开卡片 ---------- */
+
+/**
+ * 线离卡片边框至少留这么多（世界坐标）。
+ *
+ * 0 会让线贴着卡片边框走，看着像卡片自己的边框；太大又会把走廊挤没——
+ * 自动排列的行距是 36（`ROW_GAP`），两边各留 16 之后还剩 4px 能让线穿过去。
+ */
+export const EDGE_CLEARANCE = 16
+/**
+ * 出线 / 进线先直着走这么远再拐弯。
+ *
+ * 起点在卡片右沿、终点在左沿，如果一上来就拐，线会在卡片角上拧一个贴着边框的 90°；
+ * 先直走一小段（比分外扩的 `EDGE_CLEARANCE` 大一点，好让这一小段落在障碍之外）。
+ */
+export const EDGE_STUB = 20
+/** 拐一次弯折合多长：宁可多绕两步，也别拐成楼梯 */
+const TURN_COST = 48
+
+interface RectLike {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+function inflate(r: RectLike, by: number): RectLike {
+  return { x: r.x - by, y: r.y - by, width: r.width + by * 2, height: r.height + by * 2 }
+}
+
+/** 判定「穿过」时的容差：贴边不算穿过（线可以沿着卡片边上走） */
+const EPS = 0.5
+
+function insideRect(p: Point, r: RectLike): boolean {
+  return p.x > r.x + EPS && p.x < r.x + r.width - EPS && p.y > r.y + EPS && p.y < r.y + r.height - EPS
+}
+
+/** 轴对齐线段是否穿过矩形内部（贴边不算） */
+function crossesRect(a: Point, b: Point, r: RectLike): boolean {
+  const minX = Math.min(a.x, b.x)
+  const maxX = Math.max(a.x, b.x)
+  const minY = Math.min(a.y, b.y)
+  const maxY = Math.max(a.y, b.y)
+  return maxX > r.x + EPS && minX < r.x + r.width - EPS && maxY > r.y + EPS && minY < r.y + r.height - EPS
+}
+
+function intersectsRect(a: RectLike, b: RectLike): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+}
+
+/**
+ * 老画法：右出 → 竖直 → 右进。没有卡片挡路时就用它——同一张图上不该有两种线型混着。
+ *
+ * 往回连（目标在左边）时先往右伸出去 40px 再绕回来，否则中间那条竖线会落在源卡片里面。
+ */
+export function edgeElbow(start: Point, end: Point): Point[] {
+  if (Math.abs(start.y - end.y) < 0.5) return [start, end]
+  const midX = end.x > start.x + 48 ? (start.x + end.x) / 2 : start.x + 40
+  return [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end]
+}
+
+/** 去掉重复点与「三点共线」的中间点：路径越短，后面按长度取点越准 */
+function simplify(points: readonly Point[]): Point[] {
+  const out: Point[] = []
+  for (const p of points) {
+    const last = out[out.length - 1]
+    if (last && Math.abs(last.x - p.x) < EPS && Math.abs(last.y - p.y) < EPS) continue
+    out.push({ x: p.x, y: p.y })
+  }
+  for (let i = out.length - 2; i >= 1; i--) {
+    const a = out[i - 1]
+    const b = out[i]
+    const c = out[i + 1]
+    const sameX = Math.abs(a.x - b.x) < EPS && Math.abs(b.x - c.x) < EPS
+    const sameY = Math.abs(a.y - b.y) < EPS && Math.abs(b.y - c.y) < EPS
+    if (sameX || sameY) out.splice(i, 1)
+  }
+  return out
+}
+
+/**
+ * 候选坐标线：起点、终点各一条，其余取障碍的四条边。
+ *
+ * 障碍已经按 `EDGE_CLEARANCE` 外扩过，所以「贴着障碍边」就等于「离卡片留够白」。
+ * 端点坐标**原样保留**（不能被去重掉，否则找不到起终点）；与它们挨得太近的边线直接丢掉。
+ */
+function axisLines(keep: readonly number[], edges: readonly number[]): number[] {
+  const out = [...keep]
+  for (const v of edges) {
+    if (out.some((k) => Math.abs(k - v) <= 1)) continue
+    out.push(v)
+  }
+  return out.sort((a, b) => a - b)
+}
+
+function manhattan(a: Point, b: Point): number {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y)
+}
+
+/** A* 的开集：二叉堆。拖节点时每条边都要重算，别用「每次扫一遍找最小」 */
+class OpenSet {
+  private ids: number[] = []
+  private keys: number[] = []
+
+  get size(): number {
+    return this.ids.length
+  }
+
+  push(id: number, key: number): void {
+    this.ids.push(id)
+    this.keys.push(key)
+    let i = this.ids.length - 1
+    while (i > 0) {
+      const parent = (i - 1) >> 1
+      if (this.keys[parent] <= this.keys[i]) break
+      this.swap(parent, i)
+      i = parent
+    }
+  }
+
+  pop(): number {
+    const top = this.ids[0]
+    const lastId = this.ids.pop() as number
+    const lastKey = this.keys.pop() as number
+    if (this.ids.length) {
+      this.ids[0] = lastId
+      this.keys[0] = lastKey
+      let i = 0
+      for (;;) {
+        const left = i * 2 + 1
+        const right = left + 1
+        let small = i
+        if (left < this.ids.length && this.keys[left] < this.keys[small]) small = left
+        if (right < this.ids.length && this.keys[right] < this.keys[small]) small = right
+        if (small === i) break
+        this.swap(i, small)
+        i = small
+      }
+    }
+    return top
+  }
+
+  private swap(a: number, b: number): void {
+    const id = this.ids[a]
+    this.ids[a] = this.ids[b]
+    this.ids[b] = id
+    const key = this.keys[a]
+    this.keys[a] = this.keys[b]
+    this.keys[b] = key
+  }
+}
+
+/** 走一步的四个方向，第三项是「这一步是横的还是竖的」（拐弯要加钱） */
+const STEPS: ReadonlyArray<readonly [number, number, number]> = [
+  [1, 0, 1],
+  [-1, 0, 1],
+  [0, 1, 2],
+  [0, -1, 2],
+]
+
+/**
+ * 在障碍之间找一条横平竖直的路（A*，代价 = 长度 + 拐弯）。
+ *
+ * 网格取「端点 + 障碍边」这些线（Hanan grid）：直角路线的最优解一定落在这组线上，
+ * 所以不用真的铺一张密网格。起点、终点即使落在障碍里也允许（它们本来就贴着卡片边）。
+ */
+function orthogonalRoute(start: Point, end: Point, solids: readonly RectLike[]): Point[] | null {
+  const xs = axisLines(
+    [start.x, end.x],
+    solids.flatMap((r) => [r.x, r.x + r.width]),
+  )
+  const ys = axisLines(
+    [start.y, end.y],
+    solids.flatMap((r) => [r.y, r.y + r.height]),
+  )
+  const nx = xs.length
+  const ny = ys.length
+  const cells = nx * ny
+
+  const blocked = new Uint8Array(cells)
+  for (let xi = 0; xi < nx; xi++) {
+    for (let yi = 0; yi < ny; yi++) {
+      const p = { x: xs[xi], y: ys[yi] }
+      if (solids.some((r) => insideRect(p, r))) blocked[xi * ny + yi] = 1
+    }
+  }
+
+  const startXi = xs.indexOf(start.x)
+  const startYi = ys.indexOf(start.y)
+  const endXi = xs.indexOf(end.x)
+  const endYi = ys.indexOf(end.y)
+  if (startXi < 0 || startYi < 0 || endXi < 0 || endYi < 0) return null
+  const startCell = startXi * ny + startYi
+  const endCell = endXi * ny + endYi
+  blocked[startCell] = 0
+  blocked[endCell] = 0
+
+  // 状态 = 格子 × 方向：同样一个格子，横着进来和竖着进来，后面拐弯的价钱不一样
+  const g = new Float64Array(cells * 3).fill(Infinity)
+  const prev = new Int32Array(cells * 3).fill(-1)
+  const done = new Uint8Array(cells * 3)
+  const open = new OpenSet()
+  const first = startCell * 3
+  g[first] = 0
+  open.push(first, manhattan(start, end))
+
+  while (open.size) {
+    const cur = open.pop()
+    if (done[cur]) continue
+    done[cur] = 1
+    const dir = cur % 3
+    const cell = (cur - dir) / 3
+    if (cell === endCell) {
+      const path: Point[] = []
+      for (let id = cur; id >= 0; id = prev[id]) {
+        const d = id % 3
+        const c = (id - d) / 3
+        const xi = Math.floor(c / ny)
+        path.push({ x: xs[xi], y: ys[c - xi * ny] })
+      }
+      return simplify(path.reverse())
+    }
+    const xi = Math.floor(cell / ny)
+    const yi = cell - xi * ny
+    const here = { x: xs[xi], y: ys[yi] }
+    for (const [dx, dy, nextDir] of STEPS) {
+      const tx = xi + dx
+      const ty = yi + dy
+      if (tx < 0 || tx >= nx || ty < 0 || ty >= ny) continue
+      const target = tx * ny + ty
+      if (blocked[target]) continue
+      const there = { x: xs[tx], y: ys[ty] }
+      if (solids.some((r) => crossesRect(here, there, r))) continue
+      const next = target * 3 + nextDir
+      if (done[next]) continue
+      const cost = g[cur] + manhattan(here, there) + (dir && dir !== nextDir ? TURN_COST : 0)
+      if (cost < g[next] - 1e-6) {
+        g[next] = cost
+        prev[next] = cur
+        open.push(next, cost + manhattan(there, end))
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * 一条边画在哪：**直角折线**，遇到卡片绕着走。
+ *
+ * 顺序是「先试老画法，穿不过去才绕」：
+ * 1. 老画法（右出 → 竖直 → 右进）只要不穿过任何卡片，就用它——大多数图都是这种，
+ *    保持一条线一个样子，比「每条边都算一次最优路」更好读，也省掉每帧的寻路；
+ * 2. 穿过去了才寻路：出线先直走 `EDGE_STUB`、进线同样，中间那段交给 A* 绕。
+ *
+ * 判「穿过」时**源卡片和目标卡片也参与**（不外扩）：目标是同一列的另一张卡时，
+ * 老画法会从它身上穿进去，这一条也得绕。
+ */
+export function edgeRoute(
+  from: StructureNode,
+  to: StructureNode,
+  nodes: readonly StructureNode[],
+  height: HeightOf = defaultHeight,
+  anchor?: { from?: number; to?: number },
+): Point[] {
+  const fromRect = rectOf(from, height)
+  const toRect = rectOf(to, height)
+  const start = { x: fromRect.x + fromRect.width, y: fromRect.y + (anchor?.from ?? EDGE_ANCHOR_Y) }
+  /*
+   * 从哪一边进目标：默认走它的左沿（读图方向），但目标不在右边时（同一列、或者被拖到了左边）
+   * 还从左边进就得绕到它背后去——那种「从卡片身上穿进去」的老画法更是错的。
+   * 判据：目标的右边没有超出源的右边，就从右边进。
+   */
+  const enterRight = toRect.x + toRect.width <= fromRect.x + fromRect.width
+  const end = {
+    x: enterRight ? toRect.x + toRect.width : toRect.x,
+    y: toRect.y + (anchor?.to ?? EDGE_ANCHOR_Y),
+  }
+
+  const others = nodes
+    .filter((n) => n.id !== from.id && n.id !== to.id)
+    .map((n) => inflate(rectOf(n, height), EDGE_CLEARANCE))
+  const solids = [...others, fromRect, toRect]
+
+  const elbow = edgeElbow(start, end)
+  const blocked = solids.some((r) => elbow.some((p, i) => i > 0 && crossesRect(elbow[i - 1], p, r)))
+  if (!blocked) return elbow
+
+  // 绕行：出/进那一小段贴着卡片，不算障碍（所以用外扩后的矩形当障碍，两端点在外扩之外）
+  const stubStart = { x: start.x + EDGE_STUB, y: start.y }
+  const stubEnd = { x: end.x + (enterRight ? EDGE_STUB : -EDGE_STUB), y: end.y }
+  const around = [...others, inflate(fromRect, EDGE_CLEARANCE), inflate(toRect, EDGE_CLEARANCE)]
+  /*
+   * 只把「这条线可能经过的区域」里的卡片丢给 A*：网格是按障碍条数平方长的，
+   * 一张几十个节点的图全丢进去，拖节点时每条边都要重算，会卡。
+   * 剪枝可能漏掉远处的卡片，所以算完再拿**全量**验一遍，穿过去了就退回老画法。
+   */
+  const area = {
+    x: Math.min(start.x, end.x) - 240,
+    y: Math.min(start.y, end.y) - 240,
+    width: Math.abs(start.x - end.x) + 480,
+    height: Math.abs(start.y - end.y) + 480,
+  }
+  const near = around.filter((r) => intersectsRect(area, r))
+  const found = orthogonalRoute(stubStart, stubEnd, near) ?? orthogonalRoute(stubStart, stubEnd, around)
+  if (!found) return elbow
+
+  const points = simplify([start, ...found, end])
+  const hits = points.some((p, i) => i > 0 && solids.some((r) => crossesRect(points[i - 1], p, r)))
+  return hits ? elbow : points
+}
+
+/** 连线样式：默认折线（横平竖直、绕开卡片），可以切成曲线 */
 export const EDGE_STYLES = ['straight', 'curved'] as const
 export type EdgeStyle = (typeof EDGE_STYLES)[number]
-
-/** 折线的拐点：右出 → 竖直 → 右进。两卡上下错开时，线走成一个「Z」 */
-function edgePolyline(curve: readonly Point[]): Point[] {
-  const [p0, , , p3] = curve
-  /*
-   * 拐点取两卡中间。往回连（目标在左边）时中间点会落到源卡里面，
-   * 于是改成「先往右伸出去 40px 再绕回来」，避免线从卡片身上穿过去。
-   */
-  // 同一行：折线退化成一条横线，不必留拐点（留了也是三点共线）
-  if (Math.abs(p0.y - p3.y) < 0.5) return [p0, p3]
-  const midX = p3.x > p0.x + 48 ? (p0.x + p3.x) / 2 : p0.x + 40
-  const raw = [p0, { x: midX, y: p0.y }, { x: midX, y: p3.y }, p3]
-  // 同一行时竖直段长度为 0，去掉重合点，路径与「按长度取点」都干净
-  return raw.filter(
-    (p, i) => i === 0 || Math.abs(p.x - raw[i - 1].x) > 0.5 || Math.abs(p.y - raw[i - 1].y) > 0.5,
-  )
-}
 
 /** 点 (x,y) 到线段 ab 的距离 */
 function distanceToSegment(x: number, y: number, a: Point, b: Point): number {
@@ -343,53 +637,61 @@ function distanceToSegment(x: number, y: number, a: Point, b: Point): number {
   return Math.hypot(x - (a.x + dx * t), y - (a.y + dy * t))
 }
 
-export function edgePathD(curve: readonly Point[], style: EdgeStyle = 'straight'): string {
-  const [p0, p1, p2, p3] = curve
-  if (style === 'straight') {
-    return edgePolyline(curve)
-      .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`)
-      .join(' ')
+/**
+ * 路径的 d：折线（`edgeRoute` / `edgeElbow` 的点列）直接连，曲线要四个贝塞尔控制点。
+ *
+ * 入参统一叫「点列」：画线、点选、两颗小圆点都吃同一份，就不会出现「看得到、点不到」。
+ */
+export function edgePathD(points: readonly Point[], style: EdgeStyle = 'straight'): string {
+  if (style === 'curved' && points.length === 4) {
+    const [p0, p1, p2, p3] = points
+    return `M${p0.x} ${p0.y} C${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`
   }
-  return `M${p0.x} ${p0.y} C${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`
+  return points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ')
 }
 
 /**
- * 线上参数 t 处的点：折线按**累计长度**取（不是按拐点序号），曲线是三次贝塞尔。
+ * 折线上参数 t 处的点：按**累计长度**取（不是按拐点序号）。
  *
  * 按长度取才和视觉一致：拐点两侧的线段长短不一，按序号取会让两颗小圆点一密一疏。
  */
-export function edgePointAt(curve: readonly Point[], t: number, style: EdgeStyle = 'straight'): Point {
-  const [p0, p1, p2, p3] = curve
-  if (style === 'straight') {
-    const pts = edgePolyline(curve)
-    const segs = pts.slice(1).map((p, i) => Math.hypot(p.x - pts[i].x, p.y - pts[i].y))
-    const total = segs.reduce((a, b) => a + b, 0)
-    if (total < 0.5) return pts[0]
-    let left = t * total
-    for (let i = 0; i < segs.length; i++) {
-      if (left <= segs[i] || i === segs.length - 1) {
-        const k = segs[i] < 0.5 ? 0 : Math.min(1, left / segs[i])
-        return {
-          x: pts[i].x + (pts[i + 1].x - pts[i].x) * k,
-          y: pts[i].y + (pts[i + 1].y - pts[i].y) * k,
-        }
+function polylineAt(points: readonly Point[], t: number): Point {
+  if (!points.length) return { x: 0, y: 0 }
+  const segs = points.slice(1).map((p, i) => Math.hypot(p.x - points[i].x, p.y - points[i].y))
+  const total = segs.reduce((a, b) => a + b, 0)
+  if (total < 0.5) return points[0]
+  let left = t * total
+  for (let i = 0; i < segs.length; i++) {
+    if (left <= segs[i] || i === segs.length - 1) {
+      const k = segs[i] < 0.5 ? 0 : Math.min(1, left / segs[i])
+      return {
+        x: points[i].x + (points[i + 1].x - points[i].x) * k,
+        y: points[i].y + (points[i + 1].y - points[i].y) * k,
       }
-      left -= segs[i]
     }
-    return pts[pts.length - 1]
+    left -= segs[i]
   }
-  const u = 1 - t
-  return {
-    x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
-    y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+  return points[points.length - 1]
+}
+
+/** 线上参数 t 处的点：折线按累计长度取，曲线是三次贝塞尔 */
+export function edgePointAt(points: readonly Point[], t: number, style: EdgeStyle = 'straight'): Point {
+  if (style === 'curved' && points.length === 4) {
+    const [p0, p1, p2, p3] = points
+    const u = 1 - t
+    return {
+      x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+      y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+    }
   }
+  return polylineAt(points, t)
 }
 
 /**
  * 点在哪条连线上（阈值内才算命中，取最近的一条）。
  *
- * 采样 24 段而不是解方程：贝塞尔的「点到曲线距离」没有解析解，采样够密就够用，
- * 而且与画出来的那条线用的是同一组控制点，不会出现「看得到、点不到」。
+ * 折线按「点到线段」算，比采样准；曲线只能采样 24 段——贝塞尔的「点到曲线距离」没有解析解。
+ * `routeOf` 是画布算好的点列（和画出来的是同一份），不传就现算。
  */
 export function edgeAt(
   nodes: readonly StructureNode[],
@@ -400,6 +702,7 @@ export function edgeAt(
   height: HeightOf = defaultHeight,
   style: EdgeStyle = 'straight',
   anchorOf?: (edge: { from: string; to: string }) => { from?: number; to?: number } | undefined,
+  routeOf?: (edge: { from: string; to: string }) => readonly Point[] | undefined,
 ): { from: string; to: string } | null {
   const byId = new Map(nodes.map((n) => [n.id, n]))
   let best: { from: string; to: string } | null = null
@@ -408,47 +711,56 @@ export function edgeAt(
     const from = byId.get(edge.from)
     const to = byId.get(edge.to)
     if (!from || !to) continue
-    const curve = edgeCurve(from, to, height, anchorOf?.(edge))
-    if (style === 'straight') {
-      // 折线是线段拼的：直接算「点到线段」的距离，比按 24 等分采样准得多
-      const pts = edgePolyline(curve)
-      let dist = Infinity
-      for (let i = 1; i < pts.length; i++) {
-        dist = Math.min(dist, distanceToSegment(x, y, pts[i - 1], pts[i]))
+    const points = edgePointsOf(nodes, edge, from, to, height, style, anchorOf, routeOf)
+    let dist = Infinity
+    if (style === 'curved' && points.length === 4) {
+      for (let i = 0; i <= 24; i++) {
+        const p = edgePointAt(points, i / 24, 'curved')
+        dist = Math.min(dist, Math.hypot(p.x - x, p.y - y))
       }
-      if (dist <= bestDist) {
-        bestDist = dist
-        best = edge
+    } else {
+      for (let i = 1; i < points.length; i++) {
+        dist = Math.min(dist, distanceToSegment(x, y, points[i - 1], points[i]))
       }
-      continue
     }
-    for (let i = 0; i <= 24; i++) {
-      const p = edgePointAt(curve, i / 24, style)
-      const dist = Math.hypot(p.x - x, p.y - y)
-      if (dist <= bestDist) {
-        bestDist = dist
-        best = edge
-      }
+    if (dist <= bestDist) {
+      bestDist = dist
+      best = edge
     }
   }
   return best
 }
 
 /**
- * 一条连线两端那两颗小圆点的位置：各距端点一段（按参数取，不用像素距离）。
+ * 一条边的那份点列：优先用调用方算好的（画布上已经算过一遍），否则现算。
  *
- * 用 t=0.22 / 0.78 而不是「离端点 40px」：卡片长高（大纲节点）时曲线的弯法会变，
- * 按参数取点永远落在线上，按像素算就会偏出去。
+ * 「现算」也要走同一套规则：折线 = `edgeRoute`（会绕卡片），曲线 = 贝塞尔控制点。
+ * 两处各写一套，就会出现「画的是绕行的线、点的是老位置」。
  */
-export function edgeDots(
+function edgePointsOf(
+  nodes: readonly StructureNode[],
+  edge: { from: string; to: string },
   from: StructureNode,
   to: StructureNode,
-  height: HeightOf = defaultHeight,
-  style: EdgeStyle = 'straight',
-  anchor?: { from?: number; to?: number },
-): { from: Point; to: Point } {
-  const curve = edgeCurve(from, to, height, anchor)
-  return { from: edgePointAt(curve, 0.22, style), to: edgePointAt(curve, 0.78, style) }
+  height: HeightOf,
+  style: EdgeStyle,
+  anchorOf?: (edge: { from: string; to: string }) => { from?: number; to?: number } | undefined,
+  routeOf?: (edge: { from: string; to: string }) => readonly Point[] | undefined,
+): readonly Point[] {
+  const cached = routeOf?.(edge)
+  if (cached) return cached
+  const anchor = anchorOf?.(edge)
+  return style === 'curved' ? edgeCurve(from, to, height, anchor) : edgeRoute(from, to, nodes, height, anchor)
+}
+
+/**
+ * 一条连线两端那两颗小圆点的位置：各距端点一段（按参数取，不用像素距离）。
+ *
+ * 用 t=0.22 / 0.78 而不是「离端点 40px」：路径会绕行、拐点位置不固定，
+ * 按参数取点永远落在线上，按像素算就会偏出去。
+ */
+export function edgeDots(points: readonly Point[], style: EdgeStyle = 'straight'): { from: Point; to: Point } {
+  return { from: edgePointAt(points, 0.22, style), to: edgePointAt(points, 0.78, style) }
 }
 
 /** 点在哪颗小圆点上（点它 = 跳到线的另一端） */
@@ -461,13 +773,14 @@ export function edgeDotAt(
   height: HeightOf = defaultHeight,
   style: EdgeStyle = 'straight',
   anchorOf?: (edge: { from: string; to: string }) => { from?: number; to?: number } | undefined,
+  routeOf?: (edge: { from: string; to: string }) => readonly Point[] | undefined,
 ): { edge: { from: string; to: string }; side: 'from' | 'to' } | null {
   const byId = new Map(nodes.map((n) => [n.id, n]))
   for (const edge of edges) {
     const from = byId.get(edge.from)
     const to = byId.get(edge.to)
     if (!from || !to) continue
-    const dots = edgeDots(from, to, height, style, anchorOf?.(edge))
+    const dots = edgeDots(edgePointsOf(nodes, edge, from, to, height, style, anchorOf, routeOf), style)
     if (Math.hypot(dots.from.x - x, dots.from.y - y) <= threshold) return { edge, side: 'from' }
     if (Math.hypot(dots.to.x - x, dots.to.y - y) <= threshold) return { edge, side: 'to' }
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CARD_H, CARD_W, type StructureNode } from '../src/learn/structure'
+import type { Point } from '../src/components/learn/structure/structureView'
 import {
   CARD_PAD_B,
   CARD_FRAME_H,
@@ -17,6 +18,7 @@ import {
   edgeDots,
   edgePathD,
   edgePointAt,
+  edgeRoute,
   hitTest,
   outlineCardHeight,
   outlineSlots,
@@ -165,38 +167,94 @@ describe('从 store 铺图', () => {
   })
 })
 
-describe('结构画布：折线的拐点', () => {
+describe('结构画布：折线的拐点与绕行', () => {
   const nodes: StructureNode[] = [
     { id: 'a', kind: 'outline', x: 0, y: 0 },
     { id: 'b', kind: 'doc', x: 300, y: 200 },
   ]
+  const edges = [{ from: 'a', to: 'b' }]
 
-  it('上下错开时走成 Z：右出 → 竖直 → 右进', () => {
-    const curve = edgeCurve(nodes[0], nodes[1])
+  /** 轴对齐线段是否穿过矩形内部（贴边不算）——和 router 里的判据同一条 */
+  function crosses(a: Point, b: Point, r: { x: number; y: number; width: number; height: number }): boolean {
+    const minX = Math.min(a.x, b.x)
+    const maxX = Math.max(a.x, b.x)
+    const minY = Math.min(a.y, b.y)
+    const maxY = Math.max(a.y, b.y)
+    return maxX > r.x + 0.5 && minX < r.x + r.width - 0.5 && maxY > r.y + 0.5 && minY < r.y + r.height - 0.5
+  }
+
+  function rectOfNode(n: StructureNode) {
+    return { x: n.x, y: n.y, width: CARD_W, height: CARD_H }
+  }
+
+  function expectNoCrossing(points: Point[], obstacles: StructureNode[]) {
+    for (let i = 1; i < points.length; i++) {
+      for (const n of obstacles) expect(crosses(points[i - 1], points[i], rectOfNode(n))).toBe(false)
+    }
+  }
+
+  function expectOrthogonal(points: Point[]) {
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1]
+      const b = points[i]
+      expect(Math.abs(a.x - b.x) < 0.5 || Math.abs(a.y - b.y) < 0.5).toBe(true)
+    }
+  }
+
+  it('没有卡片挡路时还是老画法：右出 → 竖直 → 右进', () => {
+    const points = edgeRoute(nodes[0], nodes[1], nodes)
     const midX = (CARD_W + 300) / 2
-    expect(edgePathD(curve)).toBe(
+    expect(edgePathD(points)).toBe(
       `M${CARD_W} ${EDGE_ANCHOR_Y} L${midX} ${EDGE_ANCHOR_Y} L${midX} ${200 + EDGE_ANCHOR_Y} L300 ${200 + EDGE_ANCHOR_Y}`,
     )
   })
 
   it('按累计长度取点：两颗小圆点都落在折线上，且一前一后', () => {
-    const curve = edgeCurve(nodes[0], nodes[1])
-    const a = edgePointAt(curve, 0.22)
-    const b = edgePointAt(curve, 0.78)
+    const points = edgeRoute(nodes[0], nodes[1], nodes)
+    const a = edgePointAt(points, 0.22)
+    const b = edgePointAt(points, 0.78)
     // 折线总长 = 横 46 + 竖 200 + 横 46，0.22 处已经拐进竖直段了——
     // 所以这里只验「在线上」和「前后关系」，不假设它停在哪一段
     expect(a.y).toBeGreaterThan(EDGE_ANCHOR_Y)
     expect(b.y).toBeGreaterThan(a.y)
-    // 阈值用 8：edgeAt 是按 24 等分采样的，总长约 292，采样间隔就有 12
-    const edges = [{ from: 'a', to: 'b' }]
     expect(edgeAt(nodes, edges, a.x, a.y, 8)).toEqual({ from: 'a', to: 'b' })
     expect(edgeAt(nodes, edges, b.x, b.y, 8)).toEqual({ from: 'a', to: 'b' })
   })
 
-  it('往回连（目标在左边）时先向右绕出去，不穿过卡片', () => {
-    const back = edgeCurve(nodes[1], nodes[0])
-    const d = edgePathD(back)
-    expect(d).toContain(`L${300 + CARD_W + 40} `)
+  it('挡在路上的卡片要绕开，且路线还是横平竖直', () => {
+    // 正好压在「拐点竖线」上的一张卡
+    const blocker: StructureNode = { id: 'c', kind: 'note', x: 230, y: 80 }
+    const withBlocker = [...nodes, blocker]
+    const points = edgeRoute(nodes[0], nodes[1], withBlocker)
+    expect(points.length).toBeGreaterThan(2)
+    expectOrthogonal(points)
+    expectNoCrossing(points, withBlocker)
+    // 起点终点没变：还是从 a 的右沿出、进 b 的左沿
+    expect(points[0]).toEqual({ x: CARD_W, y: EDGE_ANCHOR_Y })
+    expect(points[points.length - 1]).toEqual({ x: 300, y: 200 + EDGE_ANCHOR_Y })
+  })
+
+  it('往回连（目标在左边）时绕开目标卡片，不从它身上穿过去', () => {
+    const points = edgeRoute(nodes[1], nodes[0], nodes)
+    expectOrthogonal(points)
+    expectNoCrossing(points, nodes)
+    // 先往右走出源卡片的右沿（否则竖线会落在源卡片里）
+    expect(Math.max(...points.map((p) => p.x))).toBeGreaterThan(300 + CARD_W)
+  })
+
+  it('画线和点选认同一份点列（绕行之后也点得到）', () => {
+    const blocker: StructureNode = { id: 'c', kind: 'note', x: 230, y: 80 }
+    const withBlocker = [...nodes, blocker]
+    const points = edgeRoute(nodes[0], nodes[1], withBlocker)
+    const routeOf = () => points
+    const mid = edgePointAt(points, 0.5)
+    expect(edgeAt(withBlocker, edges, mid.x, mid.y, 4, undefined, 'straight', undefined, routeOf)).toEqual({
+      from: 'a',
+      to: 'b',
+    })
+    // 老的直连位置已经没有线了
+    const oldMid = edgePointAt(edgeRoute(nodes[0], nodes[1], nodes), 0.5)
+    expect(edgeAt(withBlocker, edges, oldMid.x, oldMid.y, 4)).toBeNull()
   })
 })
 
@@ -221,14 +279,15 @@ describe('结构画布：连线的点选', () => {
     expect(edgeAt(nodes, [{ from: 'a', to: 'ghost' }], 200, EDGE_ANCHOR_Y)).toBeNull()
   })
 
-  it('画线与点选用同一组控制点（不会出现看得到点不到）', () => {
-    const curve = edgeCurve(nodes[0], nodes[1])
+  it('画线与点选用同一份点列（不会出现看得到点不到）', () => {
     // 锚点是「离卡片顶部固定距离」，不随卡片高度居中
-    expect(curve[0]).toEqual({ x: CARD_W, y: EDGE_ANCHOR_Y })
-    expect(curve[3]).toEqual({ x: 300, y: EDGE_ANCHOR_Y })
-    // 默认折线：同一行时竖直段为 0，退化成一条横线
-    expect(edgePathD(curve)).toBe(`M${CARD_W} ${EDGE_ANCHOR_Y} L300 ${EDGE_ANCHOR_Y}`)
-    // 曲线用同一组控制点（两卡只隔 92px，bend 取了下限 48）
+    const points = edgeRoute(nodes[0], nodes[1], nodes)
+    expect(points[0]).toEqual({ x: CARD_W, y: EDGE_ANCHOR_Y })
+    expect(points[points.length - 1]).toEqual({ x: 300, y: EDGE_ANCHOR_Y })
+    // 同一行时折线退化成一条横线
+    expect(edgePathD(points)).toBe(`M${CARD_W} ${EDGE_ANCHOR_Y} L300 ${EDGE_ANCHOR_Y}`)
+    // 曲线另取四个贝塞尔控制点（两卡只隔 92px，bend 取了下限 48）
+    const curve = edgeCurve(nodes[0], nodes[1])
     expect(edgePathD(curve, 'curved')).toBe(
       `M${CARD_W} ${EDGE_ANCHOR_Y} C${CARD_W + 48} ${EDGE_ANCHOR_Y}, ${300 - 48} ${EDGE_ANCHOR_Y}, 300 ${EDGE_ANCHOR_Y}`,
     )
@@ -316,7 +375,7 @@ describe('结构画布：连线两端的小圆点', () => {
   const edges = [{ from: 'a', to: 'b' }]
 
   it('两颗点分别靠近两端，且落在线上', () => {
-    const dots = edgeDots(nodes[0], nodes[1])
+    const dots = edgeDots(edgeRoute(nodes[0], nodes[1], nodes))
     expect(dots.from.x).toBeGreaterThan(CARD_W)
     expect(dots.from.x).toBeLessThan(dots.to.x)
     expect(dots.to.x).toBeLessThan(300)
@@ -324,7 +383,7 @@ describe('结构画布：连线两端的小圆点', () => {
   })
 
   it('点中圆点报出是哪一端（点它跳到另一端）', () => {
-    const dots = edgeDots(nodes[0], nodes[1])
+    const dots = edgeDots(edgeRoute(nodes[0], nodes[1], nodes))
     expect(edgeDotAt(nodes, edges, dots.from.x, dots.from.y)).toEqual({ edge: edges[0], side: 'from' })
     expect(edgeDotAt(nodes, edges, dots.to.x, dots.to.y)).toEqual({ edge: edges[0], side: 'to' })
     expect(edgeDotAt(nodes, edges, 150, 400)).toBeNull()

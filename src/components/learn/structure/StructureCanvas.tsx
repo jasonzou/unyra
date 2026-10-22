@@ -58,7 +58,9 @@ import {
   edgeCurve,
   edgeDotAt,
   edgeDots,
+  edgeElbow,
   edgePathD,
+  edgeRoute,
   heightOf,
   hitTest,
   outlineSlots,
@@ -66,6 +68,7 @@ import {
   slotAnchorY,
   slotKeyOf,
   splitLeafRef,
+  type Point,
 } from './structureView'
 
 export interface StructureCanvasProps {
@@ -235,6 +238,38 @@ export const StructureCanvas = memo(function StructureCanvas({
   )
   /** 连线画法：默认直线（见 learn/structure 的 EDGE_STYLES） */
   const edgeStyle: EdgeStyle = map.edgeStyle ?? 'straight'
+
+  /** 拖动中的那一张用 draft 的位置：连线跟着动，而不是松手才跳过去 */
+  const displayNodes = useMemo(
+    () => (draft ? nodes.map((n) => (n.id === draft.id ? { ...n, x: draft.x, y: draft.y } : n)) : nodes),
+    [nodes, draft],
+  )
+  const byId = useMemo(() => new Map(displayNodes.map((n) => [n.id, n])), [displayNodes])
+
+  /**
+   * 每条边画在哪：折线走 `edgeRoute`（会绕开卡片），曲线取贝塞尔控制点。
+   *
+   * 算一次给三处用——画线、点选、两颗小圆点认同一份点列，
+   * 否则就会出现「看着绕开了、点它却没反应」。拖动时跟着 draft 重算。
+   */
+  const routes = useMemo(() => {
+    const out = new Map<string, Point[]>()
+    for (const edge of edges) {
+      const from = byId.get(edge.from)
+      const to = byId.get(edge.to)
+      if (!from || !to) continue
+      const anchor = anchorOf(edge)
+      out.set(
+        `${edge.from}>${edge.to}`,
+        edgeStyle === 'curved' ? edgeCurve(from, to, height, anchor) : edgeRoute(from, to, displayNodes, height, anchor),
+      )
+    }
+    return out
+  }, [edges, byId, displayNodes, height, anchorOf, edgeStyle])
+  const routeOf = useCallback(
+    (edge: { from: string; to: string }) => routes.get(`${edge.from}>${edge.to}`),
+    [routes],
+  )
 
   /* ---------- 空格：按住时左键临时变成「抓手」 ---------- */
 
@@ -833,12 +868,12 @@ export const StructureCanvas = memo(function StructureCanvas({
       }
 
       const world = toWorld(e.clientX, e.clientY)
-      const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle, anchorOf)
+      const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle, anchorOf, routeOf)
       if (dot) {
         centerOn(dot.side === 'from' ? dot.edge.to : dot.edge.from)
         return
       }
-      const edge = edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height, edgeStyle, anchorOf)
+      const edge = edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height, edgeStyle, anchorOf, routeOf)
       if (edge) {
         setSelectedEdge(edge)
         setSelectedId(null)
@@ -847,7 +882,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       setSelectedId(null)
       setSelectedEdge(null)
     },
-    [centerOn, edges, height, menu, nodes, onSlotClick, toWorld],
+    [centerOn, edges, height, menu, nodes, onSlotClick, toWorld, anchorOf, edgeStyle, routeOf],
   )
 
   const onPointerMove = useCallback(
@@ -856,8 +891,10 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (!g) {
         // 没有手势：算「指针附近有没有连线」，小圆点只在此时露面
         const world = toWorld(e.clientX, e.clientY)
-        const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle, anchorOf)
-        const edge = dot?.edge ?? edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height)
+        const dot = edgeDotAt(nodes, edges, world.x, world.y, 12 / cameraRef.current.zoom, height, edgeStyle, anchorOf, routeOf)
+        const edge =
+          dot?.edge ??
+          edgeAt(nodes, edges, world.x, world.y, 8 / cameraRef.current.zoom, height, edgeStyle, anchorOf, routeOf)
         setHoverDot(!!dot)
         setHoverEdge((prev) => (prev?.from === edge?.from && prev?.to === edge?.to ? prev : edge ?? null))
         return
@@ -885,7 +922,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       setPaletteAt({ x: e.clientX, y: e.clientY })
       setHoverId(hitTest(nodes, world.x, world.y, height)?.id ?? null)
     },
-    [anchorOf, edgeStyle, edges, height, isOverTrash, nodes, toWorld],
+    [anchorOf, edgeStyle, edges, height, isOverTrash, nodes, toWorld, routeOf],
   )
 
   const onPointerUp = useCallback(
@@ -1093,13 +1130,6 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   /* ---------- 渲染 ---------- */
 
-  /** 拖动中的那一张用 draft 的位置：连线跟着动，而不是松手才跳过去 */
-  const displayNodes = useMemo(
-    () => (draft ? nodes.map((n) => (n.id === draft.id ? { ...n, x: draft.x, y: draft.y } : n)) : nodes),
-    [nodes, draft],
-  )
-  const byId = useMemo(() => new Map(displayNodes.map((n) => [n.id, n])), [displayNodes])
-
   /*
    * 量一遍目标项圆点的真实位置。
    *
@@ -1183,11 +1213,13 @@ export const StructureCanvas = memo(function StructureCanvas({
               const from = byId.get(edge.from)
               const to = byId.get(edge.to)
               if (!from || !to) return null
-              const anchor = anchorOf(edge)
-              const curve = edgeCurve(from, to, height, anchor).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
+              const path = routeOf(edge)
+              if (!path) return null
+              // 世界坐标 → SVG 坐标（这一层是从包围盒左上角铺开的）
+              const points = path.map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
               const isSelected = selectedEdge?.from === edge.from && selectedEdge?.to === edge.to
               const color = edgeColorOf(store, displayNodes, edge)
-              const dots = edgeDots(from, to, height, edgeStyle, anchor)
+              const dots = edgeDots(points, edgeStyle)
               // 悬停目标项 → 对应的那条子大纲连线发光
               const slotKey = slotKeyOf(store, to)
               const glow =
@@ -1198,7 +1230,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               return (
                 <g key={`${edge.from}>${edge.to}`}>
                   <path
-                    d={edgePathD(curve, edgeStyle)}
+                    d={edgePathD(points, edgeStyle)}
                     fill="none"
                     stroke={color ?? (isHoveredEdge ? 'var(--color-seal, #b45309)' : 'currentColor')}
                     className={color || isHoveredEdge ? '' : 'text-ink-faint/55'}
@@ -1220,8 +1252,8 @@ export const StructureCanvas = memo(function StructureCanvas({
                       return (
                         <circle
                           key={side}
-                          cx={p.x - edgeOrigin.x}
-                          cy={p.y - edgeOrigin.y}
+                          cx={p.x}
+                          cy={p.y}
                           r={3}
                           fill="currentColor"
                           className="text-card transition-all"
@@ -1254,10 +1286,18 @@ export const StructureCanvas = memo(function StructureCanvas({
                 { id: '', kind: from.kind, x: linkAt.x, y: linkAt.y - CARD_H / 2 },
                 height,
                 anchorFrom == null ? undefined : { from: anchorFrom },
-              ).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
+              )
+              /*
+                跟手的这条是**橡皮筋**：终点跟着指针乱跑，按「绕开卡片」去算会一路抖，
+                所以它保持老画法（出线 → 竖直 → 进线），落手之后才走真正的路由。
+              */
+              const points = (edgeStyle === 'curved' ? curve : edgeElbow(curve[0], curve[3])).map((p) => ({
+                x: p.x - edgeOrigin.x,
+                y: p.y - edgeOrigin.y,
+              }))
               return (
                 <path
-                  d={edgePathD(curve, edgeStyle)}
+                  d={edgePathD(points, edgeStyle)}
                   fill="none"
                   // 虚线颜色跟着接入点走：拉的是哪一条，线就是那条的颜色
                   stroke={linkColor ?? 'currentColor'}
