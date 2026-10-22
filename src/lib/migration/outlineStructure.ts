@@ -32,8 +32,7 @@
 import type { MigrationContext, MigrationScript, MigrationStepResult } from './types'
 import {
   CARD_H,
-  OUTLINE_HEAD,
-  SLOT_ROW,
+  outlineCardHeight,
   seedFromSource,
   type SeedSourceNode,
   type StructureMap,
@@ -195,9 +194,7 @@ export async function migrateOutlineToStructure(ctx: MigrationContext): Promise<
     for (const item of items) item.slotKeys.forEach((key, index) => slotRank.set(key, index))
     const height = (node: { kind: string; ref?: string }): number => {
       if (node.kind !== 'outline' || !node.ref) return CARD_H
-      const count = slotsOf.get(node.ref) ?? 0
-      if (!count) return CARD_H
-      return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8)
+      return outlineCardHeight(slotsOf.get(node.ref) ?? 0)
     }
     const map = seedFromSource(
       toSource(items, examsOf),
@@ -283,9 +280,7 @@ export async function migrateStructureTopology(ctx: MigrationContext): Promise<M
     for (const item of items) item.slotKeys.forEach((key, index) => slotRank.set(key, index))
     const height = (node: { kind: string; ref?: string }): number => {
       if (node.kind !== 'outline' || !node.ref) return CARD_H
-      const count = slotsOf.get(node.ref) ?? 0
-      if (!count) return CARD_H
-      return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8)
+      return outlineCardHeight(slotsOf.get(node.ref) ?? 0)
     }
 
     const rebuilt = seedFromSource(

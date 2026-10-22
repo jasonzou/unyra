@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { CARD_H, CARD_W, type StructureNode } from '../src/learn/structure'
 import {
+  CARD_PAD_B,
+  CARD_FRAME_H,
+  DOC_BODY_H,
+  DOC_LINES,
+  DOC_LINE_H,
   EDGE_ANCHOR_Y,
   OUTLINE_HEAD,
   SLOT_ROW,
@@ -13,9 +18,9 @@ import {
   edgePathD,
   edgePointAt,
   hitTest,
+  outlineCardHeight,
   outlineSlots,
   resolveNodeView,
-  DOC_BODY_H,
   slotAnchorY,
   slotColor,
   slotKeyOf,
@@ -276,13 +281,23 @@ describe('结构画布：大纲的目标项（接入点）', () => {
     expect(slotKeyOf(store, assigned)).toBe('a')
   })
 
-  it('大纲卡片按目标项条数长高（否则点不到后面的目标项）', () => {
-    expect(cardHeight(store, parentNode)).toBe(OUTLINE_HEAD + 2 * SLOT_ROW + 8)
+  it('大纲卡片按目标项条数长高（含「＋ 添加目标项」那一行，否则它会掉出卡片）', () => {
+    // 2 条目标项 + 1 行「＋ 添加目标项」+ 底部内边距 + 上下边框
+    expect(cardHeight(store, parentNode)).toBe(
+      CARD_FRAME_H + OUTLINE_HEAD + 3 * SLOT_ROW + CARD_PAD_B,
+    )
     // 其它类型恒为固定高度
     expect(cardHeight(store, { kind: 'doc', ref: 'p1' })).toBe(CARD_H)
     // 没有目标项的大纲也不缩到比默认更矮
     const bare = makeStore([makeNode({ id: 'p9', title: '空' })])
     expect(cardHeight(bare, { kind: 'outline', ref: 'p9' })).toBe(CARD_H)
+  })
+
+  it('卡片高度刚好装下内容：边框 + 标题行 + 内容 + 底部内边距', () => {
+    expect(outlineCardHeight(0)).toBe(CARD_H)
+    expect(outlineCardHeight(1)).toBe(CARD_FRAME_H + OUTLINE_HEAD + 2 * SLOT_ROW + CARD_PAD_B)
+    // 有正文的文档卡是「两行摘要」，行高与行数都是常量算出来的
+    expect(DOC_BODY_H).toBe(CARD_FRAME_H + OUTLINE_HEAD + DOC_LINES * DOC_LINE_H + CARD_PAD_B)
   })
 
   it('大纲 → 子文档 的连线取那个接入点的颜色；别的连线没有颜色', () => {
@@ -419,12 +434,24 @@ describe('文档卡：摘要与生成按钮、目标项圆点', () => {
     expect(a.excerpt).toContain('第一段正文')
     // 摘要去掉标题井号，不然第一行永远是「# 标题」
     expect(a.excerpt).not.toContain('#')
+    // 摘要要压成**一段**：正文里的换行会把两行的摘要切成半句话
+    expect(a.excerpt).not.toContain('\n')
     expect(cardHeight(store, { kind: 'doc', ref: 'n1' })).toBe(DOC_BODY_H)
 
     const b = resolveNodeView(store, { id: 'd:n2', kind: 'doc', ref: 'n2', x: 0, y: 0 })
     expect(b.blank).toBe(true)
     expect(b.excerpt).toBeUndefined()
     expect(cardHeight(store, { kind: 'doc', ref: 'n2' })).toBe(CARD_H)
+  })
+
+  it('摘要洗掉 Markdown 记号（列表符号、粗体、链接、表格竖线）', () => {
+    const noisy = makeNode({
+      id: 'n3',
+      title: '哈希',
+      docs: { teaching: '## 要点\n\n- **装填因子** 要小\n- 见 [维基](https://x.y)\n\n| a | b |\n| --- | --- |\n| 1 | 2 |' },
+    })
+    const view = resolveNodeView(makeStore([noisy]), { id: 'd:n3', kind: 'doc', ref: 'n3', x: 0, y: 0 })
+    expect(view.excerpt).toBe('要点 装填因子 要小 见 维基 a b 1 2')
   })
 
 })

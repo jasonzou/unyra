@@ -24,7 +24,19 @@ import {
  * （自动排列按实际高度往下排），放在组件层会让领域层反向依赖界面。
  * 这里 re-export 一份，调用方从 structureView 取的习惯不变。
  */
-export { DOC_BODY_H, NOTE_ROW, OUTLINE_HEAD, SLOT_ROW, cardHeight, heightOf } from '../../../learn/structure'
+export {
+  CARD_FRAME_H,
+  CARD_PAD_B,
+  DOC_BODY_H,
+  DOC_LINE_H,
+  DOC_LINES,
+  NOTE_ROW,
+  OUTLINE_HEAD,
+  SLOT_ROW,
+  cardHeight,
+  heightOf,
+  outlineCardHeight,
+} from '../../../learn/structure'
 import { nodeById } from '../../../learn/graph'
 
 /**
@@ -111,6 +123,35 @@ function clip(text: string, max = 46): string {
 }
 
 /**
+ * 把 Markdown 正文压成**一段**能塞进卡片两行的纯文字。
+ *
+ * 摘要只有两行：标题井号、列表符号、表格竖线这些记号白占宽度，而正文里的换行会把话
+ * 切成半句（第一行还没说完就断）。所以这里是「读起来像一句话」的清洗，不是「保留结构」
+ * 的转换——完整正文在文档里，摘要只负责让人认出这是哪一篇。
+ */
+function plainText(md: string): string {
+  return (
+    md
+      .replace(/```[\s\S]*?```/g, ' ') // 代码块整段不要
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // 图片：卡片上显示不出来
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // 链接只留文字
+      .replace(/^\s{0,3}#{1,6}\s*/gm, '') // 标题井号
+      .replace(/^\s{0,3}>\s?/gm, '') // 引用符
+      .replace(/^\s{0,3}[-*+]\s+/gm, '') // 无序列表符号
+      .replace(/^\s{0,3}\d+[.)]\s+/gm, '') // 有序列表序号
+      .replace(/^\s*\|?[\s:|-]{6,}\|?\s*$/gm, ' ') // 表格的分隔行
+      .replace(/\|/g, ' ')
+      .replace(/\*\*([^*]+)\*\*/g, '$1') // 粗体
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/`([^`]+)`/g, '$1') // 行内代码
+      .replace(/~~([^~]+)~~/g, '$1')
+      .replace(/\s*\n\s*/g, ' ') // 软换行并成一段（否则第一行就是半句）
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+  )
+}
+
+/**
  * 这个节点占的是哪个接入点：先看显式 slot，老数据退回去用节点的 key。
  *
  * 接入点现在挂在**文档**上（大纲的父子节点只能是文档）；`outline` 也认，是为了
@@ -183,11 +224,15 @@ export function resolveNodeView(store: LearnStore, node: StructureNode): NodeVie
       }
     }
     const body = owner.docs.teaching.trim()
+    /*
+     * 摘要给两行：洗掉 Markdown 记号、并成一段（否则第一行永远是「# 标题」或半句话）。
+     * 整篇只有代码块 / 图片时洗出来是空的——退回原文，别让有正文的卡片显示成「还没有正文」。
+     */
+    const excerpt = body ? plainText(body).slice(0, 120) || body.replace(/\s+/g, ' ').slice(0, 120) : ''
     return {
       title: owner.title,
       subtitle: body ? `${body.length} 字` : '还没有正文',
-      // 摘要给两行：去掉标题井号与多余空行，不然第一行永远是「# 标题」
-      excerpt: body ? body.replace(/^#{1,6}\s*/gm, '').replace(/\n{2,}/g, '\n').trim().slice(0, 220) : undefined,
+      excerpt: excerpt || undefined,
       blank: !body,
       missing: false,
     }

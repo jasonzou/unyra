@@ -45,6 +45,9 @@ import {
 import { reconcileStructure, structureFromStore } from '../../../learn/structureSeed'
 import { t } from '../../../i18n'
 import {
+  CARD_PAD_B,
+  DOC_LINES,
+  DOC_LINE_H,
   EDGE_ANCHOR_Y,
   KIND_BADGE,
   KIND_TONE,
@@ -1282,7 +1285,7 @@ export const StructureCanvas = memo(function StructureCanvas({
             <Fragment key={node.id}>
             <div
               data-node-id={node.id}
-              className={`absolute flex flex-col rounded-xl border ${KIND_TONE[node.kind]} ${
+              className={`absolute flex flex-col border ${KIND_TONE[node.kind]} ${
                 empty || unassigned ? 'border-dashed' : ''
               } ${unassigned ? 'opacity-70' : ''} ${selected ? 'ring-2 ring-seal/60' : isHovered ? 'ring-1 ring-seal/35' : ''} ${
                 lifted ? 'shadow-lg' : 'shadow-sm'
@@ -1301,7 +1304,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                 padding，圆点就会和它那一行错开——真错过一次。
               */}
               <div className="flex shrink-0 items-center gap-1.5 px-3" style={{ height: OUTLINE_HEAD }}>
-                <span className={`shrink-0 rounded px-1.5 py-[1px] text-[10px] font-semibold ${KIND_BADGE[node.kind]}`}>
+                <span className={`shrink-0 px-1.5 py-[1px] text-[10px] font-semibold ${KIND_BADGE[node.kind]}`}>
                   {t(GRAPH_KIND_LABEL[node.kind])}
                 </span>
                 <span
@@ -1328,7 +1331,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                       title={slot.childId ? t('跳到这个子文档') : t('生成一份空文档')}
                       onPointerEnter={() => setHoverSlot({ parentId: node.id, key: slot.key })}
                       onPointerLeave={() => setHoverSlot(null)}
-                      className="relative flex cursor-pointer items-center gap-1.5 px-2 hover:bg-seal/[0.08]"
+                      className="relative flex cursor-pointer items-center gap-1.5 pr-3 pl-2 hover:bg-seal/[0.08]"
                       style={{ height: SLOT_ROW }}
                     >
                       <span className="h-2 w-2 shrink-0" />
@@ -1359,22 +1362,35 @@ export const StructureCanvas = memo(function StructureCanvas({
                   <div
                     data-add-slot={node.id}
                     title={t('给这份大纲加一条目标项')}
-                    className="flex cursor-pointer items-center gap-1.5 px-2 text-[11px] text-ink-faint hover:bg-seal/[0.08] hover:text-seal"
+                    className="flex cursor-pointer items-center gap-1.5 pr-3 pl-2 text-[11px] text-ink-faint hover:bg-seal/[0.08] hover:text-seal"
                     style={{ height: SLOT_ROW }}
                   >
                     ＋ {t('添加目标项')}
                   </div>
                 </div>
               ) : node.kind === 'doc' && view.excerpt ? (
-                /* 有正文：两行摘要，溢出省略 */
-                <div className="line-clamp-2 px-3 pb-2 text-[11px] leading-snug text-ink-soft">{view.excerpt}</div>
+                /*
+                  有正文：**正好两行**摘要。
+                  外层只负责裁：高度就是两行的行高之和、**不带内边距**（溢出是在 padding box
+                  上裁的，留了 pb 就等于在第三行上开了一条 8px 的窗口，让它探出来半截——
+                  这就是「摘要溢出且被截断」的成因）。间距用 margin，margin 在裁剪范围之外。
+                  内层留着 line-clamp-2 只为一件事：让第二行末尾出现省略号。
+                */
+                <div
+                  className="overflow-hidden px-3"
+                  style={{ height: DOC_LINES * DOC_LINE_H, marginBottom: CARD_PAD_B }}
+                >
+                  <div className="line-clamp-2 text-[11px] text-ink-soft" style={{ lineHeight: `${DOC_LINE_H}px` }}>
+                    {view.excerpt}
+                  </div>
+                </div>
               ) : node.kind === 'doc' && node.ref ? (
                 /* 空文档（壳）：给一颗「生成文档」，正文交给 AI 写、用户确认 */
                 <div className="flex items-center justify-between gap-2 px-3 pb-2">
                   <span className="text-[11px] text-ink-faint">{t('还没有正文')}</span>
                   <button
                     type="button"
-                    className="rounded bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
+                    className="bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
                     onClick={() => onGenerateDoc?.(node.ref as string)}
                   >
                     {t('生成文档')}

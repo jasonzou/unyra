@@ -313,14 +313,49 @@ export const SLOT_ROW = 22
 export const NOTE_ROW = 20
 
 /**
- * 一张卡有多高：大纲节点按目标项条数长高，有注释再加一行，其余一律 CARD_H。
+ * 卡片上下边框的合计厚度。
  *
- * 大纲卡片必须能装下全部目标项——装不下的部分如果做成滚动或省略号，
- * 「点目标项生成子大纲」这个主要入口就有一半是点不到的。
+ * 卡片是 `box-sizing: border-box`，写进 `height` 的是**连边框一起**的高度，
+ * 所以算内容时要先把这 2px 还回去——漏掉它，最后一行就会压在边框上（差一点也算溢出）。
  */
-/** 有正文的文档卡：标题行 + 两行摘要 */
-export const DOC_BODY_H = 104
+export const CARD_FRAME_H = 2
+/**
+ * 卡片内容与下边框之间的留白。
+ *
+ * 值必须与组件里的一致（大纲卡是 `pb-2`，文档卡摘要用 `marginBottom`——摘要那块要
+ * **能裁**，所以留白不能放进被裁的那个盒子里）。
+ */
+export const CARD_PAD_B = 8
+/**
+ * 摘要每行的行高。
+ *
+ * 摘要用 `text-[11px]`，行高必须**显式**钉成这个数（组件里写 `lineHeight: 15px`），
+ * 不能靠 `leading-snug` 之类的比例值：比例值算出来的行高带着小数，
+ * 而卡片高度是整数常量，两者一对不上就是「第二行被裁掉半截」。
+ */
+export const DOC_LINE_H = 15
+/** 有正文的文档卡固定两行摘要（多出来的交给省略号，卡片高度不跟着正文长短变） */
+export const DOC_LINES = 2
+/** 有正文的文档卡：边框 + 标题行 + 两行摘要 + 底部内边距 */
+export const DOC_BODY_H = CARD_FRAME_H + OUTLINE_HEAD + DOC_LINES * DOC_LINE_H + CARD_PAD_B
 
+/**
+ * 大纲卡有多高：边框 + 标题行 + 每条目标项一行 + 底部「＋ 添加目标项」一行 + 内边距。
+ *
+ * 「＋ 添加目标项」是卡片里**真实占位的一行**，不是浮在边上的东西——
+ * 漏算它（行数少算一条），这一行就会从卡片下边框掉出去，而它恰好是「加目标项」的唯一入口。
+ */
+export function outlineCardHeight(count: number): number {
+  if (!count) return CARD_H
+  return Math.max(CARD_FRAME_H + OUTLINE_HEAD + (count + 1) * SLOT_ROW + CARD_PAD_B, CARD_H)
+}
+
+/**
+ * 一张卡有多高：大纲节点按目标项条数长高，有正文的文档卡多两行摘要，其余一律 CARD_H。
+ *
+ * 高度只由「内容有几种、有几行」决定，不由内容多长决定——同一类卡片在图上高度一致，
+ * 自动排列才排得整齐；装不下的文字交给省略号，而不是把卡片撑破。
+ */
 export function cardHeight(store: LearnStore, node: { kind: GraphKind; ref?: string; note?: string }): number {
   if (node.kind === 'doc') {
     // 有正文的文档卡多两行摘要的高度；空文档还是标准高度（它要放「生成文档」按钮）
@@ -329,9 +364,7 @@ export function cardHeight(store: LearnStore, node: { kind: GraphKind; ref?: str
   }
   if (node.kind !== 'outline') return CARD_H
   const owner = node.ref ? nodeById(store, node.ref) : null
-  const count = owner?.outline?.children.length ?? 0
-  if (!count) return CARD_H
-  return Math.max(CARD_H, OUTLINE_HEAD + count * SLOT_ROW + 8)
+  return outlineCardHeight(owner?.outline?.children.length ?? 0)
 }
 
 /** 把 store 包成一个高度访问器：布局与几何函数只认这个函数，不认 store */
