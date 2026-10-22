@@ -99,17 +99,28 @@ export function nodeLayout(store: LearnStore): Map<string, NodeLayout> {
       else children.set(parent, [id])
     }
 
-    // 分配目录：每个目录里先占掉「自己那份文档名」和 chat.json，免得子节点撞上
+    // 分配目录：每个目录里先占掉「自己那份节点文件」和目标级账本，免得子节点撞上
     const dirs = new Map<string, string[]>([[root.id, [goalSeg]]])
     const walk = (id: string): void => {
       const dir = dirs.get(id) as string[]
-      // 一个子节点若叫「static」会和资源目录撞名，chat.json / tmp.json 同理；
-      // `${本节点}.notes` 是它自己的笔记目录，也不能被某个子节点占去
+      const last = dir[dir.length - 1].toLowerCase()
+      /**
+       * 一个子节点若叫「static」会和资源目录撞名，chat.json / tmp.json 同理；
+       * `{本节点}.node.json` 是本节点自己的文件，也不能被某个子节点占去。
+       *
+       * 与 v2 的差别：不再需要预留 `{本节点}.notes`（笔记已经并进节点文件）。
+       */
       const used = new Set<string>([
-        dir[dir.length - 1].toLowerCase(),
-        dir[dir.length - 1].toLowerCase() + NOTES_SUFFIX,
+        last,
+        `${last}.node.json`,
         'chat.json',
         'tmp.json',
+        'reading.json',
+        'essay.json',
+        'mind.json',
+        'method.json',
+        'workflow.json',
+        'structure.json',
         ...ASSET_DIRS,
       ])
       for (const childId of children.get(id) ?? []) {

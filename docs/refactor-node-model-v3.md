@@ -236,6 +236,25 @@ export const NODE_KINDS = {
 
 ### P1 · 持久化合并（磁盘格式变更）
 
+**已完成（2026-10-22）。** 实际落地与下面原计划有几处**刻意的偏差**，理由都在这：
+
+| 项 | 原计划 | 实际 | 为什么改 |
+|---|---|---|---|
+| 节点文件 | `nodes/{uuid}.json` | `{目录名}.node.json`（目录仍是标题树） | 目录 uuid 化只解决「改名搬目录」，与泛化/扩展无关，却会把迁移面放大到 vfs、chip、资源路径。落点数量已经不再随挂件类型增长，G3 达成 |
+| 后缀 | `.json` | `.node.json` | 目标目录里已有 `chat.json` / `reading.json` / `structure.json`，一个叫「chat」的目标会与 `chat.json` 撞车 |
+| goalId | D12：合并 `goal.id` 与 `rootNodeId` | **未做** | 要重写 12 处按目标归档的键，收益只是去掉一个冗余 uuid，风险与收益不匹配 |
+| workspace | `files/{uuid}/` | 仍叫 `workspace/` | 目录名没变，所有引用（chip、资源路径、工作区 api）零改动 |
+| vfs | 未提 | **未改** | 它的实体模式是「一个内容一个文件」，合并后一个物理文件对应多个实体。目前只经 agent 的 `files.*` 触达，而那条路对 `docs/` 下的应用数据本来就拒绝——留作后续 |
+
+**实际落地**：`files/nodeFile.ts`（形状 + parts 编解码）、`files/build.ts`（写盘，`nodeFileCache` 只序列化变了的节点）、
+`files/parse.ts`（`parseDocsV3` 优先、`parseDocsV2` 作降落伞）、`files/diff.ts`（资源搬迁改读 `.node.json`）、
+`learn/layout.ts`（撞名规避集合）、`chipRef.ts`（有 nodeId 就信 nodeId）、`sandbox/dataPaths.ts`（`.node.json` 归应用数据）、
+第 3 次迁移 `lib/migration/v3Nodes.ts`、`docs/data-and-privacy.md` 重写。
+
+**验收**：`tsc -b` 通过；134 文件 / 1579 用例全绿；新增 `tests/nodeFile.test.ts`（往返逐项一致、空笔记留名、
+新布局优先、迁移写新删旧且不动二进制、幂等、空目录不报错）。
+
+
 **目标**：一个节点一个文件；旧的七种落点全部消失。
 
 改动：

@@ -156,15 +156,17 @@ describe('大纲：写入、对上号与落盘往返', () => {
     expect(child?.title).toBe('洛必达法则')
   })
 
-  it('落盘往返：{节点}.outline.json 写得出、读得回；老节点没有大纲也不凭空造文件', () => {
+  it('落盘往返：大纲写进节点文件的 parts、读得回；老节点没有大纲就不写那一条', () => {
     let s = fixture()
     const r = writeOutline(s, 'n2', { intro: '这一层的路线', children: [{ title: '洛必达法则', summary: '先学' }] }, NOW)
     if (!r.ok) throw new Error('writeOutline 应当成功')
     s = r.store
     const files = buildDocs(s)
-    expect(files.has('docs/微积分/极限/极限.outline.json')).toBe(true)
-    // n1 的 outline 是 undefined（老数据的形状）：不写文件
-    expect(files.has('docs/微积分/微积分.outline.json')).toBe(false)
+    const n2File = JSON.parse(files.get('docs/微积分/极限/极限.node.json') ?? '{}')
+    expect(n2File.parts.some((x: { kind: string }) => x.kind === 'outline')).toBe(true)
+    // n1 的 outline 是 undefined（老数据的形状）：parts 里没有那一条
+    const n1File = JSON.parse(files.get('docs/微积分/微积分.node.json') ?? '{}')
+    expect(n1File.parts.some((x: { kind: string }) => x.kind === 'outline')).toBe(false)
 
     const back = parseDocs(files, { activeGoalId: 'g1', activeNodeId: 'n1', activeConversationId: 'c1' })
     expect(back).not.toBeNull()
@@ -198,9 +200,10 @@ describe('大纲：写入、对上号与落盘往返', () => {
     expect(tabTitle(ref, (id) => (id === 'n2' ? '极限' : undefined))).toBe('极限 · 结构')
   })
 
-  it('nodeDocPath 能指到大纲文件（资源管理器里定位用，与教学文档同一套口径）', () => {
-    expect(nodeDocPath(fixture(), 'n2', { kind: 'outline' })).toBe('docs/微积分/极限/极限.outline.json')
-    expect(nodeDocPath(fixture(), 'n1', { kind: 'outline' })).toBe('docs/微积分/微积分.outline.json')
+  it('nodeDocPath 指到节点文件：正文 / 大纲 / 笔记合并后是同一个文件', () => {
+    expect(nodeDocPath(fixture(), 'n2', { kind: 'outline' })).toBe('docs/微积分/极限/极限.node.json')
+    expect(nodeDocPath(fixture(), 'n2', { kind: 'teaching' })).toBe('docs/微积分/极限/极限.node.json')
+    expect(nodeDocPath(fixture(), 'n1', { kind: 'outline' })).toBe('docs/微积分/微积分.node.json')
   })
 })
 

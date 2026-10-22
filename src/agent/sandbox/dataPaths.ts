@@ -81,6 +81,13 @@ export function classifyDataPath(raw: string): DataPathVerdict {
     if (/\.meta\.json$/i.test(rest)) {
       return { kind: 'app-data', api: 'graph', note: '节点元数据与学习状态（读用 graph.read，写用 graph.update / state.*）' }
     }
+    if (/\.node\.json$/i.test(rest)) {
+      return {
+        kind: 'app-data',
+        api: 'doc',
+        note: '节点文件：正文 / 大纲 / 笔记 / 试卷 / 超级文档全在里面（读用 doc.read / outline.read，写用 doc.write / outline.write）',
+      }
+    }
     if (/(^|\/)chat\.json$/i.test(rest)) {
       return { kind: 'app-data', note: '目标会话（宿主管理，agent 不能直接读写）' }
     }
@@ -105,7 +112,9 @@ export function classifyDataPath(raw: string): DataPathVerdict {
     if (/\.md$/i.test(rest)) {
       return { kind: 'app-data', api: 'doc', note: '教学文档' }
     }
-    return { kind: 'app-data', api: 'node', note: '应用数据目录' }
+    // 兜底：docs 下的其余东西都是应用数据。不给 api 提示——`api.node.*` 已经退役
+    // （节点生命周期在 `api.graph.*`，内容读写在各组自己的 api 上）。
+    return { kind: 'app-data', note: '应用数据目录' }
   }
 
   // 用户配置/界面状态：不是 agent 的数据面

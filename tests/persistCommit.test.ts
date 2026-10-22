@@ -183,7 +183,7 @@ describe('学习数据落盘：防抖提交的两条路径', () => {
     const before = buildDocs(store)
     const after = buildDocs(edited)
     const changed = [...after].filter(([rel, text]) => before.get(rel) !== text).map(([rel]) => abs(rel))
-    expect(changed, '这次只该有一份正文变了').toEqual([abs('docs/微积分/导数/导数.md')])
+    expect(changed, '这次只该有一份正文变了').toEqual([abs('docs/微积分/导数/导数.node.json')])
     expect([...rec.writes.keys()].sort(), '没变的不重写').toEqual([...changed, abs('state.json')].sort())
   })
 

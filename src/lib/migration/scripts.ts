@@ -27,15 +27,18 @@
 
 import type { MigrationScript } from './types'
 import { outlineToStructure, structureTopology } from './outlineStructure'
+import { nodeFiles } from './v3Nodes'
 
 /**
  * 迁移脚本清单。
  *
  * 顺序即执行顺序，但**排序以 `step` 为准**（下面会排一次），列表顺序只是给人看的。
  */
-export const MIGRATION_SCRIPTS: MigrationScript[] = [outlineToStructure, structureTopology].sort(
-  (a, b) => a.step - b.step,
-)
+export const MIGRATION_SCRIPTS: MigrationScript[] = [
+  outlineToStructure,
+  structureTopology,
+  nodeFiles,
+].sort((a, b) => a.step - b.step)
 
 /**
  * 当前最新的迁移序号 = 清单里最大的那个。

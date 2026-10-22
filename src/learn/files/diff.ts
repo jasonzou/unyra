@@ -2,7 +2,8 @@
 
 /* ---------- 差异 ---------- */
 
-import { parseJson, type MetaFile } from './meta'
+import { parseJson } from './meta'
+import { NODE_FILE_SUFFIX } from './nodeFile'
 
 export interface DocsDiff {
   /** 需要写（新增或内容变了）的路径 */
@@ -46,11 +47,10 @@ export function diffDocs(prev: Map<string, string>, next: Map<string, string>): 
 }
 
 /**
- * 「节点 id → 它所在的目录」：从整张文件表里挑出 `{base}.meta.json` 逐份解析。
+ * 「节点 id → 它所在的目录」：从整张文件表里挑出 `{base}.node.json` 逐份解析。
  *
  * 结果按文件表缓存。为什么值得缓存：`prev` 就是上一次保存写出去的快照，同一个对象会被
  * 反复传进来（快照只在一次提交成功之后才换），而它没变时这份索引自然也没变。
- * 日志里这一项（对每一份 meta 做 parseJson）量到 6ms，缓存把其中一半直接省掉。
  *
  * 前提是调用方**不原地改**传进来的表——整个落盘链都是「换新 Map」，不是「改旧 Map」。
  */
@@ -63,9 +63,9 @@ function dirsOf(files: Map<string, string>): Map<string, string> {
   for (const [rel, text] of files) {
     const parts = rel.split('/')
     const base = parts[parts.length - 2]
-    if (parts[parts.length - 1] !== `${base}.meta.json`) continue
-    const meta = parseJson<MetaFile>(text)
-    if (meta?.id) out.set(meta.id, parts.slice(0, -1).join('/'))
+    if (parts[parts.length - 1] !== `${base}${NODE_FILE_SUFFIX}`) continue
+    const file = parseJson<{ id?: unknown }>(text)
+    if (file && typeof file.id === 'string' && file.id) out.set(file.id, parts.slice(0, -1).join('/'))
   }
   dirsCache.set(files, out)
   return out

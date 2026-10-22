@@ -46,12 +46,13 @@ describe('Migration System', () => {
       expect(RELEASED_SCHEMA_STEP).toBeGreaterThanOrEqual(0)
     })
 
-    it('真脚本在册：第 1 次是「大纲树 → 结构图」、第 2 次是拓扑重建', () => {
+    it('真脚本在册：1 大纲树→结构图、2 拓扑重建、3 节点文件合并', () => {
       expect(MIGRATION_SCRIPTS.map((s) => s.id)).toEqual([
         'm1-outline-to-structure',
         'm2-structure-topology',
+        'm3-node-single-file',
       ])
-      expect(MIGRATION_SCRIPTS.map((s) => s.step)).toEqual([1, 2])
+      expect(MIGRATION_SCRIPTS.map((s) => s.step)).toEqual([1, 2, 3])
     })
 
     it('同一序号或同一 id 不能注册两次（否则执行顺序没有意义）', () => {
@@ -95,14 +96,16 @@ describe('Migration System', () => {
     it('从 0 开始会把全部脚本按序排出来', () => {
       const plan = planChain(0, LATEST_SCHEMA_STEP)
       expect(plan.isUpToDate).toBe(false)
-      expect(plan.scripts.map((s) => s.step)).toEqual([1, 2].slice(0, LATEST_SCHEMA_STEP))
+      expect(plan.scripts.map((s) => s.step)).toEqual(MIGRATION_SCRIPTS.map((s) => s.step))
       expect(plan.currentStep).toBe(0)
       expect(plan.targetStep).toBe(LATEST_SCHEMA_STEP)
     })
 
     it('只跑比当前序号大的（重跑不会把老脚本再跑一遍）', () => {
       const plan = planChain(1, LATEST_SCHEMA_STEP)
-      expect(plan.scripts.map((s) => s.step)).toEqual([2].filter((n) => n <= LATEST_SCHEMA_STEP))
+      expect(plan.scripts.map((s) => s.step)).toEqual(
+        MIGRATION_SCRIPTS.filter((s) => s.step > 1).map((s) => s.step),
+      )
     })
 
     it('目标序号是上限：给了 1 就只跑到第 1 次', () => {
