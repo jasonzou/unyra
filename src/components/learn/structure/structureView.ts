@@ -578,17 +578,15 @@ export function edgeRoute(
 ): Point[] {
   const fromRect = rectOf(from, height)
   const toRect = rectOf(to, height)
-  const start = { x: fromRect.x + fromRect.width, y: fromRect.y + (anchor?.from ?? EDGE_ANCHOR_Y) }
   /*
-   * 从哪一边进目标：默认走它的左沿（读图方向），但目标不在右边时（同一列、或者被拖到了左边）
-   * 还从左边进就得绕到它背后去——那种「从卡片身上穿进去」的老画法更是错的。
-   * 判据：目标的右边没有超出源的右边，就从右边进。
+   * 接入位置**固定**：从源的右沿出、从目标的左沿进。
+   *
+   * 绕行只改中间怎么走，不改「接在哪条边上」——否则同一张图上会出现
+   * 「这条从左进、那条从右进」，读图时认不出方向，点目标项圆点拉出来的线也会对不上。
+   * 目标在左边、或者跟源同一列时，宁可绕一大圈回到它的左边，也不换边进。
    */
-  const enterRight = toRect.x + toRect.width <= fromRect.x + fromRect.width
-  const end = {
-    x: enterRight ? toRect.x + toRect.width : toRect.x,
-    y: toRect.y + (anchor?.to ?? EDGE_ANCHOR_Y),
-  }
+  const start = { x: fromRect.x + fromRect.width, y: fromRect.y + (anchor?.from ?? EDGE_ANCHOR_Y) }
+  const end = { x: toRect.x, y: toRect.y + (anchor?.to ?? EDGE_ANCHOR_Y) }
 
   const others = nodes
     .filter((n) => n.id !== from.id && n.id !== to.id)
@@ -601,7 +599,7 @@ export function edgeRoute(
 
   // 绕行：出/进那一小段贴着卡片，不算障碍（所以用外扩后的矩形当障碍，两端点在外扩之外）
   const stubStart = { x: start.x + EDGE_STUB, y: start.y }
-  const stubEnd = { x: end.x + (enterRight ? EDGE_STUB : -EDGE_STUB), y: end.y }
+  const stubEnd = { x: end.x - EDGE_STUB, y: end.y }
   const around = [...others, inflate(fromRect, EDGE_CLEARANCE), inflate(toRect, EDGE_CLEARANCE)]
   /*
    * 只把「这条线可能经过的区域」里的卡片丢给 A*：网格是按障碍条数平方长的，

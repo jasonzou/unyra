@@ -242,6 +242,20 @@ describe('结构画布：折线的拐点与绕行', () => {
     expect(Math.max(...points.map((p) => p.x))).toBeGreaterThan(300 + CARD_W)
   })
 
+  it('接入位置固定：绕行也不换边（同列 / 目标在左边都还是从左沿进）', () => {
+    const below: StructureNode = { id: 'c', kind: 'doc', x: 0, y: 300 }
+    const sameCol = [...nodes, below]
+    const down = edgeRoute(nodes[0], below, sameCol)
+    expect(down[0]).toEqual({ x: CARD_W, y: EDGE_ANCHOR_Y })
+    expect(down[down.length - 1]).toEqual({ x: 0, y: 300 + EDGE_ANCHOR_Y })
+    expectOrthogonal(down)
+    expectNoCrossing(down, sameCol)
+
+    const back = edgeRoute(nodes[1], nodes[0], nodes)
+    expect(back[0]).toEqual({ x: 300 + CARD_W, y: 200 + EDGE_ANCHOR_Y })
+    expect(back[back.length - 1]).toEqual({ x: 0, y: EDGE_ANCHOR_Y })
+  })
+
   it('画线和点选认同一份点列（绕行之后也点得到）', () => {
     const blocker: StructureNode = { id: 'c', kind: 'note', x: 230, y: 80 }
     const withBlocker = [...nodes, blocker]
