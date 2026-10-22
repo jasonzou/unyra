@@ -48,6 +48,7 @@ import {
   EDGE_ANCHOR_Y,
   KIND_BADGE,
   KIND_TONE,
+  OUTLINE_HEAD,
   SLOT_ROW,
   edgeAt,
   edgeColorOf,
@@ -1241,7 +1242,12 @@ export const StructureCanvas = memo(function StructureCanvas({
                 cursor: lifted ? 'grabbing' : 'grab',
               }}
             >
-              <div className="flex items-center gap-1.5 px-3 pt-2" style={{ minHeight: 30 }}>
+              {/*
+                标题行高度**必须**等于 OUTLINE_HEAD：目标项圆点的 y 是按这个常量算的
+                （slotAnchorY = OUTLINE_HEAD + 行号 × 行高）。这里一旦改成 minHeight 或加
+                padding，圆点就会和它那一行错开——真错过一次。
+              */}
+              <div className="flex shrink-0 items-center gap-1.5 px-3" style={{ height: OUTLINE_HEAD }}>
                 <span className={`shrink-0 rounded px-1.5 py-[1px] text-[10px] font-semibold ${KIND_BADGE[node.kind]}`}>
                   {t(GRAPH_KIND_LABEL[node.kind])}
                 </span>
@@ -1258,7 +1264,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               </div>
 
               {node.kind === 'outline' && slots.length > 0 ? (
-                <div className="mt-0.5 flex flex-col overflow-hidden px-2 pb-2">
+                <div className="flex flex-col overflow-hidden px-2 pb-2">
                   {slots.map((slot) => (
                     <div
                       key={slot.key}
