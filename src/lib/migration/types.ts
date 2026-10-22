@@ -101,4 +101,12 @@ export interface ChainPlan {
   targetStep: number
   scripts: MigrationScript[]
   isUpToDate: boolean
+  /**
+   * 数据序号比当前代码还新（`currentStep > targetStep`）。
+   *
+   * 两种来路：① 用户装回了旧版本应用；② 开发机上跑过某个还没发布的序号，
+   * 之后在上线前把它合并进了前一次迁移。两种情况下都**不该静默当作"已是最新"**——
+   * 数据形状可能是代码不认识的，得让人看见。
+   */
+  dataAhead: boolean
 }

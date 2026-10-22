@@ -33,7 +33,13 @@ import type {
 } from './types'
 import { detectSchemaStep, saveSchemaMeta } from './version'
 
-/** 规划迁移链条：序号比 `fromStep` 大的脚本，按序号升序 */
+/**
+ * 规划迁移链条：序号比 `fromStep` 大的脚本，按序号升序。
+ *
+ * **这里不需要知道用户装的是哪个应用版本**——只要知道"已经跑到第几步"，
+ * 没跑过的那几步按序补上就行。版本号跨几代、中间跳过多少个版本，都不影响：
+ * 脚本是线性的，1、2、3 依次执行即可。
+ */
 export function planChain(fromStep: number, toStep: number = latestStep()): ChainPlan {
   const scripts = MIGRATION_SCRIPTS.filter((s) => s.step > fromStep && s.step <= toStep).sort(
     (a, b) => a.step - b.step,
@@ -43,6 +49,7 @@ export function planChain(fromStep: number, toStep: number = latestStep()): Chai
     targetStep: toStep,
     scripts,
     isUpToDate: scripts.length === 0,
+    dataAhead: fromStep > toStep,
   }
 }
 

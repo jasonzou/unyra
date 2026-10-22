@@ -110,6 +110,16 @@ describe('Migration System', () => {
       expect(plan.scripts.map((s) => s.step)).toEqual([1])
       expect(plan.targetStep).toBe(1)
     })
+
+    it('数据序号比代码还新时标记 dataAhead，不能静默当成「已是最新」', () => {
+      // 场景：本机跑过未发布的第 5 次迁移，之后上线前把它并进了第 4 次
+      const plan = planChain(LATEST_SCHEMA_STEP + 1, LATEST_SCHEMA_STEP)
+      expect(plan.scripts).toEqual([])
+      expect(plan.dataAhead).toBe(true)
+
+      const normal = planChain(0, LATEST_SCHEMA_STEP)
+      expect(normal.dataAhead).toBe(false)
+    })
   })
 
   describe('Script Execution', () => {

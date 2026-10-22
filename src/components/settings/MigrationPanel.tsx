@@ -156,7 +156,8 @@ export function MigrationPanel({ onToast }: Props) {
     setTimeout(() => setCopiedLog(false), 1500)
   }
 
-  const upToDate = currentStep >= LATEST_SCHEMA_STEP
+  const ahead = currentStep > LATEST_SCHEMA_STEP
+  const upToDate = currentStep === LATEST_SCHEMA_STEP
 
   return (
     <div className={pane(4, true)}>
@@ -209,16 +210,27 @@ export function MigrationPanel({ onToast }: Props) {
           <div className="flex items-center gap-2">
             <span
               className={`flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
-                upToDate
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700'
-                  : 'border-amber-500/30 bg-amber-500/10 text-amber-700'
+                ahead
+                  ? 'border-red-500/30 bg-red-500/10 text-red-700'
+                  : upToDate
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700'
+                    : 'border-amber-500/30 bg-amber-500/10 text-amber-700'
               }`}
+              title={
+                ahead
+                  ? t(
+                      '数据序号比当前代码还新：可能是装回了旧版本，或本机跑过尚未发布的迁移。代码可能读不懂这份数据。',
+                    )
+                  : undefined
+              }
             >
               <CheckCircle2 size={12} />
               <span>
-                {upToDate
-                  ? t('数据已是最新（第 {0} 次）', String(currentStep))
-                  : t('待迁移：第 {0} 次 → 第 {1} 次', String(currentStep), String(LATEST_SCHEMA_STEP))}
+                {ahead
+                  ? t('数据序号高于当前代码（第 {0} 次 > 第 {1} 次）', String(currentStep), String(LATEST_SCHEMA_STEP))
+                  : upToDate
+                    ? t('数据已是最新（第 {0} 次）', String(currentStep))
+                    : t('待迁移：第 {0} 次 → 第 {1} 次', String(currentStep), String(LATEST_SCHEMA_STEP))}
               </span>
             </span>
           </div>

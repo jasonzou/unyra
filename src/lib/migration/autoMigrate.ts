@@ -41,6 +41,19 @@ export async function autoMigrateIfNeeded(
     }
 
     const plan = planChain(currentStep, targetStep)
+
+    /**
+     * 数据比代码还新：降级装了旧版本，或者本机跑过某个未发布的序号、之后又被合并掉了。
+     * **不能静默当成"已是最新"**——代码可能读不懂这份数据，得让人看见。
+     */
+    if (plan.dataAhead) {
+      logger(
+        `[注意] 数据序号 (#${currentStep}) 比当前代码 (#${targetStep}) 还新：` +
+          `可能是装回了旧版本，或本机跑过尚未发布的迁移。不会自动处理，请确认数据形状。`,
+      )
+      return { migrated: false, fromStep: currentStep, toStep: currentStep }
+    }
+
     if (plan.isUpToDate || plan.scripts.length === 0) {
       return { migrated: false, fromStep: currentStep, toStep: currentStep }
     }
