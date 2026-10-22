@@ -59,6 +59,8 @@
 | **D8** | api 三分：`graph.*` 管结构 / `content.*` 管内容 / `state.*` 管状态；`exam.*` 只留出卷判卷 | 新挂件零 api 改动 |
 | **D9** | 磁盘路径不再承担身份；`key` 降级为显示别名 | 去掉"标题唯一"这条硬不变量 |
 | **D10** | 目标本身就是一个节点：`goal.json`（`type: 'goal'`），`goalId` 就是它自己的 uuid | 消掉 `goal.id` 与 `rootNodeId` 两个 uuid 指一件事 |
+| **D11** | **单写，不做双写过渡**。迁移由 `m_0_7_1_to_0_8_0` 一次性完成（用户 2026-10-22 定） | 不产生运行时数据冗余；代价是迁移必须一次成功，所以要有校验与降落伞（见 5.1.4） |
+| **D12** | 目标 uuid **沿用根节点的 uuid**（`rootNodeId`），丢弃 `goal.id`，把按目标归档的键一次性重写 | 根节点 uuid 被页签/收藏/reading/tmp/exams/structure 引用得更多；只重写"目标级账本"的键更省（清单见 5.1.3） |
 
 ---
 
@@ -234,18 +236,143 @@ export const NODE_KINDS = {
 | 文件 | 做什么 |
 |---|---|
 | `src/learn/types.ts` | 新增 `NodeRecord` / `PartRecord` / `FacetKey`；`KnowledgeNode` 逐步退役（P1 期间两个都保留） |
-| `src/learn/files/build.ts` | 新增 `buildNodeFile(store, uuid)`；`buildDocs` 改为输出新布局；保留 `nodeFileCache` |
-| `src/learn/files/parse.ts` | 新增 `parseNodeFile`；**保留旧解析器**（见兼容策略） |
+| `src/learn/files/build.ts` | 新增 `buildDocsV3(store)`（迁移脚本也调它，保证与运行时同源）；`buildDocs` 改为输出新布局；保留 `nodeFileCache` |
+| `src/learn/files/parse.ts` | 新增 `parseNodeFile`；**保留旧解析器**（降落伞，见 5.1.5） |
 | `src/learn/layout.ts` | `nodeLayout` 删除；新增 `goalDir(uuid)` / `nodeFile(uuid)` / `nodeFilesDir(uuid)` |
 | `src/learn/files/names.ts` | 只留 `sanitizeSegment`（笔记/超管不再有独立文件名） |
-| `src/lib/migration/v3Nodes.ts` | 新增迁移脚本 `m_0_7_1_to_0_8_0` |
+| `src/lib/migration/types.ts` | `MigrationContext.storage` 加 `movePath(from, to)` |
+| `src/lib/migration/engine.ts` | 注入 `movePath`（底层已有 `lib/storage.movePath`） |
+| `src/lib/migration/v3Nodes.ts` | 新增迁移脚本 `m_0_7_1_to_0_8_0`（规格见 5.1） |
 | `src/lib/migration/scripts.ts` | 注册上面的脚本；`LATEST_SCHEMA_VERSION` → `0.8.0` |
+| `src/components/settings/*` | 设置 → 存储里加一行"上次迁移的备份 · 占用 X MB · 删除" |
 
-**兼容策略（必须按这个顺序）**
-1. 读：存在 `docs/*/goal.json` → 走 v3 解析；否则走 v2 解析（旧代码原样保留）。
-2. 写：**只写 v3**。
-3. 迁移：`docs/` 整目录复制一份 `docs.bak-{ts}/` → 读 v2 → 写 v3 → 校验 → 把旧目录改名为 `docs.legacy-{ts}/`（**不删**）。
-4. 校验不通过 → 恢复 `docs.bak-{ts}` 并中止，`schema.json` 不升版本。
+### 5.1 迁移脚本规格（P1 的主体，`m_0_7_1_to_0_8_0`）
+
+> **单写，不做双写过渡**（D11）。迁移一次跑完，跑完之后磁盘上只有新格式。
+> 所以这个脚本是 P1 的**主体**，不是收尾工作。**先写脚本、先用真实数据演练，再改业务代码。**
+
+#### 5.1.1 落地位置与契约
+
+| 项 | 值 |
+|---|---|
+| 文件 | `src/lib/migration/v3Nodes.ts` |
+| id | `m_0_7_1_to_0_8_0` |
+| from → to | `0.7.1` → `0.8.0` |
+| 注册 | `src/lib/migration/scripts.ts` 的 `MIGRATION_SCRIPTS`；`version.ts` 的 `LATEST_SCHEMA_VERSION` → `0.8.0` |
+| 新增能力 | `MigrationContext.storage.movePath(from, to)` —— 契约加一行（`types.ts`），engine 注入一行（`engine.ts`），底层已有 `lib/storage.movePath`（`storage:move` → `electron/storage/files.ts` 的 `movePath`，同卷 rename、不删源） |
+| 可复用的业务代码 | `files/parse.ts` 的 `parseDocs`、`files/build.ts` 的新 `buildDocsV3`（迁移脚本可以 import `learn/` 领域层——`outlineStructure.ts` 已经这么做了） |
+
+**为什么不自己再写一套读盘逻辑**：v2 的读盘有 7 种落点、3 种命名规则、双写去重、老 `.笔记.md` 兼容——重写一遍必然漏。**复用 `parseDocs` 读成内存 store，再复用 `buildDocsV3` 写出去**，两条路径与运行时完全同源。
+
+#### 5.1.2 步骤（每步的失败处理写死了，别自己发挥）
+
+| # | 动作 | 失败时 |
+|---|---|---|
+| 1 | 列出 `users/{uid}/docs` 下的目标目录；**一个都不是目标目录形状（顶层无 `*.meta.json`）就整体跳过** | 返回 ok，记 `details: '没有可迁移的数据'` |
+| 2 | 读全量文本文件进 `Map<rel, text>`（跳过 `static/`、`images/`、`workspace/` 里的二进制，判据用现成的 `isAssetBinary`） | 返回 ok:false，**一个文件都不动** |
+| 3 | `parseDocs(files, state)` → 内存 store（v2） | 返回 ok:false，不动盘 |
+| 4 | 把 store 里的 `goalId` 从 `goal.id` 重写成 `goal.rootNodeId`（见 5.1.3 清单） | — |
+| 5 | `buildDocsV3(store)` → 新布局的 `Map<rel, text>`，逐个 `writeText`（每写一个就释放一个） | 返回 ok:false，已写的新文件保留（它们是新目录，旧数据未动，下次重跑覆盖） |
+| 6 | 搬二进制：`docs/{目标标题}/static` → `docs/{目标uuid}/static`；每个节点 `docs/…/{节点}/workspace` → `docs/{目标uuid}/files/{节点uuid}/` | 返回 ok:false，已搬的留在新位置（`movePath` 是 rename，不删源，可重跑） |
+| 7 | **校验**（见 5.1.4），不通过就中止 | 返回 ok:false，`schema.json` 不升版本 |
+| 8 | `movePath(docs/{目标标题}, docs.legacy-{ts})` —— 旧目录整体挪走（此时里面只剩空壳文本文件） | 返回 ok:false；新数据已完整，旧目录还在，用户可手动处理 |
+| 9 | 返回 `modifiedFiles`（**只记新增/改名的路径**，别把每个节点文件都塞进去，几万个字符串会撑爆 schema.json） | — |
+
+**幂等**：第 1 步判据是"顶层有没有 `*.meta.json`"——迁移完成后旧目录已改名，重跑自然跳过。若第 5 步中途失败，重跑会覆盖新目录（`writeText` 幂等），不会重复追加。
+
+#### 5.1.3 `goalId` 重写清单（漏一个就是"账本找不到目标"）
+
+`goal.id` → `rootNodeId`，需要改的键（迁移脚本在内存里改完再写）：
+
+| 位置 | 键 |
+|---|---|
+| `store.nodes[].goalId` | 每个节点 |
+| `store.exams[].goalId` | 每份试卷 |
+| `store.conversations[].goalId` | 每个会话 |
+| `store.reading.byGoal` | 字典键 |
+| `store.memory.work` | 字典键 |
+| `store.methods` | 字典键 |
+| `store.workflows.byGoal` | 字典键 |
+| `store.essays` / `store.essayCommits` | 字典键 |
+| `store.structure` | 字典键（P3 之后这张表会消失，迁移期仍要改） |
+| `store.resources` | 字典键 |
+| `state.json` 的 `activeGoalId` | 单值 |
+| `state.json` 的 `agentTabs` | **逐项确认**：`goal` 类型的页签存的是 goalId |
+
+**不改**：`store.tmp`（键是 nodeId）、`docArea` 页签（键是 nodeId / tabId）、`favorites`（存 TabRef）、`docScroll`（键是 tabId）。
+
+#### 5.1.4 校验清单（不通过就不许升版本）
+
+迁移脚本内部自己比对，任一条不满足就 `ok: false`：
+
+- 目标数一致；每个目标的节点数一致。
+- 每份教学文档 `trim().length` 一致（**不 trim 比长度**：空白差异也算内容差异，但尾随换行不算）。
+- 笔记：名字集合一致、每份正文逐字一致、顺序一致（meta 里登记的次序）。
+- 试卷：id 集合一致、`attempts.length` 一致。
+- 超级文档：名字集合一致、html 逐字一致。
+- 大纲：`intro` 一致、`children` 的 `key` 序列一致。
+- 二进制：`static/` 的文件数与总字节一致；`workspace/` 的文件数与总字节一致。
+- 边：条数一致；每条边的 `(from,to)` 语义映射后能对上。
+- 坐标：每个画布 facet 的 `(x,y)` 与旧 `structure.json` 一致。
+
+**跑两遍结果相同**（幂等）也属于校验：演练时手动跑两次，第二次必须 `details: '没有可迁移的数据'`。
+
+#### 5.1.5 降落伞（迁移失败时用户还能用）
+
+D11 是单写，所以**没有双写可以退回**。失败时的退路只有两条，脚本必须都保住：
+
+1. **旧目录在迁移成功之前一个字节都不动**（第 8 步之前只读旧树）。所以失败 = 数据回到迁移前的状态，只是多了半份新目录。
+2. **保留 v2 只读解析器一个版本**（`files/parse.ts` 的旧函数不删）。判据：启动时若 `docs/` 下找不到任何 `goal.json`，走 v2 解析并提示"数据迁移未完成"。
+
+**这条路几乎不花成本，理由已核实**：
+
+- `autoMigrateIfNeeded`（`lib/migration/autoMigrate.ts`）在 `hydrateLearnStore` **之前**跑，失败只记日志、返回 `migrated: false`，**应用继续启动**。
+- v2 的 `parseDocs` 只认 `docs/{顶层目录}/*.meta.json`；新目录里是 `goal.json` + `nodes/`，**没有 `meta.json`，会被它直接跳过**。所以新旧目录可以无害共存。
+- `saveLearnStore` 的 `diffDocs` 只删「上次快照里有、这次没有」的文件；快照是从**读到的旧树**摊出来的，新目录不在快照里，**不会被删**。
+
+也就是说：迁移失败 → 旧目录原样 → v2 解析器照常读 → 用户照常用，只是没升级。**这 300 行只读代码换的是"一次迁移 bug 不会让用户打不开应用"，值得留到 P4 再删。**
+
+若用户坚持连这份代码也不留：迁移失败就阻断启动并提示从 `docs.legacy-{ts}` 恢复——**这条需要用户确认**（见第 10 节第 4 条）。
+
+#### 5.1.6 迁移脚本骨架
+
+```ts
+// src/lib/migration/v3Nodes.ts
+export async function migrateToV3Nodes(ctx: MigrationContext): Promise<MigrationStepResult> {
+  const fail = (error: string): MigrationStepResult => ({
+    ok: false, fromVersion: '0.7.1', toVersion: '0.8.0', modifiedFiles: [], error,
+  })
+  const docsRoot = `${ctx.userDir}/docs`
+  const goals = (await ctx.storage.listDir(docsRoot)).filter((e) => e.dir)
+  ctx.log(`发现 ${goals.length} 个目标目录`)
+
+  // 1. 旧树形状判定（顶层有 *.meta.json 才是 v2）
+  // 2. 读全量文本 → files: Map<rel, text>
+  // 3. parseDocs(files, await ctx.storage.readJson(`${ctx.userDir}/state.json`))
+  // 4. 重写 goalId（5.1.3 清单）
+  // 5. buildDocsV3(store) → 逐个 writeText，边写边释放
+  // 6. 搬二进制（movePath，目标已存在就跳过）
+  // 7. 校验（5.1.4）
+  // 8. movePath(旧目标目录, `${docsRoot}.legacy-${Date.now()}`)
+  return { ok: true, fromVersion: '0.7.1', toVersion: '0.8.0', modifiedFiles, details }
+}
+
+export const toV3Nodes: MigrationScript = {
+  id: 'm_0_7_1_to_0_8_0',
+  fromVersion: '0.7.1',
+  toVersion: '0.8.0',
+  title: '节点数据合并为单文件',
+  summary: '……（照 outlineStructure.ts 的写法：讲清"为什么是迁移脚本而不是兼容分支"）',
+  changes: ['每个目标改为 docs/{目标uuid}/', '一个节点一个 nodes/{uuid}.json', '……'],
+  migrate: migrateToV3Nodes,
+}
+```
+
+#### 5.1.7 旧目录的处置
+
+- 迁移成功后：`docs.legacy-{ts}/` 保留，**在设置 → 存储里加一行**"上次迁移的备份 · 占用 X MB · 删除"。用户点删除才删。
+- 这样既不产生长期冗余（用户可一键清），又保住"迁移搞坏了还能捞回来"。
+- **不要**在迁移脚本里自动删 `docs.legacy-*`：删了就没有退路了。
 
 **验收（逐项对账，缺一不可）**
 - 节点数一致；每份教学文档字数一致（±0）。
@@ -391,18 +518,27 @@ content.read('#9f1c…/exam:8f2e…')    // facet/uuid 直指
 
 ## 10. 未决问题（执行到这里必须先问用户）
 
+**已定**：
+- ~~P1 是否拆成"双写一个版本"~~ → **不拆，直接单写**（D11，用户 2026-10-22 定）。
+
+**待定**：
 1. **`index.md` 要不要进版本比对**：它是生成物，内容不变时 diff 不会重写，但如果节点标题变了它会变——可接受。**默认：写，且不参与用户编辑**。
 2. **旧 api 别名保留几个版本**：默认保留一个版本（`doc.*` / `outline.*` / `sdoc.*` 转发到 `content.*`），下个版本删。
 3. **`files/{uuid}/` 里要不要保留"导出 md"的副本**：默认**不保留**（按需导出）。
-4. **P1 是否要拆成"双写一个版本"**：如果用户担心迁移风险，可以先双写（新+旧都写）一个版本再切单写。代价是磁盘翻倍、IO 翻倍。
+4. **迁移失败时，v2 只读解析器留不留**（5.1.5 的降落伞）：
+   - A（默认）：留一个版本，启动时能读旧格式并提示"迁移未完成"——多 300 行只读代码，但迁移失败用户还能用。
+   - B：不留，迁移失败就阻断启动、提示从 `docs.legacy-*` 恢复——代码最干净，但失败即不可用。
+   - 用户既然要"不过多冗余"，可能倾向 B；但 B 的代价是**一次迁移 bug 就让用户打不开应用**。建议 A。
 
 ---
 
 ## 11. 执行前检查清单
 
-- [ ] 用户确认 D1–D10（尤其 D5 facet 与 D3 uuid 目录）。
-- [ ] 用户确认第 10 节的四个未决问题。
+- [ ] 用户确认 D1–D12（尤其 D5 facet、D3 uuid 目录、D11 单写、D12 目标 uuid 沿用根节点）。
+- [ ] 用户确认第 10 节的四个未决问题（尤其第 4 条降落伞）。
 - [ ] `git status` 干净（本项目常驻别人未提交的改动，动手前必须确认）。
 - [ ] 跑一次 `npm test` 记录基线（哪些本来就是红的）。
-- [ ] 准备一份真实数据目录做迁移演练（**不要拿用户唯一的真实数据当试验品**）。
+- [ ] **复制一份真实数据目录做迁移演练**（`%APPDATA%\unyra\users\{uid}` 整个拷走，**不要拿唯一的一份当试验品**）。
+- [ ] 演练顺序：① 只跑迁移脚本不接业务代码 → ② 用新代码打开演练副本，逐项对账（5.1.4）→ ③ 再跑第二遍验幂等 → ④ 确认没问题才改业务代码。
 - [ ] 确认 `useExportFlow` 的 md 导出覆盖正文（用户选择 D1 的前提）。
+- [ ] 迁移脚本先在**没有数据**和**只有一个空目标**两种极端情况上跑通，再上真实数据。
