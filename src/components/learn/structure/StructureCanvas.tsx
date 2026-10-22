@@ -60,9 +60,7 @@ import {
   hitTest,
   outlineSlots,
   resolveNodeView,
-  SLOT_DOT_R,
   slotAnchorY,
-  slotDotPos,
   slotKeyOf,
   splitLeafRef,
 } from './structureView'
@@ -179,6 +177,8 @@ export const StructureCanvas = memo(function StructureCanvas({
   /** 连线中的起点与指针位置（世界坐标）：画那条跟手的线 */
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
   const [linkAt, setLinkAt] = useState<{ x: number; y: number } | null>(null)
+  /** 这次连线是从哪条目标项拉出来的（跟手的线要从那一行出发） */
+  const [linkSlot, setLinkSlot] = useState<string | null>(null)
   /** 从列表拖出来的那一下：指针的屏幕坐标 */
   const [paletteAt, setPaletteAt] = useState<{ x: number; y: number } | null>(null)
   const [paletteKind, setPaletteKind] = useState<GraphKind | null>(null)
@@ -570,23 +570,6 @@ export const StructureCanvas = memo(function StructureCanvas({
     [nodes, edges, store, commit, onToast],
   )
 
-  /** 指针压在哪颗目标项圆点上（世界坐标） */
-  const dotAt = useCallback(
-    (world: { x: number; y: number }) => {
-      for (const node of nodes) {
-        if (node.kind !== 'outline') continue
-        for (const slot of outlineSlots(store, node, nodes)) {
-          const p = slotDotPos(node, slot.index)
-          if (Math.hypot(p.x - world.x, p.y - world.y) <= SLOT_DOT_R + 8) {
-            return { parentId: node.id, key: slot.key, slot }
-          }
-        }
-      }
-      return null
-    },
-    [nodes, store],
-  )
-
   /* ---------- 点目标项 ---------- */
 
   const onSlotClick = useCallback(
@@ -788,6 +771,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         const from = dotEl.dataset.slotDotParent as string
         gestureRef.current = { mode: 'link', from, slotKey: dotEl.dataset.slotDot as string, moved: false }
         setLinkFrom(from)
+        setLinkSlot(dotEl.dataset.slotDot as string)
         setLinkAt(toWorld(e.clientX, e.clientY))
         setSelectedId(from)
         return
@@ -812,6 +796,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         const from = handleEl.dataset.linkHandle as string
         gestureRef.current = { mode: 'link', from }
         setLinkFrom(from)
+        setLinkSlot(null)
         setLinkAt(toWorld(e.clientX, e.clientY))
         setSelectedId(from)
         return
@@ -931,25 +916,39 @@ export const StructureCanvas = memo(function StructureCanvas({
         if (!g.moved && g.slotKey) {
           onSlotClick(g.from, g.slotKey)
           setLinkFrom(null)
+          setLinkSlot(null)
           setLinkAt(null)
           setHoverId(null)
           return
         }
         // 一、把线拖到某颗目标项圆点上：由那条目标项接住
-        const dot = dotAt(world)
-        if (dot) {
-          if (g.from !== dot.parentId) assignSlot(dot.parentId, g.from, dot.key)
+        // 用 elementFromPoint 认元素，不再按坐标算——圆点就在行里，DOM 说了算
+        const under = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-slot-dot]')
+        if (under) {
+          const parentId = under.dataset.slotDotParent ?? ''
+          const key = under.dataset.slotDot ?? ''
+          if (parentId && key && g.from !== parentId) assignSlot(parentId, g.from, key)
           setLinkFrom(null)
+          setLinkSlot(null)
           setLinkAt(null)
           setHoverId(null)
           return
         }
-        // 二、普通落点：连到那张卡上
+        // 二、落在某张文档卡上：如果这次是从目标项圆点拉出来的，就挂到那条目标项上
         const target = hitTest(nodes, world.x, world.y, height)
+        if (target && target.id !== g.from && g.slotKey && target.kind === 'doc') {
+          assignSlot(g.from, target.id, g.slotKey)
+          setLinkFrom(null)
+          setLinkSlot(null)
+          setLinkAt(null)
+          setHoverId(null)
+          return
+        }
         if (target && target.id !== g.from && !addEdge(g.from, target.id)) {
           onToast?.(t('这两个节点不能这样连：下游不能回流，笔记/试卷/超级文档只能挂在文档下面'))
         }
         setLinkFrom(null)
+        setLinkSlot(null)
         setLinkAt(null)
         setHoverId(null)
         return
@@ -1195,10 +1194,16 @@ export const StructureCanvas = memo(function StructureCanvas({
             {linkAt && linkFrom && (() => {
               const from = byId.get(linkFrom)
               if (!from) return null
+              // 从目标项圆点上拉出来的线，起点要落在那一行（不是卡片顶部那个锚点）
+              const slotIndex =
+                linkSlot && from.kind === 'outline'
+                  ? outlineSlots(store, from, nodes).findIndex((s) => s.key === linkSlot)
+                  : -1
               const curve = edgeCurve(
                 from,
                 { id: '', kind: from.kind, x: linkAt.x, y: linkAt.y - CARD_H / 2 },
                 height,
+                slotIndex >= 0 ? { from: slotAnchorY(slotIndex) } : undefined,
               ).map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
               return (
                 <path
@@ -1264,16 +1269,17 @@ export const StructureCanvas = memo(function StructureCanvas({
               </div>
 
               {node.kind === 'outline' && slots.length > 0 ? (
-                <div className="flex flex-col overflow-hidden px-2 pb-2">
+                /* 容器不带左右内边距：行自己带，圆点才能贴到卡片右边框上 */
+                <div className="flex flex-col overflow-hidden pb-2">
                   {slots.map((slot) => (
                     <div
                       key={slot.key}
                       data-slot-key={slot.key}
                       data-slot-parent={node.id}
-                      title={slot.childId ? t('跳到这个子大纲') : t('生成一个空子大纲')}
+                      title={slot.childId ? t('跳到这个子文档') : t('生成一份空文档')}
                       onPointerEnter={() => setHoverSlot({ parentId: node.id, key: slot.key })}
                       onPointerLeave={() => setHoverSlot(null)}
-                      className="flex cursor-pointer items-center gap-1.5 rounded px-1 hover:bg-seal/[0.08]"
+                      className="relative flex cursor-pointer items-center gap-1.5 px-2 hover:bg-seal/[0.08]"
                       style={{ height: SLOT_ROW }}
                     >
                       <span className="h-2 w-2 shrink-0" />
@@ -1283,13 +1289,28 @@ export const StructureCanvas = memo(function StructureCanvas({
                       >
                         {slot.title}
                       </span>
+                      {/*
+                        圆点放在**这一行里面**：垂直居中由 flex 自动保证，
+                        再也不用「按常量算 y」——那个算法已经错过两次。
+                        水平方向 right: -5px 让它半进半出压在卡片右边框上。
+                      */}
+                      <span
+                        data-slot-dot={slot.key}
+                        data-slot-dot-parent={node.id}
+                        title={slot.childId ? t('已挂文档：拖出去可换一份') : t('从圆点拖出去挂一份文档')}
+                        className="absolute top-1/2 -right-[5px] h-2.5 w-2.5 -translate-y-1/2 cursor-crosshair rounded-full border-2"
+                        style={{
+                          borderColor: slot.color,
+                          background: slot.childId ? slot.color : 'var(--color-card, #fff)',
+                        }}
+                      />
                     </div>
                   ))}
                   {/* 手动加一条目标项：这是大纲内容，不是画布节点 */}
                   <div
                     data-add-slot={node.id}
                     title={t('给这份大纲加一条目标项')}
-                    className="flex cursor-pointer items-center gap-1.5 rounded px-1 text-[11px] text-ink-faint hover:bg-seal/[0.08] hover:text-seal"
+                    className="flex cursor-pointer items-center gap-1.5 px-2 text-[11px] text-ink-faint hover:bg-seal/[0.08] hover:text-seal"
                     style={{ height: SLOT_ROW }}
                   >
                     ＋ {t('添加目标项')}
@@ -1325,34 +1346,6 @@ export const StructureCanvas = memo(function StructureCanvas({
                 style={{ top: EDGE_ANCHOR_Y, opacity: selected || isHovered ? 1 : undefined }}
               />
             </div>
-
-            {/*
-              目标项圆点：贴在卡片右边框上（半进半出），垂直对准那一行。
-              它不只是指示灯——从这里拖出去可以连一份文档，把线拖到它上面也能接住。
-            */}
-            {node.kind === 'outline' &&
-              slots.map((slot) => {
-                const p = slotDotPos(node, slot.index)
-                return (
-                  <div
-                    key={`dot-${slot.key}`}
-                    data-slot-dot={slot.key}
-                    data-slot-dot-parent={node.id}
-                    title={
-                      slot.childId ? t('「{0}」已挂文档：拖出去可换一份', slot.title) : t('从圆点拖出去挂一份文档')
-                    }
-                    className="absolute -translate-x-1/2 -translate-y-1/2 cursor-crosshair rounded-full border-2"
-                    style={{
-                      left: p.x,
-                      top: p.y,
-                      width: SLOT_DOT_R * 2,
-                      height: SLOT_DOT_R * 2,
-                      borderColor: slot.color,
-                      background: slot.childId ? slot.color : 'var(--color-card, #fff)',
-                    }}
-                  />
-                )
-              })}
 
             {/*
               注释：**贴在卡片外面**、跟着节点走的一条便签。

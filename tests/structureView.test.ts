@@ -16,10 +16,8 @@ import {
   outlineSlots,
   resolveNodeView,
   DOC_BODY_H,
-  SLOT_DOT_R,
   slotAnchorY,
   slotColor,
-  slotDotPos,
   slotKeyOf,
   splitLeafRef,
 } from '../src/components/learn/structure/structureView'
@@ -429,13 +427,4 @@ describe('文档卡：摘要与生成按钮、目标项圆点', () => {
     expect(cardHeight(store, { kind: 'doc', ref: 'n2' })).toBe(CARD_H)
   })
 
-  it('目标项圆点贴在卡片右边框上，垂直对准那一行', () => {
-    const node: StructureNode = { id: 'o:p1', kind: 'outline', ref: 'p1', x: 100, y: 50 }
-    const p0 = slotDotPos(node, 0)
-    const p2 = slotDotPos(node, 2)
-    expect(p0.x).toBe(100 + CARD_W)
-    expect(p0.y).toBe(50 + slotAnchorY(0))
-    expect(p2.y - p0.y).toBe(SLOT_ROW * 2)
-    expect(SLOT_DOT_R).toBeGreaterThan(0)
-  })
 })

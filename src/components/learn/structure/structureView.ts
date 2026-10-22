@@ -10,7 +10,6 @@
 
 import type { LearnStore } from '../../../learn/types'
 import {
-  CARD_W,
   OUTLINE_HEAD,
   SLOT_ROW,
   defaultHeight,
@@ -136,19 +135,6 @@ export function slotKeyOf(_store: LearnStore, node: StructureNode): string | nul
  */
 export function slotAnchorY(index: number): number {
   return OUTLINE_HEAD + index * SLOT_ROW + SLOT_ROW / 2
-}
-
-/** 目标项圆点的半径（世界坐标） */
-export const SLOT_DOT_R = 5
-
-/**
- * 目标项圆点的世界坐标：**贴右边框、半进半出**，垂直对准那一行。
- *
- * 圆点既是「这条目标项占了没有」的指示灯，也是连线的手柄：
- * 从它拖出去连一份文档，或者把线拖到它上面来接住。
- */
-export function slotDotPos(node: StructureNode, index: number): { x: number; y: number } {
-  return { x: node.x + CARD_W, y: node.y + slotAnchorY(index) }
 }
 
 /**
