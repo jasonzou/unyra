@@ -66,11 +66,46 @@ function onTimeout() {
   })
 }
 
+/*
+ * 参数回传也要折：toWire 只覆盖节点门面自己方法的参数，普通 api 调用的 args 没人管——
+ * 模型把节点对象、没 await 的 Promise（n.content 是 getter）或函数塞进参数，结构化克隆
+ * 就在 postMessage 上炸，整批调用报废且报错指不到位置。这里深折一遍：
+ * - 节点对象 → 只带 uuid（按身份传，与 toWire 的 connect 语义一致）；
+ * - Promise / 函数 → 人话占位（调用照常发出，由各 api 自己的校验给「缺字段」的回执）。
+ */
+function foldArg(v, seen) {
+  if (!v || typeof v !== 'object') {
+    if (typeof v === 'function') return '［函数不能作为参数：把要传的值先算出来］'
+    return v
+  }
+  if (v.__node === true) return v.uuid
+  if (typeof v.then === 'function') return '［这是个没 await 的 Promise：先 await 拿到值再传］'
+  if (seen.has(v)) return '［循环引用］'
+  seen.add(v)
+  if (Array.isArray(v)) {
+    const out = v.map((x) => foldArg(x, seen))
+    seen.delete(v)
+    return out
+  }
+  const out = {}
+  for (const k of Object.keys(v)) out[k] = foldArg(v[k], seen)
+  seen.delete(v)
+  return out
+}
+
 function call(name, args) {
   return new Promise((resolve, reject) => {
     const id = ++seq
     pending.set(id, { resolve, reject })
-    self.postMessage({ kind: 'call', id, name, args })
+    let wire
+    try {
+      wire = { kind: 'call', id, name, args: foldArg(args, new Set()) }
+      self.postMessage(wire)
+    } catch (err) {
+      // 仍有漏网的不可克隆值：与其甩一句 DataCloneError，不如点名是哪条调用、该怎么改
+      reject(new Error('参数里有发不出去的值（' + (err && err.message ? err.message : '不可克隆') + '）：调用 ' + name + ' 的参数里出现了函数 / Promise / 节点对象。节点只传 uuid 字符串；Promise 先 await；要传内容就取它的纯数据字段。'))
+      return
+    }
   })
 }
 

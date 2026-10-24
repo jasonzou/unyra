@@ -18,6 +18,14 @@ describe('真沙箱节点门面的结构守卫', () => {
     expect(js).not.toMatch(/channel\.get\(/)
   })
 
+  it('api 调用的参数回传必须先折（节点对象→uuid、Promise/函数→人话占位）', () => {
+    // toWire 只覆盖节点门面方法的参数；普通 api 调用的 args 在 postMessage 前没人折的话，
+    // 一个没 await 的 Promise 就能让整批调用报废（真事）
+    expect(js).toMatch(/function foldArg\(/)
+    expect(js).toMatch(/args: foldArg\(args, new Set\(\)\)/)
+    expect(js).toMatch(/__node === true\) return v\.uuid/)
+  })
+
   it('两份门面的成员清单一致（invoke 分发 / facade 方法表 / NODE_MEMBERS_ORDER）', () => {
     const members = NODE_MEMBERS_ORDER as readonly string[]
     // 进程内 facade 的方法表（attachNodeFacade 里那个字面量数组）
