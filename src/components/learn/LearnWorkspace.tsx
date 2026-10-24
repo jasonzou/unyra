@@ -152,6 +152,7 @@ import {
 } from '../../learn/reading'
 import { makeConversation, makeGoal, nodeDocRel } from '../../learn/store'
 import { loadAgentSettings, saveAgentSettings, subscribeAgentSettings } from '../../agent/settings'
+import { subscribeDrops } from '../../agent/contextDebug'
 import { personaOf } from '../../agent/persona'
 import { docFormatOf } from '../../agent/docFormat'
 import AgentSettingsPanel from '../AgentSettingsPanel'
@@ -418,6 +419,15 @@ export default function LearnWorkspace({
    */
   /** 上下文比对调试器：悬浮窗口（可拖动），只在开发者模式里打开（见 AgentSettingsPanel 的开发者分页） */
   const debugWin = usePresence()
+  const openContextDebugger = debugWin.setOpen
+  // 命中骤降定格成报告时自动弹出（开发者开关开着才弹；见 agent/contextDebug 与 ToolsTab 的开关）
+  useEffect(
+    () =>
+      subscribeDrops(() => {
+        if (loadAgentSettings().dev.contextDebugger) openContextDebugger(true)
+      }),
+    [openContextDebugger],
+  )
   /**
    * 上下文轨迹：**独立的 Electron 窗口**（与考试窗口同一套结构，见 electron/app/traceWindow）。
    * 主窗口是数据拥有者：打开时把当前激活会话整份递过去，开着期间随数据变化持续 push；
@@ -5474,8 +5484,8 @@ export default function LearnWorkspace({
       )}
 
       {/*
-        上下文比对调试器：可拖动的悬浮窗（见 components/FloatWindow）。
-        开着才有记录——快照由 agent 设置里的开发者开关控制（见 useAgent 的 onContext）。
+        上下文对比调试器：可拖动的悬浮窗（见 components/FloatWindow）。
+        平时不录制；命中骤降时 contextDebug 定格报告，开发者开关开着就自动弹出来。
       */}
       {debugWin.mounted && (
         <FloatWindow width={760} height={680} closing={debugWin.closing}>

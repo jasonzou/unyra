@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import type { AgentSettings, AgentDevSettings } from '../../agent/settings'
 import { SANDBOX_API_CATALOG } from '../../agent/apiCatalog'
-import { clearRecords as clearContextRecords } from '../../agent/contextFilter'
+import { clearDropReports } from '../../agent/contextDebug'
 import type { BaseProcessInfo } from '../../../shared/ipc'
 import Switch from '../Switch'
 import { pane } from '../Pane'
@@ -79,7 +79,7 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger, onOpenCont
 
   // 清理快照记录
   const handleClearSnapshots = () => {
-    clearContextRecords()
+    clearDropReports()
     setClearedSnapshot(true)
     setTimeout(() => setClearedSnapshot(false), 2000)
   }
@@ -88,7 +88,7 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger, onOpenCont
   const patchDev = (patch: Partial<AgentDevSettings>) => {
     const next = { ...settings, dev: { ...settings.dev, ...patch } }
     onChange(next)
-    if (patch.contextDebugger === false) clearContextRecords()
+    if (patch.contextDebugger === false) clearDropReports()
   }
 
   // 强制终止进程
@@ -234,8 +234,8 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger, onOpenCont
             <Switch
               on={settings.dev?.contextDebugger === true}
               onChange={(next) => patchDev({ contextDebugger: next })}
-              label={t('实时记录发往 API 的上下文快照')}
-              hint={t('在每次向大模型发送请求前抓取一份不可变快照，用于两轮之间逐字节对账定位')}
+              label={t('命中骤降时自动弹出对比调试器')}
+              hint={t('平时不录制任何上下文；只有某次请求的缓存命中字数低于上一次，才把前后两份摆进调试器（滚动只留最近两份请求用于比对）')}
             />
           </div>
 

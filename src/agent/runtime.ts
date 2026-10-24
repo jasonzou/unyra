@@ -17,7 +17,7 @@ import {
   type AgentToolResult,
   type MessageImage,
 } from './types'
-import type { ContextSnapshot } from './contextFilter'
+import type { ContextSnapshot } from './contextDebug'
 import { MAX_REQUEST_RETRIES, isRetryable, retryDelayMs, sleepMs } from './retry'
 import { t } from '../i18n'
 
@@ -87,7 +87,7 @@ export interface AgentRunOptions {
   /**
    * 上下文过滤器钩子：**每一次**把上下文发往 API 之前调用（此时 system、messages、
    * 工具声明都已拼装完成，拿到的是与实发完全一致的那一份）。调试器据此记录快照、
-   * 比对两轮之间上下文差异出现在哪个部位（见 agent/contextFilter）。
+   * 对比调试器在发送前收下这份快照做滚动比对（见 agent/contextDebug）。
    * 不注入就没有任何开销。
    */
   onContext?: (snapshot: ContextSnapshot) => void

@@ -24,7 +24,7 @@ import { emptyDelivery, hasDelivery, mergeDelivery, normalizeDelivery } from '..
 import { createExecuteTool, type AskAnswers, type AskFormPayload, type ExamToolDeps } from '../agent/tools'
 import { ASK_IDLE_TIMEOUT_MS } from '../agent/sandbox/limits'
 import { ensureActivityListeners, userIdleMs } from '../lib/userActivity'
-import { recordContext } from '../agent/contextFilter'
+import { captureDrop, noteRequest } from '../agent/contextDebug'
 import { assertPrefixStable, currentEpoch, lastCacheRead, noteCacheRead, resetPrefixGate } from '../agent/prefixGate'
 import { globalContextWindow, hasApiKey, loadAiSettings, resolveGlobal } from '../ai/settings'
 import type { ReasoningEffort } from '../ai/types'
@@ -891,8 +891,9 @@ export function useAgent(opts: {
           ctx: { nodeId: target.nodeId, goalId: target.goalId },
           signal: ctrl.signal,
           /**
-           * 上下文过滤器：每跳请求发出前把实发的上下文交给过滤器记录（见 agent/contextFilter）。
-           * 只在开发者模式的调试器开着时才记——快照会拷下整段历史，平时不值得花这个内存。
+           * 上下文对比调试器的记账口：每跳请求发出前收下实发的上下文（见 agent/contextDebug）。
+           * 滚动只留最近两份、不累积；命中骤降时由哨兵定格成报告（开不开着窗口都在记，
+           * 这正是「不录制、只在出事时摆出来」的前提）。
            */
           onContext: (snapshot) => {
             // 前缀门禁：此刻的 system / messages / tools 与实发完全一致（见 agent/runtime），
@@ -902,7 +903,7 @@ export function useAgent(opts: {
               snapshot.messages,
               snapshot.tools as Parameters<typeof assertPrefixStable>[2],
             )
-            if (loadAgentSettings().dev.contextDebugger) recordContext(snapshot)
+            noteRequest(target.conversationId, snapshot)
           },
           /**
            * 动态提示词注入的边界通道（触发在 execute 里发生，onPromptModule 只入队）。
@@ -960,9 +961,11 @@ export function useAgent(opts: {
             // 服务商缓存是真丢，但那不是分叉——跨了纪元的读数不比较，不喊狼来了。
             const prevRead = lastCacheRead(convKey)
             if (prevRead && prevRead.epoch === currentEpoch(convKey) && e.usage.cacheRead + 512 < prevRead.read) {
+              // 定格：把前后两份实发上下文摆进对比调试器（断点已标注，见 agent/contextDebug）
+              captureDrop(convKey, prevRead.read, e.usage.cacheRead)
               console.warn(
                 `[cache-watch] ${convKey} 命中骤降：${prevRead.read} → ${e.usage.cacheRead}（-${prevRead.read - e.usage.cacheRead}）。` +
-                  '载荷已由前缀门禁证明只增不改；反复出现时开「上下文调试器」比对两轮快照即可定位分叉的消息。',
+                  '前后两份上下文已摆进对比调试器（断点已标注）。',
               )
             }
             noteCacheRead(convKey, e.usage.cacheRead)
