@@ -280,14 +280,21 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
 
     const children = prereqIds(store, node.id)
     if (node.outline && outlineVisible(store, node.id, isRoot)) {
+      /*
+       * 行与文档的对应：**认领优先**——边上的 portKey 说了算（文档改过名、还没起正经
+       * 标题，都不影响它占着哪条目标项）。旧数据的边没有 portKey，退回按 key 对号
+       * （文档标题生成的 key === 目标项 key）。
+       */
       const slots: OutlineSlotView[] = node.outline.children.map((e, index) => ({
         key: e.key,
         title: e.title,
         index,
         childId:
+          store.edges.find((ed) => ed.from === node.id && ed.portKey === e.key)?.to ??
           children
             .map((cid) => nodeById(store, cid))
-            .find((c) => c && c.key === e.key)?.id ?? null,
+            .find((c) => c && c.key === e.key)?.id ??
+          null,
       }))
       const intro = node.outline.intro?.trim() ?? ''
       const outline: Pending = {

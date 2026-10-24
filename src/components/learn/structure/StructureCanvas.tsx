@@ -277,10 +277,10 @@ export const StructureCanvas = memo(function StructureCanvas({
       const from = cards.find((c) => c.uuid === edge.from)
       const to = cards.find((c) => c.uuid === edge.to)
       if (!from || !to || from.kind !== 'outline' || to.kind !== 'doc') return undefined
-      const measured = dotY[`${from.uuid}|${to.uuid}`]
-      if (measured != null) return { from: measured }
-      const index = from.slots?.findIndex((s) => s.childId === to.uuid) ?? -1
-      return index < 0 ? undefined : { from: slotAnchorY(index) }
+      const slot = from.slots?.find((s) => s.childId === to.uuid)
+      if (!slot) return undefined
+      // 实测的圆点位置优先（DOM 量出来的才是真位置）；没量到就按行号算
+      return { from: dotY[`${from.uuid}|${slot.key}`] ?? slotAnchorY(slot.index) }
     },
     [cards, dotY],
   )

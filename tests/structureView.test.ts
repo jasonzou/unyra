@@ -279,4 +279,41 @@ describe('认领接口的文档卡：没有正经标题就显示接口的 label'
     }
     expect(deriveCanvas(named, 'g1', undefined).cards.find((c) => c.uuid === 'free1')?.title).toBe('我的笔记页')
   })
+
+  it('行与文档的对应：认领（portKey）优先，key 对号只兜旧数据的底', () => {
+    const base = makeStore()
+    const r = base.nodes.find((n) => n.id === 'r')!
+    const mk = (id: string, title: string, key: string) => ({
+      id,
+      title,
+      key,
+      description: '',
+      docs: { teaching: '' },
+      notes: [],
+      annotations: [],
+      status: 'learning' as const,
+      origin: 'user' as const,
+      goalId: 'g1',
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    // claimed：文档标题与目标项毫无关系，但边上有 portKey
+    // legacy：边没有 portKey，文档 key 与目标项 key 对上号（旧数据）
+    const store: LearnStore = {
+      ...base,
+      nodes: [
+        { ...r, outline: { intro: '', children: [{ key: 'jixian', title: '极限', summary: '' }, { key: 'lianjie', title: '衔接', summary: '' }], updatedAt: 1 } },
+        mk('claimed1', '新文档', '新文档'),
+        mk('legacy1', 'jixian', 'jixian'),
+      ],
+      edges: [
+        ...base.edges,
+        { from: 'r', to: 'claimed1', createdAt: 1, portKey: 'lianjie' },
+        { from: 'r', to: 'legacy1', createdAt: 1 },
+      ],
+    }
+    const slots = deriveCanvas(store, 'g1', undefined).cards.find((c) => c.uuid === outlineUuid('r'))?.slots ?? []
+    expect(slots.find((s) => s.key === 'lianjie')?.childId).toBe('claimed1')
+    expect(slots.find((s) => s.key === 'jixian')?.childId).toBe('legacy1')
+  })
 })
