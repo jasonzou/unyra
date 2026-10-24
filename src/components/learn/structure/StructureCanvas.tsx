@@ -127,6 +127,10 @@ const PALETTE: GNodeKind[] = ['doc', 'outline', 'note', 'exam', 'superdoc']
 /** 网格背景的点距（世界坐标 px）：平移/缩放时按相机换算，见画布根的 backgroundImage */
 const GRID_PX = 28
 
+/** 双击节点聚焦的落点与缩放：节点停在屏幕高的 40% 处、水平居中，放大到 140% */
+const FOCUS_ZOOM = 1.4
+const FOCUS_VERTICAL = 0.4
+
 /**
  * palette 行的图标：全部 24×24、描边 2、圆角端点——与 lucide 同一套笔画语言
  * （自绘图标纪律：比例先对齐成熟图形语言，不自造异形字）。图形口径：
@@ -224,6 +228,8 @@ type Gesture =
       moved: boolean
       /** 按下的是标题：没拖动的话松手就打开它 */
       openTitle: boolean
+      /** 多选整组拖：这批卡按下时的原位置（含按下的这张）；单选拖没有它 */
+      group?: Array<{ id: string; x: number; y: number }>
     }
   | { mode: 'link'; from: string; fromKind: GNodeKind; slotKey?: string; moved?: boolean }
   | {
@@ -305,8 +311,13 @@ export const StructureCanvas = memo(function StructureCanvas({
   const [hoverDot, setHoverDot] = useState(false)
   /** 指针停在某个目标项上：对应的那条子文档连线发光 */
   const [hoverSlot, setHoverSlot] = useState<{ parentId: string; key: string } | null>(null)
-  /** 拖动中的节点位置（只在本地，松手才写回坐标表） */
-  const [draft, setDraft] = useState<{ id: string; x: number; y: number } | null>(null)
+  /** 拖动中的节点位置（只在本地，松手才写回坐标表）；整组拖时 moves 带上每一张的新位置 */
+  const [draft, setDraft] = useState<{
+    id: string
+    x: number
+    y: number
+    moves?: Record<string, { x: number; y: number }>
+  } | null>(null)
   /** 连线中的起点与指针位置（世界坐标）：画那条跟手的线 */
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
   const [linkAt, setLinkAt] = useState<{ x: number; y: number } | null>(null)
@@ -359,11 +370,15 @@ export const StructureCanvas = memo(function StructureCanvas({
   /** 连线画法：默认直线（见 learn/structure 的 EDGE_STYLES） */
   const edgeStyle: EdgeStyle = saved?.edgeStyle ?? 'straight'
 
-  /** 拖动中的那一张用 draft 的位置：连线跟着动，而不是松手才跳过去 */
-  const displayCards = useMemo(
-    () => (draft ? cards.map((c) => (c.uuid === draft.id ? { ...c, x: draft.x, y: draft.y } : c)) : cards),
-    [cards, draft],
-  )
+  /** 拖动中的那一张（整组拖时是整组）用 draft 的位置：连线跟着动，而不是松手才跳过去 */
+  const displayCards = useMemo(() => {
+    if (!draft) return cards
+    return cards.map((c) => {
+      const m = draft.moves?.[c.uuid]
+      if (m) return { ...c, x: m.x, y: m.y }
+      return c.uuid === draft.id ? { ...c, x: draft.x, y: draft.y } : c
+    })
+  }, [cards, draft])
   const byId = useMemo(() => new Map(displayCards.map((c) => [c.uuid, c])), [displayCards])
 
   /**
@@ -520,6 +535,25 @@ export const StructureCanvas = memo(function StructureCanvas({
     [cards, view, height, flash, animateCamera],
   )
 
+  /**
+   * 双击节点：把它带到一个**固定**的阅读位——垂直 40%、水平居中、放大 140%。
+   * 走 animateCamera 的过渡（300ms ease-out），是滑过去不是闪过去。
+   */
+  const focusCard = useCallback(
+    (card: CardView) => {
+      if (!view.width || !view.height) return
+      animateCamera({
+        x: view.width / 2 - (card.x + CARD_W / 2) * FOCUS_ZOOM,
+        y: view.height * FOCUS_VERTICAL - (card.y + height(card) / 2) * FOCUS_ZOOM,
+        zoom: FOCUS_ZOOM,
+      })
+      setSelectedId(card.uuid)
+      setMultiIds(null)
+      flash(card.uuid)
+    },
+    [view, height, animateCamera, flash],
+  )
+
   const lastFocusNonce = useRef<number | null>(null)
   useEffect(() => {
     if (!focusTarget || focusTarget.nonce === lastFocusNonce.current) return
@@ -630,6 +664,20 @@ export const StructureCanvas = memo(function StructureCanvas({
         ...(base.edgeStyle ? { edgeStyle: base.edgeStyle } : {}),
         positions: { ...base.positions, [uuid]: { x, y, ...(prevNote ? { note: prevNote } : {}) } },
       })
+    },
+    [saved, commit],
+  )
+
+  /** 一次提交写一批位置（多选整组拖的落点）：一笔进撤回栈，Ctrl+Z 一次退整组 */
+  const writePositions = useCallback(
+    (entries: Array<{ uuid: string; x: number; y: number }>) => {
+      const base = saved ?? { version: 2 as const, positions: {} }
+      const positions = { ...base.positions }
+      for (const en of entries) {
+        const prevNote = positions[en.uuid]?.note
+        positions[en.uuid] = { x: en.x, y: en.y, ...(prevNote ? { note: prevNote } : {}) }
+      }
+      commit({ version: 2, ...(base.edgeStyle ? { edgeStyle: base.edgeStyle } : {}), positions })
     },
     [saved, commit],
   )
@@ -882,8 +930,35 @@ export const StructureCanvas = memo(function StructureCanvas({
         const card = cards.find((c) => c.uuid === id)
         if (!card) return
         const world = toWorld(e.clientX, e.clientY)
-        setSelectedId(id)
-        setMultiIds(null)
+        /*
+         * Ctrl/⌘ + 点按：把这张卡加进 / 移出多选（拉框之外的第二个入口）。
+         * 按下即定，不带拖动手势——这一下只是改选区。
+         */
+        if (e.ctrlKey || e.metaKey) {
+          setMultiIds((prev) => {
+            const next = new Set(prev ?? [])
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next.size > 0 ? next : null
+          })
+          setSelectedId(null)
+          setSelectedEdge(null)
+          return
+        }
+        /*
+         * 按下的是多选里的一张：整组一起拖（每张的原位置在按下这一刻冻结，
+         * 之后整组跟着同一个位移走）。普通单选还是老样子：回到单选。
+         */
+        const group = multiIds?.has(id)
+          ? [...multiIds]
+              .map((uid) => cards.find((c) => c.uuid === uid))
+              .filter((c): c is CardView => !!c)
+              .map((c) => ({ id: c.uuid, x: c.x, y: c.y }))
+          : undefined
+        if (!group) {
+          setSelectedId(id)
+          setMultiIds(null)
+        }
         setSelectedEdge(null)
         gestureRef.current = {
           mode: 'node',
@@ -894,6 +969,7 @@ export const StructureCanvas = memo(function StructureCanvas({
           origY: card.y,
           moved: false,
           openTitle: !!target.closest('[data-open-title]'),
+          ...(group ? { group } : {}),
         }
         return
       }
@@ -918,7 +994,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       gestureRef.current = { mode: 'marquee', startX: world.x, startY: world.y }
       setMarquee({ x: world.x, y: world.y, width: 0, height: 0 })
     },
-    [cards, centerOn, edges, height, menu, onSlotClick, toWorld, anchorOf, edgeStyle, routeOf],
+    [cards, centerOn, edges, height, menu, multiIds, onSlotClick, toWorld, anchorOf, edgeStyle, routeOf],
   )
 
   const onPointerMove = useCallback(
@@ -944,7 +1020,13 @@ export const StructureCanvas = memo(function StructureCanvas({
         const dy = world.y - g.grabY
         if (!g.moved && Math.abs(dx) + Math.abs(dy) < 2) return
         g.moved = true
-        setDraft({ id: g.id, x: g.origX + dx, y: g.origY + dy })
+        if (g.group && g.group.length > 1) {
+          const moves: Record<string, { x: number; y: number }> = {}
+          for (const m of g.group) moves[m.id] = { x: m.x + dx, y: m.y + dy }
+          setDraft({ id: g.id, x: g.origX + dx, y: g.origY + dy, moves })
+        } else {
+          setDraft({ id: g.id, x: g.origX + dx, y: g.origY + dy })
+        }
         setOverTrash(isOverTrash(e.clientX, e.clientY))
         return
       }
@@ -989,12 +1071,18 @@ export const StructureCanvas = memo(function StructureCanvas({
         const inTrash = isOverTrash(e.clientX, e.clientY)
         setOverTrash(false)
         if (inTrash && g.moved) {
-          removeNode(g.id)
+          // 整组拖进垃圾桶 = 整组删（与 Delete 键删除整个多选同一口径）
+          for (const m of g.group ?? [{ id: g.id }]) removeNode(m.id)
           setDraft(null)
+          setMultiIds(null)
           return
         }
         if (draft && draft.id === g.id && g.moved) {
-          writePos(draft.id, draft.x, draft.y)
+          if (g.group && g.group.length > 1 && draft.moves) {
+            writePositions(g.group.map((m) => ({ uuid: m.id, x: draft.moves![m.id].x, y: draft.moves![m.id].y })))
+          } else {
+            writePos(draft.id, draft.x, draft.y)
+          }
         } else if (!g.moved && g.openTitle) {
           const card = cards.find((c) => c.uuid === g.id)
           if (card) openNode(card)
@@ -1129,27 +1217,37 @@ export const StructureCanvas = memo(function StructureCanvas({
                   ? t('已放一份空超级文档「{0}」：点「生成超级文档」让 AI 来写', r.title)
                   : g.kind === 'outline'
                     ? t('已建一份文档和它的空大纲：大纲卡上直接写目标项')
-                    : t('已建文档「{0}」：双击卡片打开写正文', r.title),
+                    : t('已建文档「{0}」：点标题打开写正文', r.title),
           )
         }
       }
     },
-    [cards, draft, height, isOverTrash, marquee, onSlotClick, onCreateNode, onToast, openNode, removeNode, toWorld, tryConnect, writePos],
+    [cards, draft, height, isOverTrash, marquee, onSlotClick, onCreateNode, onToast, openNode, removeNode, toWorld, tryConnect, writePos, writePositions],
   )
 
   /* ---------- 双击 ---------- */
 
   const onDoubleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      const target = (e.target as HTMLElement).closest<HTMLElement>('[data-node-id]')
+      /*
+       * 画布上的双击归画布自己（适应画布 / 聚焦节点），不再冒泡到文档区的
+       * 「双击切纯净阅读」——两套手势长在同一个容器里，输的总是用户。
+       */
+      e.stopPropagation()
+      const hit = e.target as HTMLElement
+      // 双击在按钮 / 输入框上是连点，不是手势
+      if (hit.closest('button, textarea, input, [data-menu]')) return
+      // 双击标题 = 打开（第一下点标题已经把文档开了），不再聚焦
+      if (hit.closest('[data-open-title]')) return
+      const target = hit.closest<HTMLElement>('[data-node-id]')
       if (!target) {
         fit()
         return
       }
       const card = cards.find((c) => c.uuid === target.dataset.nodeId)
-      if (card) openNode(card)
+      if (card) focusCard(card)
     },
-    [fit, cards, openNode],
+    [fit, cards, focusCard],
   )
 
   /* ---------- 右键菜单 ---------- */
@@ -1450,7 +1548,7 @@ export const StructureCanvas = memo(function StructureCanvas({
           const h = height(card)
           const slots = card.slots ?? []
           const openable = card.kind !== 'outline'
-          const lifted = draft?.id === card.uuid
+          const lifted = !!draft && (draft.id === card.uuid || (draft.moves !== undefined && card.uuid in draft.moves))
           const hasUpstream = edges.some((e) => e.to === card.uuid)
           // 空文档没接上游 = 还没挂进树里，置灰提示（游离文档）；入口是根，天生没有上级
           const unassigned = card.kind === 'doc' && !card.entry && !hasUpstream
@@ -1555,6 +1653,25 @@ export const StructureCanvas = memo(function StructureCanvas({
                   >
                     ＋ {t('添加目标项')}
                   </div>
+                </div>
+              ) : card.kind === 'outline' && slots.length === 0 ? (
+                /*
+                  空大纲：给一颗「生成大纲」——与文档卡右键菜单的「生成前置知识大纲」
+                  是同一个动作（按 o: 前缀找出宿主文档，工作流读那份文档铺目标项）。
+                */
+                <div className="flex items-center justify-between gap-2 px-3 pb-2">
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-ink-soft">{card.subtitle}</span>
+                  <button
+                    type="button"
+                    title={t('读父级文档，把「先要学会什么」铺成目标项')}
+                    className="shrink-0 bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
+                    onClick={() => {
+                      const docId = docIdOfOutlineUuid(card.uuid)
+                      if (docId) onGenerateOutline?.(docId)
+                    }}
+                  >
+                    {t('生成大纲')}
+                  </button>
                 </div>
               ) : card.kind === 'doc' && card.excerpt ? (
                 /*
@@ -1748,7 +1865,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       {/* 左侧节点列表：拖到画布上生成节点（必须拖出列表再松手，见 Gesture.palette.leftList） */}
       <div
         ref={paletteRef}
-        className="absolute top-4 left-4 z-20 flex w-[112px] flex-col gap-1 rounded-xl border border-line bg-card/85 p-2 backdrop-blur"
+        className="absolute top-4 left-4 z-20 flex w-[148px] flex-col gap-1 rounded-xl border border-line bg-card/85 p-2 backdrop-blur"
       >
         <div className="px-1 pb-1 text-[10px] font-semibold text-ink-faint">{t('拖到画布或文档卡上')}</div>
         {PALETTE.map((kind) => (

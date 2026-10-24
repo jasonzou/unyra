@@ -417,6 +417,8 @@ const dict: Record<string, string> = {
   '权威根': 'Root',
   '入口节点选定的文档：这门课从这里开始': 'The document chosen by the entry node: this is where the course starts',
   '「{0}」的空文档已挂上：点卡片上的「生成文档」让 AI 来写': 'Empty doc attached to "{0}": click Generate on the card to let the AI write it',
+  '已建文档「{0}」：点标题打开写正文': 'Created doc "{0}": click its title to open and write',
+  '读父级文档，把「先要学会什么」铺成目标项': 'Read the parent doc and lay out what to learn first as outline goals',
   '没能创建文档实体，请稍后再试': 'Could not create the document, please try again later',
   '已移除 {0} 张卡。内容没有删，Ctrl+Z 可以撤回': 'Removed {0} cards. Content is untouched — Ctrl+Z to undo',
   '生成超级文档': 'Generate super doc',

@@ -31,7 +31,7 @@ import {
   type ComponentProps,
   type ReactNode,
 } from 'react'
-import { ExternalLink, Globe } from 'lucide-react'
+import { ExternalLink, Globe, Maximize2, Minimize2 } from 'lucide-react'
 import type {
   DocKind,
   DocView,
@@ -5038,6 +5038,27 @@ export default function LearnWorkspace({
               // 标题大纲：按当前页签的槽取（渲染组件装进去，见 lib/outline 的 OutlineHandle）
               outlineSlot={getOutlineSlot(gTabId)}
             />
+          )}
+
+          {/*
+            画布页签（大纲页）右上角的纯净阅读入口：悬浮组不画 outline（它不是文档），
+            这颗补位。画布内的双击归画布自己（适应画布 / 聚焦节点），进纯净阅读
+            只走这颗按钮与 F11——两套双击手势不再打架。
+          */}
+          {gTab?.ref.kind === 'outline' && (
+            <button
+              type="button"
+              title={pure ? t('退出纯净阅读（F11 / Esc）') : t('纯净阅读：收起两侧栏、页签栏与顶栏，只留正文（F11）')}
+              aria-pressed={pure}
+              onClick={toggleZen}
+              className={
+                pure
+                  ? 'absolute right-4 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-lg border border-line-strong bg-line/50 text-ink transition'
+                  : 'absolute right-4 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-card/90 text-ink-soft shadow-sm backdrop-blur transition hover:bg-line/50 hover:text-ink'
+              }
+            >
+              {pure ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </button>
           )}
 
           {/*

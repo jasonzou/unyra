@@ -83,6 +83,10 @@ export interface VideoPlayerHandle {
   play: () => Promise<void>
   pause: () => void
   getVideoElement: () => HTMLVideoElement | null
+  /** 读静音态（页签条快捷按钮用；与播放器按钮、持久化是同一份状态） */
+  getMuted: () => boolean
+  /** 写静音态：进状态机，元素属性由同步 effect 落下去 */
+  setMuted: (muted: boolean) => void
 }
 
 const SPEED_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
@@ -178,6 +182,20 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     // 音量与倍速
     const [volume, setVolume] = useState(readStoredVolume)
     const [isMuted, setIsMuted] = useState(readStoredMuted)
+    /** 静音态的即时读数：handle 的 getMuted 要读「现在」的值，不等下一次渲染 */
+    const isMutedRef = useRef(isMuted)
+    useEffect(() => {
+      isMutedRef.current = isMuted
+    }, [isMuted])
+    /** 外部（页签条快捷静音）写静音：与 toggleMute 同一份状态与持久化；元素属性由同步 effect 落下去 */
+    const applyMuted = useCallback((muted: boolean) => {
+      setIsMuted(muted)
+      try {
+        localStorage.setItem(MUTED_STORAGE_KEY, muted ? '1' : '0')
+      } catch {
+        // 忽略
+      }
+    }, [])
     const [playbackRate, setPlaybackRate] = useState(readStoredRate)
 
     // 全屏与镜像
@@ -278,8 +296,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           if (videoRef.current) videoRef.current.pause()
         },
         getVideoElement: () => videoRef.current,
+        getMuted: () => isMutedRef.current,
+        setMuted: applyMuted,
       }),
-      [captureFrame],
+      [captureFrame, applyMuted],
     )
 
     /**
