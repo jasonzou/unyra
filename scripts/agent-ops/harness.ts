@@ -28,6 +28,8 @@ export const childId = 'n2'
 export function baseStore(): LearnStore {
   return {
     version: 2,
+    drafts: {},
+    docScroll: {},
     nodes: [
       {
         id: rootId, title: '微积分', key: '微积分', description: '微积分是什么',
@@ -38,7 +40,7 @@ export function baseStore(): LearnStore {
       {
         id: childId, title: '极限', key: '极限', description: '极限的描述',
         docs: { teaching: '极限的正文，先讲直觉。' },
-        notes: [{ name: '笔记', content: '我自己记的极限笔记', createdAt: NOW, updatedAt: NOW }],
+        notes: [{ id: 'note-probe', name: '笔记', content: '我自己记的极限笔记', createdAt: NOW, updatedAt: NOW }],
         annotations: [], status: 'learning', origin: 'ai', goalId, createdAt: NOW, updatedAt: NOW,
       },
     ],

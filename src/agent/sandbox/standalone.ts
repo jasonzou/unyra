@@ -14,5 +14,5 @@ import type { SandboxOptions } from './types'
  * 每次都重建一套纯属浪费。
  */
 export function buildStandaloneApi(opts: SandboxOptions): Record<string, unknown> {
-  return buildApi(opts, []).api
+  return buildApi(opts, [], { nodeFacade: true }).api
 }

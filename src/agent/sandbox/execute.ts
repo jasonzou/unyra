@@ -114,7 +114,10 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
        * 宿主负责去重与落库，这里绝不改会话。
        */
       const moduleKeys = new Set<string>()
-      const { api } = buildApi(opts, log)
+      // 进程内 runner（测试探针 / 超级文档桥的直调）才有节点对象门面；真 Worker
+      // 通道的回执要过结构化克隆，api.node.get 必须回纯 manifest（见 buildApi 的
+      // nodeFacade 说明）。
+      const { api } = buildApi(opts, log, { nodeFacade: !!opts.runSandbox })
       /**
        * 本次编排里 api 附带的图片（目前只有 res.read 会带）。它们不能进 content
        * （文本通道会把 base64 截成乱码），随工具结果的 images 交回运行时，

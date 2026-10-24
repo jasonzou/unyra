@@ -50,7 +50,18 @@ export { imagesOf }
  * 全部按 path 寻址（见 SandboxOptions 的说明）：解析失败不抛异常，而是把「找不到 +
  * 候选清单」当成正常返回值交回去——模型读到就能自己改对，抛异常只会得到一句栈。
  */
-export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  const api: Record<string, unknown> = {}
+export function buildApi(
+  opts: SandboxOptions,
+  log: SandboxCall[],
+  /**
+   * nodeFacade：要不要把 api.node.get 包成「进程内节点对象门面」。**默认关**——
+   * 门面对象带吐 Promise 的 getter 与函数成员，只能活在进程内；真 Worker 通道的
+   * 回执要过结构化克隆，api.node.get 必须回纯 manifest（Worker 侧自己包成门面，
+   * 见 sandboxRuntime 的 wrapManifest）。进程内直调（编排测试 / 探针的 fakeRunner /
+   * 超级文档桥）才开。
+   */
+  addons?: { nodeFacade?: boolean },
+): BuiltApi {  const api: Record<string, unknown> = {}
   const tmpView = opts.tmp?.()
   const tmp = tmpView ? new TmpVars(tmpView) : null
 
@@ -1309,7 +1320,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
    * 放最后：门面要读已注册的 node.get / node.invoke。
    */
   registerNodeApi(api, opts.nodes, log)
-  attachNodeFacade(api)
+  if (addons?.nodeFacade) attachNodeFacade(api)
 
   // 根 help：顶层函数与各组的总览。真沙箱由 sandboxRuntime 再挂一次（同步、不花宿主往返）
   ;(api as unknown as { __help: () => string }).__help = () => renderRootHelp()
