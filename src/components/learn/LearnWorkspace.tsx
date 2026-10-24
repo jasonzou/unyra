@@ -3711,13 +3711,32 @@ export default function LearnWorkspace({
     [makeNodeService],
   )
 
+  /**
+   * 画布垃圾桶是**用户的**删除通道，与服务那条 agent 通道（api.node.delete）语义不同：
+   * - 大纲卡不是独立节点（跟着文档走），删不得——说清该怎么做；
+   * - 试卷卡走**用户自己的两档确认**（与试卷列表同一条路：列出连带删掉什么 → 二次确认 → 可撤回），
+   *   正在考的那份先挡下；agent 的「指路」报错不该弹给用户。
+   */
   const canvasDeleteNode = useCallback(
     (uuid: string) => {
+      if (uuid.startsWith('o:')) {
+        return { error: '大纲不是独立的节点，跟着文档走——删掉文档才会连大纲一起删' }
+      }
+      const target = getLatest().exams.find((e) => e.id === uuid)
+      if (target) {
+        if (exam.live && exam.live.examId === uuid) {
+          onToast(t('有一场考试正在进行，先把它考完或放弃'))
+          return { ok: true as const }
+        }
+        setPendingExamDelete(target)
+        setExamDeleteStage(examAttempted(target) ? 'warn' : 'final')
+        return { ok: true as const }
+      }
       const r = makeNodeService().delete(uuid)
       if ('ok' in r) dropPositionOf(uuid)
       return r
     },
-    [makeNodeService, dropPositionOf],
+    [getLatest, makeNodeService, dropPositionOf, onToast, exam.live],
   )
 
   const canvasConnect = useCallback(
