@@ -573,18 +573,20 @@ export function setWorkflowEffort(store: LearnStore, id: string, effort: Workflo
  * 那是登记时写漏了参数，触发方（与用户）看得见比静默替换成空串好。
  */
 export function renderWorkflowInstruction(text: string, params?: Record<string, string | number>): string {
-  if (!params) return text
   /*
    * 可选参数的标准语义是「没给就整行省略」：一行里出现**参数表里没有的**占位符 =
    * 它等的参数没来，这行就不进指令（参数缺失由提示词模块教模型凭上下文判断，而不是
    * 揣着一行占位符发愣）。判据按占位符的名字查表，先于填值——参数值里就算真有
    * 双大括号也不会误伤。
+   * 参数表整个没来（params 缺省）= 每个占位符都没等到，照样逐行省——**绝不把
+   * {{占位符}} 原样发给模型**（调用方忘了传参，指令退化成光秃秃的标准标题）。
    */
+  const table = params ?? {}
   const lines = text.split('\n').filter((line) => {
-    for (const m of line.matchAll(/\{\{(\w+)\}\}/g)) if (!(m[1] in params)) return false
+    for (const m of line.matchAll(/\{\{(\w+)\}\}/g)) if (!(m[1] in table)) return false
     return true
   })
-  return lines.join('\n').replace(/\{\{(\w+)\}\}/g, (whole, key: string) => (key in params ? String(params[key]) : whole))
+  return lines.join('\n').replace(/\{\{(\w+)\}\}/g, (whole, key: string) => (key in table ? String(table[key]) : whole))
 }
 
 /**

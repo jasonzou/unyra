@@ -7,6 +7,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   assertPrefixStable,
   clearPrefixGatesForTests,
+  currentEpoch,
+  lastCacheRead,
+  noteCacheRead,
   PrefixGateError,
   resetPrefixGate,
 } from '../src/agent/prefixGate'
@@ -77,6 +80,29 @@ describe('前缀门禁', () => {
         tools,
       ),
     ).not.toThrow()
+  })
+
+  it('缓存哨兵的纪元：前缀搬家（裁剪 / 重置）换届，跨届读数不比较', () => {
+    // 同届内：读数账对得上
+    noteCacheRead('c1', 16256)
+    expect(lastCacheRead('c1')).toMatchObject({ epoch: 0, read: 16256 })
+    expect(currentEpoch('c1')).toBe(0)
+    // 裁剪（前缀搬家）：纪元换届——旧读数比不得
+    assertPrefixStable(
+      'c1',
+      [msg('system', 'S'), msg('user', '旧一'), msg('assistant', '旧二'), msg('user', '旧三')],
+      tools,
+    )
+    assertPrefixStable('c1', [msg('system', 'S'), msg('user', '旧三'), msg('assistant', '新四')], tools)
+    expect(currentEpoch('c1')).toBe(1)
+    expect(lastCacheRead('c1')!.epoch).toBe(0)
+    // 换届后记的新读数带新纪元
+    noteCacheRead('c1', 7552)
+    expect(lastCacheRead('c1')).toMatchObject({ epoch: 1, read: 7552 })
+    // 重置：账本整条清掉
+    resetPrefixGate('c1')
+    expect(lastCacheRead('c1')).toBeUndefined()
+    expect(currentEpoch('c1')).toBe(2)
   })
 
   it('resetPrefixGate 之后账重新开始记', () => {

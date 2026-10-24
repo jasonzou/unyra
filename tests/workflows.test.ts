@@ -309,6 +309,10 @@ describe('删除与模板渲染', () => {
       renderWorkflowInstruction('## 使用「X」工作流。' + NL + '- 标题: {{title}}' + NL + '- 类型: {{kind}}', { title: '极限' }),
     ).toBe('## 使用「X」工作流。' + NL + '- 标题: 极限')
     expect(renderWorkflowInstruction('没有占位符', undefined)).toBe('没有占位符')
+    // 参数表整个没来 = 每个占位符都没等到：参数行逐行省，绝不把 {{占位符}} 原样发给模型
+    expect(
+      renderWorkflowInstruction('## 使用「X」工作流。' + NL + '- 标题: {{title}}', undefined),
+    ).toBe('## 使用「X」工作流。')
     expect(renderWorkflowInstruction('{{kind}}', { kind: 'quiz' })).toBe('quiz')
     // 参数值里就算真有双大括号也不会被误当成占位符剔掉（判据是「参数表里没有的」占位符）
     const braces = 'a' + '{{x}}' + 'b'

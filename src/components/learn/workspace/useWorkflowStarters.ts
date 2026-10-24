@@ -114,7 +114,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onToast(t('这个节点没有等着判分或讲解的考试'))
       return
     }
-    agent.runWorkflow('exam-grade', { nodeId: target.id })
+    agent.runWorkflow('exam-grade', { nodeId: target.id, params: { target: target.id } })
   }
 
   /* ---------- 学习状态（自评 / 掌握度 / 错误记忆 / 检验） ---------- */
