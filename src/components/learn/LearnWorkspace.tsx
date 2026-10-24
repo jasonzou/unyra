@@ -3729,6 +3729,12 @@ export default function LearnWorkspace({
         setExamDeleteStage(examAttempted(target) ? 'warn' : 'final')
         return { ok: true as const }
       }
+      // 删根文档 = 删整个目标（根就是目标的骨架）：从画布的删除键触发也必须走两档确认
+      if (getLatest().goals.some((g) => g.rootNodeId === uuid)) {
+        const node = nodeById(getLatest(), uuid)
+        setPendingDelete({ nodeId: uuid, title: node?.title ?? uuid, isRoot: true, count: goalSubtreeSize(uuid) })
+        return { ok: true as const }
+      }
       const r = makeNodeService().delete(uuid)
       if ('ok' in r) dropPositionOf(uuid)
       return r
@@ -3806,6 +3812,37 @@ export default function LearnWorkspace({
     [getLatest],
   )
 
+  /**
+   * 右键「设为入口」：把一份**没有上级**的文档立为那张图的入口（目标的根）。
+   * 一张图有且只有一个——换入口就是旧的退位（它还挂在图上，多半从此变成游离卡）。
+   */
+  const canvasSetEntry = useCallback(
+    (docUuid: string) => {
+      const s = getLatest()
+      const node = nodeById(s, docUuid)
+      if (!node) return { error: t('这份文档已经不在了') }
+      const goal = s.goals.find((g) => g.id === node.goalId)
+      if (!goal) return { error: t('这个文档不属于任何学习目标') }
+      if (goal.rootNodeId === docUuid) return { error: t('它已经是入口了') }
+      if (s.edges.some((e) => e.to === docUuid)) {
+        return { error: t('「{0}」已经有上级了——只有没有上级的文档能立为入口', node.title) }
+      }
+      set({ ...s, goals: s.goals.map((g) => (g.id === goal.id ? { ...g, rootNodeId: docUuid, updatedAt: Date.now() } : g)) })
+      return { ok: true, note: t('已把「{0}」立为入口：这门课从这里开始（原入口文档还在图上）', node.title) }
+    },
+    [getLatest, set],
+  )
+
+  /** 游离笔记的就地编辑：实体在池子里，编辑走节点对象的 editContent（内容与绑定无关） */
+  const editFreeNote = useCallback(
+    (uuid: string, text: string) => {
+      const n = makeNodeService().get(uuid)
+      if (!n || n.kind !== 'note') return { error: t('这份笔记已经不在了') }
+      return n.editContent({ text })
+    },
+    [makeNodeService],
+  )
+
   /** 画布统一通道（一个稳定对象：OutlinePane 按 referential equality 冻结比较） */
   const canvasChannel = useMemo(
     () => ({
@@ -3813,13 +3850,15 @@ export default function LearnWorkspace({
       onDeleteNode: canvasDeleteNode,
       onConnect: canvasConnect,
       onDisconnect: canvasDisconnect,
+      onSetEntry: canvasSetEntry,
+      onEditFreeNote: editFreeNote,
       onCreateChildDoc: createChildDoc,
       onRenameNote: canvasRenameNote,
       onAddOutlineEntry: canvasAddOutlineEntry,
       onGenerateDoc: generateDocForNode,
       onGenerateOutline: (docUuid: string) => startPrereqOutline(docUuid),
     }),
-    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline],
+    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, canvasSetEntry, editFreeNote, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline],
   )
 
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())

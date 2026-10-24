@@ -57,25 +57,29 @@ function makeStore(): LearnStore {
 }
 
 describe('deriveCanvas：卡片就是节点、连线全部派生', () => {
-  it('每份实体一张卡：入口、文档、可见大纲、挂件；uuid 直接对上实体', () => {
+  it('每份实体一张卡：入口不再是独立的卡——根文档带 entry 徽章；uuid 直接对上实体', () => {
     const view = deriveCanvas(makeStore(), 'g1', undefined)
     const kinds = Object.fromEntries(view.cards.map((c) => [c.uuid, c.kind]))
-    expect(kinds[entryUuid('r')]).toBe('entry')
+    expect(kinds[entryUuid('r')]).toBeUndefined()
     expect(kinds['r']).toBe('doc')
     expect(kinds[outlineUuid('r')]).toBe('outline')
-    // 子文档 a 没有目标项也没有子级：它的大纲卡不上画布（空壳没有意义）
+    // 子文档 a 没有大纲实体：它的大纲卡不上画布
     expect(kinds[outlineUuid('a')]).toBeUndefined()
     expect(kinds['note1']).toBe('note')
     expect(kinds['sdoc1']).toBe('superdoc')
     expect(kinds['exam1']).toBe('exam')
-    // 入口 + 根 + 根的大纲 + 子文档 + 笔记 + 超级文档 + 试卷 = 7
-    expect(view.cards).toHaveLength(7)
+    // 根 + 根的大纲 + 子文档 + 笔记 + 超级文档 + 试卷 = 6
+    expect(view.cards).toHaveLength(6)
+    // 入口徽章挂在根文档身上，一张图有且只有一个
+    const byUuid = Object.fromEntries(view.cards.map((c) => [c.uuid, c]))
+    expect(byUuid['r'].entry).toBe(true)
+    expect(view.cards.filter((c) => c.entry).length).toBe(1)
   })
 
-  it('连线全派生：入口→根、大纲→子文档（树边）、文档→大纲与挂件（归属）', () => {
+  it('连线全派生：大纲→子文档（树边）、文档→大纲与挂件（归属）；入口不再是线的一端', () => {
     const view = deriveCanvas(makeStore(), 'g1', undefined)
     const keys = view.edges.map((e) => `${e.from}>${e.to}`)
-    expect(keys).toContain(`${entryUuid('r')}>r`)
+    expect(keys).not.toContain(`${entryUuid('r')}>r`)
     expect(keys).toContain(`${outlineUuid('r')}>a`)
     expect(keys).toContain(`r>${outlineUuid('r')}`)
     expect(keys).toContain('r>note1')
@@ -125,17 +129,15 @@ describe('deriveCanvas：坐标以存过的为准，没存的自动铺排（确�
     expect(note).toMatchObject({ x: 42, y: 24 })
   })
 
-  it('没存过的卡自动铺排：入口最左、根在其右、挂件再右；同一份输入派生两次结果一致', () => {
+  it('没存过的卡自动铺排：根在最左列、挂件在其右；同一份输入派生两次结果一致', () => {
     const store = makeStore()
     const first = deriveCanvas(store, 'g1', undefined)
     const second = deriveCanvas(store, 'g1', undefined)
     expect(first.cards).toEqual(second.cards)
 
     const byUuid = Object.fromEntries(first.cards.map((c) => [c.uuid, c]))
-    const entry = byUuid[entryUuid('r')]
     const root = byUuid['r']
     const note = byUuid['note1']
-    expect(entry.x).toBeLessThan(root.x)
     expect(root.x).toBeLessThan(note.x)
     // 自动铺排的卡都拿到有限坐标
     for (const c of first.cards) {
@@ -156,12 +158,12 @@ describe('deriveCanvas：坐标以存过的为准，没存的自动铺排（确�
     }
   })
 
-  it('入口没存过坐标时贴到根文档左边（读图方向「从入口往右」）', () => {
+  it('根文档存过坐标就用存的（入口徽章跟着它走，不再有独立的入口卡）', () => {
     const saved: StructureMap = { version: 2, positions: { r: { x: 900, y: 100 } } }
     const view = deriveCanvas(makeStore(), 'g1', saved)
-    const entry = view.cards.find((c) => c.uuid === entryUuid('r'))!
     const root = view.cards.find((c) => c.uuid === 'r')!
-    expect(entry.x).toBeLessThan(root.x)
+    expect(root.x).toBe(900)
+    expect(root.entry).toBe(true)
   })
 
   it('游离文档（摘了线）也在画布上：按深度补铺，不凭空消失', () => {

@@ -18,8 +18,9 @@
 import type { LearnStore } from '../../../learn/types'
 import { examsOfNode, nodeById, parentIds, prereqIds } from '../../../learn/graph'
 import { notesOf } from '../../../learn/notes'
+import { attemptScore, type ExamAttempt } from '../../../learn/exam'
 import { superDocsOf } from '../../../learn/types'
-import { entryUuid, outlineUuid, type GNodeKind } from '../../../learn/nodeKinds'
+import { outlineUuid, type GNodeKind } from '../../../learn/nodeKinds'
 import {
   CARD_H,
   CARD_W,
@@ -51,6 +52,29 @@ export const DOC_LINE_H = 15
 export const DOC_LINES = 2
 /** 有正文的文档卡：边框 + 标题行 + 两行摘要 + 底部内边距 */
 export const DOC_BODY_H = CARD_FRAME_H + OUTLINE_HEAD + DOC_LINES * DOC_LINE_H + CARD_PAD_B
+
+/**
+ * 试卷卡的考试记录行：一行一次作答，状态用一句话说清、判了分的带分数。
+ * 放在派生层（与 store 同一份数据），组件只管照着画。
+ */
+function attemptRows(attempts: ExamAttempt[]): ExamAttemptRow[] {
+  const LABEL: Record<ExamAttempt['status'], string> = {
+    ongoing: '进行中',
+    submitted: '待判分',
+    graded: '已判分',
+    abandoned: '已放弃',
+  }
+  return attempts.map((a, i) => {
+    const score = a.status === 'graded' ? attemptScore(a) : null
+    return { n: i + 1, label: `${LABEL[a.status]}${score !== null ? ' · ' + score + ' 分' : ''}` }
+  })
+}
+
+/** 试卷卡有多高：边框 + 标题行 + 每条考试记录一行 + 内边距（没有记录就是标准高度） */
+export function examCardHeight(rows: number): number {
+  if (!rows) return CARD_H
+  return Math.max(CARD_FRAME_H + OUTLINE_HEAD + rows * SLOT_ROW + CARD_PAD_B, CARD_H)
+}
 
 /** 大纲卡有多高：边框 + 标题行 + 每条目标项一行 + 底部「＋ 添加目标项」一行 + 内边距 */
 export function outlineCardHeight(count: number): number {
@@ -84,8 +108,19 @@ export interface CardView {
   note?: string
   /** 大纲卡的目标项行（kind = outline 时才有） */
   slots?: OutlineSlotView[]
+  /** 这张文档卡是本图的入口（目标的根）——卡片上挂「入口」徽章；一张图有且只有一个 */
+  entry?: boolean
+  /** 试卷卡的考试记录行（kind = exam 时才有；一行一次作答） */
+  attempts?: ExamAttemptRow[]
   x: number
   y: number
+}
+
+/** 试卷卡上的一行考试记录 */
+export interface ExamAttemptRow {
+  /** 第几次（从 1 起） */
+  n: number
+  label: string
 }
 
 /** 一条派生连线（from → to，方向即读图方向） */
@@ -176,16 +211,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     byUuid.set(p.card.uuid, p)
   }
 
-  // 入口：每张图一个，读图起点
-  const entry: Pending = {
-    card: { uuid: entryUuid(goal.rootNodeId), kind: 'entry', title: '入口', subtitle: '这门课从这里开始' },
-    depth: 0,
-    anchorY: 0,
-    next: [],
-    parent: null,
-  }
-  add(entry)
-
+  // 入口不再是独立的卡：它就是目标的根文档，卡片上挂「入口」徽章（一张图有且只有一个）
   const docPending = new Map<string, Pending>()
 
   const makeDoc = (docId: string): Pending => {
@@ -193,6 +219,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     if (!node) throw new Error('deriveCanvas: 节点已不存在（' + docId + '）')
     const body = node.docs?.teaching.trim() ?? ''
     const excerpt = body ? plainText(body).slice(0, 120) || body.replace(/\s+/g, ' ').slice(0, 120) : ''
+    const isRoot = docId === goal.rootNodeId
     const p: Pending = {
       card: {
         uuid: node.id,
@@ -201,6 +228,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
         subtitle: body ? `${body.length} 字` : '还没有正文',
         ...(excerpt ? { excerpt } : {}),
         ...(body ? {} : { blank: true }),
+        ...(isRoot ? { entry: true as const } : {}),
       },
       depth: 1,
       anchorY: 0,
@@ -232,17 +260,11 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     }
   }
 
-  // 每份文档：入口边（根）/ 大纲卡 / 挂件卡
+  // 每份文档：大纲卡 / 挂件卡（入口就是根文档自己，不再有入口边）
   for (const node of docs) {
     const doc = docPending.get(node.id)
     if (!doc) continue
     const isRoot = node.id === goal.rootNodeId
-    if (isRoot) {
-      edges.push({ from: entry.card.uuid, to: node.id })
-      entry.next.push(doc)
-      doc.parent = entry
-      doc.depth = 1
-    }
 
     const children = prereqIds(store, node.id)
     if (node.outline && outlineVisible(store, node.id, isRoot)) {
@@ -311,6 +333,8 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
           title: exam.title,
           subtitle: exam.questions.length ? `${exam.questions.length} 题` : '还没有题',
           ...(exam.questions.length ? {} : { blank: true }),
+          // 考试记录一行一次作答：界面据此把卡片撑高、逐行列出（样式与大纲目标项同款）
+          ...(exam.attempts.length ? { attempts: attemptRows(exam.attempts) } : {}),
         },
         depth: doc.depth + 1,
         anchorY: 0,
@@ -401,6 +425,10 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
       const p = byUuid.get(c.uuid)
       return p?.card.excerpt ? DOC_BODY_H : CARD_H
     }
+    if (c.kind === 'exam') {
+      const p = byUuid.get(c.uuid)
+      return examCardHeight(p?.card.attempts?.length ?? 0)
+    }
     return CARD_H
   }
 
@@ -432,28 +460,13 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
       if (!n.placed) place(n)
     }
   }
-  place(entry)
-  // 没够到入口的（游离文档——摘了线或删了上游）也要出现在画布上：按各自深度补铺
+  // 读图起点 = 根文档（入口徽章在它身上）；没连进树的（游离文档——摘了线或删了上游）
+  // 也要出现在画布上：按各自深度补铺
+  const rootPending = docPending.get(goal.rootNodeId)
+  if (rootPending) place(rootPending)
   for (const p of byUuid.values()) {
     if (!p.placed) place(p)
   }
-  // 入口没有存过坐标时贴到根文档左边（读图方向「从入口往右」才成立）
-  const entrySaved = positions[entry.card.uuid]
-  const rootCard = placedByUuid.get(goal.rootNodeId)
-  if (!entrySaved && rootCard) {
-    const entryCard = placedByUuid.get(entry.card.uuid)
-    const spot = freeSpotNear(
-      [...placedByUuid.values()].filter((c) => c.uuid !== entry.card.uuid),
-      { x: rootCard.x - COL_GAP, y: rootCard.y },
-      { width: CARD_W, height: CARD_H },
-      heightOf,
-    )
-    if (entryCard) {
-      entryCard.x = spot.x
-      entryCard.y = spot.y
-    }
-  }
-
   return { cards, edges, heightOf }
 }
 

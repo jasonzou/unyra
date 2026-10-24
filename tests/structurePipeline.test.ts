@@ -105,7 +105,7 @@ describe('实体先行（全图化定稿）：卡片的存在性一律由 store 
     expect(keys).toContain(`${outlineUuid('r')}>a`)
     expect(keys).toContain(`r>${outlineUuid('r')}`)
     expect(keys).toContain('r>note-uuid-1')
-    expect(keys).toContain(`${entryUuid('r')}>r`)
+    expect(keys).not.toContain(`${entryUuid('r')}>r`) // 入口不再是独立的卡，也就不在任何线上
   })
 
   it('v1 存量（卡片表）读盘折成 v2 坐标表：d:/e: 剥前缀、o:/entry: 原样、n:/s: 放弃坐标', () => {

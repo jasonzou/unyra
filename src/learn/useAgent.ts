@@ -149,6 +149,8 @@ export function useAgent(opts: {
   const [running, setRunning] = useState<Record<string, true>>({})
   /** 每个会话一个中止器：停止按钮只停当前会话，别的导师不受牵连 */
   const abortMapRef = useRef(new Map<string, AbortController>())
+  /** 缓存哨兵：每会话上一次请求的命中数——跨轮骤降说明服务端看到的前缀与我们的不同（见 usage 分支的告警） */
+  const cacheReadRef = useRef(new Map<string, number>())
   /** 同一会话的轮次串行化（见 runTurn 的说明）：conversationId → 在途轮次的结束承诺 */
   const turnChainRef = useRef(new Map<string, Promise<void>>())
   /**
@@ -949,7 +951,18 @@ export function useAgent(opts: {
               tally.miss += Math.max(0, e.usage.input - e.usage.cacheRead)
               tally.estimated = tally.estimated || e.usage.estimated === true
               // 留最后一跳的值：状态条要的是「现在吐字多快」，不是全程平均
-              if (e.usage.tps) {
+              // 缓存哨兵：同一会话的前缀逐字节只增（前缀门禁在管），命中因此只许涨不许跌。
+            // 跌了（且超过一块的量）= 服务端看到的前缀与我们发的不一致，或缓存被部分逐出——
+            // 当场把数字喊出来，配合开发者模式的上下文调试器（两份快照逐条比对）就能定位到条。
+            const prevRead = cacheReadRef.current.get(convKey)
+            if (prevRead !== undefined && e.usage.cacheRead + 512 < prevRead) {
+              console.warn(
+                `[cache-watch] ${convKey} 命中骤降：${prevRead} → ${e.usage.cacheRead}（-${prevRead - e.usage.cacheRead}）。` +
+                  '载荷已由前缀门禁证明只增不改；反复出现时开「上下文调试器」比对两轮快照即可定位分叉的消息。',
+              )
+            }
+            cacheReadRef.current.set(convKey, e.usage.cacheRead)
+            if (e.usage.tps) {
                 tally.tps = e.usage.tps
                 setTps((prev) => ({ ...prev, [convKey]: e.usage.tps as number }))
               }
