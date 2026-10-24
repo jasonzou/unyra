@@ -103,6 +103,20 @@ export async function toolTests() {
   const rBadConnect = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const n = await api.node.get(" + JSON.stringify(noteUuid) + "); return await o.connect(n, 'down') })")
   ok(!rBadConnect.ok && rBadConnect.content.includes('笔记'), '挂件不能手工连（归属自动生成）', rBadConnect.content.slice(0, 160))
 
+  // 固定接口：创建带 portKey = 创建即认领（点目标项建文档的同一条路）；getPortData 拉回整条
+  const rClaimCreate = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const c = await o.content; return await api.node.create({ kind: 'doc', title: '认领甲', under: " + JSON.stringify(outlineUuidOf) + ", portKey: c.children[0].key }) })")
+  ok(rClaimCreate.ok && rClaimCreate.content.includes('认领了目标项'), 'node.create 带 portKey 创建即认领', rClaimCreate.content.slice(0, 200))
+  const claimUuid = (jsonOf(rClaimCreate) as { uuid: string }).uuid
+  ok(h.store().edges.some((e) => e.from === childId && e.to === claimUuid && !!e.portKey), '认领落在树边上（下游侧有效）')
+  const rPorts = await h.run("((api)=>{ const d = await api.node.get(" + JSON.stringify(claimUuid) + "); const data = await d.getPortData(); const up = d.relations.find((r) => r.type === 'up'); return { data, portKey: up && up.portKey } })")
+  ok(rPorts.ok && rPorts.content.includes('子甲') && rPorts.content.includes('先学') && rPorts.content.includes('"portKey"'), 'getPortData 拉到整条（key/label/data），manifest 关系带 portKey', rPorts.content.slice(0, 240))
+  const rPortTaken = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const c = await o.content; const made = await api.node.create({ kind: 'doc', title: '抢口乙' }); const d2 = await api.node.get(made.uuid); return await d2.connect(o, 'up', c.children[0].key) })")
+  ok(!rPortTaken.ok && rPortTaken.content.includes('一个接口只认领一个下游'), '一个接口只认领一个下游（人话拒绝）', rPortTaken.content.slice(0, 200))
+  const rPortFree = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const d = await api.node.get(" + JSON.stringify(claimUuid) + "); const un = await d.disconnect(o); const c = await o.content; const made = await api.node.create({ kind: 'doc', title: '补位丙' }); const d2 = await api.node.get(made.uuid); const re = await d2.connect(o, 'up', c.children[0].key); const gone = await d.getPortData(); return { un: un.ok, re: re.ok, gone } })")
+  ok(rPortFree.ok && rPortFree.content.includes('"re":true') && rPortFree.content.includes('"gone":[]'), '剪线解除认领：接口空出来可被别人认领，原文档 getPortData 归零', rPortFree.content.slice(0, 240))
+  const rBadPort = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const made = await api.node.create({ kind: 'doc', title: '问口丁' }); const d = await api.node.get(made.uuid); return await d.connect(o, 'up', '没有这个口') })")
+  ok(!rBadPort.ok && rBadPort.content.includes('可认领的'), '不存在的接口报出可认领清单', rBadPort.content.slice(0, 200))
+
   const rRename = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(subUuid) + "); const c = await n.content; return await n.editContent({ ...c, title: '夹逼定理（正式）' }) })")
   ok(rRename.ok && h.store().nodes.some((n) => n.title === '夹逼定理（正式）'), '改名走 editContent（title 在 content 里）', rRename.content.slice(0, 160))
   const rDupName = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(subUuid) + "); const c = await n.content; return await n.editContent({ ...c, title: '极限' }) })")

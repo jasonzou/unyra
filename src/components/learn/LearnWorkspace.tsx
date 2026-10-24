@@ -3747,12 +3747,12 @@ export default function LearnWorkspace({
   )
 
   const canvasConnect = useCallback(
-    (fromUuid: string, toUuid: string) => {
+    (fromUuid: string, toUuid: string, portKey?: string) => {
       const svc = makeNodeService()
       const from = svc.get(fromUuid)
       const to = svc.get(toUuid)
       if (!from || !to) return { error: '有一个节点刚刚不在了（可能被删除）' }
-      return from.connect(to, 'down')
+      return from.connect(to, 'down', portKey)
     },
     [makeNodeService],
   )
@@ -3800,8 +3800,8 @@ export default function LearnWorkspace({
    * 永远指向同一份实体；只建实体不写正文——正文由「生成文档」交给 AI。
    */
   const createChildDoc = useCallback(
-    (ownerNodeId: string, title: string): string | null => {
-      const r = makeNodeService().create({ kind: 'doc', title, under: ownerNodeId })
+    (ownerNodeId: string, title: string, portKey?: string): string | null => {
+      const r = makeNodeService().create({ kind: 'doc', title, under: ownerNodeId, ...(portKey ? { portKey } : {}) })
       return 'uuid' in r ? r.uuid : null
     },
     [makeNodeService],

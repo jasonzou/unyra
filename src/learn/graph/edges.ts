@@ -121,11 +121,20 @@ export function backtrackTargets(store: LearnStore, id: string): KnowledgeNode[]
 }
 
 /** 新增依赖边 from → to；自环、重复、成环一律拒绝 */
-export function addEdge(store: LearnStore, from: string, to: string): { store: LearnStore; added: boolean } {
+export function addEdge(
+  store: LearnStore,
+  from: string,
+  to: string,
+  portKey?: string,
+): { store: LearnStore; added: boolean; reason?: string } {
   if (from === to || !nodeById(store, from) || !nodeById(store, to)) return { store, added: false }
   if (store.edges.some((e) => e.from === from && e.to === to)) return { store, added: false }
   if (wouldCreateCycle(store, from, to)) return { store, added: false }
-  const edge: DependencyEdge = { from, to, createdAt: Date.now() }
+  // 一个接口只认领一个下游：同一条上游上，portKey 已被别的下游占了就拒绝（带上原因，别让调用方猜）
+  if (portKey && store.edges.some((e) => e.from === from && e.portKey === portKey && e.to !== to)) {
+    return { store, added: false, reason: '接口「' + portKey + '」已经被另一个下游认领了（一个接口只认领一个下游）' }
+  }
+  const edge: DependencyEdge = { from, to, createdAt: Date.now(), ...(portKey ? { portKey } : {}) }
   return { store: { ...store, edges: [...store.edges, edge] }, added: true }
 }
 

@@ -34,7 +34,7 @@ function legacyTree(): Record<string, string> {
       title: '高数',
       key: '高数',
       description: '整门课',
-      dependencies: [{ to: 'n2', createdAt: 1 }],
+      dependencies: [{ to: 'n2', createdAt: 1, portKey: 'daoshu' }],
       notes: [{ name: '错题', createdAt: 2, updatedAt: 3 }],
       superdocs: [{ id: crypto.randomUUID(), name: '讲义', html: '<html>讲义</html>', createdAt: 4, updatedAt: 5 }],
       exams: [
@@ -159,7 +159,7 @@ describe('节点文件：一个节点一个 .node.json', () => {
     expect(after!.exams[0].nodeId).toBe('n1')
 
     // 依赖边、目标、归属都还在
-    expect(after!.edges).toEqual([{ from: 'n1', to: 'n2', createdAt: 1 }])
+    expect(after!.edges).toEqual([{ from: 'n1', to: 'n2', createdAt: 1, portKey: 'daoshu' }])
     expect(after!.goals.map((g) => g.id)).toEqual(['g1'])
     expect(after!.goals[0].rootNodeId).toBe('n1')
     expect(after!.nodes.every((n) => n.goalId === 'g1')).toBe(true)

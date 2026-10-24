@@ -27,6 +27,20 @@ export type GNodeKind = 'entry' | 'outline' | 'doc' | 'note' | 'exam' | 'superdo
 export interface NodeRelation {
   id: string
   type: 'up' | 'down'
+  /**
+   * 接口认领（**只在下游一侧的关系上出现**）：我作为下游，认领了上游的哪个接口。
+   * 上游在自己的 relations 里看不到这条——认领本来就是下游的动作。
+   */
+  portKey?: string
+}
+
+/** 一个固定接口：提供方声明、下游按 key 认领（key 在同一个提供方内唯一） */
+export interface NodePort {
+  key: string
+  /** 人读的名字（界面上就是「这一条要写什么」） */
+  label: string
+  /** 提供方自定义的载荷（基类只透传，形状由各类型自己定义） */
+  data: unknown
 }
 
 /* ---------- uuid 方案（全节点宇宙唯一的身份语法，画布 / 页签 / agent 句柄共用） ---------- */
@@ -59,11 +73,13 @@ export type NodeResult = { ok: true; note?: string } | { error: string }
 /** 连接过滤的回执：true = 收下；string = 拒绝原因 */
 export type ConnectFilter = true | string
 
-/** 服务上下文：宿主注入的「读最新 store / 写回 store / 当前目标」三件套 */
+/** 服务上下文：宿主注入的四件套（读 store / 写回 store / 当前目标 / 按 uuid 还原节点对象） */
 export interface NodeCtx {
   store: () => LearnStore
   commit: (next: LearnStore) => void
   goalId: () => string
+  /** getPortData 用：把关系里的 uuid 还原成节点对象（实现在 NodeService，避免基类反向依赖它） */
+  objectOf: (uuid: string) => GNode | undefined
 }
 
 /**
@@ -93,6 +109,31 @@ export abstract class GNode {
   /** 动态自述（文案随上游与状态变化） */
   abstract help(): NodeHelp
 
+  /* ---------- 固定接口（provider 侧声明，consumer 侧认领） ---------- */
+
+  /**
+   * 我对外提供的固定接口。默认没有；由「要向下游交代清楚该干什么」的类型声明
+   * （大纲：每条目标项一个口）。从内容**派生**——内容一变接口就跟着变，不落第二份状态。
+   */
+  get ports(): NodePort[] {
+    return []
+  }
+
+  /**
+   * 拉取我认领到的接口数据：扫自己 relations 里**带 portKey 的上游项**，按 uuid 还原
+   * 上游对象，到它的 ports 里对号取**整条**（含 key / label / data）——消费方因此
+   * 不用猜「我挂在哪条计划下、该写什么」。接口被上游删了就静默缺席（认领随关系存在）。
+   */
+  getPortData(): NodePort[] {
+    const out: NodePort[] = []
+    for (const r of this.relations) {
+      if (r.type !== 'up' || !r.portKey) continue
+      const port = this.ctx.objectOf(r.id)?.ports.find((p) => p.key === r.portKey)
+      if (port) out.push(port)
+    }
+    return out
+  }
+
   /* ---------- 连接协议（双边协商；落库由上游一方的 link 实现） ---------- */
 
   /** 默认拒绝：能连谁由各类型自己声明，这里只给兜底措辞 */
@@ -109,8 +150,11 @@ export abstract class GNode {
    * - `'down'`：target 以下游身份接入 → 先问 target 的上游过滤，再问我的下游过滤；
    * - `'up'`：target 以上游身份接入 → 先问 target 的下游过滤，再问我的上游过滤。
    * 两个过滤都通过才落库（由上游一方的 link 写 store）；任何一步拒绝都不留半边状态。
+   *
+   * `portKey`（可选）：下游认领上游的一个固定接口（接口必须存在，且一个接口只认领
+   * 一个下游）。谁发起连接都一样——认领记在**这条边**上，下游一侧读得到。
    */
-  connect(target: unknown, type: unknown): NodeResult {
+  connect(target: unknown, type: unknown, portKey?: unknown): NodeResult {
     if (!(target instanceof GNode)) {
       return { error: 'connect 的第一个参数要是一个节点对象：const t = await api.node.get(uuid) 取到再连' }
     }
@@ -126,7 +170,38 @@ export abstract class GNode {
     if (r1 !== true) return { error: r1 }
     const r2 = up.onDownstream(down)
     if (r2 !== true) return { error: r2 }
-    return up.link(down)
+    let claim: string | undefined
+    if (portKey !== undefined && portKey !== null && portKey !== '') {
+      if (typeof portKey !== 'string' || !portKey.trim()) {
+        return { error: 'portKey 要是非空字符串：认领上游的哪个接口（先看上游的 ports 里有哪些 key）' }
+      }
+      claim = portKey.trim()
+      const port = up.ports.find((p) => p.key === claim)
+      if (!port) {
+        return {
+          error: up.ports.length
+            ? '「' + up.title + '」没有接口「' + claim + '」。可认领的：' + up.ports.map((p) => p.key + '（' + p.label + '）').join('、')
+            : '「' + up.title + '」没有声明任何接口（ports），portKey 无处认领',
+        }
+      }
+      const takenBy = this.claimTakenBy(up, claim, down.uuid)
+      if (takenBy) {
+        const other = this.ctx.objectOf(takenBy)
+        return { error: '接口「' + port.label + '」已经被「' + (other?.title ?? takenBy) + '」认领了——一个接口只认领一个下游' }
+      }
+    }
+    return up.link(down, claim)
+  }
+
+  /**
+   * 认领占用查的是树边（portKey 存在边上）；今天能声明接口又能挂树边的上游只有大纲，
+   * 锚在宿主文档上。其余类型没有可占用的记录，返回 null 放行。
+   */
+  private claimTakenBy(up: GNode, portKey: string, exceptDownUuid: string): string | null {
+    const hostId = docIdOfOutlineUuid(up.uuid)
+    if (!hostId) return null
+    const edge = this.ctx.store().edges.find((e) => e.from === hostId && e.portKey === portKey && e.to !== exceptDownUuid)
+    return edge ? edge.to : null
   }
 
   /** 摘掉一条连接（双向清除；对「大纲 ↔ 文档」就是拆掉那条树边） */
@@ -140,8 +215,8 @@ export abstract class GNode {
     return this.unlink(target)
   }
 
-  /** 落库：由**上游一方**实现（当前唯一可手工连接的组合是「大纲 → 文档」，见 outline.ts） */
-  protected link(_down: GNode): NodeResult {
+  /** 落库：由**上游一方**实现（当前唯一可手工连接的组合是「大纲 → 文档」，见 outline.ts）；portKey 是下游的接口认领，随边落库 */
+  protected link(_down: GNode, _portKey?: string): NodeResult {
     return { error: '这两个类型之间不能建立连接（help().connection 里有各自的连接规则）' }
   }
 

@@ -96,13 +96,13 @@ export interface StructureCanvasProps {
   /** 删除节点（统一通道：删谁只删谁） */
   onDeleteNode?: (uuid: string) => ChannelResult
   /** 连线（双边协商在服务层：大纲↔文档挂层、文档↔挂件绑定） */
-  onConnect?: (fromUuid: string, toUuid: string) => ChannelResult
+  onConnect?: (fromUuid: string, toUuid: string, portKey?: string) => ChannelResult
   /** 断开一条连线（= 解绑 / 拆边；两端实体都不动） */
   onDisconnect?: (fromUuid: string, toUuid: string) => ChannelResult
   /** 右键「设为入口」：把一份没有上级的文档立为本图的入口（目标的根；全图有且只有一个） */
   onSetEntry?: (docUuid: string) => ChannelResult
   /** 点大纲目标项：挂一份带标题的空文档（统一通道建实体），返回新文档 uuid */
-  onCreateChildDoc?: (ownerNodeId: string, title: string) => string | null
+  onCreateChildDoc?: (ownerNodeId: string, title: string, portKey?: string) => string | null
   /** 改笔记名（宿主走笔记节点的 editContent，页签跟着改） */
   onRenameNote?: (noteUuid: string, to: string) => ChannelResult
   /** 给某份大纲手动加一条目标项（宿主走大纲节点的 editContent） */
@@ -590,9 +590,9 @@ export const StructureCanvas = memo(function StructureCanvas({
   /* ---------- 连线（唯一可手工建立：大纲 → 文档） ---------- */
 
   const tryConnect = useCallback(
-    (fromUuid: string, toUuid: string) => {
+    (fromUuid: string, toUuid: string, portKey?: string) => {
       if (!onConnect) return false
-      return report(onConnect(fromUuid, toUuid))
+      return report(onConnect(fromUuid, toUuid, portKey))
     },
     [onConnect, report],
   )
@@ -614,7 +614,7 @@ export const StructureCanvas = memo(function StructureCanvas({
        */
       const ownerDocId = docIdOfOutlineUuid(parentId)
       if (!ownerDocId || !onCreateChildDoc) return
-      const uuid = onCreateChildDoc(ownerDocId, slot.title)
+      const uuid = onCreateChildDoc(ownerDocId, slot.title, slot.key)
       if (!uuid) {
         onToast?.(t('没能创建文档，请稍后再试'))
         return
@@ -956,7 +956,8 @@ export const StructureCanvas = memo(function StructureCanvas({
           if (isPair('outline', 'doc')) {
             const outline = fromCard?.kind === 'outline' ? g.from : target.uuid
             const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
-            tryConnect(outline, doc)
+            // 从目标项圆点拖出来的线 = 认领那个口（与点目标项建文档同一口径）；反方向拖没有口可指
+            tryConnect(outline, doc, fromCard?.kind === 'outline' ? g.slotKey : undefined)
           } else if (isPair('doc', 'note') || isPair('doc', 'exam') || isPair('doc', 'superdoc')) {
             const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
             const widget = fromCard?.kind === 'doc' ? target.uuid : g.from

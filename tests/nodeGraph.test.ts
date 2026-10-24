@@ -66,19 +66,22 @@ function fixture(): LearnStore {
 /** 可变 ctx：commit 直接换掉闭包里的 store，让后续断言看到最新值 */
 function harness() {
   let store = fixture()
-  const ctx: NodeCtx = {
-    store: () => store,
-    commit: (next) => {
-      store = next
-    },
-    goalId: () => 'g1',
-  }
   const deps = {
     getLatest: () => store,
     set: (s: LearnStore) => {
       store = s
     },
     goalId: () => 'g1',
+  }
+  // objectOf 走真实解析：一个常驻服务按 uuid 还原节点对象（与线上 NodeService 同一套）
+  const resolver = new NodeService(deps)
+  const ctx: NodeCtx = {
+    store: () => store,
+    commit: (next) => {
+      store = next
+    },
+    goalId: () => 'g1',
+    objectOf: (uuid) => resolver.get(uuid),
   }
   return {
     get store() {
@@ -128,6 +131,7 @@ describe('派生关系：树边 + 归属 + 目标绑定，一张图没有第二�
 
     expect(root.relations).toEqual([
       { id: entryUuid('r'), type: 'up' },
+      { id: 'a', type: 'down' },
       { id: outlineUuid('r'), type: 'down' },
       { id: 'note1', type: 'down' },
       { id: 'sdoc1', type: 'down' },
@@ -446,5 +450,89 @@ describe('NodeService：create / get / list / delete（画布与 agent 同一条
     expect(outline!.disconnect(svc.get('b'))).toMatchObject({ ok: true })
     expect(h.store.edges.some((e) => e.from === 'a' && e.to === 'b')).toBe(false)
     expect(h.store.nodes.some((n) => n.id === 'b')).toBe(true)
+  })
+})
+
+describe('固定接口：ports 派生 / portKey 认领 / getPortData 拉取', () => {
+  it('大纲的 ports 就是它的目标项清单（从内容派生，不落第二份状态）', () => {
+    const h = harness()
+    const outline = h.service().get(outlineUuid('r'))
+    expect(outline!.ports).toEqual([{ key: 'jixian', label: '极限', data: { summary: '' } }])
+    // 文档与挂件不声明接口
+    expect(h.service().get('r')!.ports).toEqual([])
+    expect(h.service().get('a')!.ports).toEqual([])
+  })
+
+  it('create 带 portKey = 创建即认领；getPortData 拉到整条（含 key / label / data）', () => {
+    const h = harness()
+    const r = h.service().create({ kind: 'doc', title: '极限初步', under: 'r', portKey: 'jixian' })
+    expect(r).toMatchObject({ ok: true })
+    const doc = h.service().get('uuid' in r ? r.uuid : '')
+    expect(doc!.relations).toContainEqual({ id: outlineUuid('r'), type: 'up', portKey: 'jixian' })
+    expect(doc!.getPortData()).toEqual([{ key: 'jixian', label: '极限', data: { summary: '' } }])
+  })
+
+  it('connect 第三参认领：两种发起方向都行；一个接口只认领一个下游', () => {
+    const h = harness()
+    const svc = h.service()
+    const outline = svc.get(outlineUuid('r'))
+    const d1 = svc.create({ kind: 'doc', title: '第一份' })
+    const d2 = svc.create({ kind: 'doc', title: '第二份' })
+    expect('uuid' in d1 && 'uuid' in d2).toBe(true)
+    const doc1 = svc.get('uuid' in d1 ? d1.uuid : '')
+    const doc2 = svc.get('uuid' in d2 ? d2.uuid : '')
+    // 文档侧发起
+    expect(doc1!.connect(outline, 'up', 'jixian')).toMatchObject({ ok: true })
+    // 大纲侧发起：同一接口已被占 → 人话拒绝（点名占用的那份文档）
+    const refused = doc2!.connect(outline, 'up', 'jixian')
+    expect(refused).toMatchObject({ error: expect.stringContaining('一个接口只认领一个下游') })
+    expect(refused).toMatchObject({ error: expect.stringContaining('第一份') })
+    // 不存在的接口：报出可认领清单
+    expect(doc2!.connect(outline, 'up', 'nope')).toMatchObject({
+      error: expect.stringContaining('jixian（极限）'),
+    })
+    // 没声明接口的上游（空大纲一条目标项都没有）：portKey 无处认领
+    const empty = svc.create({ kind: 'outline', title: '空层' })
+    expect('uuid' in empty).toBe(true)
+    expect(doc2!.connect(svc.get('uuid' in empty ? empty.uuid : ''), 'up', 'jixian')).toMatchObject({
+      error: expect.stringContaining('没有声明任何接口'),
+    })
+  })
+
+  it('create 的 portKey 校验：没有大纲 / key 不存在都报出可认领清单', () => {
+    const h = harness()
+    expect(h.service().create({ kind: 'doc', title: 'X', under: 'a', portKey: 'jixian' })).toMatchObject({
+      error: expect.stringContaining('还没有大纲'),
+    })
+    expect(h.service().create({ kind: 'doc', title: 'X', under: 'r', portKey: 'nope' })).toMatchObject({
+      error: expect.stringContaining('jixian（极限）'),
+    })
+  })
+
+  it('剪线 = 认领解除：接口空出来，原文档 getPortData 归零', () => {
+    const h = harness()
+    const svc = h.service()
+    const r = svc.create({ kind: 'doc', title: '极限初步', under: 'r', portKey: 'jixian' })
+    const doc = svc.get('uuid' in r ? r.uuid : '')
+    const outline = svc.get(outlineUuid('r'))
+    expect(doc!.getPortData()).toHaveLength(1)
+    expect(outline!.disconnect(doc)).toMatchObject({ ok: true })
+    expect(doc!.getPortData()).toEqual([])
+    // 剪掉的是整条边：上游关系彻底消失（下游侧的认领随边存在，也随边消失）
+    expect(doc!.relations.some((r) => r.type === 'up')).toBe(false)
+    // 空出来了：别的文档现在认领得到
+    const d2 = svc.create({ kind: 'doc', title: '另一份' })
+    expect(svc.get('uuid' in d2 ? d2.uuid : '')!.connect(outline, 'up', 'jixian')).toMatchObject({ ok: true })
+  })
+
+  it('大纲重写后 ports 跟着变；认领的 key 没了就静默缺席（内容不因关系损坏）', () => {
+    const h = harness()
+    const svc = h.service()
+    const r = svc.create({ kind: 'doc', title: '极限初步', under: 'r', portKey: 'jixian' })
+    const doc = svc.get('uuid' in r ? r.uuid : '')
+    const outline = svc.get(outlineUuid('r'))
+    expect(outline!.editContent({ intro: '', children: [{ title: '连续', summary: 'ε-δ' }] })).toMatchObject({ ok: true })
+    expect(outline!.ports).toEqual([{ key: '连续', label: '连续', data: { summary: 'ε-δ' } }])
+    expect(doc!.getPortData()).toEqual([])
   })
 })

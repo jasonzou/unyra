@@ -8,7 +8,7 @@
 import { loadAgentSettings } from '../../agent/settings'
 import { layoutHintOf } from '../../agent/docFormat'
 import { bindExam, bindNote, bindSuperDoc, detachExam, detachNote, detachSuperDoc } from '../detached'
-import { examsOfNode, nodeById, parentIds, titleTaken, updateDoc, updateNode } from '../graph'
+import { examsOfNode, nodeById, removeEdge, titleTaken, updateDoc, updateNode } from '../graph'
 import { clearOutline } from '../outline'
 import { notesOf } from '../notes'
 import { superDocsOf, type KnowledgeNode } from '../types'
@@ -51,7 +51,16 @@ export class DocGNode extends GNode {
     if (this.isRoot) {
       out.push({ id: entryUuid(this.uuid), type: 'up' })
     } else {
-      for (const p of parentIds(s, this.uuid)) out.push({ id: outlineUuid(p), type: 'up' })
+      // 上游大纲的认领记在树边上（下游侧有效）：哪条边把我挂进来，就带上那条边的 portKey
+      for (const e of s.edges) {
+        if (e.to !== this.uuid) continue
+        out.push({ id: outlineUuid(e.from), type: 'up', ...(e.portKey ? { portKey: e.portKey } : {}) })
+      }
+    }
+    // 下级文档也在下游（树边 from 我）：画布在枢纽不在时按 doc→doc 画那条线，两端都要能摘
+    for (const e of s.edges) {
+      if (e.from !== this.uuid || !nodeById(s, e.to)) continue
+      out.push({ id: e.to, type: 'down' })
     }
     if (node.outline) out.push({ id: outlineUuid(this.uuid), type: 'down' })
     for (const n of notesOf(node)) out.push({ id: n.id, type: 'down' })
@@ -157,7 +166,7 @@ export class DocGNode extends GNode {
       connection: [
         root
           ? '上游是入口（entry:，由目标绑定自动生成，不能手工连）。'
-          : '上游是大纲（o: 前缀）：把这份文档挂到某份大纲下，先取那份大纲的对象再 connect(我, "down")。',
+          : '上游是大纲（o: 前缀）：把这份文档挂到某份大纲下，先取那份大纲再 connect(我, "up", 目标项key?)——第三个参数给目标项 key 就认领了这个接口，之后 await 我.getPortData() 能读到「这条目标项要我写什么」。',
         '下游（大纲 / 笔记 / 试卷 / 超级文档）都可以连线：api.node.create({ kind, under: 我的 uuid }) 创建即挂；拖线 / connect(挂件对象, "down") 绑定游离的挂件或换绑别人的，disconnect 解绑（内容原样）。与自己的大纲之间 disconnect = 删除那份大纲。',
       ].join('\n'),
     }
@@ -214,6 +223,19 @@ export class DocGNode extends GNode {
       if (!next) return { error: '这份大纲已经不在了（还没有写过内容）' }
       this.ctx.commit(next)
       return { ok: true, note: '已删除「' + this.title + '」的大纲：计划清空，文档与它的下级文档都还在' }
+    }
+    // 父大纲（上游树边）：摘线 = 拆那条树边，我变成没有上级的独立文档（大纲与它的其他下级不动）
+    if (target.kind === 'outline') {
+      const upEdge = this.ctx.store().edges.find((e) => e.to === this.uuid && outlineUuid(e.from) === target.uuid)
+      if (upEdge) {
+        this.ctx.commit(removeEdge(this.ctx.store(), upEdge.from, this.uuid))
+        return { ok: true, note: '已把「' + this.title + '」从「' + target.title + '」之下摘出来（它变成没有上级的独立文档，内容原样，认领随线解除）' }
+      }
+    }
+    // 下级文档（下游树边，画布枢纽不在时的 doc→doc 那条线）：摘线 = 拆边，对方变游离
+    if (target.kind === 'doc' && this.ctx.store().edges.some((e) => e.from === this.uuid && e.to === target.uuid)) {
+      this.ctx.commit(removeEdge(this.ctx.store(), this.uuid, target.uuid))
+      return { ok: true, note: '已拆掉「' + this.title + '」到「' + target.title + '」的那条线：对方变成没有上级的独立文档（内容原样）' }
     }
     if (target.kind === 'note' || target.kind === 'superdoc' || target.kind === 'exam') {
       const detach = target.kind === 'note' ? detachNote : target.kind === 'superdoc' ? detachSuperDoc : detachExam

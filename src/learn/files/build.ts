@@ -108,7 +108,7 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
         annotations: node.annotations,
         ...(node.learning !== undefined ? { learning: node.learning } : {}),
         ...(node.tint !== undefined ? { tint: node.tint } : {}),
-        dependencies: (deps.get(node.id) ?? []).map((e) => ({ to: e.to, createdAt: e.createdAt })),
+        dependencies: (deps.get(node.id) ?? []).map((e) => ({ to: e.to, createdAt: e.createdAt, ...(e.portKey ? { portKey: e.portKey } : {}) })),
         parts: partsOfNode(node, examsOf.get(node.id) ?? []),
         // 目标信息只写在根节点的文件里：一个目标一份文档，根节点就是那份文档
         ...(goal && id === goal.rootNodeId

@@ -132,7 +132,13 @@ export class NodeService {
   }
 
   private get ctx(): NodeCtx {
-    return { store: this.deps.getLatest, commit: this.deps.set, goalId: this.deps.goalId }
+    return {
+      store: this.deps.getLatest,
+      commit: this.deps.set,
+      goalId: this.deps.goalId,
+      // getPortData 按 uuid 还原上游对象（基类不反向依赖本服务，走 ctx 注入）
+      objectOf: (uuid: string) => this.get(uuid),
+    }
   }
 
   /** 按 uuid 取节点对象；不存在回 undefined（api 层翻成「没有这个节点」的回执） */
@@ -204,21 +210,33 @@ export class NodeService {
     if (kind === 'doc') {
       const docTitle = title || '新文档'
       if (host) {
+        // 点目标项建文档时带上那条目标项的 key = 创建即认领（与 connect 的 portKey 同一口径）
+        const portKey = typeof input.portKey === 'string' ? input.portKey.trim() : ''
+        const children = host.outline?.children ?? []
+        if (portKey && !children.some((c) => c.key === portKey)) {
+          return {
+            error: children.length
+              ? '「' + host.title + '」的大纲没有目标项 key「' + portKey + '」。可认领的：' + children.map((c) => c.key + '（' + c.title + '）').join('、')
+              : '「' + host.title + '」还没有大纲（没有可认领的接口）',
+          }
+        }
         const r = createNodeUnder(store, host.id, {
           title: docTitle,
           ...(typeof input.description === 'string' ? { description: input.description } : {}),
+          ...(portKey ? { portKey } : {}),
         })
         if (r.node.id === host.id) {
           return { error: '本目标里已经有「' + docTitle + '」这个文档（' + r.node.id + '），没有另建一份' }
         }
         this.deps.set(r.store)
+        const claimed = portKey ? '，认领了目标项「' + (children.find((c) => c.key === portKey)?.title ?? portKey) + '」' : ''
         return {
           ok: true,
           uuid: r.node.id,
           title: r.node.title,
           created: r.created,
           note: r.created
-            ? '已建文档「' + r.node.title + '」并挂到「' + host.title + '」的大纲之下；教学正文用 editContent 写'
+            ? '已建文档「' + r.node.title + '」并挂到「' + host.title + '」的大纲之下' + claimed + '；教学正文用 editContent 写'
             : '本目标里已有同名文档「' + r.node.title + '」，直接复用（没有另建）',
         }
       }

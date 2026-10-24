@@ -70,7 +70,8 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       const from = typeof r.from === 'string' ? r.from : ''
       const to = typeof r.to === 'string' ? r.to : ''
       if (!from || !to || from === to || !ids.has(from) || !ids.has(to)) continue
-      edges.push({ from, to, createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now() })
+      const portKey = typeof r.portKey === 'string' && r.portKey ? r.portKey : undefined
+      edges.push({ from, to, createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(), ...(portKey ? { portKey } : {}) })
     }
 
     const rawGoals: unknown[] = Array.isArray(d.goals) ? d.goals : []

@@ -145,7 +145,7 @@ function makeApi() {
         get: () => channel.invoke(m.uuid, 'content', []),
         enumerable: true,
       })
-      for (const name of ['editContent', 'help', 'connect', 'disconnect']) {
+      for (const name of ['editContent', 'help', 'connect', 'disconnect', 'getPortData']) {
         obj[name] = (...args) =>
           channel.invoke(m.uuid, name, toWire(args)).then((v) => (v && v.object === true ? wrapManifest(v) : v))
       }

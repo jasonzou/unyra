@@ -7,7 +7,7 @@
  */
 import { addEdge, nodeById, prereqIds, removeEdge } from '../graph'
 import { clearOutline, writeOutline } from '../outline'
-import { docIdOfOutlineUuid, GNode, type ConnectFilter, type NodeCtx, type NodeHelp, type NodeRelation, type NodeResult } from './base'
+import { docIdOfOutlineUuid, GNode, type ConnectFilter, type NodeCtx, type NodeHelp, type NodePort, type NodeRelation, type NodeResult } from './base'
 
 export class OutlineGNode extends GNode {
   constructor(ctx: NodeCtx, uuid: string) {
@@ -45,6 +45,15 @@ export class OutlineGNode extends GNode {
       { id: this.docId, type: 'up' },
       ...prereqIds(s, this.docId).map((id): NodeRelation => ({ id, type: 'down' })),
     ]
+  }
+
+  /**
+   * 固定接口 = 每条目标项一个口：key 是目标项 key（与画布槽位同一套）、label 是标题、
+   * data 是那条计划的内容。完全从大纲内容派生，不落第二份状态。
+   */
+  get ports(): NodePort[] {
+    const children = this.record?.outline?.children ?? []
+    return children.map((c) => ({ key: c.key, label: c.title, data: { summary: c.summary } }))
   }
 
   get content(): unknown {
@@ -89,7 +98,7 @@ export class OutlineGNode extends GNode {
       ].join('\n'),
       connection: [
         '上游是宿主文档（自动连着）；disconnect(宿主文档对象) 摘掉这条归属线 = 删除这份大纲（计划清空，文档与树边不动）。',
-        '下游是文档：await 大纲.connect(文档对象, "down") 把一份文档挂到这一层（它就是那条树边）；disconnect 拆掉那一条边，对方变成游离文档，不删除任何东西。别的东西（笔记 / 试卷 / 超级文档 / 大纲）挂不进来。',
+        '下游是文档：await 大纲.connect(文档对象, "down", 目标项key?) 把一份文档挂到这一层（它就是那条树边）；第三个参数给目标项 key = 认领这个接口，一个接口只认领一个文档，对方用 getPortData() 能读到这条计划。disconnect 拆掉那一条边，对方变成游离文档，不删除任何东西。别的东西（笔记 / 试卷 / 超级文档 / 大纲）挂不进来。',
       ].join('\n'),
     }
   }
@@ -103,13 +112,14 @@ export class OutlineGNode extends GNode {
     return true
   }
 
-  protected link(down: GNode): NodeResult {
-    const r = addEdge(this.ctx.store(), this.docId, down.uuid)
+  protected link(down: GNode, portKey?: string): NodeResult {
+    const r = addEdge(this.ctx.store(), this.docId, down.uuid, portKey)
     if (!r.added) {
-      return { error: '这条边没能挂上：会成环（「' + down.title + '」已经在「' + this.title + '」的上游里）' }
+      return { error: r.reason ?? '这条边没能挂上：会成环（「' + down.title + '」已经在「' + this.title + '」的上游里）' }
     }
     this.ctx.commit(r.store)
-    return { ok: true, note: '已把文档「' + down.title + '」挂到「' + this.title + '」之下' }
+    const claimed = portKey ? '，认领了目标项「' + (this.ports.find((p) => p.key === portKey)?.label ?? portKey) + '」' : ''
+    return { ok: true, note: '已把文档「' + down.title + '」挂到「' + this.title + '」之下' + claimed }
   }
 
   protected unlink(target: GNode): NodeResult {

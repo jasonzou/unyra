@@ -204,7 +204,7 @@ export function createChildNode(
 export function createNodeUnder(
   store: LearnStore,
   parentId: string,
-  input: { title: string; description?: string; origin?: 'ai' | 'user' },
+  input: { title: string; description?: string; origin?: 'ai' | 'user'; portKey?: string },
 ): { store: LearnStore; node: KnowledgeNode; created: boolean } {
   const parent = nodeById(store, parentId)
   if (!parent) throw new Error('父节点不存在')
@@ -216,7 +216,7 @@ export function createNodeUnder(
   })
   let next = added.store
   if (added.created && added.node.id !== parentId) {
-    next = addEdge(next, parentId, added.node.id).store
+    next = addEdge(next, parentId, added.node.id, input.portKey).store
   }
   return { store: next, node: added.node, created: added.created }
 }

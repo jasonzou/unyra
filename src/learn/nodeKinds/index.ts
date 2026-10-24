@@ -35,10 +35,10 @@ export const KIND_RANK: Record<GNodeKind, number> = {
   superdoc: 2,
 }
 
-export type { GNodeKind, GNode, NodeCtx, NodeHelp, NodeRelation, NodeResult, ConnectFilter } from './base'
+export type { GNodeKind, GNode, NodeCtx, NodeHelp, NodePort, NodeRelation, NodeResult, ConnectFilter } from './base'
 export { outlineUuid, docIdOfOutlineUuid, entryUuid, docIdOfEntryUuid } from './base'
 /** 节点对象对外的全部成员（全类型同构；沙箱门面与调用校验共用这一份清单） */
-export const NODE_MEMBERS_ORDER = ['content', 'editContent', 'help', 'connect', 'disconnect'] as const
+export const NODE_MEMBERS_ORDER = ['content', 'editContent', 'help', 'connect', 'disconnect', 'getPortData'] as const
 export type NodeMember = (typeof NODE_MEMBERS_ORDER)[number]
 export { DocGNode } from './doc'
 export { OutlineGNode } from './outline'

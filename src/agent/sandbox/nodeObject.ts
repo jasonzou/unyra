@@ -25,7 +25,7 @@ import { wrapApi } from './wrap'
 /** 节点对象的成员（全类型同构；多态在行为与 help 文案，不在方法表） */
 export const NODE_MEMBERS = NODE_MEMBERS_ORDER
 
-/** manifest：node.get 的回执——身份 + 关系快照（方法表是固定的五件套，不必随单传输） */
+/** manifest：node.get 的回执——身份 + 关系快照（方法表是固定的六件套，不必随单传输） */
 export interface NodeManifest {
   ok: true
   /** 标记形状：沙箱门面据此再包一层真对象 */
@@ -33,7 +33,7 @@ export interface NodeManifest {
   uuid: string
   kind: GNodeKind
   title: string
-  relations: Array<{ id: string; type: 'up' | 'down'; kind: GNodeKind; title: string }>
+  relations: Array<{ id: string; type: 'up' | 'down'; kind: GNodeKind; title: string; portKey?: string }>
 }
 
 export function isManifest(v: unknown): v is NodeManifest {
@@ -58,7 +58,13 @@ export interface NodeOps {
 function manifestOf(service: NodeService, node: GNode): NodeManifest {
   const relations = node.relations.map((r) => {
     const other = service.get(r.id)
-    return { id: r.id, type: r.type, kind: other?.kind ?? 'doc', title: other?.title ?? r.id }
+    return {
+      id: r.id,
+      type: r.type,
+      kind: other?.kind ?? 'doc',
+      title: other?.title ?? r.id,
+      ...(r.portKey ? { portKey: r.portKey } : {}),
+    }
   })
   return { ok: true, object: true, uuid: node.uuid, kind: node.kind, title: node.title, relations }
 }
@@ -125,9 +131,13 @@ export function registerNodeApi(api: Record<string, unknown>, ops: NodeOps | und
       const targetId = asText(rest[0]).trim()
       const target = targetId ? service.get(targetId) : undefined
       if (!target) return { error: 'connect / disconnect 的第一个参数要是另一个节点对象（api.node.get(uuid) 取到再传）' }
-      const r = member === 'connect' ? node.connect(target, rest[1]) : node.disconnect(target)
+      const r =
+        member === 'connect'
+          ? node.connect(target, rest[1], rest[2])
+          : node.disconnect(target)
       return r
     }
+    if (member === 'getPortData') return node.getPortData()
     if (member === 'editContent') {
       const reason = ops.guard?.('edit', node.kind, rest[0])
       if (reason) return { error: reason }
@@ -171,7 +181,7 @@ export function attachNodeFacade(api: Record<string, unknown>): void {
       get: () => ns.invoke(m.uuid, 'content', []),
       enumerable: true,
     })
-    for (const name of ['editContent', 'help', 'connect', 'disconnect'] as const) {
+    for (const name of ['editContent', 'help', 'connect', 'disconnect', 'getPortData'] as const) {
       obj[name] = (...callArgs: unknown[]) =>
         Promise.resolve(ns.invoke(m.uuid, name, toWire(callArgs))).then((v) => (isManifest(v) ? wrap(v) : v))
     }

@@ -205,7 +205,7 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
 
     for (const dep of file.dependencies ?? []) {
       if (!dep || typeof dep.to !== 'string' || !dep.to) continue
-      edges.push({ from: file.id, to: dep.to, createdAt: dep.createdAt })
+      edges.push({ from: file.id, to: dep.to, createdAt: dep.createdAt, ...(typeof dep.portKey === 'string' && dep.portKey ? { portKey: dep.portKey } : {}) })
     }
 
     for (const exam of content.exams) {
@@ -439,7 +439,7 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
 
     for (const dep of meta.dependencies ?? []) {
       if (!dep || typeof dep.to !== 'string' || !dep.to) continue
-      edges.push({ from: meta.id, to: dep.to, createdAt: dep.createdAt })
+      edges.push({ from: meta.id, to: dep.to, createdAt: dep.createdAt, ...(typeof dep.portKey === 'string' && dep.portKey ? { portKey: dep.portKey } : {}) })
     }
   }
 

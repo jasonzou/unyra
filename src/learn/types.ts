@@ -428,6 +428,8 @@ export interface DependencyEdge {
   from: string
   to: string
   createdAt: number
+  /** 下游对上游固定接口的认领（下游侧有效；挂件绑定不走树边，没有这个字段） */
+  portKey?: string
 }
 
 export interface LearningGoal {
