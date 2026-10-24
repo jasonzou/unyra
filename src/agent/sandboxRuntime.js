@@ -30,13 +30,11 @@ let runTimer = null
 self.onmessage = (ev) => {
   const msg = ev.data || {}
   if (msg.kind === 'reply') {
-    console.error('[rt] reply branch id=' + msg.id + ' ok=' + msg.ok)
     const slot = pending.get(msg.id)
-    console.error('[rt] slot=' + !!slot + ' pendingSize=' + pending.size)
     if (!slot) return
     pending.delete(msg.id)
     armTimer()
-    if (msg.ok) { console.error('[rt] resolving'); slot.resolve(msg.value) }
+    if (msg.ok) slot.resolve(msg.value)
     else slot.reject(new Error(msg.message))
     return
   }
