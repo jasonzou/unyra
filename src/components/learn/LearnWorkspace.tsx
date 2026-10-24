@@ -164,6 +164,7 @@ import { usePresence } from '../../lib/presence'
 import ExamCopyView from './ExamCopyView'
 import { OutlinePane } from './workspace/OutlinePane'
 import { NodeService, type GNodeKind } from '../../learn/nodeKinds'
+import { noteEntityOf } from './workspace/panes'
 import { pruneImages } from '../../learn/images'
 import { dropDrafts } from '../../learn/drafts'
 import { queueOf, shouldEnqueue } from '../../learn/agentQueue'
@@ -1569,9 +1570,12 @@ export default function LearnWorkspace({
       }
       const s = getLatest()
       let ref = targetRef
+      // 游离笔记的页签：nodeId 放的是笔记自己的 id，对不上节点、却对得上游离池 = 合法页签
+      //（与绑定笔记同一套用法，差别只是没有那条关系线——见 workspace/panes 的 noteEntityOf）
+      const freeNote = ref.kind === 'note' ? noteEntityOf(s, ref) : null
       const initialNodeId = tabNodeId(ref)
       const initialNode = initialNodeId ? nodeById(s, initialNodeId) : undefined
-      if (initialNodeId && !initialNode) return
+      if (initialNodeId && !initialNode && !freeNote) return
       if (ref.kind === 'outline' && initialNode) {
         const goal = s.goals.find((g) => g.id === initialNode.goalId)
         if (goal && ref.nodeId !== goal.rootNodeId) {
@@ -1581,7 +1585,7 @@ export default function LearnWorkspace({
       }
       const nodeId = tabNodeId(ref)
       const node = nodeId ? nodeById(s, nodeId) : undefined
-      if (nodeId && !node) return
+      if (nodeId && !node && !freeNote) return
       const wasActive = focusedTab(s.docArea)?.id === tabKey(ref)
       const base = node ? touchNode(retargetNode(s, node.id), node.id) : s
       /*
@@ -1614,7 +1618,7 @@ export default function LearnWorkspace({
        * 于是切到那个目标时它就出现在栏上、切走时跟着收起来——「所有这个目标下任何层级
        * 的文档打开都会被 tab 组记录」正是这一行。
        */
-      const owner = refOwner(ref, (id) => nodeById(base, id)?.goalId ?? null)
+      const owner = refOwner(ref, (id) => nodeById(base, id)?.goalId ?? null) ?? freeNote?.goalId ?? null
       set({ ...base, docArea: withOwners(opened, claimTab(opened.tabOwners, owner, tabKey(ref))) })
       if (wasActive) requestReveal()
       setSidebarOpen(false)
