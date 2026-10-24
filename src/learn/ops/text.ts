@@ -1,14 +1,9 @@
 /**
- * 纯文本小工具：读取上限、给模型看的截断，以及「此刻在看哪个节点」那段上下文。
+ * 纯文本小工具：读取上限与给模型看的截断。
  *
- * 从 learn/agentOps 拆出来（见 docs/refactor-plan.md 3.5）：它们只读 store，与具体某一组 api
+ * 从 learn/agentOps 拆出来（见 docs/refactor-plan.md 3.5）：它们只读数据，与具体某一组 api
  * 无关，单独放一处之后，用一次 clipText 不必再 import 整个宿主实现。
  */
-
-import { MASTERY_LABEL, superDocsOf, type LearnStore } from '../types'
-import { nodeById, parentIds, prereqIds } from '../graph'
-import { docPathOf, docsInfoOf, nodePathOf } from '../paths'
-import { learningLine } from '../learning'
 
 /** res.read 一次默认回多少字：整篇塞进去只会把上下文顶掉 */
 export const READ_LIMIT = 12_000
@@ -20,64 +15,12 @@ export function clipText(text: string, limit: number): string {
 }
 
 /**
- * 「此刻在看哪个节点」——每一轮都写进用户消息里。
+ * 【节点上下文不再存在】（2026-10-23 的架构决定）：
  *
- * 会话改成目标级之后，系统提示词只能描述**目标**（否则切一次节点就整段前缀作废），
- * 于是「当前节点是哪一个」这件事必须跟着每条消息走。顺带把描述与文档字数一并给出，
- * 模型因此不必为了知道「这个节点写过什么」而先读一遍。
- *
- * 紧跟其后的还有一条【写入目标】：省略 path 的文档写入到底落在哪一份，每轮明说——
- * 教学文档的编写因此从轮次的第一条消息起就有明确的对象，而不是模型凭
- * 「界面上碰巧开着哪个」去猜（那正是它写错文档的来路）。
+ * 从前的 currentNodeBlock 把「当前学习目标 / 目标规划 / 当前节点 / 写入目标」每轮拼进
+ * 用户消息——它随节点与进度每轮都在变，既不是固定的提示词也不是当次的指令，还把
+ * 新对话的第一条指令盖在了下面。现在这一块整体删除：目标 / 节点 / 规划状态由 agent
+ * 自己查（api.graph.list / api.graph.read / api.state.read），沙箱的「当前节点」语义
+ * （省略 path 的写入落点）由宿主的 scope 解析兜着，模型不需要这块背景也能写对地方。
+ * clipText 留在这里继续给别处用。
  */
-export function currentNodeBlock(store: LearnStore, goalId: string, nodeId: string): string {
-  const node = nodeById(store, nodeId)
-  /**
-   * 目标问题从系统提示词搬到这里（2026-10-22）。
-   *
-   * 它曾经是系统提示词里唯一的会话标识，代价是**每个目标一份不同的前缀**——
-   * 开新目标、切目标，那段上万 token 的规范就整段重算。搬到消息层之后，
-   * 所有目标共用同一份系统提示词前缀，目标是谁由每条消息自己交代。
-   * 用 `question`（用户原话）而不是目标标题：Agent 改标题也不会动到这段话。
-   */
-  const goalQuestion = store.goals.find((g) => g.id === goalId)?.question?.trim() ?? ''
-  const goalLine = '【学习目标】' + (goalQuestion || '（学习者没有写下具体问题）')
-  if (!node) return goalLine + '\n【当前节点】已不存在（可能刚被删除）。'
-  const isGoal = store.goals.some((g) => g.rootNodeId === node.id)
-  const lines = [
-    goalLine,
-    '【当前节点】「' + node.title + '」（路径 ' + nodePathOf(store, goalId, node.id) + '，id #' + node.id + '）',
-    /*
-     * 写入目标一条说死：省略 path 的文档写入落在哪里，不再让模型拿「当前节点」
-     * 与系统提示词里那句括注自己对暗号——它从这一轮的第一条消息起就该明确
-     * 自己要编写的是哪一份文档（用户点名的规矩）。措辞是「写的就是这份」而不是
-     * 「默认是这份」：动别的文档必须显式写 path，没有含糊的余地。
-     */
-    '【写入目标】这一轮 api.doc.write / api.doc.append / api.doc.replace 省略 path 时，写的就是这份教学文档：「' +
-      docPathOf(store, goalId, node.id, 'teaching') +
-      '」；要写其他节点的文档或任何笔记，必须写明 path。',
-    '它的描述：' + (node.description.trim() ? clipText(node.description, 400) : '（还没写）'),
-    '它的文档：' + docsInfoOf(node).map((d) => d.label + ' ' + d.chars + ' 字').join('、'),
-    '它的状态：' + MASTERY_LABEL[node.status],
-  ]
-  // 超级文档不常备，有才提一句：模型需要知道「这里已经有什么交互件」
-  const sdocs = superDocsOf(node)
-  if (sdocs.length) lines.push('它的超级文档：' + sdocs.map((d) => '「' + d.name + '」' + d.html.length + ' 字').join('、'))
-  /*
-   * 学习状态跟着每条消息走（与「当前节点」同理：系统提示词固定在目标一级，
-   * 任何会变的字段都不能进那里，否则切一次节点整段前缀缓存作废）。
-   * 只在真有时才多写这一行——绝大多数节点还没评估过，多一行「（无）」只是噪声。
-   */
-  const learning = learningLine(node)
-  if (learning) lines.push('它的学习状态：' + learning + '（详见 api.state.read()）')
-  const prereqs = prereqIds(store, node.id)
-    .map((id) => nodeById(store, id)?.title)
-    .filter((t): t is string => !!t)
-  const parents = parentIds(store, node.id)
-    .map((id) => nodeById(store, id)?.title)
-    .filter((t): t is string => !!t)
-  if (parents.length) lines.push('上级节点：' + parents.join('、'))
-  if (prereqs.length) lines.push('它的下级节点：' + prereqs.join('、'))
-  if (isGoal) lines.push('这是学习目标本身（根节点）：教学文档按系统性大纲组织。')
-  return lines.join('\n')
-}

@@ -12,7 +12,7 @@
  */
 import type { ReasoningEffort, StreamFn } from '../../ai/types'
 import type { ResolvedProvider } from '../../ai/client'
-import { runAgent } from '../runtime'
+import { runAgent, type AgentInjection } from '../runtime'
 import { assertPrefixStable } from '../prefixGate'
 import type { AgentEvent, AgentPart, AgentTool, ConversationMessage, MessageUsage } from '../types'
 import { applyEvent } from '../../learn/agent/events'
@@ -54,8 +54,7 @@ export interface SubRunOptions {
     pull: () => string | null
     flush: (parts: AgentPart[]) => void
     append: (text: string) => void
-  }
-  /** 测试注入替身流，从而不联网驱动整个循环 */
+  }  /** 测试注入替身流，从而不联网驱动整个循环 */
   stream?: StreamFn
 }
 
@@ -87,7 +86,7 @@ export async function runSubAgentTask(opts: SubRunOptions): Promise<SubRunOutcom
   let errorMessage: string | undefined
 
   /** 边界动作：拉介入指令 → 半场落库 → 指令入账；三件事钉在同一个点 */
-  const atBoundary = async (): Promise<string | null> => {
+  const atBoundary = async (): Promise<AgentInjection | null> => {
     if (!opts.injections) return null
     const text = opts.injections.pull()
     if (text === null) return null
@@ -96,7 +95,8 @@ export async function runSubAgentTask(opts: SubRunOptions): Promise<SubRunOutcom
       parts = []
     }
     opts.injections.append(text)
-    return text
+    // 介入是「做什么」的指令：以 user 边进历史（提示词模块那种声明才是 assistant）
+    return { role: 'user', content: text }
   }
 
   await runAgent({

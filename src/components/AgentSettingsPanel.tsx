@@ -59,6 +59,8 @@ interface Props {
   onChange: (next: AgentSettings) => void
   /** 打开上下文比对调试器（悬浮窗由工作区渲染，见 LearnWorkspace） */
   onOpenContextDebugger: () => void
+  /** 打开上下文轨迹（同一悬浮窗体系，见 LearnWorkspace） */
+  onOpenContextTrace: () => void
   /** 工作流列表（内置 + 全局 + 当前目标，见 learn/workflows）；不传就整个分页不显示 */
   flowRows?: WorkflowRow[]
   /** 从列表直接跑一条（占位参数由工作区按当前节点补齐） */
@@ -135,6 +137,7 @@ export default function AgentSettingsPanel({
   model,
   onChange,
   onOpenContextDebugger,
+  onOpenContextTrace,
   flowRows,
   onRunWorkflow,
   onRemoveWorkflow,
@@ -344,6 +347,7 @@ export default function AgentSettingsPanel({
               settings={settings}
               onChange={onChange}
               onOpenContextDebugger={onOpenContextDebugger}
+              onOpenContextTrace={onOpenContextTrace}
             />
           ) : tab === 'permissions' ? (
             <PermissionsTab

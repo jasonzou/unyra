@@ -23,10 +23,13 @@ export interface OutlinePaneProps {
   docs: NodeDocActions
   exams: ExamActions
   onCreateNote?: (nodeId: string) => string | null
+  onCreateExam?: (nodeId: string) => string | null
+  onCreateSuperDoc?: (nodeId: string) => string | null
   onRenameNote?: (nodeId: string, from: string, to: string) => void
   onAddOutlineEntry?: (nodeId: string, title: string) => void
   onCreateChildDoc?: (ownerNodeId: string, title: string) => string | null
   onGenerateDoc?: (nodeId: string) => void
+  onGenerateOutline?: (ownerNodeId: string) => void
   onToast?: (msg: string) => void
   focusTarget?: { nodeId: string; nonce: number } | null
   onFocusHandled?: () => void
@@ -59,10 +62,13 @@ export const OutlinePane = memo(function OutlinePane({
   docs,
   exams,
   onCreateNote,
+  onCreateExam,
+  onCreateSuperDoc,
   onRenameNote,
   onAddOutlineEntry,
   onCreateChildDoc,
   onGenerateDoc,
+  onGenerateOutline,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -80,10 +86,13 @@ export const OutlinePane = memo(function OutlinePane({
         docs={docs}
         exams={exams}
         onCreateNote={onCreateNote}
+          onCreateExam={onCreateExam}
+          onCreateSuperDoc={onCreateSuperDoc}
         onRenameNote={onRenameNote}
         onAddOutlineEntry={onAddOutlineEntry}
         onCreateChildDoc={onCreateChildDoc}
         onGenerateDoc={onGenerateDoc}
+        onGenerateOutline={onGenerateOutline}
         onToast={onToast}
         focusTarget={focusTarget}
         onFocusHandled={onFocusHandled}

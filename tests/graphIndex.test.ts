@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { emptyLearnStore } from '../src/learn/store/empty'
 import { nodeById } from '../src/learn/graph/lookup'
 import { parentIds, prereqIds } from '../src/learn/graph/edges'
+import { shellExamOf } from '../src/learn/graph/exams'
+import type { Exam } from '../src/learn/exam'
 import type { KnowledgeNode, LearnStore } from '../src/learn/types'
 import {
   GRAPH_EDGE_RULES,
@@ -124,7 +126,7 @@ describe('P0：图索引', () => {
 describe('P0：类型登记表', () => {
   it('GRAPH_KINDS 就是登记表的键', () => {
     expect(GRAPH_KINDS).toEqual(Object.keys(NODE_KINDS))
-    expect(GRAPH_KINDS).toEqual(['outline', 'doc', 'note', 'exam', 'superdoc'])
+    expect(GRAPH_KINDS).toEqual(['entry', 'outline', 'doc', 'note', 'exam', 'superdoc'])
   })
 
   it('显示名 / 同列权重 / 连线规则都从登记项派生', () => {
@@ -156,5 +158,34 @@ describe('P0：类型登记表', () => {
     expect(isGraphKind('flashcard')).toBe(false)
     expect(isGraphKind('')).toBe(false)
     expect(isGraphKind(null)).toBe(false)
+  })
+})
+
+describe('空壳试卷判定（实体先行的吸收落点）', () => {
+  const exam = (id: string, nodeId: string, questions: Exam['questions'], attempts: Exam['attempts'], createdAt = 1): Exam => ({
+    id, nodeId, goalId: 'g1', title: id, kind: 'quiz', level: 'easy', minutes: 0,
+    questions, attempts, createdAt,
+  })
+
+  it('0 题 0 考才算壳；有多份壳时取最新；没壳回 undefined', () => {
+    const store = emptyLearnStore()
+    const withExams: LearnStore = {
+      ...store,
+      exams: [
+        exam('old-shell', 'n1', [], [], 1),
+        exam('real', 'n1', [{ id: 'q', type: 'single', stem: 's', options: [], answer: ['a'], points: 1 }], [], 2),
+        exam('new-shell', 'n1', [], [], 3),
+        exam('other-node', 'n2', [], [], 4),
+      ],
+    }
+    expect(shellExamOf(withExams, 'n1')?.id).toBe('new-shell')
+    expect(shellExamOf(withExams, 'n2')?.id).toBe('other-node')
+    expect(shellExamOf(withExams, 'n3')).toBeUndefined()
+    // 出过题（有题）或考过（有 attempt）的都不是壳——吸收绝不能覆盖真实数据
+    const afterAbsorb: LearnStore = {
+      ...store,
+      exams: [exam('filled', 'n1', [{ id: 'q', type: 'single', stem: 's', options: [], answer: ['a'], points: 1 }], [], 1)],
+    }
+    expect(shellExamOf(afterAbsorb, 'n1')).toBeUndefined()
   })
 })

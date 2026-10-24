@@ -129,6 +129,43 @@ function makeApi() {
   }
   api.ui = attachGroupHelp(api.ui || {}, 'ui')
   /**
+   * api.node(地址)：节点对象门面。node.get 回 manifest（身份 + 该类型的方法表，
+   * 来自 learn/nodeKinds 的登记声明），这里把 manifest 包成真的 JS 对象——
+   * 方法调用都走 node.invoke 通道（宿主记账、失败进清单），聚合方法
+   * （note / outline / superdoc）回的 manifest 在这里再包一层。与进程内门面
+   * （sandbox/nodeObject 的 attachNodeFacade）行为必须一致。
+   */
+  if (api.node && typeof api.node.get === 'function') {
+    const channel = api.node
+    const wrapManifest = (m) => {
+      const obj = { kind: m.kind, id: m.id, label: m.label }
+      for (const d of m.methods) {
+        obj[d.name] = (...args) =>
+          channel.invoke(m.target, d.name, args).then((v) =>
+            v && v.object === true && Array.isArray(v.methods) ? wrapManifest(v) : v,
+          )
+      }
+      obj.help = () =>
+        '「' + m.label + '」的成员方法：\n' +
+        m.methods
+          .map((d) => '- ' + d.signature + ' — ' + d.summary + (d.example ? '\n  示例：' + d.example : ''))
+          .join('\n')
+      return obj
+    }
+    const nodeFactory = async (target, part) => {
+      const t =
+        target && typeof target === 'object'
+          ? target
+          : { node: target ?? '', ...(part !== undefined ? { part: String(part) } : {}) }
+      const m = await channel.get(t)
+      return m && m.object === true && Array.isArray(m.methods) ? wrapManifest(m) : m
+    }
+    nodeFactory.get = channel.get
+    nodeFactory.invoke = channel.invoke
+    nodeFactory.__help = channel.__help
+    api.node = nodeFactory
+  }
+  /**
    * api.ui.dom(fn)：宿主先建一个「会话」，回调拿到的是一层**门面**（facade）——
    * 它的每个方法都回到宿主去操作文档区根元素。只暴露选择器级别的读写与点击，
    * 因为 DOM 节点本身同样无法穿过 Worker 边界。
@@ -168,15 +205,19 @@ function makeApi() {
   return api
 }
 
+/**
+ * 报错兜底提示：编排代码里出现了**已退役的组名**时，把「现在该怎么写」直接附在报错后面。
+ * 只在真报错时按 body 命中；条目必须指向**当前真实存在**的 api——指向不存在的名字
+ * 只会把模型的纠错路径也带偏（api.memory 是正式 api，绝不能出现在这张表里）。
+ */
 const DEPRECATED_HINTS = {
-  docs: '没有 api.docs 这一组：文档请用 api.doc.*（先 await api.doc.__help()）。',
-  description: 'api.description 已退役：修改节点描述请用 await api.node.update(path, { description })。',
-  review: '没有 api.review：复习计划用 api.outline.write / api.state.* 表达，不要自己找数据文件。',
+  docs: '没有 api.docs 这一组：内容读写请用 api.node(地址) 取节点对象后调成员方法（先 await api.node.__help()）。',
+  description: 'api.description 已退役：修改节点描述请用 await api.graph.update(path, { description })。',
+  review: '没有 api.review：复习计划用 api.node(path).outline().write({ intro, children }) / api.state.* 表达，不要自己找数据文件。',
   retrieval: '没有 api.retrieval：联网检索请用 api.web.search。',
-  note: '没有 api.note 这一组：笔记请用 api.doc.read / api.doc.write，路径写「节点/笔记/名字」。',
+  note: '没有 api.note 这一组：笔记请用 api.node(路径).note("名字")，写就 note.write(内容)。',
   stats: 'api.stats 不存在：阅读事实用 api.reading.*，注意力用 api.attention.get。',
-  memory: 'api.memory 不存在：长期事实用 api.doc.* / api.state.*，可执行逻辑用 api.method.*。',
-  mind: 'api.mind 不存在：知识结构用 api.node.*，文档用 api.doc.*。',
+  mind: 'api.mind 不存在：知识结构用 api.graph.*，内容读写用 api.node(地址) 的成员方法。',
   checkin: 'api.checkin 不存在：没有打卡数据这一组。',
   plot: 'api.plot 不存在：图像请写进教学文档（```plot 围栏），静态素材用 api.res.*。',
   methods: 'api.methods 不存在：方法调用请用 api.method.call(name, ...args)。',

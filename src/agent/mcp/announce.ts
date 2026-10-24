@@ -57,7 +57,7 @@ export function needsMcpAnnounce(messages: ConversationMessage[], digest: string
   return activeMsgs[activeMsgs.length - 1].mcpDigest !== digest
 }
 
-/** 构造 MCP 感知注入消息（隐藏 user 消息，进过程组不画分界条——与技能注入同款） */
+/** 构造 MCP 感知注入消息（隐藏 assistant 消息，进过程组不画分界条——与技能注入同款） */
 export function mcpAnnounceMessage(
   settings: McpSettings | null | undefined,
   at: number,
@@ -67,7 +67,7 @@ export function mcpAnnounceMessage(
 ): ConversationMessage {
   return {
     id: uuid,
-    role: 'user',
+    role: 'assistant',
     parts: [{ type: 'text', text: formatMcpDiscoveryPrompt(settings) }],
     ts: at,
     hidden: true,

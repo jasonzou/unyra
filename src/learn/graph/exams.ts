@@ -15,6 +15,22 @@ export function examsOfNode(store: LearnStore, nodeId: string): Exam[] {
 }
 
 /**
+ * 这个节点的**空壳试卷**（拖到画布上占位的那种：0 题、没考过），最新的那份。
+ *
+ * 实体先行模型（2026-10-24）：空试卷卡就是一份真实实体，出题时**吸收**它——
+ * 新卷沿用壳的 id 与创建时间落库，画布上那张卡原位变实，不需要任何对账。
+ * 没有壳（或壳已被吸收）时回 undefined，出题照常新建。
+ */
+export function shellExamOf(store: LearnStore, nodeId: string): Exam | undefined {
+  const list = examsOfNode(store, nodeId)
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i]
+    if (e.questions.length === 0 && e.attempts.length === 0) return e
+  }
+  return undefined
+}
+
+/**
  * 正在考的那一次（跨全部节点找）。
  *
  * 考试窗口是单例、同一时刻只可能有一次在考，所以这里不按节点过滤：

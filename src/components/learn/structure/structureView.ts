@@ -14,6 +14,8 @@ import {
   SLOT_ROW,
   defaultHeight,
   rectOf,
+  splitLeafRef,
+  type EdgeStyle,
   type GraphKind,
   type HeightOf,
   type StructureNode,
@@ -36,6 +38,7 @@ export {
   cardHeight,
   heightOf,
   outlineCardHeight,
+  splitLeafRef,
 } from '../../../learn/structure'
 import { nodeById } from '../../../learn/graph'
 
@@ -58,8 +61,9 @@ export interface NodeView {
   missing: boolean
 }
 
-/** 五种节点的色板：边框与徽标用同一套（色值走主题变量，见 mindmapTint 的同一条理由） */
+/** 六种节点的色板：边框与徽标用同一套（色值走主题变量，见 mindmapTint 的同一条理由） */
 export const KIND_TONE: Record<GraphKind, string> = {
+  entry: 'border-rose-500/35 bg-rose-500/[0.06]',
   outline: 'border-seal/35 bg-seal/[0.06]',
   doc: 'border-sky-500/30 bg-sky-500/[0.06]',
   note: 'border-emerald-500/30 bg-emerald-500/[0.06]',
@@ -68,6 +72,7 @@ export const KIND_TONE: Record<GraphKind, string> = {
 }
 
 export const KIND_BADGE: Record<GraphKind, string> = {
+  entry: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
   outline: 'bg-seal/15 text-seal-deep',
   doc: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
   note: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
@@ -75,29 +80,17 @@ export const KIND_BADGE: Record<GraphKind, string> = {
   superdoc: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
 }
 
-/* ---------- 目标项的颜色 ---------- */
+/* ---------- 目标项的统一色 ---------- */
 
 /**
- * 目标项的配色。**按目标项的序号取**，同一个目标项在「卡片上的小圆点」与
- * 「它到子大纲的那条连线」上必须是同一个颜色——两处各取一次色，就会对不上。
+ * 目标项（接入点）圆点与它派生的连线**只用这一个颜色**。
  *
- * 用色值而不是 Tailwind 类：连线是 SVG 的 stroke，`className` 上的色板类管不到它；
- * 而颜色要跟着数据走（第 3 个目标项恒为第 3 个颜色），不适合用语义 token。
+ * 以前按目标项序号发彩虹色——后来发现颜色在图上只承载一个含义就够了：
+ * 「这条连接来自某条目标项」。至于是第几条，行序与文字已经说明白了，
+ * 颜色再抢这个活只会让图花。取主题印章色（CSS 变量）：明暗主题与配色方案自动跟随，
+ * SVG 的 stroke/fill 也认它（降级值与 theme.css 的默认主题一致）。
  */
-export const SLOT_COLORS = [
-  '#2e8b6e',
-  '#c2410c',
-  '#7c3aed',
-  '#0891b2',
-  '#be123c',
-  '#4d7c0f',
-  '#a16207',
-  '#475569',
-] as const
-
-export function slotColor(index: number): string {
-  return SLOT_COLORS[((index % SLOT_COLORS.length) + SLOT_COLORS.length) % SLOT_COLORS.length]
-}
+export const SLOT_ACCENT = 'var(--color-seal, #a8432f)'
 
 /** 大纲卡片里的一行目标项 */
 export interface OutlineSlot {
@@ -105,16 +98,24 @@ export interface OutlineSlot {
   key: string
   title: string
   index: number
-  color: string
   /** 已经挂上来的子大纲节点 id；null = 这个接入点还空着（灰的，点一下生成） */
   childId: string | null
 }
 
-/** 叶子的 ref 是 `{节点 id}:{名字}`：按**第一个**冒号切，名字里再冒号也不影响归属 */
-export function splitLeafRef(ref: string): { owner: string; name: string } | null {
-  const at = ref.indexOf(':')
-  if (at <= 0 || at === ref.length - 1) return null
-  return { owner: ref.slice(0, at), name: ref.slice(at + 1) }
+/** 叶子的 ref 格式规则在领域层（learn/structure 的 splitLeafRef），上面已转出口。 */
+
+/**
+ * 事件目标是不是文本输入位（输入框 / 多行框 / 可编辑区）。
+ *
+ * 画布把 Delete、Ctrl+Z 这类键都接在容器上，事件会从里面的输入框一路冒上来——
+ * 不先把「正在打字」认出来，注释里按个退格就会把选中的节点删掉。
+ * 空格手势与键盘快捷键两处共用这一份判据。
+ */
+export function isTextEntryTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  // 显式收窄成 boolean：isContentEditable 在形状不完整的事件目标上是 undefined，
+  // 直接 || 出去会让返回值变成 undefined（调用方拿它做 === false 的判据时会走错分支）
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true)
 }
 
 function clip(text: string, max = 46): string {
@@ -152,19 +153,12 @@ function plainText(md: string): string {
 }
 
 /**
- * 这个节点占的是哪个接入点：先看显式 slot，老数据退回去用节点的 key。
+ * 这个节点占的是哪个接入点：只认显式记下来的 slot。
  *
- * 接入点现在挂在**文档**上（大纲的父子节点只能是文档）；`outline` 也认，是为了
- * 让上一次重构留下的老数据（slot 记在大纲节点上）不至于当场失效。
+ * （历史包袱说明：签名里曾有 store 参数做「按节点 key 回退」——回退会把还没确定
+ * 做什么的空文档卡也点亮目标项，已经删掉；参数随之移除，别再加回来。）
  */
-export function slotKeyOf(_store: LearnStore, node: StructureNode): string | null {
-  /*
-   * **只认显式记下来的 slot**，不再按节点 key 回退。
-   *
-   * 回退会把「空节点」也算成占了某条目标项：拖出来一张还没写内容的文档卡，
-   * 它恰好叫「导数」，就把「导数」那条目标项点亮了——可它其实还没确定要做什么。
-   * 空节点就是「还没确定」，在图上保持灰色。
-   */
+export function slotKeyOf(node: StructureNode): string | null {
   return node.slot ?? null
 }
 
@@ -181,10 +175,16 @@ export function slotAnchorY(index: number): number {
 /**
  * 一个大纲节点卡片里要列出的目标项，以及每个接入点有没有挂上子文档。
  *
- * 「亮起」的判据是**下游有没有一个子大纲节点占了这个接入点**，不是「这个目标项有没有被学过」——
- * 图上看得见的东西就应该是图上真实存在的连接；拿学习状态来染色，会让人以为连线也在那儿。
+ * 「亮起」的判据有两条，缺一不可：下游文档**占着这个接入点**（slot 对得上）
+ * 且**真的连着这张大纲**（有出边）。只看 slot 的话，删掉连线之后双方在数据层面
+ * 还互相指着——大纲的圆点还亮着、文档还占着接入点（2026-10-22 修的 bug）。
  */
-export function outlineSlots(store: LearnStore, node: StructureNode, nodes: readonly StructureNode[]): OutlineSlot[] {
+export function outlineSlots(
+  store: LearnStore,
+  node: StructureNode,
+  nodes: readonly StructureNode[],
+  edges: readonly { from: string; to: string }[],
+): OutlineSlot[] {
   const owner = node.ref ? nodeById(store, node.ref) : null
   const entries = owner?.outline?.children ?? []
   return entries.map((entry, index) => {
@@ -194,9 +194,11 @@ export function outlineSlots(store: LearnStore, node: StructureNode, nodes: read
         n.kind === 'doc' &&
         // 排除这张大纲自己的那份文档（它的 ref 与大纲相同），只看下游文档
         n.ref !== node.ref &&
-        slotKeyOf(store, n) === entry.key,
+        slotKeyOf(n) === entry.key &&
+        // 占用必须有一条真实的连线背书
+        edges.some((e) => e.from === node.id && e.to === n.id),
     )
-    return { key: entry.key, title: entry.title, index, color: slotColor(index), childId: child?.id ?? null }
+    return { key: entry.key, title: entry.title, index, childId: child?.id ?? null }
   })
 }
 
@@ -210,6 +212,11 @@ export function outlineSlots(store: LearnStore, node: StructureNode, nodes: read
  */
 export function resolveNodeView(store: LearnStore, node: StructureNode): NodeView {
   const ref = node.ref ?? ''
+
+  // 入口：纯图件，不指回任何实体（见 nodeKinds/entry）
+  if (node.kind === 'entry') {
+    return { title: '入口', subtitle: '这门课从这里开始', missing: false }
+  }
 
   if (node.kind === 'outline' || node.kind === 'doc') {
     const owner = ref ? nodeById(store, ref) : null
@@ -255,7 +262,8 @@ export function resolveNodeView(store: LearnStore, node: StructureNode): NodeVie
 
   const exam = store.exams.find((e) => e.id === ref)
   if (!exam) return { title: '空节点', subtitle: '还没有试卷', missing: !!ref }
-  return { title: exam.title, subtitle: `${exam.questions.length} 题`, missing: false }
+  // 0 题的壳（画布拖出、等出题）要说清「还没出」，别显示成「0 题」像一张空数据
+  return { title: exam.title, subtitle: exam.questions.length ? `${exam.questions.length} 题` : '还没有题', missing: false }
 }
 
 /**
@@ -621,9 +629,8 @@ export function edgeRoute(
   return hits ? elbow : points
 }
 
-/** 连线样式：默认折线（横平竖直、绕开卡片），可以切成曲线 */
-export const EDGE_STYLES = ['straight', 'curved'] as const
-export type EdgeStyle = (typeof EDGE_STYLES)[number]
+/** 连线样式（straight / curved）定义在领域层 learn/structure——这里只认它的类型，
+ *  不再复制一份常量：两份清单迟早漂移。 */
 
 /** 点 (x,y) 到线段 ab 的距离 */
 function distanceToSegment(x: number, y: number, a: Point, b: Point): number {
@@ -786,10 +793,10 @@ export function edgeDotAt(
 }
 
 /**
- * 一条连线该是什么颜色：只有「大纲 → 子大纲」这条有颜色，取的是那个接入点的颜色。
+ * 一条连线该是什么颜色：只有「大纲 → 子文档」这条（目标项派生的连线）上统一色，
+ * 其余连线一律中性灰——颜色在图上只有一个含义「这是目标项的连接」。
  *
- * 其余连线一律中性灰——颜色在图上只有一个含义「这是第几个目标项」，
- * 给别的线也上色，这个含义就废了。
+ * 这条边本身就是占用凭证（在画它 = 连线存在），所以只查 slot 是否真属于这张大纲。
  */
 export function edgeColorOf(
   store: LearnStore,
@@ -798,9 +805,9 @@ export function edgeColorOf(
 ): string | null {
   const from = nodes.find((n) => n.id === edge.from)
   const to = nodes.find((n) => n.id === edge.to)
-  // 只有「大纲 → 子文档」这条有颜色（子文档占了一条目标项）
   if (!from || !to || from.kind !== 'outline' || to.kind !== 'doc') return null
-  const key = slotKeyOf(store, to)
+  const key = slotKeyOf(to)
   if (!key) return null
-  return outlineSlots(store, from, nodes).find((s) => s.key === key)?.color ?? null
+  const owner = from.ref ? nodeById(store, from.ref) : null
+  return owner?.outline?.children.some((e) => e.key === key) ? SLOT_ACCENT : null
 }

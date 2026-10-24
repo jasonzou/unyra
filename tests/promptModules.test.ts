@@ -61,7 +61,7 @@ describe('模块注册表', () => {
 })
 
 describe('触发映射', () => {
-  it('api 组前缀落到正确的模块；高频组（doc/node/state/tmp/ask）绝不触发', () => {
+  it('api 组前缀落到正确的模块；高频组（content/graph/state/tmp/ask）绝不触发', () => {
     expect(promptModuleForApiName('sdoc.write')).toBe('sdoc')
     expect(promptModuleForApiName('browser.snapshot')).toBe('browser')
     expect(promptModuleForApiName('web.search')).toBe('web')
@@ -106,11 +106,44 @@ describe('触发映射', () => {
     expect(promptModuleForContent('<p class="sd-card">页</p>', 'sdoc.write')).toEqual([])
   })
 
-  it('写入参数的嗅探面：doc.write/append 取第二参、doc.replace 取 payload.content、sdoc.write 取 html，其它调用不嗅探', () => {
+  it('content.* 写入与 doc.* 同一条嗅探口径：正文/笔记带排版配方，superdoc part 不带但动画标记照常', () => {
+    expect(promptModuleForContent('## 一段纯 Markdown 讲解', 'content.write')).toContain('doc-html')
+    expect(promptModuleForContent('<div class="grid">x</div>', 'content.append', '极限')).toContain('doc-html')
+    expect(promptModuleForContent('{ "q": "改写" }', 'content.replace', { node: '极限', part: 'teaching' })).toContain('doc-html')
+    // part 写 superdoc:* 的写入是完整 HTML：不注入排版配方，plot / 动画标记照常嗅探
+    expect(promptModuleForContent('<p class="sd-card">页</p>', 'content.write', { node: '极限', part: 'superdoc:实验' })).toEqual([])
+    expect(promptModuleForContent('<animate a/>', 'content.write', { node: '极限', part: 'superdoc:实验' })).toEqual(['rich-animation'])
+  })
+
+  it('节点对象的成员写入（node.invoke）与 content.* 同一条嗅探口径', () => {
+    // 正文 / 笔记的 write → 排版配方在场
+    expect(promptModuleForContent('## 一段纯 Markdown 讲解', 'node.invoke', { node: '#n2', part: 'teaching' })).toContain('doc-html')
+    expect(promptModuleForContent('<div class="grid">x</div>', 'node.invoke', { node: '#n2', part: 'note' })).toContain('doc-html')
+    // 大纲的写入与 content.* 同口径（照带配方，无害）；超级文档的写入不带
+    expect(promptModuleForContent('{ "intro": "" }', 'node.invoke', { node: '#n2', part: 'outline' })).toContain('doc-html')
+    expect(promptModuleForContent('<p class="sd-card">页</p>', 'node.invoke', { node: '#n2', part: 'superdoc' })).toEqual([])
+    expect(promptModuleForContent('<animate a/>', 'node.invoke', { node: '#n2', part: 'superdoc' })).toEqual(['rich-animation'])
+  })
+
+  it('写入参数的嗅探面：doc/content.write/append 取正文（含内联 body 形态）、replace 取 payload.content、sdoc.write 取 html，其它调用不嗅探', () => {
     expect(writableContentOf('doc.write', ['', '```plot\n{}\n```'])).toContain('plot')
     expect(writableContentOf('doc.append', ['笔记/x', '<animate/>'])).toBe('<animate/>')
     expect(writableContentOf('doc.replace', ['', { content: '@keyframes p{}' }])).toBe('@keyframes p{}')
     expect(writableContentOf('sdoc.write', ['', '名', '<p>页</p>'])).toBe('<p>页</p>')
+    expect(writableContentOf('content.write', ['极限', '# 正文'])).toBe('# 正文')
+    expect(writableContentOf('content.append', ['极限', '<animate/>'])).toBe('<animate/>')
+    // 单对象内联写法（{ node, part, body }）：正文在 body 字段里
+    expect(writableContentOf('content.write', [{ node: '极限', part: 'teaching', body: '# 内联' }])).toBe('# 内联')
+    // 大纲是对象 body：没有可嗅探的正文
+    expect(writableContentOf('content.write', [{ node: '极限', part: 'outline' }, { intro: '' }])).toBeNull()
+    expect(writableContentOf('content.replace', ['极限', { content: '新的一句话' }])).toBe('新的一句话')
+    // 节点对象的成员调用：invoke(target, 方法名, 参数数组)
+    expect(writableContentOf('node.invoke', [{ node: '#n2', part: 'teaching' }, 'write', ['# 正文']])).toBe('# 正文')
+    expect(writableContentOf('node.invoke', [{ node: '#n2', part: 'note' }, 'append', ['<animate/>']])).toBe('<animate/>')
+    expect(writableContentOf('node.invoke', [{ node: '#n2', part: 'teaching' }, 'replace', [{ content: '```plot\n{}\n```' }]])).toContain('plot')
+    // 读与聚合取（read / note / outline）不携带正文
+    expect(writableContentOf('node.invoke', [{ node: '#n2', part: 'teaching' }, 'read', []])).toBeNull()
+    expect(writableContentOf('node.invoke', [{ node: '#n2', part: 'teaching' }, 'note', ['错题本']])).toBeNull()
     expect(writableContentOf('doc.read', ['', '```plot\n{}\n```'])).toBeNull()
     expect(writableContentOf('graph.rename', ['', '```plot\n{}\n```'])).toBeNull()
   })
@@ -155,10 +188,10 @@ describe('去重判据', () => {
 })
 
 describe('模块消息', () => {
-  it('隐藏 user 消息：mark 是分界条文案、promptModule 供去重、正文是模块全文', () => {
+  it('隐藏 assistant 消息（提示词=声明归 assistant 边）：mark 是过程组文案、promptModule 供去重、正文是模块全文', () => {
     const mod = promptModuleByKey('browser')!
     const m = promptModuleMessage(mod, 'uuid-1', AT)
-    expect(m.role).toBe('user')
+    expect(m.role).toBe('assistant')
     expect(m.hidden).toBe(true)
     expect(m.promptModule).toBe('browser')
     expect(m.mark).toContain('内置浏览器')
@@ -170,9 +203,9 @@ describe('系统提示词确实瘦了（减负的验收线）', () => {
   const system = buildTeacherSystem()
 
   it('系统提示词只给 api 集：组索引在场，具体签名靠 __help 现查', () => {
-    // 组索引在场（模型必须知道能力存在）
+    // 组索引在场（模型必须知道能力存在）；doc/outline/sdoc 是 legacy 旧写法，不进索引
     expect(system).toContain('api.graph — 节点与拓扑')
-    expect(system).toContain('api.doc — 教学文档与笔记')
+    expect(system).toContain('api.node — 节点对象')
     expect(system).toContain('api.state — 学习状态')
     expect(system).toContain('api.browser')
     expect(system).toContain('api.subagent')
@@ -206,7 +239,8 @@ describe('系统提示词确实瘦了（减负的验收线）', () => {
 
   it('删除的 api 与历史漂移一并清掉', () => {
     expect(system).not.toContain('iwanna')
-    expect(system).not.toContain('三件事')
-    expect(system).toContain('四件事')
+    // 建节点的收尾步骤：阶段拆分已归「生成大纲」流程，建节点不再顺手写大纲（三步）
+    expect(system).not.toContain('四件事')
+    expect(system).toContain('三件事')
   })
 })

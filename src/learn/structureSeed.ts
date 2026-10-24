@@ -7,8 +7,11 @@
  */
 
 import type { LearnStore } from './types'
+import { kindSpec } from './nodeKinds'
 import {
+  CARD_H,
   CARD_W,
+  freeSpotNear,
   heightOf,
   seedFromSource,
   slotOrderOf,
@@ -53,6 +56,8 @@ export function structureFromStore(store: LearnStore, goalId: string): Structure
     key: node.key,
     // 只有总目标无条件有大纲卡；其余节点看它有没有目标项
     hasOutline: node.id === rootNodeId || (node.outline?.children.length ?? 0) > 0,
+    // 根节点派生入口卡，根文档自动挂到入口下面（权威根）
+    isRoot: node.id === rootNodeId,
     downstream: downstream.get(node.id) ?? [],
     notes: node.notes.map((n) => n.name),
     superdocs: (node.superdocs ?? []).map((s) => s.name),
@@ -65,23 +70,23 @@ export function structureFromStore(store: LearnStore, goalId: string): Structure
 /* ---------- 视图：把「实体 + 存过的那份图」算成一张能画的图 ---------- */
 
 /**
- * 结构图的**唯一来源**：`(store, 存过的那份)` → 一张能画的图。
+ * 结构图派的**唯一来源**：`(store, 存过的那份)` → 一张能画的图。
  *
- * ## 为什么改成纯函数
+ * ## 架构（2026-10-24 实体先行定稿）
  *
- * 以前是「第一次进来铺一张」+「每次 store 变化对账补节点」两个 effect 叠加：
- * 图是一份独立快照，靠增量补偿跟实体对齐。副作用有三条路——首帧、store 变化、
- * 用户拖拽——谁先谁后都会影响结果，出了问题很难复现（"生成的文档不出现在画布上"
- * 就是这么来的）。
- *
- * 现在只有一个入口：**每次渲染从头算**。派生出来的卡片一定在，存过的坐标一定被尊重，
- * 用户删掉的卡片（`hidden`）一定不在。没有中间状态，也就没有对不齐的可能。
+ * **卡片的存在性一律由 store 派生，画布自有状态只有坐标与墓碑。** 实体长出来卡就在
+ * （拖到画布上的挂件从落地那一刻起就是真实空实体——空试卷出题时被同 id 吸收、空超级文档
+ * 按名字覆写）；实体没了卡就不在（hidden 记着用户删过哪些）。唯一的意图卡是**占着大纲
+ * 目标项的空文档卡**（它的依托是 store 里的那条目标项，点「生成」时由宿主同步建实体并
+ * 就地换血）。没有第三种来源，也就没有任何「意图 ↔ 实体」的对账规则——历史上那类
+ * 「生成一个、多出一个空节点」「连线即消失」的 bug 全部由此而来，现已从根上消除
+ * （无依托的旧幽灵卡在读盘归一时清理，见 learn/structure 的 normalizeStructure）。
  *
  * ## 三条规矩
  *
- * 1. **卡片 = 派生出来的 + 存过但派生不出来的**。后者是用户从左侧拖出来的自由卡片
- *    （还没有 ref 的那种），派生不出来但必须留着，否则一刷新就没了。
- * 2. **坐标以存过的那份为准**；没存过的新卡片落在父卡片右边（与以前的落点一致）。
+ * 1. **卡片 = 派生出来的 + 存过但派生不出来的**。后者只剩占目标项的空文档卡
+ *    （store 派生不出「还没建的实体」，但目标项在，卡就得在）。
+ * 2. **坐标以存过的那份为准**；没存过的新卡片落在父卡片右边。
  * 3. **派生出来的边只给「这次才出现的卡片」补**。两张卡都在存过的图里时，那条线
  *    用户可能已经删了——再补回来就是以前那个"删不掉的线"的 bug。
  */
@@ -97,10 +102,14 @@ export function structureViewOf(
   const savedNodes = new Map(saved.nodes.map((n) => [n.id, n]))
   const seededIds = new Set(seeded.nodes.map((n) => n.id))
 
-  // 1. 卡片：派生的用存过的坐标，自由卡片原样留着
+  // 1. 卡片：派生的用存过的坐标，存过的意图卡（占目标项的空文档）原样留着
   const nodes: StructureNode[] = []
   for (const n of seeded.nodes) {
-    if (hidden.has(n.id)) continue
+    /*
+     * 入口的墓碑一律无视：它是每张图**默认存在**的起点，不是用户放上去的卡——
+     * 旧数据里就算记着它的 hidden（比如老版本删过），这里也要把它长回来。
+     */
+    if (hidden.has(n.id) && n.kind !== 'entry') continue
     const prev = savedNodes.get(n.id)
     nodes.push(
       prev ? { ...n, x: prev.x, y: prev.y, ...(prev.note ? { note: prev.note } : {}) } : { ...n },
@@ -108,6 +117,8 @@ export function structureViewOf(
   }
   for (const n of saved.nodes) {
     if (hidden.has(n.id) || seededIds.has(n.id)) continue
+    // 入口现在只由派生长出来（见 seedFromSource 的 isRoot）：老版本拖出来的自由入口卡就此退场
+    if (n.kind === 'entry') continue
     nodes.push(n)
   }
 
@@ -131,18 +142,17 @@ export function structureViewOf(
    * 3. 挂不上的新卡片不出现。
    *
    * 派生出来的卡片必须有一条来自**还在的**父卡片的入边——文档卡被用户删掉（hidden）时，
-   * 它下面的笔记 / 大纲 / 试卷也就无处可挂，一起不出现（旧的对账就是这个口径）。
-   * 循环到不再变化：删掉文档卡会让它的子卡片跟着失去入边。
-   * **存过的自由卡片不受这条约束**（用户从左侧拖出来、还没有 ref 的那种，本来就没边）。
+   * 它下面的笔记 / 大纲 / 试卷也就无处可挂，一起不出现。循环到不再变化：删掉文档卡会让
+   * 它的子卡片跟着失去入边。**锚点卡不受这条约束**（登记表里 anchor 的类型：文档是子树的
+   * 挂点、入口是整张图的起点，本来就没有入边）；**存过的意图卡也不受**（占目标项的空文档卡
+   * 还没有实体，本来就没有派生边）。
    */
   for (let changed = true; changed; ) {
     changed = false
     const alive = new Set(nodes.map((n) => n.id))
     for (let i = nodes.length - 1; i >= 0; i--) {
       const n = nodes[i]
-      if (savedNodes.has(n.id)) continue
-      // 文档卡是连接件：它是子树的挂点，本来就没有入边，不能按「挂不上」处理
-      if (n.kind === 'doc') continue
+      if (savedNodes.has(n.id) || kindSpec(n.kind).anchor) continue
       const attached = edges.some((e) => e.to === n.id && alive.has(e.from))
       if (attached) continue
       nodes.splice(i, 1)
@@ -154,10 +164,30 @@ export function structureViewOf(
   const kept = new Set(nodes.map((n) => n.id))
   const finalEdges = edges.filter((e) => kept.has(e.from) && kept.has(e.to))
 
-  // 4. 新卡片落在父卡片右边（以前对账的落点），免得叠在别人身上
+  // 4. 新卡片落在父卡片右边（以前对账的落点），免得叠在别人身上。
+  //    唯一的例外是入口：它是子文档的**上级**，落在子文档左边才符合「从入口往右读」的方向。
+  //    老数据第一次补入口时尤其要防重叠——入口的种子坐标是世界原点，而老图的根文档
+  //    八成就铺在原点上，不挪的话入口正好压在根文档底下，看起来就是「没有入口」。
   const byId = new Map(nodes.map((n) => [n.id, n]))
+  const hOf = heightOf(store)
   for (const n of nodes) {
     if (savedNodes.has(n.id)) continue
+    if (n.kind === 'entry') {
+      // 入口的落位锚是它的**子文档**（根文档）：铺到子文档左边，撞到谁就再往下挪
+      const childEdge = finalEdges.find((e) => e.from === n.id)
+      const child = childEdge ? byId.get(childEdge.to) : undefined
+      if (child) {
+        const spot = freeSpotNear(
+          nodes.filter((x) => x.id !== n.id),
+          { x: child.x - CARD_W - 96, y: child.y },
+          { width: CARD_W, height: CARD_H },
+          hOf,
+        )
+        n.x = spot.x
+        n.y = spot.y
+      }
+      continue
+    }
     const parentEdge = finalEdges.find((e) => e.to === n.id)
     const parent = parentEdge ? byId.get(parentEdge.from) : undefined
     if (!parent) continue
@@ -170,6 +200,11 @@ export function structureViewOf(
     nodes,
     edges: finalEdges,
     ...(saved.edgeStyle ? { edgeStyle: saved.edgeStyle } : {}),
+    /*
+     * 墓碑必须跟着派生图走：组件里所有写回都以「派生图」为底合并（`{ ...map, ...next }`），
+     * 这里一丢，下一次删除或拖动就会把 saved 里的 hidden 整个冲掉——
+     * 用户会看到「删了一张卡，之前删掉的卡全回来了」。
+     */
+    ...(saved.hidden?.length ? { hidden: saved.hidden } : {}),
   }
 }
-

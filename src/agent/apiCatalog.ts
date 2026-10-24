@@ -3,16 +3,14 @@
  *
  * 这是「execute 工具 api 上下文管理」页（超级导师设置 → 开发者）的数据源，
  * 也是子代理 apiBrief（subagent/groups）的来源。注册表是唯一入口：
- * 签名、用法、示例、可用性都在 `sandbox/apiRegistry.ts` 里，这里只做一次投影。
+ * 签名、用法、示例都在 `sandbox/apiRegistry.ts` 里，这里只做一次投影。
  */
-import { catalogGroups, type ApiAvailability } from './sandbox/apiRegistry'
+import { catalogGroups } from './sandbox/apiRegistry'
 
 export interface ApiEntry {
   name: string
   signature: string
   summary: string
-  /** 什么时候才可用（绝大多数恒可用；条件注入的少数要写明） */
-  availability?: ApiAvailability
 }
 
 export interface ApiGroup {

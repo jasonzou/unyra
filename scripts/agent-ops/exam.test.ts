@@ -542,7 +542,7 @@ export async function methodAndSdocTests() {
   })()
   ok(
     !!roundTrip && roundTrip.nodes.find((n) => n.id === childId)?.superdocs?.[0]?.html === '<p>rt</p>',
-    '超级文档随 meta.json 落盘并读回',
+    '超级文档随节点文件落盘并读回',
     roundTrip?.nodes.find((n) => n.id === childId)?.superdocs,
   )
   ok(

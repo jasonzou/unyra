@@ -261,6 +261,60 @@ export const PROMPT_MODULES: PromptModule[] = [
   - 绝不改动或覆盖之前的历史 attempts 作答轮次。`,
   },
   {
+    key: 'teach-method',
+    title: '教学文档生成',
+    text: `「教学文档生成」方法——为知识节点产出一份针对性教学文档的完整流程。触发它的指令只给任务与参数，步骤一律照这里执行：
+
+一、先查再用
+- 本轮会用到 api.graph.*、api.node（内容读写）、api.state.* 与 api.ask。动手前先 await api.<组>.__help() 把签名与示例查清楚，不要凭记忆猜参数。
+- 当前节点由宿主解析：api.node() 省略地址 = 当前节点，一切读写落在它身上；要看节点与目标的现状，用 api.graph.list()（回执带 current=当前节点）与 api.graph.read()，不要问用户。
+
+二、前置知识与多源检索
+- 结合节点标题、上级节点的文档（api.graph.read / api.node(path).readRange 只读需要的部分）与学科判断，列出学会这个主题**绕不开的前置知识点**（一般 3~6 条：太少说明没拆开，太多说明没抓住主干）。
+- **必须积极使用 api.web.search 与 api.web.fetch** 检索当前主题的权威讲义、官方文档或前沿实践，并**挑 1~3 篇最权威的原文用 api.web.fetch 读正文**比对提炼（只看 snippet / summary 不算调研），严禁凭模型自身主观意志捏造教学内容。
+- 前置知识只进摸底表单与讲义正文，**不落成节点**——树由学习者在画布上生长（点大纲目标项挂文档、再逐个生成）。
+
+三、摸底提问
+- 用 api.ask 出一张表单，每条前置知识一道单选题「这个我已经掌握 / 会一点 / 完全不会」。表单会压在输入框上方，用户答完才继续——不要自问自答，也不要跳过。（触发响铃已由系统做好，不必再调 tiktok。）
+
+四、想清楚再动笔
+- 按摸底结果定详略：「完全不会」的前置在文档开头的**「预备知识」一节先补讲**（每条几段讲够用即止），「会一点」的点到为止，「已掌握」的直接用。
+- 想好文档结构：先讲什么、后讲什么、在哪衔接补讲的内容。前置之外的延伸方向留给文末「下一步」，不进正文。
+
+五、生成
+- 标题已就位，一般不动；明显词不达意才 api.graph.rename 修正；描述空着就 api.graph.update(path, { description }) 写 150~300 字。
+- 按构思并结合检索到的权威资料，const n = await api.node(path) 取到当前节点，用 n.write(讲义) 写教学文档：循序渐进、先直觉与例子再定义与推导，对摸底暴露的盲点**正面讲解**。排版以当前「文档格式」策略为准，结构配方见「文档排版与图表」模块：至少两三处结构性元素，不要交一篇纯文本。
+- 使用了网络检索时，文档末尾必须带「## 📚 参考资料与权威来源」区块声明真实网址与名称，并在收口前 api.delivery.submit({ files, sources }) 登记本轮的文件变动与来源（对话正文不用再复述清单）。
+- **本轮不拆下一层大纲**（n.outline() 不要调）：拆层是「生成大纲」流程的事，由用户在画布上触发；就算教学路线明显分阶段，也只把延伸方向写进文末「下一步」一节。
+
+六、状态记账与收尾
+- 用 api.state.read(path) 看学习状态：有错误记忆的这次讲解要正面处理那个错法；把摸底结果用 api.state.update / api.state.mistake 按用户的答案记准。用户留空的题当「会一点」处理，不要追问。
+- 写完用 api.ui.point() 把这份教学文档在文档区打开（已开着就切到它），请用户看刚生成的文档；若用了网络检索，对话回复里必须声明参考资料链接。`,
+  },
+  {
+    key: 'outline-method',
+    title: '大纲编写',
+    text: `「大纲编写」方法——为知识节点规划一份「这一层往下怎么学」的计划文件。触发它的指令只给任务与参数，规矩一律照这里执行：
+
+一、先查再用与看现状
+- await api.node.__help() 把节点对象的方法表查清楚再动手（大纲是 api.node(path).outline() 取到的对象）。
+- api.node(path).outline().read() 看已有大纲（**有就整份重写，不要追加**），api.graph.read() 看标题、描述与现有下级节点，api.node(path).readRange(0, 2000) 扫教学文档的开头与标题结构（不要整篇读）。
+
+二、多源检索与规划
+- 多使用 api.web.search 与 api.web.fetch 获取该知识分支的权威分类目录与行业标准脉络——搜到之后要**用 api.web.fetch 打开其中最权威的 1~2 份大纲 / 目录读原文**再拆分层，只看摘要就动手等于凭印象臆造。
+- 这一层往下拆成哪几个**阶段目标**（一般 3~8 个，每个都能独立成篇、有明确的「学完会什么」）。已经有下级节点的，计划要与它们对齐——同一个人同一层不该有两套说法。
+
+三、落盘
+- api.node(path).outline().write({ intro, children })：intro 一两段（这一层按什么路线走、为什么这么分）；children 每项 { title, summary }，summary 两三句——学什么、为什么排在这个位置。key 由标题自动生成，不要自己编。
+
+四、深度与树的生长规矩（硬性）
+- 只写**直接子层级**，一层为止——「爷爷知道儿子的存在，但不知道孙子的存在」。孙辈的大纲由那些子目标自己的 outline 负责；children 里不要出现「1.1.1」这类两层以下的东西，summary 里也不要替孙辈规划。
+- 大纲只是当前节点的一份**计划文件**：目标项落地成文档由学习者在画布上驱动（点目标项挂文档、逐个开讲）——计划与落地是两段流程，写大纲的一轮不建节点。
+
+五、收尾
+- 写完用 api.ui.point() 把这份文档在文档区打开，让用户在大纲页里看这一层的路线。`,
+  },
+  {
     key: 'learning-process',
     title: '学习过程',
     text: `学习过程记录（api.reading.* / api.attention.* / api.focus.*）：
@@ -543,8 +597,8 @@ export function promptModuleByKey(key: string): PromptModule | null {
 }
 
 /**
- * api 名 → 模块 key 的触发映射：按组前缀（doc.write → doc），顶层名（wait / ask）用名字本身。
- * 只有「规范搬进了模块」的组才在这里；doc / node / state / ask 这些每轮必用的组不触发注入。
+ * api 名 → 模块 key 的触发映射：按组前缀（content.write → content），顶层名（wait / ask）用名字本身。
+ * 只有「规范搬进了模块」的组才在这里；content / graph / state / ask 这些每轮必用的组不触发注入。
  */
 const GROUP_MODULE: Record<string, string> = {
   sdoc: 'sdoc',
@@ -575,13 +629,30 @@ export function promptModuleForApiName(name: string): string | null {
 
 /**
  * 写入内容里的标记 → 模块 key（内容触发）：模型写出 ```plot 图像或 SMIL / @keyframes
- * 动画时，对应的数据形态 / 动画写法模块就该在场。宿主在 execute 的 doc / sdoc 写入
- * 参数上嗅探（见 sandbox/execute 的 callApi）。
+ * 动画时，对应的数据形态 / 动画写法模块就该在场。宿主在 execute 的写入调用参数上
+ * 嗅探（见 sandbox/execute 的 callApi 与下面的 writableContentOf）。
+ *
+ * target 是这次写入的第一个参数（content.* 的定位对象）：part 写 superdoc:* 的写入
+ * 本来就是完整 HTML，不注入 doc-html 排版配方（那与超级文档的写法相冲），但 plot /
+ * 动画标记照常嗅探。
  */
-export function promptModuleForContent(content: string, apiName?: string): string[] {
+export function promptModuleForContent(content: string, apiName?: string, target?: unknown): string[] {
   const out: string[] = []
-  // 写教学文档（files.write / files.edit / doc.write / append / replace）就注入排版配方
-  if (apiName === 'files.write' || apiName === 'files.edit' || apiName?.startsWith('doc.')) out.push('doc-html')
+  // 写入类调用先判是不是超级文档：part 写 superdoc:*（或 sdoc.write）本来就是完整 HTML，
+  // 不注入 doc-html 排版配方（那与超级文档的写法相冲）；plot / 动画标记照常嗅探
+  const rawPart =
+    target && typeof target === 'object' ? String((target as Record<string, unknown>).part ?? '') : ''
+  const superdoc = apiName === 'sdoc.write' || rawPart.trim().startsWith('superdoc')
+  // 写教学文档（files.write / files.edit / 旧 content 组 / 节点对象的 write）就注入排版配方
+  const writeish =
+    apiName === 'files.write' ||
+    apiName === 'files.edit' ||
+    apiName === 'node.invoke' ||
+    apiName?.startsWith('doc.') ||
+    apiName?.startsWith('content.')
+  if (!superdoc && writeish) {
+    out.push('doc-html')
+  }
   if (content.includes('```plot')) out.push('plot-forms')
   if (content.includes('<animate') || content.includes('@keyframes')) out.push('rich-animation')
   return out
@@ -589,11 +660,21 @@ export function promptModuleForContent(content: string, apiName?: string): strin
 
 /**
  * 从一次写入调用的参数里取出要嗅探的正文（供内容触发用，见 sandbox/execute 的 callApi）：
- * files.write 第二参数、files.edit 的 content 或 replace、doc.write / doc.append 第二参数等。
- * 其余调用不携带可嗅探的正文，回 null。
+ * files.write 第二参数、files.edit 的 content 或 replace、doc / content 写入的那份正文。
+ * 大纲等对象 body 没有可嗅探的正文，回 null。其余调用不携带正文，也回 null。
  */
 export function writableContentOf(name: string, args: unknown[]): string | null {
   if (name === 'files.write' || name === 'doc.write' || name === 'doc.append') return typeof args[1] === 'string' ? args[1] : null
+  // content.write / content.append：target 在前、正文在后；单对象写法（{ node, part, body }）的正文在 body。
+  // 大纲是对象——嗅不出围栏，跳过。
+  if (name === 'content.write' || name === 'content.append') {
+    if (typeof args[1] === 'string') return args[1]
+    const inline = args[0]
+    if (inline && typeof inline === 'object' && typeof (inline as Record<string, unknown>).body === 'string') {
+      return (inline as Record<string, unknown>).body as string
+    }
+    return null
+  }
   if (name === 'files.edit') {
     const payload = args[1]
     if (payload && typeof payload === 'object') {
@@ -607,11 +688,25 @@ export function writableContentOf(name: string, args: unknown[]): string | null 
     }
     return null
   }
-  if (name === 'doc.replace') {
+  if (name === 'doc.replace' || name === 'content.replace') {
     const payload = args[1]
     const content =
       payload && typeof payload === 'object' ? (payload as Record<string, unknown>).content : undefined
     return typeof content === 'string' ? content : null
+  }
+  // 节点对象的成员调用：invoke(target, 方法名, 参数数组)——正文与笔记的 write/append/replace 带可嗅探文本
+  if (name === 'node.invoke') {
+    const method = typeof args[1] === 'string' ? args[1] : ''
+    const rest = Array.isArray(args[2]) ? args[2] : []
+    if (method === 'write' || method === 'append') {
+      return typeof rest[0] === 'string' ? rest[0] : null
+    }
+    if (method === 'replace') {
+      const p = rest[0]
+      const content = p && typeof p === 'object' ? (p as Record<string, unknown>).content : undefined
+      return typeof content === 'string' ? content : null
+    }
+    return null
   }
   if (name === 'sdoc.write') return typeof args[2] === 'string' ? args[2] : null
   return null
@@ -640,8 +735,10 @@ export function missingPromptModules(messages: ConversationMessage[], keys: stri
 }
 
 /**
- * 一条模块消息：隐藏 user 消息，promptModule 供去重。
+ * 一条模块消息：隐藏 **assistant** 消息，promptModule 供去重。
  *
+ * 模块是「怎么做」的**声明**（排版配方、api 规程、方法流程）——固定内容、声明一次、
+ * 同上下文不重复，归 assistant 边；「做什么」的指令（工作流、用户消息）才是 user。
  * 与 personaMessage 同一个形状家族，也是一条**提示词注入**（inject: 'prompt'）：
  * 它不分割轮次，界面上并进那一轮的「思考、工具与提示词」过程组——与思考、工具调用
  * 同一层（见 agent/messageKind 与 panel/partGroups）。正文只在上下文里，展开看全文。
@@ -649,7 +746,7 @@ export function missingPromptModules(messages: ConversationMessage[], keys: stri
 export function promptModuleMessage(mod: PromptModule, uuid: string, at: number): ConversationMessage {
   return {
     id: uuid,
-    role: 'user',
+    role: 'assistant',
     parts: [{ type: 'text', text: mod.text }],
     ts: at,
     hidden: true,

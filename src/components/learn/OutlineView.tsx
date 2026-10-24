@@ -28,14 +28,18 @@ export interface OutlineViewProps {
   exams: ExamActions
   /** 新建一份笔记并返回名字（笔记节点不需要上下文，拖出来就是真笔记） */
   onCreateNote?: (nodeId: string) => string | null
+  onCreateExam?: (nodeId: string) => string | null
+  onCreateSuperDoc?: (nodeId: string) => string | null
   /** 改笔记名 */
   onRenameNote?: (nodeId: string, from: string, to: string) => void
   /** 给某个节点的大纲手动加一条目标项 */
   onAddOutlineEntry?: (nodeId: string, title: string) => void
   /** 在目标项上挂一份带标题的空文档（壳），返回新节点 id */
   onCreateChildDoc?: (ownerNodeId: string, title: string) => string | null
-  /** 空文档卡上的「生成文档」：交给 AI 写正文 */
-  onGenerateDoc?: (nodeId: string) => void
+  /** 空文档卡上的「生成文档」：交给 AI 写正文。hint 为画布侧的意图（挂在哪条目标项下） */
+  onGenerateDoc?: (nodeId: string, hint?: string) => void
+  /** 空大纲卡上的「生成大纲」：按上游文档节点生成前置知识大纲 */
+  onGenerateOutline?: (ownerNodeId: string) => void
   onToast?: (msg: string) => void
   /** 外部指定的聚焦目标（如 chip 路由） */
   focusTarget?: { nodeId: string; nonce: number } | null
@@ -58,10 +62,13 @@ export default memo(function OutlineView({
   docs,
   exams,
   onCreateNote,
+  onCreateExam,
+  onCreateSuperDoc,
   onRenameNote,
   onAddOutlineEntry,
   onCreateChildDoc,
   onGenerateDoc,
+  onGenerateOutline,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -78,10 +85,13 @@ export default memo(function OutlineView({
           docs={docs}
           exams={exams}
           onCreateNote={onCreateNote}
+          onCreateExam={onCreateExam}
+          onCreateSuperDoc={onCreateSuperDoc}
           onRenameNote={onRenameNote}
           onAddOutlineEntry={onAddOutlineEntry}
           onCreateChildDoc={onCreateChildDoc}
           onGenerateDoc={onGenerateDoc}
+          onGenerateOutline={onGenerateOutline}
           onToast={onToast}
           focusTarget={focusTarget}
           onFocusHandled={onFocusHandled}

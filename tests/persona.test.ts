@@ -81,8 +81,8 @@ describe('什么时候补这一句（needsPersonaAnnounce）', () => {
 describe('那条隐藏消息本身', () => {
   const msg = personaMessage('adhd', AT, 'p1')
 
-  it('是 user 角色、隐藏、带 mark 与人格 id', () => {
-    expect(msg.role).toBe('user')
+  it('是 assistant 角色（提示词=声明归 assistant 边）、隐藏、带 mark 与人格 id', () => {
+    expect(msg.role).toBe('assistant')
     expect(msg.hidden).toBe(true)
     expect(msg.mark).toBe('导师人格 · ADHD 导师')
     expect(msg.persona).toBe('adhd')
@@ -92,7 +92,7 @@ describe('那条隐藏消息本身', () => {
   it('正文整段进上下文（隐藏只是界面不显示，模型要看得到）', () => {
     const history = toChatHistory([msg, userMsg('讲一下哈希表')])
     expect(history).toHaveLength(2)
-    expect(history[0].role).toBe('user')
+    expect(history[0].role).toBe('assistant')
     expect(String(history[0].content)).toContain('停不下来的好奇鬼')
     expect(String(history[1].content)).toContain('讲一下哈希表')
   })

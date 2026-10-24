@@ -7,14 +7,17 @@
  * 顺序是给人看的（也是 `GRAPH_KINDS` 的顺序）；真正决定连线的是每个类型自己的 `targets`，
  * 决定同列上下的是 `rank`。两者都不在这里重复写。
  */
-import type { NodeKindSpec } from './base'
-import { docKind } from './doc'
+import type { NodeKindSpec, NodeMethodDoc } from './base'
+import { docKind, DocHandle } from './doc'
+import { entryKind } from './entry'
 import { examKind } from './exam'
-import { noteKind } from './note'
-import { outlineKind } from './outline'
-import { superdocKind } from './superdoc'
+import { noteKind, NoteHandle } from './note'
+import { outlineKind, OutlineHandle } from './outline'
+import { superdocKind, SuperdocHandle } from './superdoc'
+import type { NodeHandle } from './handle'
 
 export const NODE_KINDS = {
+  entry: entryKind,
   outline: outlineKind,
   doc: docKind,
   note: noteKind,
@@ -23,6 +26,21 @@ export const NODE_KINDS = {
 } satisfies Record<string, NodeKindSpec>
 
 export type GraphKind = keyof typeof NODE_KINDS
+
+/**
+ * 内容节点的行为类：api 层解析地址后用它实例化节点对象（api.node 通道）。
+ * 键与登记表对齐——**声明了 methods 的类型必须有行为类**（对账见 tests/nodeHandle）；
+ * 入口 / 试卷不是内容载体（没有 methods），不在这里。
+ */
+export const NODE_HANDLES = {
+  doc: DocHandle,
+  outline: OutlineHandle,
+  note: NoteHandle,
+  superdoc: SuperdocHandle,
+} as const satisfies Record<string, new (ctx: import('./handle').HandleContext, nodeId: string, baseLabel: string, name?: string) => NodeHandle>
+
+/** 有节点对象行为的类型（= 登记表里声明了 methods 的那几个，编译期由 NODE_HANDLES 键约束） */
+export type HandleKind = keyof typeof NODE_HANDLES
 
 /** 全部类型（顺序即登记顺序） */
 export const GRAPH_KINDS = Object.keys(NODE_KINDS) as GraphKind[]
@@ -52,4 +70,25 @@ export const KIND_RANK = Object.fromEntries(
   GRAPH_KINDS.map((k) => [k, NODE_KINDS[k].rank]),
 ) as Record<GraphKind, number>
 
-export type { NodeKindSpec, NodeFormat } from './base'
+/** 查一个类型的某个成员方法声明（调用校验与 help 共用）；没有就是 null */
+export function methodDocOf(kind: GraphKind, name: string): NodeMethodDoc | null {
+  return NODE_KINDS[kind].methods?.find((m) => m.name === name) ?? null
+}
+
+/**
+ * 各类型成员方法的一览（api.node 组的 help 正文用它）：声明是唯一来源，
+ * 这里只做排版——加一种内容类型，help 自动跟上，不用另抄一份清单。
+ */
+export function renderKindMethodsTable(): string {
+  const lines: string[] = []
+  for (const k of GRAPH_KINDS) {
+    const spec = NODE_KINDS[k]
+    if (!spec.methods?.length) continue
+    const via = k === 'doc' ? 'api.node(路径)' : 'api.node(路径).' + (k === 'outline' ? 'outline()' : k + "(名字)")
+    lines.push('- ' + spec.label + '（' + via + '）: ' + spec.methods.map((m) => m.signature.split('(')[0]).join(' / '))
+  }
+  return lines.join('\n')
+}
+
+export type { NodeKindSpec, NodeFormat, NodeMethodDoc } from './base'
+export type { NodeHandle, HandleContext } from './handle'

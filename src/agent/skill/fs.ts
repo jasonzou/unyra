@@ -1,6 +1,5 @@
 import { listDir, readText, revealPath, storageInfo, storageAbsPath, writeText, removePath } from '../../lib/storage'
 import { isElectron, isWeb } from '../../lib/native'
-import { BUILTIN_SKILLS } from './builtins'
 import { getLoadedSkills, setLoadedSkills, subscribeSkills } from './registry'
 import type { SkillCategory, SkillDef, SkillScriptDef } from './types'
 
@@ -183,29 +182,6 @@ export function sanitizeSkillId(id: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-let isInitialized = false
-
-/**
- * 初始化技能目录：
- * 若数据根目录下的 skills/ 缺少内置技能，自动将内置技能释放为独立的物理子目录与 SKILL.md。
- */
-export async function ensureSkillsDirAndBuiltins(): Promise<void> {
-  if (!isElectron() && !isWeb()) return
-
-  for (const builtin of BUILTIN_SKILLS) {
-    try {
-      const filePath = `${SKILLS_REL_DIR}/${builtin.id}/SKILL.md`
-      const existing = await readText(filePath)
-      if (existing === null) {
-        // 尚未在磁盘上创建该内置技能目录与 SKILL.md，写入种子
-        await writeText(filePath, serializeSkillMd(builtin))
-      }
-    } catch (err) {
-      console.warn('[skills] 释放内置技能失败:', builtin.id, err)
-    }
-  }
-}
-
 /**
  * 从磁盘物理扫描所有技能子目录：
  * 遍历 {root}/skills/*\/SKILL.md
@@ -216,24 +192,10 @@ export async function loadSkillsFromDisk(): Promise<SkillDef[]> {
   }
 
   try {
-    // 首次进入确保内置技能落盘
-    if (!isInitialized) {
-      await ensureSkillsDirAndBuiltins()
-      isInitialized = true
-    }
-
     const entries = await listDir(SKILLS_REL_DIR)
     const dirs = entries.filter((e) => e.dir)
 
-    // 如果还没有子目录，再次尝试播种
-    if (!dirs.length) {
-      await ensureSkillsDirAndBuiltins()
-      const retryEntries = await listDir(SKILLS_REL_DIR)
-      dirs.push(...retryEntries.filter((e) => e.dir))
-    }
-
     const loaded: SkillDef[] = []
-    const builtinIds = new Set(BUILTIN_SKILLS.map((b) => b.id))
 
     for (const d of dirs) {
       const skillId = d.name
@@ -241,9 +203,6 @@ export async function loadSkillsFromDisk(): Promise<SkillDef[]> {
       const content = await readText(mdPath)
       if (content !== null) {
         const parsed = parseSkillMd(content, skillId)
-        if (builtinIds.has(skillId)) {
-          parsed.builtin = true
-        }
 
         // 动态扫描附属 scripts/ 与 references/ 物理子目录
         try {

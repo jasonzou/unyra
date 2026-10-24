@@ -37,6 +37,10 @@ const dict: Record<string, string> = {
   '归一 Unyra · 考试': 'Unyra · Exam',
   '考试窗口打不开': "Couldn't open the exam window",
 
+  /* ---------- app/traceWindow.ts ---------- */
+  '归一 Unyra · 上下文轨迹': 'Unyra · Context trace',
+  '轨迹窗口打不开': "Couldn't open the context trace window",
+
   /* ---------- app/ipc.ts：截图与导出 ---------- */
   '没有可用的窗口': 'No available window',
   '截出来是空的': 'The screenshot came out empty',

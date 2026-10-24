@@ -49,12 +49,13 @@ const store = (workflows?: LearnStore['workflows']): LearnStore => ({
 })
 
 describe('内置工作流', () => {
-  it('十二个内置都在：开讲、学习大纲、生成大纲、出卷、阅卷、了解、超级实验室、伪编译、修复函数图像、压缩上下文、浏览器操作、随笔整理', () => {
+  it('十三个内置都在：开讲、学习大纲、生成大纲、前置知识大纲、出卷、阅卷、了解、超级实验室、伪编译、修复函数图像、压缩上下文、浏览器操作、随笔整理', () => {
     const rows = builtinWorkflowRows()
     expect(rows.map((r) => r.id)).toEqual([
       'teach-node',
       'goal-outline',
       'outline',
+      'prereq-outline',
       'exam',
       'exam-grade',
       'explain',
@@ -93,7 +94,7 @@ describe('内置工作流', () => {
     expect(text).toContain('除此之外不要问')
     // 任务型分支明确禁止建树、禁止写大纲，并要求先打开文档
     expect(text).toContain('不要**调用 api.graph.createTree')
-    expect(text).toContain('不要**调 api.outline.write')
+    expect(text).toContain('写根节点的大纲')
     expect(text).toContain('先把文档打开')
     // 学习型分支仍按创建模式走
     expect(text).toContain('选择目标创建模式')
@@ -141,6 +142,7 @@ describe('内置工作流', () => {
     expect(beeping).toEqual([
       'teach-node',
       'outline',
+      'prereq-outline',
       'exam',
       'explain',
       'superlab',
@@ -194,7 +196,7 @@ describe('内置工作流', () => {
     // 占位符一个都不许剩下：剩下的会被模型当成正文抄进注解里
     expect(text).not.toContain('{{')
     // 交货那条 api 必须点名，否则模型只会把解释贴在对话里、正文上什么都不出现
-    expect(text).toContain('api.doc.annotate')
+    expect(text).toContain('api.graph.annotate')
     // 解释要挂在用户盯着的那段文字旁边，别把视线拽到对话栏（同伪编译）
     expect(text).not.toContain('switchMain')
   })
@@ -381,15 +383,19 @@ describe('思考档位（三态配置）', () => {
   it('写教学文档的两条内置工作流，配方在动笔之前就注入（doc-html）', () => {
     const rows = builtinWorkflowRows()
     // 「开讲」与新目标的「学习大纲」是仅有的两条会写教学文档的内置工作流。
-    // 它们必须带 promptModule：靠 doc.* 写入触发只会晚一轮，第一份文档就永远是纯 HTML 草稿。
-    for (const id of ['teach-node', 'goal-outline']) {
-      const row = rows.find((r) => r.id === id)
-      expect(row, id).toBeTruthy()
-      expect(row?.promptModule, id).toBe('doc-html')
-      expect(workflowModules(row!).map((m) => m.key), id).toEqual(['doc-html'])
-    }
-    // 其余内置条目照旧：没配 promptModule 也没有 prompt 的就是空
+    // 它们必须带 doc-html：靠写入触发只会晚一轮，第一份文档就永远是纯 HTML 草稿。
+    // 开讲还带教学方法规程（teach-method），也在动笔之前一起注入。
+    const teach = rows.find((r) => r.id === 'teach-node')!
+    expect(teach.promptModule).toBe('teach-method doc-html')
+    expect(workflowModules(teach).map((m) => m.key)).toEqual(['teach-method', 'doc-html'])
+    const goal = rows.find((r) => r.id === 'goal-outline')!
+    expect(goal.promptModule).toBe('doc-html')
+    expect(workflowModules(goal).map((m) => m.key)).toEqual(['doc-html'])
+    // 其余内置条目照旧：没配 promptModule 也没有 prompt 的就是空（「了解」「修复函数图像」）
+    const explain = rows.find((r) => r.id === 'explain')!
+    expect(workflowModules(explain)).toEqual([])
+    // 「生成大纲」「前置知识大纲」带大纲编写规程（outline-method）
     const outline = rows.find((r) => r.id === 'outline')!
-    expect(workflowModules(outline)).toEqual([])
+    expect(workflowModules(outline).map((m) => m.key)).toEqual(['outline-method'])
   })
 })

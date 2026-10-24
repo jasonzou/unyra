@@ -324,7 +324,20 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
   for (const [dir, { base, meta }] of metas) {
     const goal = goalOfDir(dir)
     if (!goal) continue
-    if (dir.split('/').length === 2) readGoalLedgers(files, dir, goal.id, ledgers)
+    if (dir.split('/').length === 2) {
+      readGoalLedgers(files, dir, goal.id, ledgers)
+    } else {
+      /*
+       * v2 早期每个节点目录各有一份 chat.json：并进所属目标的对话列表（归属单位是目标）。
+       * 不在这里挑拣——nodeId → goalId 的折算与孤儿（已删节点）丢弃由 normalize 统一做
+       * （见 store/normalize/conversation），与目标目录那份走同一条口径。
+       */
+      const nodeChat = parseJson<{ conversations?: unknown[] }>(files.get(`${dir}/chat.json`))
+      for (const c of nodeChat?.conversations ?? []) {
+        if (!c || typeof c !== 'object') continue
+        ledgers.conversations.push(migrateConversation(c as Conversation))
+      }
+    }
 
     const tmpFile = parseJson<{ entries?: Record<string, TmpEntry> }>(files.get(`${dir}/tmp.json`))
     if (tmpFile?.entries && typeof tmpFile.entries === 'object') tmp[meta.id] = tmpFile.entries

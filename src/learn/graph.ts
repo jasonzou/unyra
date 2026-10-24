@@ -77,6 +77,7 @@ export {
   ongoingAttempt,
   removeExam,
   replaceQuestionImages,
+  shellExamOf,
   startAttempt,
   submitAttempt,
   upsertAttempt,

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_SKILLS } from '../src/agent/skill/builtins'
 import {
   formatActiveSkillsPrompt,
   getActiveSkills,
@@ -12,10 +11,6 @@ import { normalizeAgentSettings } from '../src/agent/settings'
 
 describe('Agent 技能 (Skills) 与 MCP 设施测试', () => {
   describe('Skills 聚合与系统提示词注入', () => {
-    it('内置技能库已清空，全部技能通过用户自定义或磁盘安装', () => {
-      expect(BUILTIN_SKILLS).toEqual([])
-    })
-
     it('无自定义配置且无磁盘技能时返回空', () => {
       const skills = getEffectiveSkills(null)
       expect(skills.length).toBe(0)

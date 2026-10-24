@@ -82,8 +82,8 @@ describe('什么时候补这一句（needsDocFormatAnnounce）', () => {
 describe('那条隐藏消息本身', () => {
   const msg = docFormatMessage('markdown', AT, 'f1')
 
-  it('是 user 角色、隐藏、带 mark 与格式 id', () => {
-    expect(msg.role).toBe('user')
+  it('是 assistant 角色（提示词=声明归 assistant 边）、隐藏、带 mark 与格式 id', () => {
+    expect(msg.role).toBe('assistant')
     expect(msg.hidden).toBe(true)
     expect(msg.mark).toBe('文档格式 · 纯 Markdown')
     expect(msg.docFormat).toBe('markdown')
@@ -93,7 +93,7 @@ describe('那条隐藏消息本身', () => {
   it('正文整段进上下文（隐藏只是界面不显示，模型要看得到）', () => {
     const history = toChatHistory([msg, userMsg('讲一下哈希表')])
     expect(history).toHaveLength(2)
-    expect(history[0].role).toBe('user')
+    expect(history[0].role).toBe('assistant')
     expect(String(history[0].content)).toContain('只用标准 Markdown 语法')
   })
 })

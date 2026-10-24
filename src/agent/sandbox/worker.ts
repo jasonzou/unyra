@@ -9,17 +9,21 @@ import type { SandboxReply, SandboxRequest } from './types'
 /**
  * 旧 api 名 → 新写法。
  *
- * 文档模型与寻址方式一起改过（note.* 变成带 path 的 doc.*），而对话历史里还留着
- * 上一版的名字：模型照抄旧调用时会撞上「没有这个 api」，只给这一句它不知道下一步该写什么。
- * 这里把「叫什么」直接翻成「现在怎么写」。
+ * 模型照抄历史里的旧名字时会撞上「没有这个 api」，只给这一句它不知道下一步该写什么；
+ * 这里把「叫什么」直接翻成「现在怎么写」。**条目必须是当前真不存在的名字**——
+ * 还在的兼容 api（doc.* / outline.* / sdoc.*）轮不到这张表，写了也只是死条目。
  */
 export const RENAMED_API_HINT: Record<string, string> = {
+  'node.list': 'graph.list()',
+  'node.read': 'graph.read(path)',
+  'node.update': 'graph.update(path, { description })',
+  'node.create': 'graph.create({ parent, title, description })',
+  'node.rename': 'graph.rename(path, 新标题)',
+  'node.delete': 'graph.delete(path)',
+  'node.move': 'graph.move(path, 新父节点)',
+  'node.paths': 'graph.paths()',
   'note.read': 'content.read({ path, part: "note:笔记名" })',
   'note.write': 'content.write({ path, part: "note:笔记名" }, content)',
-  'doc.read': 'content.read(path)',
-  'doc.write': 'content.write(path, content)',
-  'doc.list': 'graph.read(path)（里面列出该节点的文档与字数）',
-  'doc.search': 'content.find(path, 要找的文字)',
   read_note: 'content.read({ path, part: "note:笔记名" })',
   update_note: 'content.write({ path, part: "note:笔记名" }, content)',
   set_title: 'graph.rename(path, title)',

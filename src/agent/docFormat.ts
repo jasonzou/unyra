@@ -139,6 +139,7 @@ export function needsDocFormatAnnounce(messages: ConversationMessage[], id: DocF
  * hidden + mark：与 personaMessage 同一个形状家族，也是一条**提示词注入**
  * （inject: 'prompt'，不画分界条、并进过程组——见 agent/messageKind）。
  * id 由调用方给（宿主那一层才有 crypto.randomUUID）。
+ * **role 是 assistant**：格式是「怎么做」的声明（见 personaMessage 的分工说明）。
  */
 export function docFormatMessage(
   id: DocFormatId,
@@ -149,7 +150,7 @@ export function docFormatMessage(
   const format = docFormatOf(id, customDocFormats)
   return {
     id: uuid,
-    role: 'user',
+    role: 'assistant',
     parts: [{ type: 'text', text: format.instruction }],
     ts: at,
     hidden: true,

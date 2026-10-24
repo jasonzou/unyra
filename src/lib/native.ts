@@ -306,6 +306,23 @@ export interface NativeBridge {
     allowClose(): void
   }
   /**
+   * 上下文轨迹窗口（第三个 BrowserWindow，`?contextTrace=1` 分支）的**主窗口那一侧**。
+   * 轨迹是纯只读的：把当前会话的原始数据整份推过去，轨迹窗口没有回发通道。
+   */
+  traceHost: {
+    /** 开轨迹窗口（payload = 当前会话数据）；已经开着就聚焦并换数据 */
+    open(payload: unknown): Promise<ExamOpenResult>
+    /** 把当前会话数据推给轨迹窗口（随数据变化持续推） */
+    push(payload: unknown): void
+    /** 订阅「轨迹窗口关掉了」；主窗口据此停止推送。返回取消订阅函数 */
+    onClosed(cb: () => void): () => void
+  }
+  /** 轨迹窗口那一侧：只收会话数据 */
+  traceGuest: {
+    /** 订阅主窗口推来的会话数据；返回取消订阅函数 */
+    onState(cb: (payload: unknown) => void): () => void
+  }
+  /**
    * 语音：模型的状态与下载、一次识别、这台机器上有没有显卡。
    * 与 electron/preload.ts 那份是同一套（渲染层不能 import 主进程的文件，只能各声明一份）。
    */

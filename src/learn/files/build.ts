@@ -171,9 +171,10 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
       if (goalEssays.length || goalCommits.length) {
         files.set(`${path}/essay.json`, jsonText({ version: 2, essays: goalEssays, commits: goalCommits }))
       }
-      /** 结构图：一个节点都没铺过时不写文件 */
+      /** 结构图：一个节点都没铺过时不写文件。画布删空但墓碑还在的照写——
+       *  否则重启之后被删的卡会跟着实体集体复活。 */
       const structure = store.structure?.[goal.id]
-      if (structure && structure.nodes.length) {
+      if (structure && (structure.nodes.length || structure.hidden?.length)) {
         files.set(`${path}/structure.json`, jsonText(structure))
       }
     }

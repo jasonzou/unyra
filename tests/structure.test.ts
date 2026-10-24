@@ -13,9 +13,13 @@ import {
   clampZoom,
   emptyStructure,
   fitZoom,
+  freeSpotNear,
   kindOf,
   minZoomOf,
   normalizeStructure,
+  normalizeStructureBook,
+  removeNodeFromMap,
+  renameLeafInMap,
   seedLayout,
   slotOrderOf,
   wouldCycle,
@@ -46,6 +50,18 @@ describe('结构图：连线规则', () => {
       const downstream = GRAPH_KINDS.filter((to) => canConnect(kind, to))
       if (kind === 'note' || kind === 'exam' || kind === 'superdoc') expect(downstream).toEqual([])
     }
+  })
+
+  it('入口只连文档，且子级有且只有一个（权威根唯一）', () => {
+    expect(canConnect('entry', 'doc')).toBe(true)
+    expect(canConnect('entry', 'outline')).toBe(false)
+    expect(canConnect('doc', 'entry')).toBe(false)
+    const nodes = [node('e1', 'entry'), node('d1', 'doc'), node('d2', 'doc')]
+    expect(canAddEdge(nodes, [], 'e1', 'd1')).toBe(true)
+    // 已经有一个子级了：第二份文档接不上
+    expect(canAddEdge(nodes, [{ from: 'e1', to: 'd1' }], 'e1', 'd2')).toBe(false)
+    // 换个父照样能连：限制只针对入口的出线
+    expect(canAddEdge(nodes, [{ from: 'e1', to: 'd1' }], 'd1', 'd2')).toBe(false) // doc→doc 本就不允许
   })
 
   it('自连、重复边、跨类型边都加不进去', () => {
@@ -79,6 +95,21 @@ describe('结构图：包围盒与缩放', () => {
   it('包围盒按卡片尺寸算，不是按坐标点算', () => {
     const box = boundsOf([node('a', 'outline', 100, 50), node('b', 'doc', 400, 200)])
     expect(box).toEqual({ x: 100, y: 50, width: 300 + CARD_W, height: 150 + CARD_H })
+  })
+
+  it('freeSpotNear：锚点空就原样返回，被占就往下找第一块空位', () => {
+    // 占着 (400, 0) 的一张卡
+    const nodes = [node('a', 'doc', 400, 0)]
+    const size = { width: CARD_W, height: CARD_H }
+    // 锚点正好撞上：往下挪到第一块空地
+    const spot = freeSpotNear(nodes, { x: 400, y: 0 }, size)
+    expect(spot.y).toBeGreaterThanOrEqual(CARD_H)
+    // 锚点本来就空：原样返回
+    expect(freeSpotNear(nodes, { x: 900, y: 0 }, size)).toEqual({ x: 900, y: 0 })
+    // 一整列都被占：返回的是有限位置（不发散、坐标有限）
+    const column = Array.from({ length: 6 }, (_, i) => node(`c${i}`, 'doc', 400, i * (CARD_H + ROW_GAP)))
+    const last = freeSpotNear(column, { x: 400, y: 0 }, size)
+    expect(Number.isFinite(last.y)).toBe(true)
   })
 
   it('空图没有包围盒（调用方据此不缩放）', () => {
@@ -300,6 +331,86 @@ describe('结构图：初始铺排', () => {
       expect(Number.isFinite(n.y)).toBe(true)
     }
   })
+
+  it('带环的坏数据不能把深度传播变成死循环（守卫后正常返回）', () => {
+    // 正常入口（canAddEdge 的环检测 + 读盘校验）进不来环，但自动排列吃的是画布现数据——
+    // 坏数据一旦带环，没有上限守卫这里会无限入队、界面卡死
+    const map = seedLayout({
+      nodes: [
+        { id: 'root', kind: 'doc' },
+        { id: 'a', kind: 'outline' },
+        { id: 'b', kind: 'doc' },
+      ],
+      edges: [
+        { from: 'root', to: 'a' },
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+      ],
+    })
+    expect(map.nodes).toHaveLength(3)
+    expect(map.nodes.every((n) => Number.isFinite(n.x) && Number.isFinite(n.y))).toBe(true)
+    // 环上的两个节点都拿到了列坐标，没有丢
+    expect(map.nodes.find((n) => n.id === 'a')).toBeTruthy()
+    expect(map.nodes.find((n) => n.id === 'b')).toBeTruthy()
+  })
+})
+
+describe('结构图：图的编辑操作（组件三条删除路径与改名共用的规则）', () => {
+  const base = {
+    version: 1 as const,
+    nodes: [
+      node('d:n1', 'doc', 0, 0, 'n1'),
+      node('o:n1', 'outline', 300, 0, 'n1'),
+      node('n:n1:错题', 'note', 600, 0, 'n1:错题'),
+    ],
+    edges: [
+      { from: 'd:n1', to: 'o:n1' },
+      { from: 'd:n1', to: 'n:n1:错题' },
+    ],
+    hidden: ['e:gone'],
+  }
+
+  it('removeNodeFromMap：节点与相关边一起撤，墓碑去重追加，已有墓碑不动', () => {
+    const next = removeNodeFromMap(base, 'd:n1')
+    expect(next.nodes.map((n) => n.id)).toEqual(['o:n1', 'n:n1:错题'])
+    expect(next.edges).toEqual([])
+    expect(next.hidden).toEqual(['e:gone', 'd:n1'])
+    // 删第二遍不产生重复墓碑
+    expect(removeNodeFromMap(next, 'd:n1').hidden).toEqual(['e:gone', 'd:n1'])
+    // 不存在的节点：原样返回（组件据此跳过写回，不留下一条空撤回）
+    expect(removeNodeFromMap(base, 'ghost')).toBe(base)
+  })
+
+  it('renameLeafInMap：id 与 ref 一起换，边跟着改指向，无关字段原样保留', () => {
+    const r = renameLeafInMap(base, base.nodes[2], '复盘')
+    expect(r).not.toBeNull()
+    expect(r!.leaf).toEqual({ owner: 'n1', name: '错题' })
+    const next = r!.map
+    expect(next.nodes.find((n) => n.id === 'n:n1:复盘')).toMatchObject({ kind: 'note', ref: 'n1:复盘' })
+    expect(next.nodes.find((n) => n.id === 'n:n1:错题')).toBeUndefined()
+    expect(next.edges).toContainEqual({ from: 'd:n1', to: 'n:n1:复盘' })
+    expect(next.edges).not.toContainEqual({ from: 'd:n1', to: 'n:n1:错题' })
+    expect(next.hidden).toEqual(['e:gone'])
+  })
+
+  it('renameLeafInMap：超级文档用 s: 前缀；id 拼法不符的老数据保持原 id', () => {
+    const sdoc = { version: 1 as const, nodes: [node('s:n1:讲义', 'superdoc', 0, 0, 'n1:讲义')], edges: [] }
+    const r = renameLeafInMap(sdoc, sdoc.nodes[0], '新讲义')
+    expect(r!.map.nodes[0]).toMatchObject({ id: 's:n1:新讲义', ref: 'n1:新讲义' })
+    // 老数据：id 不是 n:{owner}:{名字} / s:{owner}:{名字} 的拼法 → 只换 ref，id 不动
+    const legacy = { version: 1 as const, nodes: [node('uuid-1', 'note', 0, 0, 'n1:错题')], edges: [] }
+    const r2 = renameLeafInMap(legacy, legacy.nodes[0], '复盘')
+    expect(r2!.map.nodes[0]).toMatchObject({ id: 'uuid-1', ref: 'n1:复盘' })
+  })
+
+  it('renameLeafInMap：不是叶子 / 没 ref / 名字没变（含空白）都算无事可做', () => {
+    const doc = { version: 1 as const, nodes: [node('d:n1', 'doc', 0, 0, 'n1')], edges: [] }
+    expect(renameLeafInMap(doc, doc.nodes[0], '新名字')).toBeNull()
+    const free = { version: 1 as const, nodes: [node('uuid-2', 'note')], edges: [] }
+    expect(renameLeafInMap(free, free.nodes[0], '新名字')).toBeNull()
+    expect(renameLeafInMap(base, base.nodes[2], ' 错题 ')).toBeNull()
+    expect(renameLeafInMap(base, base.nodes[2], '')).toBeNull()
+  })
 })
 
 describe('结构图：读盘校验', () => {
@@ -307,11 +418,11 @@ describe('结构图：读盘校验', () => {
     const map = normalizeStructure({
       version: 1,
       nodes: [
-        { id: 'a', kind: 'outline', x: 0, y: 0 },
-        { id: 'a', kind: 'doc', x: 10, y: 10 },
+        { id: 'a', kind: 'outline', x: 0, y: 0, ref: 'n1' },
+        { id: 'a', kind: 'doc', x: 10, y: 10, ref: 'n2' },
         { id: 'b', kind: 'nope', x: 0, y: 0 },
-        { id: 'c', kind: 'doc', x: 'NaN', y: 0 },
-        { id: 'd', kind: 'doc', x: 5, y: 5 },
+        { id: 'c', kind: 'doc', x: 'NaN', y: 0, ref: 'n3' },
+        { id: 'd', kind: 'doc', x: 5, y: 5, ref: 'n4' },
       ],
       edges: [{ from: 'a', to: 'd' }],
     })
@@ -323,9 +434,9 @@ describe('结构图：读盘校验', () => {
     const map = normalizeStructure({
       version: 1,
       nodes: [
-        { id: 'o1', kind: 'outline', x: 0, y: 0 },
-        { id: 'o2', kind: 'outline', x: 0, y: 100 },
-        { id: 'd', kind: 'doc', x: 0, y: 200 },
+        { id: 'o1', kind: 'outline', x: 0, y: 0, ref: 'n1' },
+        { id: 'o2', kind: 'outline', x: 0, y: 100, ref: 'n2' },
+        { id: 'd', kind: 'doc', x: 0, y: 200, ref: 'n3' },
       ],
       edges: [
         // 大纲 → 大纲：旧规则下合法，新规则下不合法，读盘时丢掉
@@ -340,6 +451,23 @@ describe('结构图：读盘校验', () => {
     expect(normalizeStructure(null)).toEqual(emptyStructure())
     expect(normalizeStructure('x')).toEqual(emptyStructure())
     expect(normalizeStructure({ nodes: 'oops', edges: 3 })).toEqual(emptyStructure())
+  })
+
+  it('hidden 逐条校验：字符串留下，别的一律丢掉', () => {
+    const map = normalizeStructure({ version: 1, nodes: [], edges: [], hidden: ['d:n1', 42, null, '', 'o:n2'] })
+    expect(map.hidden).toEqual(['d:n1', 'o:n2'])
+    // 没有 hidden 就不带这个字段
+    expect(normalizeStructure({ version: 1, nodes: [], edges: [] }).hidden).toBeUndefined()
+  })
+
+  it('画布删空但墓碑还在的账本要留下（删空 ≠ 没铺过，否则重启全体复活）', () => {
+    const out = normalizeStructureBook(
+      { g1: { version: 1, nodes: [], edges: [], hidden: ['d:n1'] }, g2: { version: 1, nodes: [], edges: [] } },
+      new Set(['g1', 'g2']),
+    )
+    expect(out.g1?.hidden).toEqual(['d:n1'])
+    // 真的什么都没有的仍然不留
+    expect(out.g2).toBeUndefined()
   })
 
   it('kindOf 只认表里的节点', () => {

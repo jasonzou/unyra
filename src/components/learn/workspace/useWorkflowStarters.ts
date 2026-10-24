@@ -93,7 +93,12 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       return
     }
     setCreating(false)
-    agent.runWorkflow('exam', { nodeId: target.id })
+    // 交付边界随指令钉一遍：这是往目标节点上「填一份试卷」的轮次，不是建树（画布上的
+    // 空试卷卡由派生在实体长出来时顶替收编，agent 这一侧不再建任何节点）
+    agent.runWorkflow('exam', {
+      nodeId: target.id,
+      hint: '【本轮交付边界】交付物只有这一份试卷：落在目标节点身上；不要创建任何新节点，也不要动教学文档与大纲——那是「开讲」与「生成大纲」流程的事。',
+    })
   }
 
   /**
@@ -141,7 +146,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
    * （内置工作流「超级实验室」）。它是个问询类工作流：触发即响铃、对话栏切到主位，
    * 表单压在输入框上方等需求。
    */
-  const startSuperLab = (nodeId?: string) => {
+  const startSuperLab = (nodeId?: string, shellName?: string) => {
     // 与 newExam 同一条：可省的 nodeId 让「右键某一个节点新建」落到那一个节点上
     const target = nodeId ? nodeById(getLatest(), nodeId) : activeNode
     if (!target) {
@@ -153,7 +158,14 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onOpenSettings()
       return
     }
-    agent.runWorkflow('superlab', { nodeId: target.id })
+    // 画布拖出的壳（实体先行）：写进这份壳、不另起名字——卡的位置就是用户放卡的位置
+    const shellHint = shellName
+      ? `节点上已放了一份空超级文档「${shellName}」——本轮就写它：api.node().superdoc("${shellName}").write(完整HTML)，不要另起新名字。`
+      : ''
+    agent.runWorkflow('superlab', {
+      nodeId: target.id,
+      hint: '【本轮交付边界】交付物只有这一份超级文档：写在目标节点身上（api.node().superdoc(名字)）；不要创建任何新节点，也不要动教学文档与大纲。' + shellHint,
+    })
     onToast(t('已启动超级实验室，导师马上会问你想做什么'))
   }
 
@@ -173,6 +185,23 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     }
     agent.runWorkflow('outline', { nodeId: target.id })
     onToast(t('已请导师规划「{0}」的大纲，大纲页会随写入更新', target.title))
+  }
+
+  /**
+   * 前置知识大纲：文档卡右键菜单触发——读那份文档，把「先要学会什么」
+   * 落成大纲目标项（内置工作流「前置知识大纲」）。ownerNodeId 是文档卡的
+   * 知识节点 id，工作流跑在它的上下文里。
+   */
+  const startPrereqOutline = (nodeId?: string) => {
+    const target = nodeId ? nodeById(getLatest(), nodeId) : activeNode
+    if (!target) return
+    if (!hasKey) {
+      onToast(t('生成大纲需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
+      onOpenSettings()
+      return
+    }
+    agent.runWorkflow('prereq-outline', { nodeId: target.id })
+    onToast(t('已请导师规划「{0}」的前置知识大纲，大纲页会随写入更新', target.title))
   }
 
   /**
@@ -255,6 +284,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     startSuperLab,
     startBrowserUse,
     startOutline,
+    startPrereqOutline,
     workflowRows,
     runWorkflowRow,
     removeWorkflowRow,

@@ -244,6 +244,10 @@ export function needsPersonaAnnounce(messages: ConversationMessage[], id: Person
  * hidden + mark：它是一条**提示词注入**（inject: 'prompt'）——不分割轮次，
  * 界面上并进那一轮的「思考、工具与提示词」过程组（见 agent/messageKind 的说明）；
  * 正文只在上下文里。id 由调用方给（宿主那一层才有 crypto.randomUUID）。
+ *
+ * **role 是 assistant**：人格是「怎么做」的**声明**（函数声明），不是「做什么」的指令
+ * （函数调用）——声明只能出现一次、内容固定，归 assistant 边；指令（工作流、用户消息）
+ * 才是 user。这与系统提示词固化（Conversation.systemPrompt）是同一条分工的两半。
  */
 export function personaMessage(
   id: PersonaId,
@@ -254,7 +258,7 @@ export function personaMessage(
   const persona = personaOf(id, customPersonas)
   return {
     id: uuid,
-    role: 'user',
+    role: 'assistant',
     parts: [{ type: 'text', text: persona.instruction }],
     ts: at,
     hidden: true,

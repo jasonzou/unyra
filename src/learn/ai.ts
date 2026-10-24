@@ -1,7 +1,7 @@
 /**
  * 学习场景的两处提示词：
  * 1. buildTeacherSystem —— 教学 Agent 的系统提示词。**只描述目标，不含当前节点**：
- *    上下文是目标级的，此刻在哪个节点由每条消息带着走（见 useAgent 的 currentNodeBlock）。
+ *    上下文是目标级的；节点背景不再随消息注入，模型需要时自己 api.graph.list 现查。
  * 2. generateShortAnnotation —— 「了解」那种一两句话的就地释义。
  *
  * 节点的标题与描述不再由这里代劳：新建节点时不再先发一次「生成描述」的模型请求，

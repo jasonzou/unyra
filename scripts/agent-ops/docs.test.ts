@@ -48,7 +48,7 @@ export async function toolTests() {
   )
   const r3 = await h.run('((api)=>{ await api.doc.append("笔记", "第二段"); return (await api.doc.read("笔记")).content })')
   ok(r3.ok && r3.content.startsWith('新的笔记\n\n第二段'), 'doc.append 空行分隔', JSON.stringify(r3.content))
-  const rNew = await h.run('((api)=>{ await api.doc.write("笔记/错题本", "第一道错题"); return { names: (await api.node.read("")).docs.map((d)=>d.文档) } })')
+  const rNew = await h.run('((api)=>{ await api.doc.write("笔记/错题本", "第一道错题"); return { names: (await api.graph.read("")).docs.map((d)=>d.文档) } })')
   ok(
     rNew.ok &&
       h.store().nodes.find((n) => n.id === childId)?.notes.some((n) => n.name === '错题本'),
@@ -66,6 +66,39 @@ export async function toolTests() {
     '「笔记」与「笔记/错题本」各自读到自己那份',
     rBoth.content.slice(0, 200),
   )
+  /*
+   * 节点对象通道（api.node）：多态读写的入口。这里钉四件事——
+   * 取到的对象有身份与方法、聚合取的子对象写入真的落 store、
+   * help() 现查方法表、未知成员方法给出可用清单而不是空报错。
+   */
+  const rNode1 = await h.run("((api)=>{ const n = await api.node('极限'); const r = await n.read(); return { kind: n.kind, label: n.label, chars: r.chars, head: r.content.slice(0, 5) } })")
+  ok(
+    rNode1.ok && rNode1.content.includes('"kind":"doc"') && rNode1.content.includes('极限的正文'),
+    'api.node 取到节点对象，read 读到正文（doc 类型）',
+    rNode1.content.slice(0, 200),
+  )
+  const rNode2 = await h.run("((api)=>{ const n = await api.node('极限'); const note = await n.note('节点对象笔记'); await note.write('通过节点对象写的'); return (await note.read()).content })")
+  ok(
+    rNode2.ok &&
+      rNode2.content.includes('通过节点对象写的') &&
+      h.store().nodes.find((x) => x.id === childId)?.notes.some((x) => x.name === '节点对象笔记'),
+    '聚合取笔记对象：write 一份不存在的笔记会新建并落 store',
+    rNode2.content.slice(0, 160),
+  )
+  const rNode3 = await h.run("((api)=>{ const n = await api.node('极限'); const o = await n.outline(); const w = await o.write({ intro: '节点对象写的路线', children: [{ title: '子甲', summary: '先学' }] }); const rd = await o.read(); return { wrote: w.ok, count: rd.children.length, title: rd.children[0].title } })")
+  ok(
+    rNode3.ok && rNode3.content.includes('"count":1') && rNode3.content.includes('子甲'),
+    '聚合取大纲对象：write 整份落盘、read 回对象（不是 JSON 字符串）',
+    rNode3.content.slice(0, 200),
+  )
+  const rNode4 = await h.run("((api)=>{ const n = await api.node('极限'); return n.help() })")
+  ok(
+    rNode4.ok && rNode4.content.includes('write(') && rNode4.content.includes('note(') && rNode4.content.includes('outline()'),
+    '对象上的 help() 同步列出该类型的方法与示例',
+    rNode4.content.slice(0, 160),
+  )
+  const rNode5 = await h.run("((api)=>{ return await api.node.invoke('', '没有这个方法', []) })")
+  ok(!rNode5.ok && rNode5.content.includes('可用'), '未知成员方法被拒并列出可用清单', rNode5.content.slice(0, 200))
   // 排版提醒（见 ops/assemble 的 layoutHintOf）：文档好不好看模型自己看不见，回执得说一句。
   // 边界一起钉住：整篇写入 + 教学文档 + 够长 + HTML 与 Markdown 结构痕迹都没有，才提醒；
   // 纯 Markdown 策略下整体不提（那档的正文本来就不该有 class，见 agent/docFormat）。
@@ -105,51 +138,52 @@ export async function toolTests() {
   ok(!r4.ok && r4.content.includes('位置校验失败') && r4.content.includes('没有生效'), 'expected 不符时工具级失败，并说清是哪个 api 没生效', r4.content.slice(0, 200))
   const r5 = await h.run('((api)=>{ await api.doc.write("微积分/笔记", "目标自己的笔记"); return (await api.doc.read("微积分/笔记")).content })')
   ok(r5.ok && r5.content.startsWith('目标自己的笔记'), '跨节点写笔记（path 指名）', r5.content)
-  const r6 = await h.run('((api)=>{ const l = await api.node.list(); return { count: l.count, paths: l.nodes.map((n)=>n.path) } })')
-  ok(r6.ok && r6.content.includes('微积分/极限'), 'node.list 列出目标内节点', r6.content)
-  const r7 = await h.run('((api)=>{ const c = await api.node.create({ parent: "极限", title: "夹逼定理", description: "一句话" }); return c })')
-  ok(r7.ok && r7.content.includes('已创建节点「夹逼定理」'), 'node.create 建下级节点', r7.content)
+  const r6 = await h.run('((api)=>{ const l = await api.graph.list(); return { count: l.count, paths: l.nodes.map((n)=>n.path) } })')
+  ok(r6.ok && r6.content.includes('微积分/极限'), 'graph.list 列出目标内节点', r6.content)
+  const r7 = await h.run('((api)=>{ const c = await api.graph.create({ parent: "极限", title: "夹逼定理", description: "一句话" }); return c })')
+  ok(r7.ok && r7.content.includes('已创建节点「夹逼定理」'), 'graph.create 建下级节点', r7.content)
   const created = h.store().nodes.find((n) => n.title === '夹逼定理')
   ok(!!created && created.goalId === goalId, '新节点归属目标', created)
   ok(h.store().edges.some((e) => e.from === childId && e.to === created?.id), '新节点挂在请求的父节点下')
   // 显式路径是新口径：不写 parent、或从「当前」出发，一律被拒（不再隐式建在当前节点下）
-  const r7a = await h.run('((api)=>{ return await api.node.create({ title: "无parent节点" }) })')
-  ok(!r7a.ok && r7a.content.includes('parent'), 'node.create 不写 parent 被拒', r7a.content.slice(0, 160))
-  const r7b = await h.run('((api)=>{ return await api.node.create({ parent: "当前", title: "当前下的节点" }) })')
+  const r7a = await h.run('((api)=>{ return await api.graph.create({ title: "无parent节点" }) })')
+  ok(!r7a.ok && r7a.content.includes('parent'), 'graph.create 不写 parent 被拒', r7a.content.slice(0, 160))
+  const r7b = await h.run('((api)=>{ return await api.graph.create({ parent: "当前", title: "当前下的节点" }) })')
   ok(!r7b.ok && r7b.content.includes('当前'), 'parent 写「当前」也被拒', r7b.content.slice(0, 160))
-  // node.move：换父节点 = 摘掉旧父线挂到新父节点之下；根不能移、挂到自己下级成环也被拒
-  const rMove = await h.run('((api)=>{ return await api.node.move("夹逼定理", "微积分") })')
+  // graph.move：换父节点 = 摘掉旧父线挂到新父节点之下；根不能移、挂到自己下级成环也被拒
+  const rMove = await h.run('((api)=>{ return await api.graph.move("夹逼定理", "微积分") })')
   ok(
     rMove.ok &&
       h.store().edges.some((e) => e.from === rootId && e.to === created?.id) &&
       !h.store().edges.some((e) => e.from === childId && e.to === created?.id),
-    'node.move 换父节点（旧父线摘掉）',
+    'graph.move 换父节点（旧父线摘掉）',
     rMove.content,
   )
-  const rMoveRoot = await h.run('((api)=>{ return await api.node.move("微积分", "夹逼定理") })')
+  const rMoveRoot = await h.run('((api)=>{ return await api.graph.move("微积分", "夹逼定理") })')
   ok(!rMoveRoot.ok && rMoveRoot.content.includes('总目标'), '目标的根不能移动', rMoveRoot.content.slice(0, 160))
-  const rCycle = await h.run('((api)=>{ await api.node.create({ parent: "极限", title: "环测试" }); return await api.node.move("极限", "环测试") })')
+  const rCycle = await h.run('((api)=>{ await api.graph.create({ parent: "极限", title: "环测试" }); return await api.graph.move("极限", "环测试") })')
   ok(!rCycle.ok && rCycle.content.includes('环'), '不能把节点挂到它自己的下级之下', rCycle.content.slice(0, 160))
-  const r8 = await h.run('((api)=>{ const t = await api.node.title("夹逼定理"); await api.node.rename("夹逼定理", "夹逼定理（正式）"); const t2 = await api.node.title("夹逼定理（正式）"); return { before: t.title, after: t2.title } })')
-  ok(r8.ok && r8.content.includes('夹逼定理（正式）'), 'node.title / node.rename（改名后路径仍能找到）', r8.content)
-  const r9 = await h.run('((api)=>{ return await api.node.rename("夹逼定理（正式）", "极限") })')
+  const r8 = await h.run('((api)=>{ const t = await api.graph.title("夹逼定理"); await api.graph.rename("夹逼定理", "夹逼定理（正式）"); const t2 = await api.graph.title("夹逼定理（正式）"); return { before: t.title, after: t2.title } })')
+  ok(r8.ok && r8.content.includes('夹逼定理（正式）'), 'graph.title / graph.rename（改名后路径仍能找到）', r8.content)
+  const r9 = await h.run('((api)=>{ return await api.graph.rename("夹逼定理（正式）", "极限") })')
   ok(!r9.ok && r9.content.includes('已经有叫'), '同名改名被拒绝', r9.content.slice(0, 160))
-  const r10 = await h.run('((api)=>{ return await api.node.delete("微积分") })')
+  const r10 = await h.run('((api)=>{ return await api.graph.delete("微积分") })')
   ok(!r10.ok && r10.content.includes('学习目标本身'), '不能删学习目标', r10.content.slice(0, 160))
-  const r11 = await h.run('((api)=>{ return await api.node.delete("夹逼定理（正式）") })')
-  ok(r11.ok && !h.store().nodes.some((n) => n.title === '夹逼定理（正式）'), 'node.delete 删掉节点', r11.content)
+  const r11 = await h.run('((api)=>{ return await api.graph.delete("夹逼定理（正式）") })')
+  ok(r11.ok && !h.store().nodes.some((n) => n.title === '夹逼定理（正式）'), 'graph.delete 删掉节点', r11.content)
   const r12 = await h.run('((api)=>{ const f = await api.doc.find("", "极限"); return { matches: f.matches, first: f.hits[0] } })')
   ok(r12.ok && r12.content.includes('"start"'), 'doc.find 只回位置', r12.content)
+  // description.* 已整组退役（被 graph.update 取代）：留下的只有沙箱的「没有这个 api」
   const r13 = await h.run('((api)=>{ return await api.description.update("只有内容的老写法") })')
-  ok(r13.ok && h.store().nodes.find((n) => n.id === childId)?.description === '只有内容的老写法', 'description.update 单参数兼容旧写法', r13.content)
+  ok(!r13.ok && r13.content.includes('沙箱里没有这个 api'), 'description.* 已退役，调了只报不存在', r13.content.slice(0, 160))
   const r14 = await h.run('((api)=>{ return await api.note.read() })')
-  ok(!r14.ok && r14.content.includes('files.read'), '旧 api 名给出新写法', r14.content.slice(0, 200))
+  ok(!r14.ok && r14.content.includes('content.read'), '旧 api 名给出新写法', r14.content.slice(0, 200))
   const r15 = await h.run('((api)=>{ return await api.exam.read() })')
   ok(!r15.ok && r15.content.includes('沙箱里没有这个 api'), '未注入 exam 时该组不存在', r15.content.slice(0, 160))
-  const r16 = await h.run('((api)=>{ await api.doc.write("", "# 正文"); await api.node.update("", { status: "mastered" }); return "ok" })')
-  ok(r16.ok && h.store().nodes.find((n) => n.id === childId)?.status === 'mastered', 'node.update 能改状态', r16.content)
-  const r17 = await h.run('((api)=>{ return (await api.node.read("")).docs })')
-  ok(r17.ok && r17.content.includes('教学文档'), 'node.read 回各文档字数', r17.content)
+  const r16 = await h.run('((api)=>{ await api.doc.write("", "# 正文"); await api.graph.update("", { status: "mastered" }); return "ok" })')
+  ok(r16.ok && h.store().nodes.find((n) => n.id === childId)?.status === 'mastered', 'graph.update 能改状态', r16.content)
+  const r17 = await h.run('((api)=>{ return (await api.graph.read("")).docs })')
+  ok(r17.ok && r17.content.includes('教学文档'), 'graph.read 回各文档字数', r17.content)
   const r18 = await h.run('((api)=>{ return await api.doc.read("根本没有的节点") })')
   ok(r18.ok === false && r18.content.includes('没有'), 'path 找不到时给出可读原因', r18.content.slice(0, 160))
   // outline：整份写入 → 读回，key 由标题自动生成；两侧全空被拒（清空不是写入的活）
@@ -169,17 +203,31 @@ export async function toolTests() {
  */
 export async function apiNameTests() {
   const calls: Record<string, string> = {
-    'node.list': '',
-    'node.read': "''",
-    'node.paths': "''",
-    'node.create': "{ parent: '微积分', title: '临时节点' }",
-    'node.title': "''",
-    'node.rename': "'临时节点', '新临时节点'",
-    'node.update': "'', { description: '临时描述' }",
-    'node.annotate': "'', { term: '极限', body: '基本概念' }",
-    'node.delete': "''",
+    // 节点对象通道：多态内容读写的入口（行为用例见 toolTests 的「节点对象」一节）
+    'node.get': "''",
+    'node.invoke': "'', 'read', []",
+    'graph.list': '',
+    'graph.read': "''",
+    'graph.paths': "''",
+    'graph.create': "{ parent: '微积分', title: '临时节点' }",
+    'graph.createTree': "{ parent: '微积分', tree: [{ title: '树节点甲' }] }",
+    'graph.title': "''",
+    'graph.rename': "'临时节点', '新临时节点'",
+    'graph.update': "'', { description: '临时描述' }",
+    'graph.annotate': "'', { term: '极限', body: '基本概念' }",
+    'graph.delete': "''",
+    'graph.relations': "''",
     // 迁移：把刚建的临时节点挂到根之下（它已在根之下时回一句「已经在」，同样证明 api 在）
-    'node.move': "'临时节点', '微积分'",
+    'graph.move': "'临时节点', '微积分'",
+    // content.*（内容读写的唯一入口）：写都打在笔记 part 上，不动共享 fixture 的教学正文
+    'content.read': "{ node: '', part: 'note:错题本' }",
+    'content.find': "{ node: '', part: 'note:错题本' }, '错题'",
+    'content.write': "{ node: '', part: 'note:探针笔记' }, '探针内容'",
+    'content.append': "{ node: '', part: 'note:探针笔记' }, '再补一句'",
+    'content.readRange': "{ node: '', part: 'note:探针笔记' }, 0, 50",
+    'content.replace': "{ node: '', part: 'note:探针笔记' }, { content: '改过的探针内容' }",
+    'content.list': "''",
+    'content.remove': "{ node: '', part: 'superdoc:不存在的名' }",
     // 持久化函数（创建/列表/删除/调用）
     'method.list': '',
     'method.create': "{ name: '探针函数', code: '((api)=>{ return 1 })' }",
@@ -509,12 +557,12 @@ export async function apiNameTests() {
   ok(sawInvoke === 'compact', 'wf.invoke 把要触发的那一条交给了宿主（按 id 交出去）', sawInvoke)
   ok(sawOpenSuper === '探针文档', 'ui.superdoc 把要开的文档名递给了宿主', sawOpenSuper)
   // __help 三级：组 / 单条 / 根。假沙箱把它们当普通调用转回宿主，execute 的 callApi 兜底渲染
-  const groupHelp = await tool.run({ description: '组 help', body: '((api)=>{ return await api.node.__help() })' }, { nodeId: childId, goalId })
-  ok(groupHelp.ok && groupHelp.content.includes('node.create'), 'api.node.__help() 列出组内 api', groupHelp.content.slice(0, 150))
+  const groupHelp = await tool.run({ description: '组 help', body: '((api)=>{ return await api.graph.__help() })' }, { nodeId: childId, goalId })
+  ok(groupHelp.ok && groupHelp.content.includes('graph.create'), 'api.graph.__help() 列出组内 api', groupHelp.content.slice(0, 150))
   const apiHelp = await tool.run({ description: '单条 help', body: '((api)=>{ return await api.doc.write.__help() })' }, { nodeId: childId, goalId })
   ok(apiHelp.ok && apiHelp.content.includes('示例：') && apiHelp.content.includes('await api.doc.write'), 'api.doc.write.__help() 带签名与示例', apiHelp.content.slice(0, 150))
   const rootHelp = await tool.run({ description: '根 help', body: '((api)=>{ return await api.__help() })' }, { nodeId: childId, goalId })
-  ok(rootHelp.ok && rootHelp.content.includes('api.node') && rootHelp.content.includes('api.<组>.<api>.__help()'), 'api.__help() 是组总览并教用法', rootHelp.content.slice(0, 150))
+  ok(rootHelp.ok && rootHelp.content.includes('api.graph') && rootHelp.content.includes('api.<组>.<api>.__help()'), 'api.__help() 是组总览并教用法', rootHelp.content.slice(0, 150))
   const bogusHelp = await tool.run({ description: '不存在的组', body: '((api)=>{ return await api.nope.__help() })' }, { nodeId: childId, goalId })
   ok(bogusHelp.content.includes('await api.__help()'), '查不存在的组给出指路而不是空话', bogusHelp.content.slice(0, 120))
   ok(

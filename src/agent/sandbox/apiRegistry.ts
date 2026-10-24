@@ -12,16 +12,13 @@
  * - **不登记就不存在**：`wrapApi` 遇到未登记的名字会当场抛错（测试与运行都拦）。
  * - **应用数据不写文件路径**：doc / state / outline / exam / sdoc / wf / method
  *   的用法里只出现对应 api，不教模型拼 `*.json`。
+ * - **旧写法组标 `legacy`**：等价的新组是唯一被宣传的入口（系统提示词组索引与
+ *   根 help 只列非 legacy 组）；legacy 组仍登记、仍可调用（老对话的历史里还有它的
+ *   调用），直查 `api.<组>.__help()` 也照常——只是不再向模型推荐。
+ * - **成员方法的登记在 learn/nodeKinds**：api.node 组的 usage 里那张「各类型方法表」
+ *   从类型登记表派生（renderKindMethodsTable），这里不另抄一份清单。
  */
-
-export type ApiAvailability =
-  | 'always'
-  | 'exam'
-  | 'ui'
-  | 'browser'
-  | 'subagent'
-  | 'mcp'
-  | 'conditional'
+import { renderKindMethodsTable } from '../../learn/nodeKinds'
 
 export interface ApiDoc {
   /** 组内方法名，如 `read` */
@@ -42,14 +39,6 @@ export interface ApiDoc {
   example: string
   /** 附加示例 */
   examples?: string[]
-  /** 只读 api 标 false；写操作省略或 true */
-  mutates?: boolean
-  /** 可用性：条件组在宿主没注入时调用会得到「沙箱里没有这个 api」 */
-  availability?: ApiAvailability
-  /** false = 不进 Worker 名单（保留实现做兼容/内部用） */
-  exposed?: boolean
-  /** 退役说明：有它就不进名单，帮助里也会标出来 */
-  deprecated?: string
 }
 
 export interface ApiGroupDoc {
@@ -61,6 +50,10 @@ export interface ApiGroupDoc {
   usage: string
   /** 组级示例（可选） */
   example?: string
+  /** 旧写法兼容组：不再进系统提示词组索引与根 help（见文件头纪律） */
+  legacy?: boolean
+  /** legacy 组的替换写法说明（renderGroupHelp 的旧写法提示；不给则指向 content.*） */
+  legacyNote?: string
   apis: ApiDoc[]
 }
 
@@ -82,12 +75,14 @@ const g = (
   usage: string,
   apis: ApiSeed[],
   example?: string,
+  extra: Partial<Pick<ApiGroupDoc, 'legacy' | 'legacyNote'>> = {},
 ): ApiGroupDoc => ({
   key,
   label,
   intro,
   usage,
   ...(example ? { example } : {}),
+  ...extra,
   apis: apis.map((x) => ({
     ...x,
     full: x.full ?? (key === 'core' ? x.name : `${key}.${x.name}`),
@@ -161,9 +156,9 @@ path 找不到时回执会列候选子节点，照着改一次就对。
 **类型与关系（先看这段再建节点）**
 
 一个**学习节点**（KnowledgeNode）是内容的容器，它同时拥有：
-- 一份**教学文档**（doc.write，正文 .md）
-- 一份**大纲**（outline.write，children 是「目标项」）
-- 若干**笔记**（doc.write 的 note）、若干**试卷**（exam）、若干**超级文档**（sdoc）
+- 一份**教学文档**（api.node(path).write，正文）
+- 一份**大纲**（api.node(path).outline().write，children 是「目标项」）
+- 若干**笔记**（api.node(path).note('名字')）、若干**试卷**（exam）、若干**超级文档**（api.node(path).superdoc('名字')）
 
 画布上看到的卡片是这些内容各自成为的**节点**，五种类型：
 \`doc\` 文档 / \`outline\` 大纲 / \`note\` 笔记 / \`exam\` 试卷 / \`superdoc\` 超级文档。
@@ -175,8 +170,8 @@ path 找不到时回执会列候选子节点，照着改一次就对。
 - **文档 → 笔记 / 试卷 / 超级文档**：叶子只挂在文档下面；
 - **大纲之间不连**：大纲的父子节点只能是文档（没有「大纲 → 大纲」这条路）。
 
-所以建一个子目标的顺序是：父节点上先有一条目标项（outline.write 写进 children），
-再 node.create({ parent: 父标题, title: 目标项标题 }) 让它落地成子节点——
+所以建一个子目标的顺序是：父节点上先有一条目标项（api.node(父).outline().write 的 children），
+再 graph.create({ parent: 父标题, title: 目标项标题 }) 让它落地成子节点——
 子节点自己会带一份文档与一份空大纲。**不要**为了挂上父子关系去建一条大纲→大纲的线。`,
     [
       a('list', 'graph.list()', '本目标全部节点', '回 path / id / title / status / 描述摘要 / 字数 / 掌握度。规划路线、找父节点、核对是否存在时先调它。', 'const all = await api.graph.list()'),
@@ -201,11 +196,38 @@ path 找不到时回执会列候选子节点，照着改一次就对。
     ],
   ),
   g(
+    'node',
+    '节点对象',
+    'api.node(地址) 取一个节点对象，调它的成员方法读写内容——正文 / 大纲 / 笔记 / 超级文档各一套（对象上 .help() 现查）；树的骨架仍在 graph.*。',
+    `内容读写的入口。api.node(地址) 回一个**节点对象**，方法按类型多态：
+
+${renderKindMethodsTable()}
+
+地址与 path 语法一致：api.node('极限')、api.node('极限/笔记/错题本')、api.node('#id')，省略 = 当前节点的正文。
+从文档节点出发能取到其它内容对象：n.note('错题本') / n.outline() / n.superdoc('实验')——它们也是节点对象，各有各的方法。
+每个对象上 n.help() 同步列出它这个类型的方法与示例；调不存在的方法会回执列出可用清单。
+**试卷不在这里**：出卷 / 作答 / 判分是业务动作，用 exam.*。`,
+    [
+      a('get', 'node.get(地址)', '取节点对象的清单（身份 + 方法表）', '门面 api.node() 的底层通道。直接用它的一般是「先看看这个节点能干什么」。', `const m = await api.node.get('极限')`),
+      a(
+        'invoke',
+        'node.invoke(地址, 方法名, 参数数组)',
+        '调节点对象的成员方法',
+        '门面自动走它（n.write(...) 最终就是一次 node.invoke）；直接调时参数是数组形状，方法名必须是清单里声明的。',
+        `await api.node.invoke('极限', 'append', ['\\n\\n## 补充'])`,
+      ),
+    ],
+    `const n = await api.node('极限')      // 正文（教学文档）
+await n.write('# 极限\\n\\n从数列极限开始……')
+const note = await n.note('错题本')     // 该节点的一份笔记（不存在时 write 新建）
+await note.append('第一题：……')`,
+  ),
+  g(
     'doc',
     '教学文档与笔记',
     '教学文档与笔记的读、分段读、查找、整篇写、区间改、追加、注解。',
-    `**读写内容请优先用 content.***（这一组是旧写法，等价、保留兼容）：
-正文与笔记的读、分段读、查找、整篇写、区间改、追加、注解。
+    `**读写内容请用 api.node(地址) 的成员方法**（这一组是旧写法，等价、保留兼容）：
+正文与笔记的读、分段读、查找、整篇写、区间改、追加。
 - 省略 path = 当前节点的教学文档；
 - '极限/笔记' = 该节点的笔记（第一份）；'极限/笔记/错题本' = 指定名字的笔记；
 - 笔记不存在时 write 会自动新建。
@@ -218,12 +240,14 @@ path 找不到时回执会列候选子节点，照着改一次就对。
       a('replace', 'doc.replace(path?, { start?, end?, content, expected? })', '按区间改文档', '给 start/end 或 expected（原文字符串，必须先匹配）再替换。改一处用 replace，不要整篇重写。', `await api.doc.replace('极限', { expected: '旧的一句话', content: '新的一句话' })`),
       a('append', 'doc.append(path?, content)', '追加到文档末尾', '不覆盖已有正文；适合补一段。', `await api.doc.append('极限', '\\n\\n## 补充：夹逼定理的几何直觉')`),
     ],
+    undefined,
+    { legacy: true, legacyNote: '等价于 api.node(地址) 取节点对象后调成员方法，新代码请用它（先 await api.node.__help()）' },
   ),
   g(
     'content',
     '内容读写',
     '一份内容的读 / 写 / 追加 / 查找：正文、大纲、笔记、超级文档共用这一套，按 part 区分。',
-    `**这是读写内容的唯一入口**（doc.* / outline.* / sdoc.* 是旧写法，保留兼容、等价）。
+    `**读写内容的推荐写法是节点对象**（api.node(地址).成员方法；这一组与 doc.* / outline.* / sdoc.* 一样是旧写法，等价、保留兼容）。
 
 位置由 \`part\` 表达：
 - 省略 part = 正文（教学文档）；
@@ -294,6 +318,8 @@ path 找不到时回执会列候选子节点，照着改一次就对。
         `await api.content.remove({ node: '极限', part: 'superdoc:旧讲义' })`,
       ),
     ],
+    undefined,
+    { legacy: true, legacyNote: '等价于 api.node(地址) 取节点对象后调成员方法，新代码请用它（先 await api.node.__help()）' },
   ),
   g(
     'outline',
@@ -308,6 +334,8 @@ path 找不到时回执会列候选子节点，照着改一次就对。
   children: [{ title: '极限', summary: '从数列到函数极限' }, { title: '导数', summary: '从切线到求导法则' }],
 })`),
     ],
+    undefined,
+    { legacy: true, legacyNote: '等价于 api.node(路径).outline().read() / .write({ intro, children })，新代码请用它' },
   ),
   g(
     'state',
@@ -420,6 +448,8 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
       a('write', 'sdoc.write(path?, name?, html)', '写入超级文档', '同名覆盖；name 不含 .html；html 必须自包含。', `await api.sdoc.write('极限', '夹逼实验', '<!doctype html><html>…</html>')`),
       a('delete', 'sdoc.delete(path?, name)', '删一份超级文档', '不可逆；删除前先 api.sdoc.list 确认名字，并告知用户删了什么。', `await api.sdoc.delete('极限', '夹逼实验')`),
     ],
+    undefined,
+    { legacy: true, legacyNote: '等价于 api.node(路径).superdoc("名字") 的 read / write / remove，新代码请用它' },
   ),
   g(
     'res',
@@ -625,18 +655,19 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
   g(
     'subagent',
     '子代理',
-    '并发派活：创建、运行、恢复、干预、中断、查看、删除、等待。',
-    `子代理适合长文档通读、繁重检索、独立并行任务。它们的 api 面按 apiGroups 白名单裁剪；
-不要指望子代理有 wf/state/exam 这些导师专用组。`,
+    '并发派活：登记定义、派任务、等待交付、恢复、干预、中断、查看、删除。',
+    `子代理适合长文档通读、繁重检索、独立并行任务。它们的 api 面按 create 时给的 tools
+白名单裁剪（可选组见回执说明）；不要指望子代理有 wf/state/exam 这些导师专用组。
+地址一律认 key（name 是显示名，碰巧写 name 也能对上）。`,
     [
-      a('create', 'subagent.create({ name?, task, apiGroups?, ... })', '创建一个子代理任务', '任务写清楚交付物与边界；apiGroups 只从允许名单里选。', `const sa = await api.subagent.create({ name: '读论文', task: '通读这篇论文并给出方法-实验-结论摘要', apiGroups: ['web', 'res'] })`),
-      a('run', 'subagent.run({ id? })', '启动子代理任务', '启动后用 subagent.wait 收交付；不要对同一个重复 run。', `await api.subagent.run({ id: sa.id })`),
-      a('resume', 'subagent.resume(id)', '继续一个已完成的子代理', '在同一份会话上追加指令接着跑，上下文不丢。', `await api.subagent.resume(sa.id)`),
-      a('intervene', 'subagent.intervene(id, message)', '给运行中的子代理插一条指令', '用于纠偏；消息排队等子代理下一跳消费，不要频繁打断。', `await api.subagent.intervene(sa.id, '先只看第 3 节')`),
-      a('interrupt', 'subagent.interrupt(id)', '中断一个子代理任务', '立刻停跑但保留已产出的内容；之后可用 resume 继续。', `await api.subagent.interrupt(sa.id)`),
-      a('view', 'subagent.view(id)', '查看子代理会话详情', '回状态、消息流与交付；判断它卡没卡、跑偏没跑偏时用。', `const detail = await api.subagent.view(sa.id)`),
-      a('delete', 'subagent.delete(id)', '删除一个子代理会话', '不可逆；交付没拿走前不要删。', `await api.subagent.delete(sa.id)`),
-      a('wait', 'subagent.wait({ seconds? })', '等子代理交付', '回已完成/仍在跑/出错三类；不要用 sleep 轮询。', `const done = await api.subagent.wait({ seconds: 60 })`),
+      a('create', 'subagent.create({ key, system, tools?, name? })', '登记一个子代理（只登记、未启动）', 'key 是地址（字母开头，≤32 字符，可用字母/数字/-/_）；system ≥20 字，写清角色、工作方式与交付纪律（子代理看不到导师的对话）；tools 从允许名单里选，默认 [web, tmp]。同 key 再 create 即覆盖定义（会话保留，新提示词从下一次任务生效）。', `const r = await api.subagent.create({ key: 'paper', system: '你是论文研读员：通读给定论文，交付方法-实验-结论三段摘要。只用 api.web 与 api.res。', tools: ['web', 'res'] })`),
+      a('run', 'subagent.run({ agent, task })', '派任务并后台启动', 'agent 认 key；task 写全：做什么、什么口径、交付什么格式。run 立即返回、任务并发跑，用 wait 收交付；同一个子代理同一时刻只跑一场。', `await api.subagent.run({ agent: 'paper', task: '通读 https://example.com/paper.pdf，交付 500 字摘要与三个关键结论' })`),
+      a('resume', 'subagent.resume(key)', '继续一个被中断的子代理', '在同一份会话上接着跑，上下文保留、不加新指令；只对被中断过的有效。', `await api.subagent.resume('paper')`),
+      a('intervene', 'subagent.intervene(key, message)', '给运行中的子代理插一条指令', '用于纠偏；消息排队等子代理下一跳消费，不要频繁打断。', `await api.subagent.intervene('paper', '先只看第 3 节')`),
+      a('interrupt', 'subagent.interrupt(key)', '中断一个子代理任务', '立刻停跑但保留已产出的内容；之后可用 resume 继续。', `await api.subagent.interrupt('paper')`),
+      a('view', 'subagent.view(key)', '查看子代理会话详情', '回状态、最近过程与上次交付；判断它卡没卡、跑偏没跑偏时用。', `const detail = await api.subagent.view('paper')`),
+      a('delete', 'subagent.delete(key)', '删除一个子代理的定义与会话', '不可逆；交付没拿走前不要删。', `await api.subagent.delete('paper')`),
+      a('wait', 'subagent.wait({ seconds })', '等子代理交付', '回已完成/仍在跑/超时三类；seconds 是本次愿意等的最大时长。不要用 sleep 轮询。', `const done = await api.subagent.wait({ seconds: 60 })`),
     ],
   ),
   g(
@@ -673,7 +704,7 @@ files.* 碰到它们会被拒绝，并提示该用哪一组。`,
       a('stat', 'files.stat(path)', '查文件或目录的属性', '回大小、类型与时间戳；只查非应用数据。', `const st = await api.files.stat('docs/目标/节点/workspace/main.py')`),
       a('mkdir', 'files.mkdir(path)', '创建一个目录', '父级自动递归；只建非应用数据目录（workspace/、static/、skills/、外部）。', `await api.files.mkdir('docs/目标/节点/workspace/output')`),
       a('copy', 'files.copy(from, to, { overwrite? }?)', '复制文件或目录', '两端都必须是非应用数据；目标存在时按 overwrite 决定是否覆盖。', `await api.files.copy('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
-      a('move', 'files.move(from, to)', '移动/重命名', '两端都必须是非应用数据；应用数据改名用 node.rename / doc.write。', `await api.files.move('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
+      a('move', 'files.move(from, to)', '移动/重命名', '两端都必须是非应用数据；应用数据改名用 graph.rename / content.write。', `await api.files.move('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
       a('delete', 'files.delete(path)', '删除文件/目录', '只删非应用数据；不可逆，先确认。', `await api.files.delete('docs/目标/节点/workspace/tmp.txt')`),
     ],
   ),
@@ -738,37 +769,27 @@ export function apiGroupOf(full: string): ApiGroupDoc | null {
   return GROUP_OF_FULL.get(full) ?? null
 }
 
-/** 是否真的进 Worker 名单 */
-export function isExposed(api: ApiDoc): boolean {
-  return api.exposed !== false && !api.deprecated
-}
-
-/** 对外可见的组（至少有一条 exposed api） */
+/** 对外可见的组（在注册表里登记过、能被调用的全部组，含 legacy 兼容组） */
 export function exposedGroups(): ApiGroupDoc[] {
-  return API_GROUPS.filter((group) => group.apis.some(isExposed))
+  return API_GROUPS
 }
 
-/** Worker 的 API_NAMES：从注册表派生，不再手抄 */
+/** 被宣传的组：系统提示词组索引与根 help 只列这些（legacy 旧写法组除外，见文件头纪律） */
+export function promotedGroups(): ApiGroupDoc[] {
+  return API_GROUPS.filter((group) => !group.legacy)
+}
+
+/** Worker 的 API_NAMES：从注册表派生，不再手抄（legacy 组也在——老对话还要调它） */
 export function exposedApiNames(): string[] {
-  return API_GROUPS.flatMap((group) => group.apis.filter(isExposed).map((api) => api.full))
+  return API_GROUPS.flatMap((group) => group.apis.map((api) => api.full))
 }
 
 /* ---------- 渲染 ---------- */
 
-const AVAILABILITY_LABEL: Record<ApiAvailability, string> = {
-  always: '恒可用',
-  exam: '试卷组：宿主注入 exam 时可用',
-  ui: '界面组：宿主注入 ui 时可用',
-  browser: '浏览器组：宿主注入 browser 时可用',
-  subagent: '子代理组：导师专用',
-  mcp: 'MCP 组：用户启用 MCP 时可用',
-  conditional: '条件组：宿主注入时可用；没有注入时调用会回「沙箱里没有这个 api」',
-}
-
 /** `api.__help()` 的正文 */
 export function renderRootHelp(): string {
   const lines = ['execute 沙箱 api 集（先查组，再查单条 api）：', '']
-  for (const group of exposedGroups()) {
+  for (const group of promotedGroups()) {
     lines.push(
       group.key === 'core'
         ? '- 顶层函数 — ' + group.label + '：' + group.intro
@@ -791,10 +812,19 @@ export function renderRootHelp(): string {
 export function renderGroupHelp(key: string): string {
   const group = API_GROUPS.find((x) => x.key === key)
   if (!group) return '没有 api.' + key + ' 这一组。先 await api.__help() 看有哪些组。'
-  const items = group.apis.filter(isExposed)
+  const items = group.apis
   if (!items.length) return 'api.' + key + ' 这一组在当前版本没有可用的 api。'
   const title = key === 'core' ? '顶层函数（api.<name>）' : 'api.' + key + ' — ' + group.label
-  const lines = [title, '', group.usage, '', '可用 api：']
+  const lines = [
+    title +
+      (group.legacy
+        ? '（旧写法：' + (group.legacyNote ?? '等价于 api.content.*，新代码请用 content.*') + '）'
+        : ''),
+    '',
+    group.usage,
+    '',
+    '可用 api：',
+  ]
   for (const api of items) {
     lines.push('- ' + api.signature + ' — ' + api.summary)
   }
@@ -827,10 +857,6 @@ export function renderApiHelp(full: string): string {
   if (api.returns) lines.push('', '返回：' + api.returns)
   lines.push('', '示例：', api.example)
   for (const ex of api.examples ?? []) lines.push('', ex)
-  if (api.availability && api.availability !== 'always') {
-    lines.push('', '可用性：' + AVAILABILITY_LABEL[api.availability])
-  }
-  if (api.deprecated) lines.push('', '已退役：' + api.deprecated)
   return lines.join('\n')
 }
 
@@ -849,16 +875,16 @@ export function buildSandboxHelp(): SandboxHelp {
   const apis: Record<string, string> = {}
   for (const group of exposedGroups()) {
     groups[group.key] = renderGroupHelp(group.key)
-    for (const api of group.apis.filter(isExposed)) {
+    for (const api of group.apis) {
       apis[api.full] = renderApiHelp(api.full)
     }
   }
   return { root: renderRootHelp(), groups, apis }
 }
 
-/** 系统提示词里的 api 集索引：只给组名与一句说明，不给具体签名 */
+/** 系统提示词里的 api 集索引：只给组名与一句说明，不给具体签名（legacy 组不宣传） */
 export function groupIndexForSystemPrompt(): string {
-  return exposedGroups()
+  return promotedGroups()
     .map((group) =>
       group.key === 'core'
         ? '- 顶层函数：' + group.intro
@@ -872,17 +898,16 @@ export function catalogGroups(): Array<{
   key: string
   label: string
   intro: string
-  items: Array<{ name: string; signature: string; summary: string; availability: ApiAvailability }>
+  items: Array<{ name: string; signature: string; summary: string }>
 }> {
   return exposedGroups().map((group) => ({
     key: group.key,
     label: group.label,
     intro: group.intro,
-    items: group.apis.filter(isExposed).map((api) => ({
+    items: group.apis.map((api) => ({
       name: api.full,
       signature: api.signature,
       summary: api.summary,
-      availability: api.availability ?? 'always',
     })),
   }))
 }

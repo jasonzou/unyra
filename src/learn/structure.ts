@@ -65,6 +65,8 @@ export function canAddEdge(nodes: readonly StructureNode[], edges: readonly Grap
   const toKind = kindOf(nodes, to)
   if (!fromKind || !toKind) return false
   if (!canConnect(fromKind, toKind)) return false
+  // 入口的子级有且只有一个：接上第二份文档会被拒绝（权威根唯一，2026-10-22）
+  if (fromKind === 'entry' && edges.some((e) => e.from === from)) return false
   if (edges.some((e) => e.from === from && e.to === to)) return false
   return !wouldCycle(edges, from, to)
 }
@@ -146,11 +148,15 @@ export interface StructureMap {
    */
   edgeStyle?: EdgeStyle
   /**
-   * 被用户**主动从画布上移除**的实体（存的是 ref，不是节点 id）。
+   * 被用户**主动从画布上移除**的卡片（存的是**节点 id**，不是 ref）。
    *
    * 图会跟着实体自动补齐（agent 新写了教学文档就该冒出文档节点），
    * 但「我就是要把它从画布上拿掉」这件事得记下来，否则下一次对账又把它加回来。
    * 撤回（Ctrl+Z）会连这一笔一起退回。
+   *
+   * 为什么按 id 而不按 ref 记：派生节点的 id 是确定性的（`d:{实体}`、`n:{owner}:{名字}`），
+   * 实体还在卡就还在，按 id 拦得住；从左侧拖出来的自由卡**没有 ref**、只存在于
+   * saved.nodes 里，也只能按 id 拦。按 ref 记两类罩不全。
    */
   hidden?: string[]
 }
@@ -180,6 +186,73 @@ export function parentsOf(edges: readonly GraphEdge[], id: string): string[] {
 
 export function childrenOf(edges: readonly GraphEdge[], id: string): string[] {
   return edges.filter((e) => e.from === id).map((e) => e.to)
+}
+
+/* ---------- 叶子的 ref 与图的编辑操作 ---------- */
+
+/**
+ * 叶子的 ref 是 `{节点 id}:{名字}`：按**第一个**冒号切，名字里再冒号也不影响归属。
+ *
+ * 笔记与超级文档都以名字为身份（见不变量 2），这条格式规则同时被
+ * 派生（seedFromSource）、显示（resolveNodeView）与改名（renameLeafInMap）用——
+ * 只能有一份，两处各切一次就会出现「a:b」这种名字认错归属的事。
+ */
+export function splitLeafRef(ref: string): { owner: string; name: string } | null {
+  const at = ref.indexOf(':')
+  if (at <= 0 || at === ref.length - 1) return null
+  return { owner: ref.slice(0, at), name: ref.slice(at + 1) }
+}
+
+/**
+ * 从画布上移除一张卡：节点与相关边一起撤，墓碑去重追加进 hidden。
+ *
+ * 组件的三条删除路径（拖进垃圾桶 / Delete 键 / 右键菜单）都走它——
+ * 墓碑怎么记、边怎么清，只有这一份；组件只负责翻译事件。
+ * 节点不在图里时返回**同一份** map：调用方据此跳过写回，不留下一条空撤回。
+ */
+export function removeNodeFromMap(map: StructureMap, id: string): StructureMap {
+  if (!map.nodes.some((n) => n.id === id)) return map
+  return {
+    ...map,
+    version: 1,
+    nodes: map.nodes.filter((n) => n.id !== id),
+    edges: map.edges.filter((e) => e.from !== id && e.to !== id),
+    hidden: [...new Set([...(map.hidden ?? []), id])],
+  }
+}
+
+/**
+ * 改叶子卡片的名字：ref 与 **id 一起换**（id 是 `n:{owner}:{名字}` / `s:{owner}:{名字}`，
+ * 名字就是身份的一半）。
+ *
+ * 为什么 id 也要换：派生按「实体 → 确定性 id」补卡，只换 ref 的话，
+ * 派生会按新名字补一张新 id 的卡，旧 id 的卡又被「存过的卡原样保留」留在画布上——
+ * 同一份内容出现两张卡。id 不符合这个拼法的卡（老数据 / 自由卡）保持原 id 不动。
+ *
+ * 实体那一侧的改名**不在这里**：图里只有引用，内容永远只存一份——
+ * 组件要先调 onRenameNote 把实体改掉，再写回返回的图。
+ * 返回 null 表示无事可做：不是叶子卡、没有 ref、名字没变（含首尾空白）。
+ */
+export function renameLeafInMap(
+  map: StructureMap,
+  node: StructureNode,
+  name: string,
+): { map: StructureMap; leaf: { owner: string; name: string } } | null {
+  const trimmed = name.trim()
+  const leaf = node.ref ? splitLeafRef(node.ref) : null
+  if (!leaf || !trimmed || trimmed === leaf.name) return null
+  const gid = node.kind === 'superdoc' ? superdocGid : noteGid
+  const nextId = node.id === gid(leaf.owner, leaf.name) ? gid(leaf.owner, trimmed) : node.id
+  const swap = (id: string): string => (id === node.id ? nextId : id)
+  return {
+    map: {
+      ...map,
+      version: 1,
+      nodes: map.nodes.map((n) => (n.id === node.id ? { ...n, id: nextId, ref: `${leaf.owner}:${trimmed}` } : n)),
+      edges: map.edges.map((e) => ({ from: swap(e.from), to: swap(e.to) })),
+    },
+    leaf,
+  }
 }
 
 /* ---------- 卡片尺寸与包围盒 ---------- */
@@ -237,6 +310,33 @@ export function boundsOf(nodes: readonly StructureNode[], heightOf: HeightOf = d
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
 }
 
+/**
+ * 给一张新卡找一个**不与现有卡重叠**的落点：从锚点出发往下挪，直到腾出位置。
+ *
+ * 通过上游节点落地时用——目标项正下方的位置常已被兄弟占着，直接用锚点会把新卡
+ * 叠在别人身上。锚点本身不重叠就原样返回；挪到头（锚点一列全满）就返回最后一格，
+ * 调用方不必再判。四周各留 12px 的呼吸空隙，贴着算重叠。
+ */
+export function freeSpotNear(
+  nodes: readonly StructureNode[],
+  anchor: { x: number; y: number },
+  size: { width: number; height: number },
+  heightOf: HeightOf = defaultHeight,
+): { x: number; y: number } {
+  const GAP = 12
+  const overlaps = (x: number, y: number): boolean =>
+    nodes.some((n) => {
+      const r = rectOf(n, heightOf)
+      return x < r.x + r.width + GAP && r.x < x + size.width + GAP && y < r.y + r.height + GAP && r.y < y + size.height + GAP
+    })
+  let y = anchor.y
+  for (let i = 0; i <= nodes.length; i++) {
+    if (!overlaps(anchor.x, y)) return { x: anchor.x, y }
+    y += size.height + ROW_GAP
+  }
+  return { x: anchor.x, y }
+}
+
 /* ---------- 缩放 ---------- */
 
 /**
@@ -247,8 +347,9 @@ export function boundsOf(nodes: readonly StructureNode[], heightOf: HeightOf = d
  */
 export const STRUCT_MAX_ZOOM = 1.6
 
-/** 绝对兜底：节点被拖得很散时包围盒会很大，算出来的下限可能趋近 0——那等于什么都看不见 */
-export const STRUCT_MIN_ZOOM_FLOOR = 0.05
+/** 绝对兜底：节点被拖得很散时包围盒会很大，算出来的下限可能趋近 0——那等于什么都看不见。
+ * 0.02（2%）时一张卡片约 260px 宽仍保有 ~5px 轮廓，缩到底能看到比 0.05 时代大 2.5 倍的范围 */
+export const STRUCT_MIN_ZOOM_FLOOR = 0.02
 
 /** 适应画布时四周留白（屏幕像素，不参与缩放） */
 export const STRUCT_FIT_PADDING = 96
@@ -441,6 +542,8 @@ export interface SeedSourceNode {
    * 一旦凭空出现，整条链就会多出一截空壳。
    */
   hasOutline: boolean
+  /** 是不是这门课的根节点：是的话派生会生成入口节点，并把它的文档自动挂上去 */
+  isRoot?: boolean
   /** 旧树里「我 → 下游」的那些边（依赖边 from=我、to=下游） */
   downstream: string[]
   /** 笔记名 */
@@ -457,6 +560,11 @@ export const docGid = (id: string): string => `d:${id}`
 export const noteGid = (nodeId: string, name: string): string => `n:${nodeId}:${name}`
 export const superdocGid = (nodeId: string, name: string): string => `s:${nodeId}:${name}`
 export const examGid = (examId: string): string => `e:${examId}`
+/**
+ * 入口节点的确定性 id：每张图默认存在一个（不是用户拖出来的，是派生长出来的）。
+ * 以根知识节点为钥——它每目标唯一且跨会话稳定，存过的坐标才能在对账时接回去。
+ */
+export const entryGid = (rootNodeId: string): string => `entry:${rootNodeId}`
 
 /**
  * 把一批学习节点铺成图：每个节点拆成大纲节点 + 文档节点，笔记/试卷/超级文档挂在文档下游。
@@ -486,6 +594,18 @@ export function seedFromSource(
     if (item.hasOutline) {
       seedNodes.push({ id: outlineGid(item.id), kind: 'outline', ref: item.id })
       seedEdges.push({ from: docGid(item.id), to: outlineGid(item.id) })
+    }
+
+    /*
+     * 入口节点：每张图**默认存在**、有且只有一个，根文档自动挂到它上面
+     * （权威根由此而来）。它是派生长出来的，不是用户拖的——所以列表里没有它，
+     * 也不该被删（派生会无视它的墓碑，见 structureViewOf）。
+     * 放在种子阶段（而不是铺完坐标再补）：seedLayout 据此把入口排进第 0 列、
+     * 根文档排进第 1 列，「从入口往右读」的方向从一开始就是对的。
+     */
+    if (item.isRoot) {
+      seedNodes.push({ id: entryGid(item.id), kind: 'entry' })
+      seedEdges.push({ from: entryGid(item.id), to: docGid(item.id) })
     }
 
     // ref 指回现有实体：内容永远只存一份，图里只存引用（见不变量 2）
@@ -574,6 +694,12 @@ export function seedLayout(
     for (const e of edges) {
       if (e.from !== id) continue
       const next = d + 1
+      /*
+       * 深度的合法上限是「节点数 − 1」（一条链最多穿完所有节点）。正常入口
+       * （canAddEdge 的环检测 + 读盘校验）进不来环，但坏数据一旦带环，
+       * 没有这道闸深度就每绕一圈涨一格、队列永远不空，界面当场卡死。
+       */
+      if (next >= nodes.length) continue
       if ((depth.get(e.to) ?? -1) < next) {
         depth.set(e.to, next)
         queue.push(e.to)
@@ -655,18 +781,33 @@ export function normalizeStructure(raw: unknown): StructureMap {
   const src = raw as { nodes?: unknown; edges?: unknown; edgeStyle?: unknown; hidden?: unknown }
 
   const seenIds = new Set<string>()
+  /*
+   * 幽灵卡退役（2026-10-24 实体先行架构）：画布自有状态只剩**坐标与墓碑**，
+   * 卡片的存在性一律由 store 派生。历史上存过的三类无依托卡在读盘这一刻整体清理——
+   * 它们正是「生成一个、多出一个空节点」这类对账 bug 的全部来源：
+   * - 无 ref 的挂件卡（笔记 / 试卷 / 超级文档）：占位意图现在落在真实空实体上；
+   * - 无 ref 的大纲卡：前置知识大纲的触发改成了文档卡右键菜单，不再需要占位卡；
+   * - 无 slot 的空文档卡：子文档的正规入口是大纲目标项（点目标项即挂空文档）。
+   * 占着目标项的空文档卡是唯一保留的意图卡——它的依托是 store 里的大纲目标项。
+   * 被清理卡片的连线由下面的 canAddEdge 自动跟着失效（端点不在了就进不来）。
+   */
+  const GHOST_LEAF: ReadonlySet<string> = new Set(['note', 'exam', 'superdoc'])
   for (const item of Array.isArray(src.nodes) ? src.nodes : []) {
     if (!item || typeof item !== 'object') continue
     const n = item as Record<string, unknown>
     if (typeof n.id !== 'string' || !n.id || seenIds.has(n.id)) continue
     if (!isKind(n.kind)) continue
     if (!isFiniteNumber(n.x) || !isFiniteNumber(n.y)) continue
+    const hasRef = typeof n.ref === 'string' && !!n.ref
+    const hasSlot = typeof n.slot === 'string' && !!n.slot
+    if ((GHOST_LEAF.has(n.kind) || n.kind === 'outline') && !hasRef) continue
+    if (n.kind === 'doc' && !hasRef && !hasSlot) continue
     seenIds.add(n.id)
     out.nodes.push({
       id: n.id,
       kind: n.kind,
-      ...(typeof n.ref === 'string' && n.ref ? { ref: n.ref } : {}),
-      ...(typeof n.slot === 'string' && n.slot ? { slot: n.slot } : {}),
+      ...(hasRef ? { ref: n.ref as string } : {}),
+      ...(hasSlot ? { slot: n.slot as string } : {}),
       ...(typeof n.note === 'string' && n.note.trim() ? { note: n.note } : {}),
       x: n.x,
       y: n.y,
@@ -696,7 +837,8 @@ export function normalizeStructure(raw: unknown): StructureMap {
  *
  * 目标已经不在的那些直接丢掉（与 reading.json / essay.json 同一条纪律：目标没了，
  * 它那本账跟着没）；归一之后一个节点都不剩的也不留——空图等于「还没铺过」，
- * 留个空对象只会让写盘时多出一个空文件。
+ * 留个空对象只会让写盘时多出一个空文件。**例外是 hidden**：画布被删空但墓碑还在的
+ * 图必须留下，否则重启之后被删的卡会跟着实体集体复活。
  */
 export function normalizeStructureBook(raw: unknown, goalIds: ReadonlySet<string>): Record<string, StructureMap> {
   const out: Record<string, StructureMap> = {}
@@ -704,7 +846,7 @@ export function normalizeStructureBook(raw: unknown, goalIds: ReadonlySet<string
   for (const [goalId, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!goalIds.has(goalId)) continue
     const map = normalizeStructure(value)
-    if (map.nodes.length) out[goalId] = map
+    if (map.nodes.length || map.hidden?.length) out[goalId] = map
   }
   return out
 }

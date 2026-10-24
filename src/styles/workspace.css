@@ -394,3 +394,32 @@
     animation: none;
   }
 }
+
+/*
+ * 从节点列表拖出一张卡时，**能当它上级**的卡描一圈呼吸的光——
+ * 「手松在我身上能接住」的视觉语言。同样是 box-shadow：border 会挤动盒模型。
+ */
+@keyframes moji-structure-candidate {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--color-seal) 45%, transparent),
+      0 0 14px color-mix(in srgb, var(--color-seal) 28%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2.5px color-mix(in srgb, var(--color-seal) 80%, transparent),
+      0 0 22px color-mix(in srgb, var(--color-seal) 48%, transparent);
+  }
+}
+
+.moji-structure-candidate {
+  animation: moji-structure-candidate 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moji-structure-candidate {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-seal) 60%, transparent);
+  }
+}

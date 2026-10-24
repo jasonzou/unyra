@@ -559,6 +559,34 @@ const api = {
   },
 
   /**
+   * 上下文轨迹窗口（第三个 BrowserWindow，`?contextTrace=1` 分支，见 app/traceWindow）的
+   * **主窗口那一侧**。轨迹是**纯只读**的：主窗口把当前会话的原始数据整份推过去，轨迹
+   * 窗口没有任何回发通道。已经开着再 open 会聚焦并把数据换成新会话的。
+   */
+  traceHost: {
+    /** 开轨迹窗口（payload = 当前会话数据）；已经开着就聚焦并换数据（reused: true） */
+    open: (payload: unknown): Promise<ExamOpenResult> => ipcRenderer.invoke('trace:open', payload),
+    /** 把当前会话数据推给轨迹窗口（主窗口侧随数据变化持续推） */
+    push: (payload: unknown): void => ipcRenderer.send('trace:push', payload),
+    /** 轨迹窗口关掉了（任何原因）；主窗口据此停止推送。返回取消订阅函数 */
+    onClosed: (cb: () => void): (() => void) => {
+      const listener = () => cb()
+      ipcRenderer.on('trace:windowClosed', listener)
+      return () => ipcRenderer.removeListener('trace:windowClosed', listener)
+    },
+  },
+
+  /** 轨迹窗口那一侧：只收状态，没有任何写盘或回发通道 */
+  traceGuest: {
+    /** 订阅主窗口推来的会话数据；返回取消订阅函数（组件卸载时必须调用） */
+    onState: (cb: (payload: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, payload: unknown) => cb(payload)
+      ipcRenderer.on('trace:state', listener)
+      return () => ipcRenderer.removeListener('trace:state', listener)
+    },
+  },
+
+  /**
    * 外壳行为：关窗策略与托盘。
    *
    * 策略存在主进程（appdata 里的 global.yaml），这里只负责读写：真正拦关窗的是主进程，

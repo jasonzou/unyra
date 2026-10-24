@@ -458,7 +458,8 @@ export function createSubAgentManager(deps: SubAgentManagerDeps): SubAgentManage
 /**
  * 从导师的沙箱基座里按 apiGroups 取子集：**没开放的东西根本不注入**（buildApi 按
  * 「注入了才有」装配），再叠加通道口的硬白名单（apiAllow）与按需的参数说明（apiBrief）。
- * doc / node 的寻址与读写是必需的基座（buildApi 无条件装配它们），由 apiAllow 挡住越权调用。
+ * content / graph 的寻址与读写是必需的基座（docOps / nodeOps 无条件装配），由 apiAllow
+ * 挡住越权调用；content 的大纲与超级文档 part 分别依赖 outline / superdocs 注入，一并带过。
  * subagent 字段刻意不透传：子代理的 api 面里永远没有 subagent.*（不递归在装配层就断了）。
  */
 function subsetSandbox(base: SandboxOptions, groups: string[]): SandboxOptions {
@@ -473,7 +474,8 @@ function subsetSandbox(base: SandboxOptions, groups: string[]): SandboxOptions {
     ...(has('res') && base.resources ? { resources: base.resources } : {}),
     ...(has('web') && base.web ? { web: base.web } : {}),
     ...(has('memory') && base.memory ? { memory: base.memory } : {}),
-    ...(has('outline') && base.outline ? { outline: base.outline } : {}),
+    ...((has('content') || has('node') || has('outline')) && base.outline ? { outline: base.outline } : {}),
+    ...((has('content') || has('node') || has('sdoc')) && base.superdocs ? { superdocs: base.superdocs } : {}),
     ...(has('workspace') && base.workspace ? { workspace: base.workspace } : {}),
     ...(has('reading') && base.reading ? { reading: base.reading } : {}),
     ...(has('attention') && base.attention ? { attention: base.attention } : {}),

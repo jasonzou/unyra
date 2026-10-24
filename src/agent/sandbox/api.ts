@@ -6,12 +6,17 @@
  */
 import { needleForDoc } from '../../lib/docDom'
 import { TmpVars, type TmpInfo } from '../../lib/tmpStore'
-import type { MessageImage } from '../types'
 import { normalizeAskForm } from './askForm'
 import { compileBody } from './body'
-import { MAX_LOGGED_CALLS, MAX_RESULT_CHARS } from './limits'
+import { MAX_RESULT_CHARS } from './limits'
 import { asExamPayload, asIndex, asOptionalPath, asRecord, asText, type DocRef, type NodeRef } from './refs'
-import { apiDocOf, renderApiHelp, renderGroupHelp, renderRootHelp } from './apiRegistry'
+import { renderRootHelp } from './apiRegistry'
+import { attachNodeFacade, contentTarget, handleFor, registerNodeObjectApi, type ContentTarget } from './nodeObject'
+import { wrapApi, imagesOf } from './wrap'
+import type { HandleContext, NodeHandle } from '../../learn/nodeKinds'
+import { TextHandle } from '../../learn/nodeKinds/handle'
+import { OutlineHandle } from '../../learn/nodeKinds/outline'
+import { SuperdocHandle } from '../../learn/nodeKinds/superdoc'
 import { filesAccessError } from './dataPaths'
 import type { SandboxCall, SandboxOptions } from './types'
 import { getLoadedSkills, getActiveSkills } from '../skill/registry'
@@ -41,94 +46,7 @@ interface BuiltApi {
   tmp: TmpVars | null
 }
 
-/**
- * api 的失败表达方式：
- * 结构性失败一律回 { ok:false, error }，作为值回给模型，避免抛异常带崩同批次其它调用。
- */
-function isFailedValue(v: unknown): boolean {
-  if (!v || typeof v !== 'object') return false
-  const r = v as { ok?: unknown; error?: unknown }
-  return r.ok === false || typeof r.error === 'string'
-}
-
-/** api 返回值里夹带的图片引用（如 res.read 看了一张图）：见 ResourceOps 的说明 */
-export function imagesOf(value: unknown): MessageImage[] {
-  if (!value || typeof value !== 'object') return []
-  const imgs = (value as { images?: unknown }).images
-  return Array.isArray(imgs) ? (imgs as MessageImage[]) : []
-}/**
- * 这次调用失败了吗——失败的话把那句话记进 record（供结果顶部那份清单用）。
- * `{ok:false}` 与 `{error}` 两种写法都认，见 isFailedValue。
- */
-function markFailed(record: SandboxCall, value: unknown): void {
-  if (!isFailedValue(value)) return
-  record.ok = false
-  const v = value as { content?: unknown; error?: unknown }
-  const text =
-    typeof v.error === 'string' && v.error.trim()
-      ? v.error
-      : typeof v.content === 'string' && v.content.trim()
-        ? v.content
-        : ''
-  // 压成一行再截断：这句话要进结果顶部的清单，太长会把别的调用挤没
-  if (text) record.message = text.replace(/\s+/g, ' ').trim().slice(0, 300)
-}
-
-/** 把工具动作包成 api 方法：每次调用记一笔，异常转为结构化失败返回值，防止炸掉整批编排 */
-function wrapApi(api: Record<string, unknown>, name: string, fn: (args: unknown[]) => unknown, log: SandboxCall[]) {
-  /*
-   * 注册表是唯一入口：没登记的名字不许出现在沙箱里。
-   * 这条检查在 buildApi 阶段就炸，而不是等模型调到一半才发现「有这个 api 但没人知道怎么用」。
-   */
-  if (!apiDocOf(name)) {
-    throw new Error('[sandbox] api 未在 apiRegistry 登记：' + name + '（先在 apiRegistry.ts 补签名、用法与示例）')
-  }
-  const wrapped = (...args: unknown[]): unknown => {
-    const record: SandboxCall = { name, ok: true }
-    if (log.length < MAX_LOGGED_CALLS) log.push(record)
-    try {
-      const value = fn(args)
-      // 异步 api:
-      if (value instanceof Promise) {
-        return value.then(
-          (settled) => {
-            markFailed(record, settled)
-            return settled
-          },
-          (err: unknown) => {
-            record.ok = false
-            record.message = err instanceof Error ? err.message : 'api 调用失败'
-            return { ok: false, error: record.message }
-          },
-        )
-      }
-      markFailed(record, value)
-      return value
-    } catch (err) {
-      record.ok = false
-      record.message = err instanceof Error ? err.message : 'api 调用失败'
-      return { ok: false, error: record.message }
-    }
-  }
-  // 宿主侧（测试 / 超级文档桥）也挂一份同步 help；真沙箱由 sandboxRuntime 再挂一次
-  ;(wrapped as unknown as { __help: () => string }).__help = () => renderApiHelp(name)
-  const segs = name.split('.')
-  if (segs.length === 1) {
-    api[name] = wrapped
-    return
-  }
-  let cur = api
-  for (let i = 0; i < segs.length - 1; i++) {
-    const k = segs[i]
-    cur = ((cur[k] as Record<string, unknown>) || (cur[k] = {})) as Record<string, unknown>
-  }
-  const groupKey = segs[0]
-  const group = api[groupKey] as Record<string, unknown>
-  if (group && typeof group.__help !== 'function') {
-    ;(group as unknown as { __help: () => string }).__help = () => renderGroupHelp(groupKey)
-  }
-  cur[segs[segs.length - 1]] = wrapped
-}
+export { imagesOf }
 
 /**
  * 组装一次编排可用的 api。
@@ -155,63 +73,65 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
   const splitPathAndValue = (args: unknown[]): { path: string; value: string } =>
     args.length >= 2 ? { path: asText(args[0]), value: args[1] as string } : { path: '', value: args[0] as string }
 
+  /*
+   * 节点对象分发点：doc.* / content.* / outline.* 这些组都是「解析地址 → 实例化
+   * 节点对象 → 调成员方法」的薄适配（行为在 learn/nodeKinds 的类型子类里，多态）。
+   * ctx 每次现取（不持有快照），与其余各组同一条纪律。
+   */
+  const handleCtx = (): HandleContext => ({
+    doc: {
+      read: (id, kind, note) => opts.docOps.read(id, kind, note),
+      write: (id, kind, note, content) => opts.docOps.write(id, kind, note, content),
+      append: (id, kind, note, content) => opts.docOps.append(id, kind, note, content),
+      replace: (id, kind, note, range) => opts.docOps.replace(id, kind, note, range),
+    },
+    outline: opts.outline,
+    superdocs: opts.superdocs,
+  })
+  const nodeOf = (arg: unknown): { ok: true; h: NodeHandle; t: ContentTarget } | { ok: false; error: string } => {
+    const r = contentTarget(opts, arg)
+    if (!r.ok) return { ok: false, error: r.error }
+    const h = handleFor(handleCtx(), r.t)
+    if ('error' in h) return { ok: false, error: h.error }
+    return { ok: true, h, t: r.t }
+  }
+
   wrapApi(api, 'doc.read', (args) => {
-    const r = docRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const content = opts.docOps.read(r.ref.id, r.ref.kind, r.ref.note)
-    return { path: r.ref.docLabel, doc: r.ref.kind, chars: content.length, content }
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
+    const r = (n.h as TextHandle).read()
+    return { path: r.path, doc: n.t.part, chars: r.chars, content: r.content }
   }, log)
 
   wrapApi(api, 'doc.readRange', (args) => {
-    const r = docRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const content = opts.docOps.read(r.ref.id, r.ref.kind, r.ref.note)
-    const start = asIndex(args[1] ?? (args.length > 1 ? args[1] : undefined)) ?? 0
-    const end = asIndex(args[2]) ?? Math.min(content.length, start + 1500)
-    return {
-      path: r.ref.docLabel,
-      text: content.slice(start, end),
-      start,
-      end: Math.min(end, content.length),
-      total: content.length,
-    }
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
+    return (n.h as TextHandle).readRange(asIndex(args[1]) ?? 0, asIndex(args[2]))
   }, log)
 
   wrapApi(api, 'doc.find', (args) => {
-    const r = docRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const content = opts.docOps.read(r.ref.id, r.ref.kind, r.ref.note)
-    const needle = asText(args[1])
-    if (!needle) return { error: '要找的内容为空' }
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
     const opt = asRecord(args[2])
-    const from = asIndex(opt.from) ?? 0
-    const limit = Math.min(asIndex(opt.limit) ?? 10, 50)
-    const hits: Array<{ start: number; end: number; around: string }> = []
-    let idx = content.indexOf(needle, from)
-    while (idx >= 0 && hits.length < limit) {
-      hits.push({
-        start: idx,
-        end: idx + needle.length,
-        around: content.slice(Math.max(0, idx - 40), Math.min(content.length, idx + needle.length + 40)),
-      })
-      idx = content.indexOf(needle, idx + Math.max(1, needle.length))
-    }
-    return { path: r.ref.docLabel, query: needle, total: content.length, matches: hits.length, hits }
+    return (n.h as TextHandle).find(asText(args[1]), {
+      from: asIndex(opt.from) ?? 0,
+      limit: asIndex(opt.limit) ?? 10,
+    })
   }, log)
 
   wrapApi(api, 'doc.write', (args) => {
     const { path, value } = splitPathAndValue(args)
-    const r = docRef(path)
-    if ('error' in r) return { error: r.error }
-    return opts.docOps.write(r.ref.id, r.ref.kind, r.ref.note, asText(value))
+    const n = nodeOf(path)
+    if (!n.ok) return { error: n.error }
+    return (n.h as TextHandle).write(asText(value))
   }, log)
 
   wrapApi(api, 'doc.replace', (args) => {
     // 文档类 api 的区间写法统一是 (path, { start, end, content, expected })
-    const r = docRef(args[0])
-    if ('error' in r) return { error: r.error }
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
     const a = asRecord(args[1])
-    return opts.docOps.replace(r.ref.id, r.ref.kind, r.ref.note, {
+    return (n.h as TextHandle).replace({
       start: asIndex(a.start),
       end: asIndex(a.end),
       content: asText(a.content),
@@ -221,9 +141,9 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
 
   wrapApi(api, 'doc.append', (args) => {
     const { path, value } = splitPathAndValue(args)
-    const r = docRef(path)
-    if ('error' in r) return { error: r.error }
-    return opts.docOps.append(r.ref.id, r.ref.kind, r.ref.note, asText(value))
+    const n = nodeOf(path)
+    if (!n.ok) return { error: n.error }
+    return (n.h as TextHandle).append(asText(value))
   }, log)
 
   wrapApi(api, 'graph.list', () => opts.nodeOps.list(), log)
@@ -376,9 +296,9 @@ wrapApi(api, 'graph.relations', (args) => {
    * content.*：**一份内容的读 / 写 / 追加 / 查找只有这一套写法**。
    *
    * 为什么要有它：以前正文归 doc.*、大纲归 outline.*、超级文档归 sdoc.*，三组的读写形状
-   * 高度重复——模型每碰一种内容就要多记一组 api，而数据侧「加一种挂件」已经只是 parts 里
-   * 多一条（见 learn/files/nodeFile）。这里把内容读写也收敛成一套：**位置由 part 表达**，
-   * 新增挂件不需要新 api。
+   * 高度重复——模型每碰一种内容就要多记一组 api。这里把内容读写也收敛成一套：**位置由
+   * part 表达**。如今这一组与 node 对象通道（api.node）共用同一份行为（上面的 nodeOf
+   * 分发到 learn/nodeKinds 的类型子类），只是收参形状不同——它是旧写法，保留兼容。
    *
    * 两种写法都收：
    *   content.read('极限/笔记/错题本')                 // 字符串沿用原来的 path 语法
@@ -387,143 +307,91 @@ wrapApi(api, 'graph.relations', (args) => {
    *
    * **试卷不在这里**：它是「出卷 / 作答 / 判分」的业务对象，用 exam.*。
    */
-  const partTarget = (
-    arg: unknown,
-  ): { ok: true; nodeId: string; label: string; part: string; name?: string } | { ok: false; error: string } => {
-    if (arg === undefined || typeof arg === 'string') {
-      const r = opts.resolveDoc(arg ?? '')
-      if (!r.ok) return { ok: false, error: r.message }
-      if (r.ref.kind === 'note') {
-        return {
-          ok: true,
-          nodeId: r.ref.id,
-          label: r.ref.docLabel,
-          part: 'note',
-          ...(r.ref.note ? { name: r.ref.note } : {}),
-        }
-      }
-      return { ok: true, nodeId: r.ref.id, label: r.ref.docLabel, part: 'teaching' }
+  /** 一份内容读出来一律是字符串（大纲是 JSON 文本，方便模型直接看结构） */
+  const contentText = (n: { ok: true; h: NodeHandle; t: ContentTarget }): { text: string } | { error: string } => {
+    if (n.t.part === 'outline') {
+      const doc = (n.h as OutlineHandle).read()
+      return { text: doc == null ? '' : JSON.stringify(doc, null, 2) }
     }
-    const o = asRecord(arg)
-    const path = typeof o.path === 'string' ? o.path : typeof o.node === 'string' ? o.node : ''
-    const r = opts.resolveNode(path)
-    if (!r.ok) return { ok: false, error: r.message }
-    const raw = typeof o.part === 'string' && o.part.trim() ? o.part.trim() : 'teaching'
-    const cut = raw.indexOf(':')
-    const part = cut < 0 ? raw : raw.slice(0, cut)
-    const name = cut < 0 ? undefined : raw.slice(cut + 1).trim() || undefined
-    return { ok: true, nodeId: r.ref.id, label: r.ref.label + '/' + raw, part, ...(name ? { name } : {}) }
-  }
-
-  /** 内容读出来一律是字符串（大纲是 JSON 文本，方便模型直接看结构） */
-  const contentText = (t: { nodeId: string; part: string; name?: string }): { text: string } | { error: string } => {
-    if (t.part === 'teaching') return { text: opts.docOps.read(t.nodeId, 'teaching') }
-    if (t.part === 'note') return { text: opts.docOps.read(t.nodeId, 'note', t.name) }
-    if (t.part === 'outline') {
-      if (!opts.outline) return { error: '这一轮没有大纲能力（宿主未注入 outline）' }
-      const doc = opts.outline.read(t.nodeId)
-      return { text: doc ? JSON.stringify(doc, null, 2) : '' }
-    }
-    if (t.part === 'superdoc') {
-      if (!opts.superdocs) return { error: '这一轮没有超级文档能力（宿主未注入 superdocs）' }
-      if (!t.name) return { error: '超级文档要带名字：part 写 "superdoc:讲义"' }
-      const got = opts.superdocs.read(t.nodeId, t.name) as { ok?: boolean; html?: unknown; error?: string }
+    if (n.t.part === 'superdoc') {
+      const got = (n.h as SuperdocHandle).read() as { ok?: boolean; html?: unknown; error?: string }
       if (got && got.ok === false) return { error: got.error ?? '读不到这份超级文档' }
       return { text: typeof got?.html === 'string' ? got.html : '' }
     }
-    if (t.part === 'exam') {
-      return { error: '试卷用 exam.read（读一份卷子与作答记录）；content.* 只管正文 / 大纲 / 笔记 / 超级文档' }
-    }
-    return { error: `不认识的 part：「${t.part}」。可用：teaching / note:<名字> / outline / superdoc:<名字>` }
+    return { text: (n.h as TextHandle).read().content }
   }
 
-  wrapApi(api, 'content.read', (args) => {
-    const t = partTarget(args[0])
-    if (!t.ok) return { error: t.error }
-    const got = contentText(t)
-    if ('error' in got) return { error: got.error }
-    return { path: t.label, part: t.part, ...(t.name ? { name: t.name } : {}), chars: got.text.length, content: got.text }
-  }, log)
-
-  wrapApi(api, 'content.find', (args) => {
-    const t = partTarget(args[0])
-    if (!t.ok) return { error: t.error }
-    const got = contentText(t)
-    if ('error' in got) return { error: got.error }
-    const needle = asText(args[1])
+  const findIn = (text: string, path: string, part: string, needle: string, opt: Record<string, unknown>): unknown => {
     if (!needle) return { error: '要找的内容为空' }
-    const opt = asRecord(args[2])
     const from = asIndex(opt.from) ?? 0
     const limit = Math.min(asIndex(opt.limit) ?? 10, 50)
     const hits: Array<{ start: number; end: number; around: string }> = []
-    let idx = got.text.indexOf(needle, from)
+    let idx = text.indexOf(needle, from)
     while (idx >= 0 && hits.length < limit) {
       hits.push({
         start: idx,
         end: idx + needle.length,
-        around: got.text.slice(Math.max(0, idx - 40), Math.min(got.text.length, idx + needle.length + 40)),
+        around: text.slice(Math.max(0, idx - 40), Math.min(text.length, idx + needle.length + 40)),
       })
-      idx = got.text.indexOf(needle, idx + Math.max(1, needle.length))
+      idx = text.indexOf(needle, idx + Math.max(1, needle.length))
     }
-    return { path: t.label, part: t.part, query: needle, total: got.text.length, matches: hits.length, hits }
+    return { path, part, query: needle, total: text.length, matches: hits.length, hits }
+  }
+
+  wrapApi(api, 'content.read', (args) => {
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
+    if (n.t.part === 'teaching' || n.t.part === 'note') {
+      const r = (n.h as TextHandle).read()
+      return { path: r.path, part: n.t.part, ...(n.t.name ? { name: n.t.name } : {}), chars: r.chars, content: r.content }
+    }
+    const got = contentText(n)
+    if ('error' in got) return { error: got.error }
+    return { path: n.h.label, part: n.t.part, ...(n.t.name ? { name: n.t.name } : {}), chars: got.text.length, content: got.text }
+  }, log)
+
+  wrapApi(api, 'content.find', (args) => {
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
+    const got = contentText(n)
+    if ('error' in got) return { error: got.error }
+    return findIn(got.text, n.h.label, n.t.part, asText(args[1]), asRecord(args[2]))
   }, log)
 
   wrapApi(api, 'content.write', (args) => {
     const first = args[0]
     // 两种写法：content.write(target, body) 与 content.write({ node, part, body })
     const inline = first && typeof first === 'object' && !Array.isArray(first) && 'body' in (first as object)
-    const t = partTarget(first)
-    if (!t.ok) return { error: t.error }
+    const n = nodeOf(first)
+    if (!n.ok) return { error: n.error }
     const body = inline ? (first as Record<string, unknown>).body : args[1]
-
-    if (t.part === 'teaching') return opts.docOps.write(t.nodeId, 'teaching', undefined, asText(body))
-    if (t.part === 'note') return opts.docOps.write(t.nodeId, 'note', t.name, asText(body))
-    if (t.part === 'outline') {
-      if (!opts.outline) return { error: '这一轮没有大纲能力（宿主未注入 outline）' }
-      let payload: unknown = body
-      if (typeof body === 'string') {
-        try {
-          payload = JSON.parse(body)
-        } catch {
-          return { error: '大纲要写成对象：{ intro, children: [{ title, summary }] }（传字符串时必须是合法 JSON）' }
-        }
-      }
-      if (!payload || typeof payload !== 'object') {
-        return { error: '大纲要写成对象：{ intro, children: [{ title, summary }] }' }
-      }
-      const a = asRecord(payload)
-      return opts.outline.write(t.nodeId, { intro: a.intro, children: a.children })
-    }
-    if (t.part === 'superdoc') {
-      if (!opts.superdocs) return { error: '这一轮没有超级文档能力（宿主未注入 superdocs）' }
-      if (!t.name) return { error: '超级文档要带名字：part 写 "superdoc:讲义"' }
-      return opts.superdocs.write(t.nodeId, t.name, asText(body))
-    }
-    if (t.part === 'exam') {
-      return { error: '试卷不能这样写：出卷用 exam.create，判分用 exam.grade' }
-    }
-    return { error: `不认识的 part：「${t.part}」。可用：teaching / note:<名字> / outline / superdoc:<名字>` }
+    if (n.t.part === 'teaching' || n.t.part === 'note') return (n.h as TextHandle).write(asText(body))
+    if (n.t.part === 'outline') return (n.h as OutlineHandle).write(body)
+    if (n.t.part === 'superdoc') return (n.h as SuperdocHandle).write(asText(body))
+    return { error: `不认识的 part：「${n.t.part}」。可用：teaching / note:<名字> / outline / superdoc:<名字>` }
   }, log)
 
   wrapApi(api, 'content.append', (args) => {
-    const t = partTarget(args[0])
-    if (!t.ok) return { error: t.error }
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
     const body = asText(args[1])
-    if (t.part === 'teaching') return opts.docOps.append(t.nodeId, 'teaching', undefined, body)
-    if (t.part === 'note') return opts.docOps.append(t.nodeId, 'note', t.name, body)
-    return { error: '只有正文与笔记能追加；大纲 / 超级文档请整份 content.write' }
+    if (n.t.part === 'teaching' || n.t.part === 'note') return (n.h as TextHandle).append(body)
+    return { error: '只有正文与笔记能追加；大纲 / 超级文档请整份写（content.write 或节点对象的 write）' }
   }, log)
 
   wrapApi(api, 'content.readRange', (args) => {
-    const t = partTarget(args[0])
-    if (!t.ok) return { error: t.error }
-    const got = contentText(t)
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
+    if (n.t.part === 'teaching' || n.t.part === 'note') {
+      return (n.h as TextHandle).readRange(asIndex(args[1]) ?? 0, asIndex(args[2]))
+    }
+    const got = contentText(n)
     if ('error' in got) return { error: got.error }
     const start = asIndex(args[1]) ?? 0
     const end = asIndex(args[2]) ?? Math.min(got.text.length, start + 1500)
     return {
-      path: t.label,
-      part: t.part,
+      path: n.h.label,
+      part: n.t.part,
       text: got.text.slice(start, end),
       start,
       end: Math.min(end, got.text.length),
@@ -532,13 +400,13 @@ wrapApi(api, 'graph.relations', (args) => {
   }, log)
 
   wrapApi(api, 'content.replace', (args) => {
-    const t = partTarget(args[0])
-    if (!t.ok) return { error: t.error }
-    if (t.part !== 'teaching' && t.part !== 'note') {
-      return { error: '只有正文与笔记能按区间改；大纲 / 超级文档请整份 content.write' }
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
+    if (n.t.part !== 'teaching' && n.t.part !== 'note') {
+      return { error: '只有正文与笔记能按区间改；大纲 / 超级文档请整份写（content.write 或节点对象的 write）' }
     }
     const a = asRecord(args[1])
-    return opts.docOps.replace(t.nodeId, t.part === 'note' ? 'note' : 'teaching', t.name, {
+    return (n.h as TextHandle).replace({
       start: asIndex(a.start),
       end: asIndex(a.end),
       content: asText(a.content),
@@ -553,46 +421,43 @@ wrapApi(api, 'graph.relations', (args) => {
    * 不再另开一套遍历——**列清单与看详情必须是同一份数据**，否则模型会看到两套说法。
    */
   wrapApi(api, 'content.list', (args) => {
-    const t = partTarget(args[0])
-    if (!t.ok) return { error: t.error }
-    const detail = opts.nodeOps.read(t.nodeId) as Record<string, unknown> | null
+    const r = nodeRef(asRecord(args[0]).node ?? asText(args[0]))
+    if ('error' in r) return { error: r.error }
+    const detail = opts.nodeOps.read(r.ref.id) as Record<string, unknown> | null
     if (!detail) return { error: '这个节点已经不在了' }
     if (typeof detail.error === 'string') return { error: detail.error }
     return {
-      path: detail.title ?? t.label,
+      path: detail.title ?? r.ref.label,
       parts: Array.isArray(detail.docs) ? detail.docs : [],
     }
   }, log)
 
   wrapApi(api, 'content.remove', (args) => {
-    const t = partTarget(args[0])
-    if (!t.ok) return { error: t.error }
-    if (t.part === 'superdoc') {
-      if (!opts.superdocs) return { error: '这一轮没有超级文档能力（宿主未注入 superdocs）' }
-      if (!t.name) return { error: '删超级文档要带名字：part 写 "superdoc:讲义"' }
-      return opts.superdocs.remove(t.nodeId, t.name)
-    }
+    const n = nodeOf(args[0])
+    if (!n.ok) return { error: n.error }
+    if (n.t.part === 'superdoc') return (n.h as SuperdocHandle).remove()
     return {
       error: 'content.remove 只删超级文档。正文清空用 content.write(path, "")；笔记与节点的删除走 graph.delete',
     }
   }, log)
 
   if (opts.outline) {
-    const outline = opts.outline
+    // outline.* 是旧写法：地址钉死 part:'outline'（字符串 path 原样带过去）
+    const outlineArg = (arg: unknown) =>
+      arg && typeof arg === 'object' ? { ...(arg as Record<string, unknown>), part: 'outline' } : { node: typeof arg === 'string' ? arg : '', part: 'outline' }
     wrapApi(api, 'outline.read', (args) => {
-      const r = nodeRef(args[0])
-      if ('error' in r) return { error: r.error }
-      return outline.read(r.ref.id)
+      const n = nodeOf(outlineArg(args[0]))
+      if (!n.ok) return { error: n.error }
+      return (n.h as OutlineHandle).read()
     }, log)
 
     wrapApi(api, 'outline.write', (args) => {
       // 两种写法都收：outline.write(path, { intro, children }) 与 outline.write({ intro, children })
       const first = args[0]
       const payloadFirst = !!first && typeof first === 'object'
-      const r = nodeRef(payloadFirst ? '' : first)
-      if ('error' in r) return { error: r.error }
-      const a = asRecord(payloadFirst ? first : args[1])
-      return outline.write(r.ref.id, { intro: a.intro, children: a.children })
+      const n = nodeOf(outlineArg(payloadFirst ? undefined : first))
+      if (!n.ok) return { error: n.error }
+      return (n.h as OutlineHandle).write(payloadFirst ? first : args[1])
     }, log)
   }
 
@@ -1861,6 +1726,14 @@ wrapApi(api, 'graph.relations', (args) => {
       ...(exitCode !== 0 ? { error: `脚本退出异常，退出码: ${exitCode}` } : {}),
     }
   }, log)
+
+  /*
+   * 节点对象通道（api.node）：登记 node.get / node.invoke，再把 api.node 包成
+   * 可调用的门面——进程内直调（探针 / 超级文档桥）与真沙箱（sandboxRuntime）
+   * 两侧行为一致。放最后：门面要读已注册的 node.get / node.invoke。
+   */
+  registerNodeObjectApi(api, opts, log, handleCtx)
+  attachNodeFacade(api)
 
   // 根 help：顶层函数与各组的总览。真沙箱由 sandboxRuntime 再挂一次（同步、不花宿主往返）
   ;(api as unknown as { __help: () => string }).__help = () => renderRootHelp()

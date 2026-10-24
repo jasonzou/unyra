@@ -361,6 +361,16 @@ export interface Conversation {
    * 一起消失。没有子代理的对话不写这个字段（空桶存 undefined）。
    */
   subagents?: SubAgentBucket
+  /**
+   * **固化的系统提示词**：这段对话的第一次请求抓一份、之后每一轮都用它（不再现拼）。
+   *
+   * 为什么固化进对话：系统提示词只描述目标一级、本来就不随轮次变——把它钉死在对话
+   * 数据上，a) 前缀缓存的「system 段」在对话生命周期内逐字节稳定（设置中途改动不会
+   * 把进行中的对话前缀打断）；b) 轨迹查看器（agent/contextTrace）能展示「当时发出去
+   * 的到底是哪一份」。兼容老数据：没有这个字段就在下一轮请求前现场抓一份补上并落盘，
+   * 之后与新数据完全一致。
+   */
+  systemPrompt?: string
 }
 
 /**
@@ -368,8 +378,9 @@ export interface Conversation {
  *
  * 子代理是导师派出去干活的「分身」：各有自己独立的上下文，在导师的对话里跑自己的
  * 「思考 → 工具 → 观察」循环，跑完只把**一份交付消息**交回导师（中间过程不进导师上下文）。
- * 没有内置的：导师用 agent_spawn 先定义（系统提示词与可用的 api 组），**定义完成即启动**；
- * 定义只活在当前这段对话里，不能跨对话复用，本对话内可反复派活（会话按 key 复用）。
+ * 没有内置的：导师用 api.subagent.create 先登记定义（系统提示词与可用的 api 组），
+ * 再 api.subagent.run 派任务；登记只活在当前这段对话里，不能跨对话复用，
+ * 本对话内可反复派活（会话按 key 复用）。
  * 架构与边界见 docs/subagent-architecture.md；实现见 agent/subagent/。
  */
 
@@ -413,7 +424,7 @@ export interface SubAgentSession {
 
 /** 一段对话的子代理桶：自定义定义 + 会话。生命周期 = 这段导师对话（随 chat.json 落盘） */
 export interface SubAgentBucket {
-  /** 导师 agent_spawn 登记的定义（只在本对话内有效） */
+  /** 导师经 api.subagent.create 登记的定义（只在本对话内有效） */
   defs: SubAgentDef[]
   sessions: SubAgentSession[]
 }

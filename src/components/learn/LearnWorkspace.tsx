@@ -104,6 +104,7 @@ import { addLocalFile } from '../../learn/localfiles'
 import { normalizeWebInput } from '../../learn/webUrl'
 import type { BrowserDeps } from '../../learn/web/browserOps'
 import {
+  upsertExam,
   addConversation,
   conversationById,
   deleteConversation,
@@ -227,7 +228,7 @@ import { setPluginDocOpener } from '../../lib/pluginDoc'
 import { focusWebAddress } from './web/addressFocus'
 import FindBar from './FindBar'
 import SuperDocView from './SuperDocView'
-import { readSuperDoc } from '../../learn/superdocs'
+import { readSuperDoc, writeSuperDocIn } from '../../learn/superdocs'
 import { superDocsOf } from '../../learn/types'
 import { findMethod, runMethodEntry } from '../../learn/methods'
 import { learnSandboxOps } from '../../learn/useAgent'
@@ -417,6 +418,34 @@ export default function LearnWorkspace({
    */
   /** 上下文比对调试器：悬浮窗口（可拖动），只在开发者模式里打开（见 AgentSettingsPanel 的开发者分页） */
   const debugWin = usePresence()
+  /**
+   * 上下文轨迹：**独立的 Electron 窗口**（与考试窗口同一套结构，见 electron/app/traceWindow）。
+   * 主窗口是数据拥有者：打开时把当前激活会话整份递过去，开着期间随数据变化持续 push；
+   * 窗口关掉（onClosed）就停。轨迹是只读的，那边没有任何回发通道。
+   */
+  const [traceWinOpen, setTraceWinOpen] = useState(false)
+  const storeConvRef = useRef(store)
+  storeConvRef.current = store
+  const openContextTrace = useCallback(() => {
+    const s = storeConvRef.current
+    const conv = s.conversations.find((c) => c.id === s.activeConversationId) ?? null
+    void native()
+      .traceHost.open(conv)
+      .then((r) => {
+        if (r.ok) setTraceWinOpen(true)
+      })
+      .catch(() => {})
+  }, [])
+  // 窗口开着：会话数据一变就推一份（activate 会话切换、流式里程碑落库都会走到）
+  useEffect(() => {
+    if (!traceWinOpen) return
+    const s = storeConvRef.current
+    native()
+      .traceHost.push(s.conversations.find((c) => c.id === s.activeConversationId) ?? null)
+    // 依赖里不放 store 整体（每次轮转都换引用）——只盯 conversations 与激活会话两个字段
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [traceWinOpen, store.conversations, store.activeConversationId])
+  useEffect(() => native().traceHost.onClosed(() => setTraceWinOpen(false)), [])
   /*
    * 文档区查找 / 替换条：null = 关着，'find' = 只有查找行，'replace' = 展开替换行。
    * focusTick 每次按快捷键都 +1：条子开着时再按一次 Ctrl+F，要把焦点抢回查找框。
@@ -2998,6 +3027,7 @@ export default function LearnWorkspace({
     startSuperLab,
     startBrowserUse,
     startOutline,
+    startPrereqOutline,
     workflowRows,
     runWorkflowRow,
     removeWorkflowRow,
@@ -3580,7 +3610,7 @@ export default function LearnWorkspace({
   }
 
   const generateTeachingDoc = useCallback(
-    (targetNode: KnowledgeNode) => {
+    (targetNode: KnowledgeNode, hint?: string) => {
       if (!hasKey) {
         onToast(t('生成教学文档需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
         onOpenSettings()
@@ -3593,7 +3623,8 @@ export default function LearnWorkspace({
         set(nextStore)
         convId = conversation.id
       }
-      agent.autoTeach({ goalId: targetNode.goalId, nodeId: targetNode.id, conversationId: convId }, false)
+      // hint 是发起方的意图上下文（如结构画布的「落地哪条目标项」），跟着这一轮进模型
+      agent.autoTeach({ goalId: targetNode.goalId, nodeId: targetNode.id, conversationId: convId }, false, hint)
       onToast(t('已开始为「{0}」生成教学文档', targetNode.title))
     },
     [hasKey, providerName, onToast, onOpenSettings, getLatest, set, agent],
@@ -3625,12 +3656,14 @@ export default function LearnWorkspace({
    * 与其它写操作同一条路子——先在最新快照上算好，再整体替换（图是不可变数据，
    * 拖动、连线、加节点都返回一份新图）。空图不留在 store 里：`structure.json`
    * 的空壳没有意义，读盘那一侧也按「空 = 还没铺过」处理。
+   * 但**画布被删空 ≠ 没铺过**：hidden 里还记着墓碑，此时丢掉整张图，
+   * 下一次派生所有被删的卡会集体复活——nodes 和 hidden 都空了才算真的空。
    */
   const updateStructure = useCallback(
     (goalId: string, next: StructureMap) => {
       const s = getLatest()
       const structure = { ...(s.structure ?? {}) }
-      if (next.nodes.length) structure[goalId] = next
+      if (next.nodes.length || next.hidden?.length) structure[goalId] = next
       else delete structure[goalId]
       set({ ...s, structure: Object.keys(structure).length ? structure : undefined })
     },
@@ -3649,6 +3682,46 @@ export default function LearnWorkspace({
       const r = createNote(s, nodeId)
       if (!r.name) return null
       set(r.store)
+      return r.name
+    },
+    [getLatest, set],
+  )
+
+  /*
+   * 挂件实体先行（与笔记同一条）：试卷 / 超级文档拖到文档卡上就建真实空实体。
+   * 卡的 id 从实体确定性派生，出题时同 id 吸收（见 workspace/examTools 的 createExam）、
+   * 超级文档按名字覆写——「生成」填充前后卡的坐标与连线始终稳定，画布零对账。
+   */
+  const createStructureExam = useCallback(
+    (nodeId: string): string | null => {
+      const s = getLatest()
+      const node = nodeById(s, nodeId)
+      if (!node) return null
+      const exam: Exam = {
+        id: crypto.randomUUID(),
+        nodeId,
+        goalId: node.goalId,
+        title: node.title + ' · 待出题',
+        kind: 'quiz',
+        level: 'easy',
+        minutes: 0,
+        questions: [],
+        attempts: [],
+        createdAt: Date.now(),
+      }
+      set(upsertExam(s, exam))
+      return exam.id
+    },
+    [getLatest, set],
+  )
+
+  const createStructureSuperDoc = useCallback(
+    (nodeId: string): string | null => {
+      const s = getLatest()
+      const node = nodeById(s, nodeId)
+      if (!node) return null
+      const r = writeSuperDocIn(node, '实验', '', Date.now())
+      set({ ...s, nodes: s.nodes.map((n) => (n.id === nodeId ? r.node : n)) })
       return r.name
     },
     [getLatest, set],
@@ -3673,11 +3746,11 @@ export default function LearnWorkspace({
     [getLatest, set],
   )
 
-  /** 空文档卡上的「生成文档」：复用正文区那颗按钮同一条路径 */
+  /** 空文档卡上的「生成文档」：复用正文区那颗按钮同一条路径；hint 为画布侧的意图 */
   const generateDocForNode = useCallback(
-    (nodeId: string) => {
+    (nodeId: string, hint?: string) => {
       const n = nodeById(getLatest(), nodeId)
-      if (n) generateDocRef.current(n)
+      if (n) generateDocRef.current(n, hint)
     },
     [getLatest],
   )
@@ -4462,6 +4535,7 @@ export default function LearnWorkspace({
                   onToast(t('超级导师设置已保存'))
                 }}
                 onOpenContextDebugger={() => debugWin.setOpen(true)}
+                onOpenContextTrace={openContextTrace}
                 flowRows={workflowRows}
                 onRunWorkflow={runWorkflowRow}
                 onRemoveWorkflow={removeWorkflowRow}
@@ -4716,10 +4790,13 @@ export default function LearnWorkspace({
                   docs={explorerDocs}
                   exams={explorerExams}
                   onCreateNote={createStructureNote}
+                  onCreateExam={createStructureExam}
+                  onCreateSuperDoc={createStructureSuperDoc}
                   onRenameNote={renameNodeNote}
                   onAddOutlineEntry={addOutlineEntry}
                   onCreateChildDoc={createChildDoc}
                   onGenerateDoc={generateDocForNode}
+                  onGenerateOutline={startPrereqOutline}
                   onToast={onToast}
                   focusTarget={outlineFocus}
                   onFocusHandled={handleOutlineFocusHandled}

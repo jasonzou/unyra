@@ -5,6 +5,7 @@ import {
   Copy,
   Cpu,
   Layers,
+  ListTree,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -25,9 +26,10 @@ interface ToolsTabProps {
   settings: AgentSettings
   onChange: (next: AgentSettings) => void
   onOpenContextDebugger: () => void
+  onOpenContextTrace: () => void
 }
 
-export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTabProps) {
+export function ToolsTab({ settings, onChange, onOpenContextDebugger, onOpenContextTrace }: ToolsTabProps) {
   // 选项卡内部视图：'all' | 'context' | 'catalog' | 'process'
   const [subTab, setSubTab] = useState<'all' | 'context' | 'catalog' | 'process'>('all')
 
@@ -215,6 +217,14 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
               >
                 <Bug size={13} />
                 <span>{t('打开对比调试器')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={onOpenContextTrace}
+                className="flex items-center gap-1.5 rounded-xl bg-seal px-3 py-1.5 text-[11.5px] font-medium text-white shadow-2xs transition hover:bg-seal-deep"
+              >
+                <ListTree size={13} />
+                <span>{t('打开上下文轨迹')}</span>
               </button>
             </div>
           </div>
@@ -433,19 +443,6 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
                             <code className="shrink-0 rounded bg-paper-deep border border-line/60 px-2 py-0.5 font-mono text-[11px] font-semibold text-seal-deep">
                               api.{item.signature}
                             </code>
-                            {item.availability && item.availability !== 'always' && (
-                              <span className="shrink-0 rounded bg-line/60 px-1.5 py-px text-[9.5px] text-ink-soft">
-                                {item.availability === 'exam'
-                                  ? t('考试在场')
-                                  : item.availability === 'subagent'
-                                    ? t('导师专用')
-                                    : item.availability === 'mcp'
-                                      ? t('已配置 MCP 时')
-                                      : item.availability === 'conditional'
-                                        ? t('宿主注入时')
-                                        : t('窗口界面')}
-                              </span>
-                            )}
                           </div>
 
                           <button

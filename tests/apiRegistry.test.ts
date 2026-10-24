@@ -12,8 +12,8 @@ import {
   buildSandboxHelp,
   catalogGroups,
   exposedApiNames,
-  exposedGroups,
   groupIndexForSystemPrompt,
+  promotedGroups,
   renderApiHelp,
   renderGroupHelp,
   renderRootHelp,
@@ -77,19 +77,36 @@ describe('注册表形状', () => {
 })
 
 describe('__help() 渲染', () => {
-  it('根 help 列出全部组，并给出三级用法', () => {
+  it('根 help 列出被宣传的组并给出三级用法；legacy 旧写法组不再上目录', () => {
     const text = renderRootHelp()
-    for (const group of exposedGroups()) {
+    for (const group of promotedGroups()) {
       if (group.key === 'core') continue
-      expect(text).toContain('api.' + group.key)
+      expect(text, group.key).toContain('api.' + group.key)
     }
     expect(text).toContain('api.<组>.__help()')
     expect(text).toContain('api.<组>.<api>.__help()')
+    // 旧写法组仍可调用（老对话的历史里还有它），但不再被推荐
+    expect(text).not.toContain('api.doc —')
+    expect(text).not.toContain('api.outline —')
+    expect(text).not.toContain('api.sdoc —')
   })
 
-  it('组 help 列出组内每条 api 的签名与一句话用法', () => {
+  it('系统提示词的组索引只有组名与一句说明，不泄露具体签名，也不宣传 legacy 组', () => {
+    const index = groupIndexForSystemPrompt()
+    expect(index).toContain('api.graph — 节点与拓扑')
+    expect(index).toContain('api.node — 节点对象')
+    expect(index).not.toContain('api.doc —')
+    expect(index).not.toContain('api.content —')
+    expect(index).not.toContain('api.outline —')
+    expect(index).not.toContain('api.sdoc —')
+    expect(index).not.toContain('doc.write(path')
+    expect(index).not.toContain('graph.read(path)')
+  })
+
+  it('legacy 组直查 help 仍可用，并明说「等价于 content.*」', () => {
     const text = renderGroupHelp('doc')
     expect(text).toContain('api.doc — 教学文档与笔记')
+    expect(text).toContain('旧写法')
     expect(text).toContain('doc.read(')
     expect(text).toContain('doc.write(')
     expect(text).toContain('api.doc.<api>.__help()')

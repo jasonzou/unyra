@@ -31,6 +31,7 @@ import {
   nodeById,
   prereqIds,
   removeExam,
+  shellExamOf,
   upsertExam,
   type GradePayload,
 } from '../../../learn/graph'
@@ -115,8 +116,14 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
         typeof payload.title === 'string' && payload.title.trim()
           ? payload.title.trim()
           : `${node.title} · ${EXAM_KIND_LABEL[kind]}`
+      /*
+       * 空壳吸收（实体先行模型）：画布上拖出的空试卷卡是一份真实实体（0 题 0 考的壳），
+       * 出题时沿用它的 id 与创建时间落库——卡原位变实，坐标、连线、页签引用都不用动。
+       * 对模型完全透明：它只管照常 exam.create，宿主这一层保证壳被吸收而不是多出一份。
+       */
+      const shell = shellExamOf(s, nodeId)
       const exam: Exam = {
-        id: crypto.randomUUID(),
+        id: shell?.id ?? crypto.randomUUID(),
         nodeId,
         goalId: node.goalId,
         title,
@@ -124,7 +131,7 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
         level,
         minutes: mins.minutes,
         questions,
-        createdAt: Date.now(),
+        createdAt: shell?.createdAt ?? Date.now(),
         attempts: [],
       }
       /*
