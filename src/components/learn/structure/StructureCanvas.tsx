@@ -345,6 +345,13 @@ export const StructureCanvas = memo(function StructureCanvas({
   const spaceRef = useRef(false)
   const [spaceDown, setSpaceDown] = useState(false)
   const gestureRef = useRef<Gesture>(null)
+  /**
+   * 最近一次左键按下的卡片（双击的落点判定用）。画布容器在每次左键按下时
+   * 捕获指针，双击派生的 click/dblclick 目标会被重定向到容器——dblclick 的
+   * e.target 到不了卡片上（「双击卡片打开」其实从来没通过 dblclick 生效过，
+   * 打开靠的是第一下点标题），落点只能认按下那一刻记下的这份。
+   */
+  const lastDownCardRef = useRef<{ id: string; openTitle: boolean } | null>(null)
   const fittedRef = useRef(false)
   /** 下一次 cards 变了之后要不要自动对镜头（自动排列之后用） */
   const fitNextRef = useRef(false)
@@ -847,6 +854,7 @@ export const StructureCanvas = memo(function StructureCanvas({
        */
       if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
         e.preventDefault() // 中键在 Chromium 里会触发自动滚动
+        lastDownCardRef.current = null
         setAnimating(false)
         if (e.button === 1) {
           /*
@@ -867,6 +875,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         return
       }
       if (e.button !== 0) return
+      lastDownCardRef.current = null
       // 菜单、按钮、输入框：容器一旦捕获指针，它们就收不到 click 了
       if (target.closest('button, textarea, input, [data-menu]')) return
       if (menu) {
@@ -960,6 +969,8 @@ export const StructureCanvas = memo(function StructureCanvas({
           setMultiIds(null)
         }
         setSelectedEdge(null)
+        const openTitle = !!target.closest('[data-open-title]')
+        lastDownCardRef.current = { id, openTitle }
         gestureRef.current = {
           mode: 'node',
           id,
@@ -968,7 +979,7 @@ export const StructureCanvas = memo(function StructureCanvas({
           origX: card.x,
           origY: card.y,
           moved: false,
-          openTitle: !!target.closest('[data-open-title]'),
+          openTitle,
           ...(group ? { group } : {}),
         }
         return
@@ -1232,19 +1243,22 @@ export const StructureCanvas = memo(function StructureCanvas({
       /*
        * 画布上的双击归画布自己（适应画布 / 聚焦节点），不再冒泡到文档区的
        * 「双击切纯净阅读」——两套手势长在同一个容器里，输的总是用户。
+       *
+       * 落点不认 e.target（指针捕获把 dblclick 的目标重定向到了容器，它永远
+       * 到不了卡片上），认的是 onPointerDown 记下的 lastDownCardRef。
        */
       e.stopPropagation()
       const hit = e.target as HTMLElement
-      // 双击在按钮 / 输入框上是连点，不是手势
+      // 双击在按钮 / 输入框上是连点，不是手势（这些元素不被捕获，target 是真的）
       if (hit.closest('button, textarea, input, [data-menu]')) return
-      // 双击标题 = 打开（第一下点标题已经把文档开了），不再聚焦
-      if (hit.closest('[data-open-title]')) return
-      const target = hit.closest<HTMLElement>('[data-node-id]')
-      if (!target) {
+      const down = lastDownCardRef.current
+      if (!down) {
         fit()
         return
       }
-      const card = cards.find((c) => c.uuid === target.dataset.nodeId)
+      // 双击标题 = 打开（第一下点标题已经把文档开了），不再聚焦
+      if (down.openTitle) return
+      const card = cards.find((c) => c.uuid === down.id)
       if (card) focusCard(card)
     },
     [fit, cards, focusCard],
