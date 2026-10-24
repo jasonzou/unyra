@@ -28,6 +28,8 @@ export const childId = 'n2'
 export function baseStore(): LearnStore {
   return {
     version: 2,
+    drafts: {},
+    docScroll: {},
     nodes: [
       {
         id: rootId, title: '微积分', key: '微积分', description: '微积分是什么',
@@ -38,7 +40,7 @@ export function baseStore(): LearnStore {
       {
         id: childId, title: '极限', key: '极限', description: '极限的描述',
         docs: { teaching: '极限的正文，先讲直觉。' },
-        notes: [{ name: '笔记', content: '我自己记的极限笔记', createdAt: NOW, updatedAt: NOW }],
+        notes: [{ id: 'note-probe', name: '笔记', content: '我自己记的极限笔记', createdAt: NOW, updatedAt: NOW }],
         annotations: [], status: 'learning', origin: 'ai', goalId, createdAt: NOW, updatedAt: NOW,
       },
     ],
@@ -61,13 +63,13 @@ export function baseStore(): LearnStore {
 
 const files = buildDocs(baseStore())
 const keys = [...files.keys()].sort()
-ok(keys.includes('docs/微积分/微积分.md'), '根节点教学文档落盘', keys)
-ok(keys.includes('docs/微积分/微积分.meta.json'), '根节点 meta 落盘', keys)
+ok(keys.includes('docs/微积分/微积分.node.json'), '根节点文件落盘（一个节点一个 .node.json）', keys)
+ok(keys.includes('docs/微积分/极限/极限.node.json'), '子节点文件落盘', keys)
 ok(keys.includes('docs/微积分/chat.json'), '对话写在目标目录', keys)
-ok(keys.includes('docs/微积分/极限/极限.md'), '子节点教学文档落盘', keys)
-ok(keys.includes('docs/微积分/极限/极限.notes/笔记.md'), '子节点笔记落盘（一份笔记一个文件）', keys)
 ok(!keys.includes('docs/微积分/极限/chat.json'), '子节点目录不再各写一份 chat.json', keys)
-ok(files.get('docs/微积分/极限/极限.notes/笔记.md') === '我自己记的极限笔记', '笔记正文写到 {节点}.notes/{名字}.md')
+ok(files.get('docs/微积分/极限/极限.node.json')!.includes('极限的正文，先讲直觉。'), '教学正文写进节点文件的 parts')
+ok(files.get('docs/微积分/极限/极限.node.json')!.includes('我自己记的极限笔记'), '笔记并进同一份节点文件')
+ok(files.get('docs/微积分/微积分.node.json')!.includes('我想弄懂微积分'), '目标问题只写在根节点文件里')
 ok(files.get('docs/微积分/chat.json')!.includes('"goalId": "g1"'), 'chat.json 里记的是 goalId')
 
 const noteTab = { id: 'n:' + childId + ':笔记', ref: { kind: 'note', nodeId: childId, note: '笔记' }, createdAt: NOW }
@@ -233,7 +235,11 @@ export const harness = (init: LearnStore, current: string) => {
   })
   const tool = createExecuteTool({ ...ops, runSandbox: fakeRunner })
   return {
-    run: (body: string) => tool.run({ description: '测试', body }, { nodeId: current, goalId }),
+    run: async (body: string) => {
+      const r = await tool.run({ description: '测试', body }, { nodeId: current, goalId })
+      if (!r.ok) console.log('PROBE-FAIL >>', body.slice(0, 120), '=>', r.content.slice(0, 240))
+      return r
+    },
     store: () => s,
     /** 假工作区的文件表：探针据此核对「api 说写了」与「盘上真有」 */
     ws: ws.files,

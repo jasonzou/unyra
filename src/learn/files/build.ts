@@ -1,28 +1,28 @@
-/** 这个文件负责什么：内存 → 磁盘——把整份学习数据摊成「相对路径 → 文件内容」（buildDocs），以及某个节点的文档在数据根下的落点（nodeDocPath）。 */
+/** 这个文件负责什么：内存 → 磁盘——把整份学习数据摊成「相对路径 → 文件内容」（buildDocs），以及某个节点的文件在数据根下的落点（nodeDocPath）。 */
 
 /* ---------- 内存 → 磁盘 ---------- */
 
-import type { DependencyEdge, DocKind, LearnStore, NodeDocs } from '../types'
+import type { DependencyEdge, DocKind, LearnStore } from '../types'
 import type { Exam } from '../exam'
 import { DOCS_DIR, MANIFEST_FILE, STATIC_DIR, nodeLayout } from '../layout'
 import { manifestText } from '../static/manifest'
-import { docFileName, noteFileName, outlineFileName } from './names'
-import { sanitizeSegment } from '../segments'
-import { CHAT_VERSION, META_VERSION, jsonText, tmpText, type MetaFile } from './meta'
+import { CHAT_VERSION, TMP_VERSION, jsonText, tmpText } from './meta'
+import { NODE_FILE_SUFFIX, NODE_FILE_VERSION, partsOfNode, type NodeFile } from './nodeFile'
 import { yieldToMain } from '../../lib/yieldToMain'
 
 /**
- * 一个节点上一次序列化出来的 meta.json 文本（见 buildDocs 里的复用判断）。
+ * 一个节点上一次序列化出来的**整份文件文本**（见 buildDocs 里的复用判断）。
  *
- * 为什么可以复用：这一段是整份摊平里最贵的一笔（每个节点一次 JSON.stringify(…, null, 2)），
- * 而一次保存里绝大多数节点一个字都没动。凭据是**节点对象本身 + 派生它的那三份 store 级数组**：
+ * 为什么可以复用：`JSON.stringify` 是整份摊平里最贵的一笔，而一次保存里绝大多数节点
+ * 一个字都没动。凭据是**节点对象本身 + 派生它的那三份 store 级数组**：
  * store 是不可变的（图操作一律返回新 store，数组只换不原地改），这四样全同就意味着
- * 这一份 meta 的每个字段都同、JSON 文本逐字节相同。
+ * 这一份文件的每个字段都同、JSON 文本逐字节相同。
  *
- * 每次 buildDocs 都重建这张表、只把凭据仍然成立的条目搬过去：表的大小因此跟着当前节点数走，
- * 删掉的节点不会留在这里。
+ * 注意与旧版的差别：旧版缓存的是很小的 meta.json（正文在单独的 .md 里，直接取字符串即可）；
+ * 合并成单文件之后，**正文也在缓存里**——缓存命中与否直接决定"这次保存要不要重新序列化
+ * 一整篇正文"，所以它比以前更要紧，别删。
  */
-interface MetaCacheEntry {
+interface NodeFileCacheEntry {
   node: LearnStore['nodes'][number]
   edges: LearnStore['edges']
   exams: LearnStore['exams']
@@ -30,14 +30,14 @@ interface MetaCacheEntry {
   text: string
 }
 
-let metaCache = new Map<string, MetaCacheEntry>()
+let nodeFileCache = new Map<string, NodeFileCacheEntry>()
 
-/** 凭据全同 ⇒ 上一份 meta.json 文本可以原样再用（理由见 MetaCacheEntry） */
-function metaReusable(
-  cached: MetaCacheEntry | undefined,
-  node: MetaCacheEntry['node'],
+/** 凭据全同 ⇒ 上一份文件文本可以原样再用（理由见 NodeFileCacheEntry） */
+function cacheReusable(
+  cached: NodeFileCacheEntry | undefined,
+  node: NodeFileCacheEntry['node'],
   store: LearnStore,
-): cached is MetaCacheEntry {
+): cached is NodeFileCacheEntry {
   return (
     !!cached &&
     cached.node === node &&
@@ -54,17 +54,14 @@ function metaReusable(
  * （store 的 userRel）、差异比对（diffDocs）三处共用同一套路径，
  * 少一层前缀就会「写得进去、读不回来」。
  *
- * 保存时拿它与上一次的快照比对，只写真正变了的文件。
- *
  * 它是**生成器**：每处理完一个节点就 `yield` 一次，由调用方决定要不要真的把主线程
- * 让出去（见下面的 buildDocs / buildDocsChunked）。做成生成器而不是写两份实现，
- * 是因为这段逻辑是落盘的正身——同步版与分片版必须逐字节一致，抄一份迟早会漂。
+ * 让出去（见下面的 buildDocs / buildDocsChunked）。
  */
 function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>, void> {
   const files = new Map<string, string>()
   const byId = new Map(store.nodes.map((n) => [n.id, n]))
 
-  // 依赖边按来源分组：写进各自的 meta.json
+  // 依赖边按来源分组：写进各自的节点文件
   const deps = new Map<string, DependencyEdge[]>()
   for (const e of store.edges) {
     const dl = deps.get(e.from)
@@ -72,16 +69,7 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
     else deps.set(e.from, [e])
   }
 
-  /**
-   * 检验记录按节点分组、目标按 id 查表：都搬到按节点循环的**外面**做一次。
-   *
-   * 循环体里原先每次都是 `store.exams.filter(…)` 与 `store.goals.find(…)`，
-   * 整份摊平因此是 O(节点数 × 检验数 + 节点数 × 目标数)：节点一多，每 320ms 一次的
-   * 保存就变成纯浪费（这个函数还会在启动 hydrate 时各跑一遍）。
-   *
-   * 顺序与原写法逐个对齐：分组保持 store.exams 的先后（= filter 的结果），
-   * 同 id 的目标只记第一个（= find 的结果），因此 meta.json 的内容逐字节不变。
-   */
+  /** 检验记录按节点分组、目标按 id 查表：都搬到按节点循环的**外面**做一次 */
   const examsOf = new Map<string, Exam[]>()
   for (const e of store.exams) {
     const list = examsOf.get(e.nodeId)
@@ -91,58 +79,25 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
   const goalById = new Map<string, LearnStore['goals'][number]>()
   for (const g of store.goals) if (!goalById.has(g.id)) goalById.set(g.id, g)
 
-  /** 这一轮还要复用的 meta 文本；循环结束后整张换上去（见 MetaCacheEntry） */
-  const nextMetaCache = new Map<string, MetaCacheEntry>()
+  /** 这一轮还要复用的文件文本；循环结束后整张换上去（见 NodeFileCacheEntry） */
+  const nextCache = new Map<string, NodeFileCacheEntry>()
 
   for (const [id, { dir, base }] of nodeLayout(store)) {
     const node = byId.get(id)
     if (!node) continue
     const goal = goalById.get(node.goalId)
-    // 目标目录及其下的层级都落在 docs/ 之下
     const path = [DOCS_DIR, ...dir].join('/')
-    const docs: NodeDocs = node.docs ?? { teaching: '' }
-    // 教学文档一律写出：它是节点的主体，别的工具（资源管理器、外部编辑器）都按它认路
-    files.set(`${path}/${docFileName(base)}`, docs.teaching ?? '')
-    /**
-     * 大纲与教学文档配对落盘（`{节点}.outline.json`，见 OutlineDoc）：节点上有大纲
-     * （新建的节点创建那一刻就有一份空的大纲）就写文件——哪怕它是空的，因为
-     * 「创建节点时两个文件同时生成」是写在数据布局上的承诺，缺一个用户就会问。
-     * 老数据没有大纲，不凭空造文件。
-     */
-    if (node.outline) files.set(`${path}/${outlineFileName(base)}`, jsonText(node.outline))
-    /**
-     * 笔记一份一个文件，写在 `{节点}.notes/{笔记名}.md`。
-     *
-     * 空笔记不落盘（绝大多数笔记是从空白开始的，建一个空文件只会让人以为里面有东西）。
-     * 于是「刚新建、还没写」的笔记只活在内存与 meta 的名字清单里——刷新一下就没了，
-     * 这正是想要的：新建之后一个字没写，本来就不该在磁盘上留下痕迹。
-     */
-    for (const note of node.notes ?? []) {
-      if (note.content.trim()) files.set(`${path}/${noteFileName(base, note.name)}`, note.content)
-    }
-    // 超级文档独立文件落盘：{path}/superdocs/{name}.html
-    for (const sdoc of node.superdocs ?? []) {
-      if (sdoc.html.trim()) {
-        files.set(`${path}/superdocs/${sanitizeSegment(sdoc.name)}.html`, sdoc.html)
-      }
-    }
-    // 试卷独立文件落盘：{path}/exams/{id}.json
-    for (const exam of examsOf.get(node.id) ?? []) {
-      files.set(`${path}/exams/${exam.id}.json`, jsonText(exam))
-    }
-    /**
-     * 这个节点的 meta 一个字都没动就直接用上一份文本（见 MetaCacheEntry）：
-     * 它是整份摊平里唯一一处对大对象做 JSON.stringify 的地方，而保存是每 320ms 一次的事。
-     */
-    const cached = metaCache.get(id)
-    let metaText: string
-    if (metaReusable(cached, node, store)) {
-      metaText = cached.text
-      nextMetaCache.set(id, cached)
+
+    const cached = nodeFileCache.get(id)
+    let text: string
+    if (cacheReusable(cached, node, store)) {
+      text = cached.text
+      nextCache.set(id, cached)
     } else {
-      const meta: MetaFile = {
-        version: META_VERSION,
+      const file: NodeFile = {
+        version: NODE_FILE_VERSION,
         id: node.id,
+        type: 'doc',
         title: node.title,
         key: node.key,
         description: node.description,
@@ -151,18 +106,11 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
         createdAt: node.createdAt,
         updatedAt: node.updatedAt,
         annotations: node.annotations,
-        dependencies: (deps.get(node.id) ?? []).map((e) => ({ to: e.to, createdAt: e.createdAt })),
-        exams: examsOf.get(node.id) ?? [],
-        learning: node.learning,
-        // 笔记清单（只有名字与时间，正文在 .notes/ 下的 .md 里）：顺序稳定靠它
-        notes: (node.notes ?? []).map((n) => ({
-          name: n.name,
-          createdAt: n.createdAt,
-          updatedAt: n.updatedAt,
-        })),
-        // 超级文档整份进 meta（可交互 HTML 只给渲染器用，不落独立文件，见 MetaFile 的说明）
-        ...(node.superdocs?.length ? { superdocs: node.superdocs } : {}),
-        // 目标信息只写在根节点的 meta 里：一个目标一份文档，根节点就是那份文档
+        ...(node.learning !== undefined ? { learning: node.learning } : {}),
+        ...(node.tint !== undefined ? { tint: node.tint } : {}),
+        dependencies: (deps.get(node.id) ?? []).map((e) => ({ to: e.to, createdAt: e.createdAt, ...(e.portKey ? { portKey: e.portKey } : {}) })),
+        parts: partsOfNode(node, examsOf.get(node.id) ?? []),
+        // 目标信息只写在根节点的文件里：一个目标一份文档，根节点就是那份文档
         ...(goal && id === goal.rootNodeId
           ? {
               goal: {
@@ -174,108 +122,88 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
             }
           : {}),
       }
-      metaText = jsonText(meta)
-      nextMetaCache.set(id, {
+      text = jsonText(file)
+      nextCache.set(id, {
         node,
         edges: store.edges,
         exams: store.exams,
         goals: store.goals,
-        text: metaText,
+        text,
       })
     }
-    files.set(`${path}/${base}.meta.json`, metaText)
+    files.set(`${path}/${base}${NODE_FILE_SUFFIX}`, text)
+
     /**
-     * 对话写在**目标目录**里（一个目标一份上下文）。目标目录同时就是根节点的目录，
+     * 目标级账本写在**目标目录**里（一个目标一份上下文）。目标目录同时就是根节点的目录，
      * 所以判据是「这个节点是不是根」而不是「这个节点有没有对话」。
      */
     if (goal && id === goal.rootNodeId) {
       const conversations = store.conversations.filter((c) => c.goalId === goal.id)
       files.set(`${path}/chat.json`, jsonText({ version: CHAT_VERSION, conversations }))
-      /**
-       * 资源清单写在目标目录的资源目录里（见 learn/static）。没有资源就不写这个文件——
-       * 空清单只会让人以为里面登记过东西。文件本体不走这条文本通道，由调用方直接写盘。
-       */
+      /** 资源清单写在目标目录的资源目录里（见 learn/static）。没有资源就不写这个文件 */
       const resources = store.resources?.[goal.id] ?? []
       if (resources.length) {
         files.set(`${path}/${STATIC_DIR}/${MANIFEST_FILE}`, manifestText(resources))
       }
-      /**
-       * 工作记忆（memory.work，见 learn/memory）写在目标目录里，与 chat.json / 资源清单
-       * 同一层：它与对话、资源同属「目标级的学习数据」。没有记忆就不写文件（同空清单的道理）。
-       *
-       * 文件名沿用 `mind.json`：上一版把「按目标的记忆」存在这里，换名字等于把老用户的
-       * 记忆扔在磁盘上读不回来。文件里换成新形状（version 2 + work），读侧两种都认
-       * （见 learn/files/parse）。长期记忆不在这里——它跨目标，跟着 state.json 走。
-       */
+      /** 工作记忆（memory.work）写在目标目录里；没有记忆就不写文件 */
       const workMemory = store.memory?.work?.[goal.id] ?? []
       if (workMemory.length) {
         files.set(`${path}/mind.json`, jsonText({ version: 2, work: workMemory }))
       }
-      /**
-       * 目标级持久化函数（method，见 learn/methods）同样写在目标目录里、同一条纪律：
-       * 没有函数就不写文件。
-       */
+      /** 目标级持久化函数（method）：没有就不写 */
       const methods = store.methods?.[goal.id] ?? []
       if (methods.length) {
         files.set(`${path}/method.json`, jsonText({ version: 1, methods }))
       }
-      /**
-       * 目标级工作流（wf，见 learn/workflows）同样写在目标目录里、同一条纪律：
-       * 没有登记过就不写文件。全局级的那份不在 docs/ 里——它跟 state.json 走（buildState），
-       * 因为它跨目标生效、跟着用户走，不属于任何一个目标的目录。
-       */
+      /** 目标级工作流：没有登记过就不写 */
       const goalWorkflows = store.workflows?.byGoal?.[goal.id] ?? []
       if (goalWorkflows.length) {
         files.set(`${path}/workflow.json`, jsonText({ version: 1, workflows: goalWorkflows }))
       }
-      /**
-       * 有效阅读也是**目标级**的账（见 learn/reading 的 ReadingBook），
-       * 写在目标目录里、同一条纪律：这个目标没有记录就不写文件。
-       *
-       * 为什么不放 state.json：它们是「这门课学了多久」，与目标同生共死——
-       * 删掉目标时那份记录该跟着一起走，而不是在用户账上留一段无主的时长。
-       */
+      /** 有效阅读：这个目标没有记录就不写 */
       const goalReading = store.reading?.byGoal?.[goal.id]
       if (goalReading && (goalReading.sessions.length || Object.keys(goalReading.days).length)) {
         files.set(`${path}/reading.json`, jsonText(goalReading))
       }
-      /**
-       * 随笔（见 learn/essays）也是**目标级**的：写在目标目录里，与 reading.json 同一条纪律
-       * ——一条都没有就不写文件。它是人随手写的，与目标同生共死。
-       */
+      /** 随笔与提交记录：一条都没有就不写 */
       const goalEssays = store.essays?.[goal.id] ?? []
       const goalCommits = store.essayCommits?.[goal.id] ?? []
       if (goalEssays.length || goalCommits.length) {
         files.set(`${path}/essay.json`, jsonText({ version: 2, essays: goalEssays, commits: goalCommits }))
       }
+      /** 结构图：v2 只有坐标表。一张坐标都没有时不写文件（等于「还没拖过」）。 */
+      const structure = store.structure?.[goal.id]
+      if (structure && Object.keys(structure.positions).length) {
+        files.set(`${path}/structure.json`, jsonText(structure))
+      }
+      /** 游离挂件池（剪了线 / 没绑过的笔记与超级文档）：一个都没有就不写 */
+      const goalDetached = store.detached?.[goal.id]
+      if (goalDetached && (goalDetached.notes.length || goalDetached.superdocs.length)) {
+        files.set(`${path}/detached.json`, jsonText({ version: 1, notes: goalDetached.notes, superdocs: goalDetached.superdocs }))
+      }
     }
+
     /**
-     * 临时变量（Agent 的大块中间数据）写在 chat.json 旁边。
-     * 一个节点没有暂存数据时不写这个文件——绝大多数节点都不需要它，
-     * 每个目录都塞一个空 tmp.json 只会让人以为里面有东西。
+     * 临时变量（Agent 的大块中间数据）仍是**一个节点一个文件**：
+     * 它不是节点内容，是随时可丢的草稿，塞进节点文件只会让每次保存都重写一大坨无关数据。
      */
     const tmp = tmpText(store.tmp?.[node.id])
     if (tmp) files.set(`${path}/tmp.json`, tmp)
 
-    // 一个节点摊完：把控制权交回调用方（同步版会立刻继续，分片版可能在这里让出主线程）
     yield
   }
 
   // 兜底未匹配到节点的试卷（写入根级 exams/{id}.json）
   const placedExamIds = new Set<string>()
   for (const node of store.nodes) {
-    for (const exam of examsOf.get(node.id) ?? []) {
-      placedExamIds.add(exam.id)
-    }
+    for (const exam of examsOf.get(node.id) ?? []) placedExamIds.add(exam.id)
   }
   for (const exam of store.exams) {
-    if (!placedExamIds.has(exam.id)) {
-      files.set(`exams/${exam.id}.json`, jsonText(exam))
-    }
+    if (!placedExamIds.has(exam.id)) files.set(`exams/${exam.id}.json`, jsonText(exam))
   }
 
   // 整张换上去：这一轮没走到的节点（删掉的、读不出来的）自然就从缓存里消失了
-  metaCache = nextMetaCache
+  nodeFileCache = nextCache
   return files
 }
 
@@ -296,13 +224,8 @@ const SMALL_STORE_MAX_NODES = 3
 /**
  * 分片摊平：每片最多连着跑 `budgetMs` 毫秒，片间 `await yieldToMain()`。
  *
- * 为什么要它：摊平一份大 store 是几十毫秒的纯计算，而它原先是在防抖回调里**同步**跑完的
- * ——日志里量到 98.77ms 一次，主线程整段被占住，期间的点击只能排队。切碎之后总时长不变，
- * 但片与片之间浏览器能处理输入、能画一帧。
- *
- * 小 store 不值得分片：单个节点的序列化耗时会随数据量变化，单靠时间阈值会让「只有几个节点」
- * 的保存出现机器相关的偶发让出。先用节点数挡住这条明显的短路径，再对真正的大 store 使用
- * 时间预算，既避免无意义的宏任务，也保留大数据保存时的响应性。
+ * 为什么还要它：合并成单文件后，**一个节点的序列化体积变大了**（正文也在里面），
+ * 整份摊平更容易一次性占住主线程，所以分片比旧版更有必要。
  */
 export async function buildDocsChunked(store: LearnStore, budgetMs = SLICE_BUDGET_MS): Promise<Map<string, string>> {
   if (store.nodes.length <= SMALL_STORE_MAX_NODES) return buildDocs(store)
@@ -320,26 +243,35 @@ export async function buildDocsChunked(store: LearnStore, budgetMs = SLICE_BUDGE
 }
 
 /**
- * 某个节点的一份文档在数据根下的相对路径；节点不在任何目标里时返回 null。
- * 用来「在资源管理器中打开」——定位到 .md 而不是目录，用户一眼就能看到那篇文档。
+ * 某个节点在数据根下的相对路径；节点不在任何目标里时返回 null。
  *
- * target.kind 为 'note' 时必须给 note（笔记名）：一个节点有多份笔记，光说「笔记」
- * 指不出是哪一份。指名不存在的笔记时返回 null，调用方据此提示「这份笔记不在了」。
- * target.kind 为 'outline' 时指到 `{节点}.outline.json`——大纲与教学文档一样是
- * 一个真实的文件，资源管理器里要能找到它。
+ * **合并之后所有内容都指向同一个文件**（正文 / 大纲 / 笔记 / 试卷 / 超级文档都在里面），
+ * 所以 `target` 只用来做一次存在性判断（要指的那份笔记还在不在），不再影响路径。
+ * 调用方（资源管理器里打开、chip 反查）因此都会落到这个 `.node.json` 上——
+ * 这是合并落点的直接代价，可读性由「导出 md」兜底。
  */
 export function nodeDocPath(
   store: LearnStore,
   nodeId: string,
-  target: { kind: DocKind | 'outline'; note?: string } = { kind: 'teaching' },
+  target: { kind: DocKind | 'outline' | 'super'; note?: string; name?: string } = { kind: 'teaching' },
 ): string | null {
   const entry = nodeLayout(store).get(nodeId)
   if (!entry) return null
+  const node = store.nodes.find((n) => n.id === nodeId)
+  if (!node) return null
   if (target.kind === 'note') {
     const name = target.note ?? ''
-    if (!name) return null
-    return [DOCS_DIR, ...entry.dir, noteFileName(entry.base, name)].join('/')
+    if (!name || !node.notes.some((n) => n.name === name)) return null
   }
-  if (target.kind === 'outline') return [DOCS_DIR, ...entry.dir, outlineFileName(entry.base)].join('/')
-  return [DOCS_DIR, ...entry.dir, docFileName(entry.base)].join('/')
+  return [DOCS_DIR, ...entry.dir, `${entry.base}${NODE_FILE_SUFFIX}`].join('/')
 }
+
+/** 某个节点的临时变量文件（Agent 的中间数据），与节点文件同目录 */
+export function nodeTmpPath(store: LearnStore, nodeId: string): string | null {
+  const entry = nodeLayout(store).get(nodeId)
+  if (!entry) return null
+  return [DOCS_DIR, ...entry.dir, 'tmp.json'].join('/')
+}
+
+/** 临时变量的版本号：写盘时由 tmpText 使用（保留出口给需要自己拼的地方） */
+export { TMP_VERSION }

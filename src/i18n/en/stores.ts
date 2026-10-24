@@ -70,7 +70,7 @@ const dict: Record<string, string> = {
   // ---------- tabs：页签名 ----------
   '已删除的节点': 'Deleted node',
   '试卷副本': 'Exam attempt copy',
-  ' · 大纲': ' · Outline',
+  ' · 结构': ' · Structure',
 
   // ---------- persona：人格名与分界条 ----------
   '导师人格 · {0}': 'Tutor persona · {0}',

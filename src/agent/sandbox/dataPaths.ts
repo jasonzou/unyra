@@ -65,21 +65,29 @@ export function classifyDataPath(raw: string): DataPathVerdict {
     if (/(^|\/)static(\/|$)/.test(rest) || /(^|\/)images(\/|$)/.test(rest)) {
       return { kind: 'static', note: '目标静态资源' }
     }
-    // 余下全部是应用数据。按文件名/目录名给出该用哪一组 api。
+    // 余下全部是应用数据。按文件名/目录名给出该用哪一组 api：
+    // 节点的所有内容（正文 / 大纲 / 笔记 / 试卷 / 超级文档）都归节点宇宙——api.node 拿对象，editContent 写。
     if (/(^|\/)superdocs\/[^/]+\.html$/i.test(rest)) {
-      return { kind: 'app-data', api: 'sdoc', note: '超级文档' }
+      return { kind: 'app-data', api: 'node', note: '超级文档' }
     }
     if (/(^|\/)exams\/[^/]+\.json$/i.test(rest)) {
-      return { kind: 'app-data', api: 'exam', note: '试卷' }
+      return { kind: 'app-data', api: 'node', note: '试卷（作答侧的读卷 / 阅卷在 api.exam）' }
     }
     if (/\.notes\/[^/]+\.md$/i.test(rest)) {
-      return { kind: 'app-data', api: 'doc', note: '笔记' }
+      return { kind: 'app-data', api: 'node', note: '笔记' }
     }
     if (/\.outline\.json$/i.test(rest)) {
-      return { kind: 'app-data', api: 'outline', note: '节点大纲' }
+      return { kind: 'app-data', api: 'node', note: '节点大纲' }
     }
     if (/\.meta\.json$/i.test(rest)) {
-      return { kind: 'app-data', api: 'node', note: '节点元数据与学习状态（读用 node.read，写用 node.update / state.*）' }
+      return { kind: 'app-data', api: 'state', note: '节点元数据与学习状态（读写走 api.state）' }
+    }
+    if (/\.node\.json$/i.test(rest)) {
+      return {
+        kind: 'app-data',
+        api: 'node',
+        note: '节点文件：正文 / 大纲 / 笔记 / 试卷 / 超级文档全在里面',
+      }
     }
     if (/(^|\/)chat\.json$/i.test(rest)) {
       return { kind: 'app-data', note: '目标会话（宿主管理，agent 不能直接读写）' }
@@ -100,12 +108,13 @@ export function classifyDataPath(raw: string): DataPathVerdict {
       return { kind: 'app-data', note: '随笔（由随笔窗口管理）' }
     }
     if (/(^|\/)mind\.json$/i.test(rest)) {
-      return { kind: 'app-data', api: 'state', note: '长期事实（用 doc / state 表达）' }
+      return { kind: 'app-data', api: 'state', note: '长期事实（读写走 api.state）' }
     }
     if (/\.md$/i.test(rest)) {
-      return { kind: 'app-data', api: 'doc', note: '教学文档' }
+      return { kind: 'app-data', api: 'node', note: '教学文档' }
     }
-    return { kind: 'app-data', api: 'node', note: '应用数据目录' }
+    // 兜底：docs 下的其余东西都是应用数据，多半是节点自己的家当——指去节点宇宙。
+    return { kind: 'app-data', api: 'node', note: '节点数据' }
   }
 
   // 用户配置/界面状态：不是 agent 的数据面

@@ -12,9 +12,10 @@ import type {
   KnowledgeNode,
   LearnStore,
   LearnTab,
+  NoteFile,
   SuperDocFile,
 } from '../../../learn/types'
-import { docOf, notesOf } from '../../../learn/types'
+import { docOf, emptyDocs, notesOf } from '../../../learn/types'
 import { draftOf } from '../../../learn/drafts'
 import { findNote } from '../../../learn/notes'
 import { nodeById } from '../../../learn/graph'
@@ -34,11 +35,55 @@ import type { DocSource } from '../NodeNote'
 export function sourceOf(store: LearnStore, tab: LearnTab, node: KnowledgeNode): DocSource | null {
   const staged = draftOf(store.drafts, tab.id)
   if (tab.ref.kind === 'note') {
-    const note = findNote(notesOf(node), tab.ref.note)
-    if (!note) return null
-    return { kind: 'note', note: note.name, content: staged ?? note.content }
+    // 笔记实体两处住：绑定的在宿主记录里，游离的在池子里（nodeId 对不上节点 = 游离）
+    const found = noteEntityOf(store, tab.ref)
+    if (!found) return null
+    return { kind: 'note', note: found.note.name, content: staged ?? found.note.content }
   }
   return { kind: 'teaching', content: staged ?? docOf(node, 'teaching') }
+}
+
+/**
+ * 笔记页签的实体解析：nodeId 对得上节点走宿主记录；对不上、却对得上**游离池里那份
+ * 笔记自己的 id** 的 = 游离笔记（页签与绑定页签同一套用法，差别只是没有那条关系线）。
+ */
+export function noteEntityOf(
+  store: LearnStore,
+  ref: { kind: 'note'; nodeId: string; note: string },
+): { note: NoteFile; host: KnowledgeNode | null; goalId: string } | null {
+  const node = nodeById(store, ref.nodeId)
+  if (node) {
+    const note = findNote(notesOf(node), ref.note)
+    return note ? { note, host: node, goalId: node.goalId } : null
+  }
+  for (const [goalId, pool] of Object.entries(store.detached ?? {})) {
+    const note = pool.notes.find((n) => n.id === ref.nodeId && n.name === ref.note)
+    if (note) return { note, host: null, goalId }
+  }
+  return null
+}
+
+/**
+ * 游离笔记的**代位节点**：页签的周边机制（滚动记忆、卷宗定位、上下文归属）都认
+ * 一个节点形状的东西——给它一个最小桩（id 就是笔记自己的 id，goalId 记它属于
+ * 哪个目标的池子），注解 / 概念动作这类文档层能力对它是自然缺席（空数组查无）。
+ */
+function stubNodeOf(note: NoteFile, goalId: string): KnowledgeNode {
+  const now = Date.now()
+  return {
+    id: note.id,
+    title: note.name,
+    key: note.name.trim().toLowerCase(),
+    description: '',
+    docs: emptyDocs(),
+    notes: [],
+    annotations: [],
+    status: 'learning',
+    origin: 'user',
+    goalId,
+    createdAt: note.createdAt || now,
+    updatedAt: note.updatedAt || now,
+  }
 }
 
 /**
@@ -50,9 +95,10 @@ export function sourceOf(store: LearnStore, tab: LearnTab, node: KnowledgeNode):
  */
 export function emptyNote(store: LearnStore, tab: LearnTab | null): boolean {
   if (!tab || tab.ref.kind !== 'note') return false
-  const node = nodeById(store, tab.ref.nodeId)
-  if (!node) return false
-  return !(sourceOf(store, tab, node)?.content ?? '').trim()
+  const found = noteEntityOf(store, tab.ref)
+  if (!found) return false
+  const staged = draftOf(store.drafts, tab.id)
+  return !(staged ?? found.note.content).trim()
 }
 
 /** 一格里那份文档的派生值（见 paneInfo） */
@@ -87,8 +133,14 @@ export function paneInfo(
 ): DocPaneInfo {
   const group = groupOf(docs, groupId)
   const tab = group ? (group.tabs.find((t) => t.id === group.active) ?? null) : null
+  // 笔记页签的 node 有两副面孔：绑定的 = 宿主；游离的 = 笔记自己的代位桩（见 noteEntityOf）
+  const noteEntity = tab?.ref.kind === 'note' ? noteEntityOf(store, tab.ref) : null
   const nodeId = tab ? tabNodeId(tab.ref) : null
-  const node = nodeId ? (nodeById(store, nodeId) ?? null) : null
+  const node = noteEntity
+    ? (noteEntity.host ?? stubNodeOf(noteEntity.note, noteEntity.goalId))
+    : nodeId
+      ? (nodeById(store, nodeId) ?? null)
+      : null
   // 本地文件、超级文档、试卷副本、大纲页都不走这一条：它们的正文不由节点决定
   //（DocSource 的 kind 是 Markdown 世界的类型，混进来会被当成笔记渲染；
   // 大纲页是结构化数据的交互页，渲染层单独接，见 renderGroup 的 outline 分支）
@@ -145,6 +197,13 @@ export function examCopyOf(
 /** 一片页签要渲染的节点与正文；不是 markdown 正文（教/笔记）就没有可常驻的东西 */
 export function paneOf(store: LearnStore, tab: LearnTab): { node: KnowledgeNode; source: DocSource } | null {
   if (tab.ref.kind !== 'teach' && tab.ref.kind !== 'note') return null
+  if (tab.ref.kind === 'note') {
+    const found = noteEntityOf(store, tab.ref)
+    if (!found) return null
+    const node = found.host ?? stubNodeOf(found.note, found.goalId)
+    const source = sourceOf(store, tab, node)
+    return source ? { node, source } : null
+  }
   const node = nodeById(store, tab.ref.nodeId)
   if (!node) return null
   const source = sourceOf(store, tab, node)

@@ -51,6 +51,7 @@ import {
   withDocs,
   withOwners,
 } from '../../../learn/groups'
+import { findNoteEntity } from '../../../learn/detached'
 import { nodeById, updateDoc, writeNote } from '../../../learn/graph'
 import { findNote } from '../../../learn/notes'
 import { readSuperDoc, writeSuperDoc } from '../../../learn/superdocs'
@@ -573,10 +574,16 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
           setDocSaving(false)
           return { ok: false, error: t('这个页签没有可保存的内容') }
         }
+        // 笔记页签的实体两处住（绑定 = 宿主记录；游离 = 池子，nodeId 就是笔记自己的 id）——
+        // 游离那份直接改池子，其余照旧走宿主
+        const freeNoteEntity =
+          tab.ref.kind === 'note' && !nodeById(s, tab.ref.nodeId)
+            ? findNoteEntity(s, tab.ref.nodeId)
+            : null
         const node = nodeById(s, tab.ref.nodeId)
         const gone =
-          !node ||
-          (tab.ref.kind === 'note' && !findNote(notesOf(node), tab.ref.note)) ||
+          !node && !freeNoteEntity ||
+          (tab.ref.kind === 'note' && !freeNoteEntity && (!node || !findNote(notesOf(node), tab.ref.note))) ||
           // 超级文档被 Agent 删掉后不靠保存「复活」它：那份 HTML 已经没有了
           (tab.ref.kind === 'super' && !readSuperDoc(s, tab.ref.nodeId, tab.ref.name))
         if (gone) {
@@ -585,7 +592,24 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
         }
         const next =
           tab.ref.kind === 'note'
-            ? writeNote(s, tab.ref.nodeId, tab.ref.note, text)
+            ? freeNoteEntity
+              ? (() => {
+                  const pool = s.detached?.[freeNoteEntity.goalId]
+                  if (!pool) return null
+                  return {
+                    ...s,
+                    detached: {
+                      ...s.detached,
+                      [freeNoteEntity.goalId]: {
+                        ...pool,
+                        notes: pool.notes.map((n) =>
+                          n.id === freeNoteEntity.note.id ? { ...n, content: text, updatedAt: Date.now() } : n,
+                        ),
+                      },
+                    },
+                  }
+                })()
+              : writeNote(s, tab.ref.nodeId, tab.ref.note, text)
             : tab.ref.kind === 'super'
               ? writeSuperDoc(s, tab.ref.nodeId, tab.ref.name, text)
               : updateDoc(s, tab.ref.nodeId, text)

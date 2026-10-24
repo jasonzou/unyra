@@ -35,6 +35,7 @@ export {
   parentIds,
   pathToRoot,
   prereqIds,
+  removeEdge,
   unmetPrereqs,
   wouldCreateCycle,
 } from './graph/edges'
@@ -77,6 +78,7 @@ export {
   ongoingAttempt,
   removeExam,
   replaceQuestionImages,
+  shellExamOf,
   startAttempt,
   submitAttempt,
   upsertAttempt,

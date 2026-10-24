@@ -64,6 +64,7 @@ export function syncVfsEventToStore(event: FileChangeEvent, store: LearnStore): 
     const existing = list.find((d) => d.name.toLowerCase() === sdocName.toLowerCase())
     const now = Date.now()
     const updated: SuperDocFile = {
+      id: existing ? existing.id : crypto.randomUUID(),
       name: existing ? existing.name : sdocName,
       html: content,
       createdAt: existing ? existing.createdAt : now,
@@ -129,6 +130,7 @@ export function syncVfsEventToStore(event: FileChangeEvent, store: LearnStore): 
     const existing = notes.find((n) => n.name.toLowerCase() === noteName.toLowerCase())
     const now = Date.now()
     const updated = {
+      id: existing ? existing.id : crypto.randomUUID(),
       name: existing ? existing.name : noteName,
       content,
       createdAt: existing ? existing.createdAt : now,

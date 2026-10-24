@@ -32,6 +32,7 @@ const essay = (id: string, updatedAt: number, text = '内容' + id): EssayEntry 
 })
 
 const note = (name: string, content: string): NoteFile => ({
+  id: crypto.randomUUID(),
   name,
   content,
   createdAt: AT,

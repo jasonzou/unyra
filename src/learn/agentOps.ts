@@ -12,7 +12,7 @@
  * 实现已按职责拆到 learn/ops/ 下（见 docs/refactor-plan.md 3.5）：这个文件现在只是 barrel，
  * 把原来的公开符号原样转出去，调用方的 import 一行都不用改。
  */
-export { clipText, currentNodeBlock } from './ops/text'
+export { clipText } from './ops/text'
 export type { AgentOpsDeps, AgentOps, ResourceIo, UserInfoIo, WorkspaceIo } from './ops/deps'
 export { makeExamTool } from './ops/exam'
 export { createAgentOps } from './ops/assemble'

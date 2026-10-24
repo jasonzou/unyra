@@ -71,7 +71,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onOpenSettings()
       return
     }
-    agent.runWorkflow('browser-use', { nodeId: nid })
+    agent.runWorkflow('browser-use', { nodeId: nid, params: { target: nid } })
   }, [activeGoal, activeNodeId, agent, getLatest, hasKey, onToast, onOpenSettings, providerName])
 
   /**
@@ -93,7 +93,9 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       return
     }
     setCreating(false)
-    agent.runWorkflow('exam', { nodeId: target.id })
+    // 交付边界随指令钉一遍：这是「往目标文档下面出一份卷」的轮次，不是建树。
+    // 画布上有空壳时 api.node.create 会原位复用（同 id 吸收），没有就现建——两条路都是它。
+    agent.runWorkflow('exam', { nodeId: target.id, params: { target: target.id } })
   }
 
   /**
@@ -112,7 +114,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onToast(t('这个节点没有等着判分或讲解的考试'))
       return
     }
-    agent.runWorkflow('exam-grade', { nodeId: target.id })
+    agent.runWorkflow('exam-grade', { nodeId: target.id, params: { target: target.id } })
   }
 
   /* ---------- 学习状态（自评 / 掌握度 / 错误记忆 / 检验） ---------- */
@@ -141,7 +143,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
    * （内置工作流「超级实验室」）。它是个问询类工作流：触发即响铃、对话栏切到主位，
    * 表单压在输入框上方等需求。
    */
-  const startSuperLab = (nodeId?: string) => {
+  const startSuperLab = (nodeId?: string, shellName?: string) => {
     // 与 newExam 同一条：可省的 nodeId 让「右键某一个节点新建」落到那一个节点上
     const target = nodeId ? nodeById(getLatest(), nodeId) : activeNode
     if (!target) {
@@ -153,7 +155,17 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onOpenSettings()
       return
     }
-    agent.runWorkflow('superlab', { nodeId: target.id })
+    // 指令从节点派生就要带上节点信息：填内容是**在这份超级文档上填**，不是再建一份。
+    // 壳的来源两条：画布空壳卡指名道姓（shellName）；文档菜单没指名时，目标下已有的
+    // 那份空壳自动顶上（有内容的绝不顶——那是要覆盖交付物的意思）。
+    const superdocs = nodeById(getLatest(), target.id)?.superdocs ?? []
+    const shellUuid = shellName
+      ? superdocs.find((d) => d.name === shellName)?.id
+      : (superdocs.find((d) => !d.html.trim())?.id ?? undefined)
+    agent.runWorkflow('superlab', {
+      nodeId: target.id,
+      params: { target: target.id, ...(shellUuid ? { shell: shellUuid } : {}) },
+    })
     onToast(t('已启动超级实验室，导师马上会问你想做什么'))
   }
 
@@ -171,8 +183,25 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onOpenSettings()
       return
     }
-    agent.runWorkflow('outline', { nodeId: target.id })
+    agent.runWorkflow('outline', { nodeId: target.id, params: { target: target.id } })
     onToast(t('已请导师规划「{0}」的大纲，大纲页会随写入更新', target.title))
+  }
+
+  /**
+   * 前置知识大纲：文档卡右键菜单触发——读那份文档，把「先要学会什么」
+   * 落成大纲目标项（内置工作流「前置知识大纲」）。ownerNodeId 是文档卡的
+   * 知识节点 id，工作流跑在它的上下文里。
+   */
+  const startPrereqOutline = (nodeId?: string) => {
+    const target = nodeId ? nodeById(getLatest(), nodeId) : activeNode
+    if (!target) return
+    if (!hasKey) {
+      onToast(t('生成大纲需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
+      onOpenSettings()
+      return
+    }
+    agent.runWorkflow('prereq-outline', { nodeId: target.id, params: { target: target.id } })
+    onToast(t('已请导师规划「{0}」的前置知识大纲，大纲页会随写入更新', target.title))
   }
 
   /**
@@ -204,7 +233,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       }
       const sent = agent.runWorkflow('code-compile', {
         nodeId: target.id,
-        params: { language: req.languageId ?? '未标注', key: req.key, code: req.code },
+        params: { target: target.id, language: req.languageId ?? '未标注', key: req.key, code: req.code },
       })
       if (!sent) {
         // 对话还没就绪（没有会话/目标）：这一轮根本发不出去，菜单不该空转
@@ -255,6 +284,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     startSuperLab,
     startBrowserUse,
     startOutline,
+    startPrereqOutline,
     workflowRows,
     runWorkflowRow,
     removeWorkflowRow,

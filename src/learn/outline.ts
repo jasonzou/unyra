@@ -43,7 +43,7 @@ export function normalizeOutline(raw: unknown): OutlineDoc | null {
 }
 
 /**
- * 整份写入某个节点的大纲（Agent 的 api.outline.write 与将来的界面入口都走这里）。
+ * 整份写入某个节点的大纲（大纲节点的 editContent 与将来的界面入口都走这里）。
  *
  * key 在这里从标题生成——大纲条目与真实节点的对上号靠的就是它
  * （同一目标内 key 唯一，见 normalizeKey），模型不用也不能自己编。
@@ -89,6 +89,23 @@ export function writeOutline(
       nodes: store.nodes.map((n) => (n.id === nodeId ? { ...n, outline, updatedAt: at } : n)),
     },
     outline,
+  }
+}
+
+/**
+ * 清空某个节点的大纲（删除大纲节点 = 这一个动作）。
+ *
+ * 只动「计划」这一层：宿主文档、树边、下游的文档都原样保留——下游是独立节点，
+ * 它们的连接是文档与文档之间的真关系，不随计划的有无而消失。画布上那份大纲卡
+ * 随之消失（卡是派生的），有树连接时连线直接画在文档与子文档之间。
+ * 没有大纲可清时返回 null（调用方据此回「已经不在了」）。
+ */
+export function clearOutline(store: LearnStore, nodeId: string, at: number): LearnStore | null {
+  const node = store.nodes.find((n) => n.id === nodeId)
+  if (!node?.outline) return null
+  return {
+    ...store,
+    nodes: store.nodes.map((n) => (n.id === nodeId ? { ...n, outline: undefined, updatedAt: at } : n)),
   }
 }
 

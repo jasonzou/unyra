@@ -43,6 +43,7 @@ README 只负责介绍项目（它是什么、能做什么、怎么装）。**�
 | [development.md](development.md) | 开发环境、脚本、测试的分工与约定 |
 | [packaging-and-release.md](packaging-and-release.md) | 构建产物、反篡改开关、自动更新与发布流程 |
 | [notice.md](notice.md) | 远程公告：JSON 格式、弹 / 不弹的规则、GitHub Actions + Pages 发布流程 |
+| [refactor-node-model-v3.md](refactor-node-model-v3.md) | **未执行的计划**：节点数据模型 v3（一个节点一个文件、类型登记表、拓扑归一）——动数据结构前先读它 |
 
 ## 其他
 

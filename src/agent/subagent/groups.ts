@@ -1,27 +1,28 @@
 /**
  * 自定义子代理可用的 api 组白名单，与按组生成的 execute 参数说明。
  *
- * 子代理没有内置的：要用就先 agent_spawn 定义——系统提示词与 api 面都由导师写在
- * 定义里，本文件只守「哪些 api 组**允许**被开放」这条边界。
+ * 子代理没有内置的：要用就先 subagent.create({ key, system, tools }) 登记——系统提示词
+ * 与 api 面都由导师写在定义里，本文件只守「哪些 api 组**允许**被开放」这条边界。
+ *
+ * 名单与注册表对账（tests/subagent）：这里出现的每个组名都必须是 apiRegistry 里的
+ * 真实组 key——写错的名字放行的只是空气，而真正想开放的组反而会被 apiAllow 硬闸拦死。
  */
 import { SANDBOX_API_CATALOG } from '../apiCatalog'
 
 /**
- * 自定义子代理可以开放的 api 组。**不在这个名单里的组，agent_spawn 直接拒收**：
+ * 自定义子代理可以开放的 api 组。**不在这个名单里的组，subagent.create 直接拒收**：
  * - ask：子代理没有宿主表单通道，调了会永远阻塞；
  * - ui：界面操作是导师与用户之间的事；
  * - exam / focus：学习状态的判断与落账是导师的职责；
  * - userInfo：学习者画像；
- * - compact / wf / code / method / sdoc / state：压缩、登记表、伪编译、持久化函数、
- *   超级文档、学习状态——这些都是「导师」这一层的事，子代理拿了只会越权。
+ * - compact / wf / code / method / state：压缩、登记表、伪编译、持久化函数、
+ *   学习状态——这些都是「导师」这一层的事，子代理拿了只会越权。
  */
 export const SUBAGENT_ALLOWED_GROUPS = [
   'web',
   'tmp',
   'res',
-  'doc',
   'node',
-  'outline',
   'memory',
   'workspace',
   'reading',

@@ -37,127 +37,153 @@ import {
 /* ---------- 3. execute 工具（假沙箱执行器）的行为（执行器与 harness 本身见 ./harness） ---------- */
 export async function toolTests() {
   const h = harness(baseStore(), childId)
-  const r1 = await h.run('((api)=>{ const d = await api.doc.read(""); return { path: d.path, chars: d.chars, head: d.content.slice(0, 4) } })')
-  ok(r1.ok && r1.content.includes('微积分/极限/教学'), 'doc.read("") 读当前节点教学文档', r1.content)
-  const r2 = await h.run('((api)=>{ await api.doc.write("笔记", "新的笔记"); return (await api.doc.read("笔记")).content })')
-  ok(r2.ok && r2.content.startsWith('新的笔记'), 'doc.write("笔记") 写当前节点笔记', r2.content)
-  ok(
-    h.store().nodes.find((n) => n.id === childId)?.notes[0]?.content === '新的笔记',
-    '写入落到 store（写的是原来那份「笔记」）',
-    h.store().nodes.find((n) => n.id === childId)?.notes[0]?.content,
-  )
-  const r3 = await h.run('((api)=>{ await api.doc.append("笔记", "第二段"); return (await api.doc.read("笔记")).content })')
-  ok(r3.ok && r3.content.startsWith('新的笔记\n\n第二段'), 'doc.append 空行分隔', JSON.stringify(r3.content))
-  const rNew = await h.run('((api)=>{ await api.doc.write("笔记/错题本", "第一道错题"); return { names: (await api.node.read("")).docs.map((d)=>d.文档) } })')
-  ok(
-    rNew.ok &&
-      h.store().nodes.find((n) => n.id === childId)?.notes.some((n) => n.name === '错题本'),
-    '写不存在的笔记会新建一份（名字就是它给的）',
-    rNew.content,
-  )
-  ok(
-    h.store().nodes.find((n) => n.id === childId)?.notes.length === 2,
-    '新笔记是追加，不是覆盖原来那份',
-    h.store().nodes.find((n) => n.id === childId)?.notes.map((n) => n.name),
-  )
-  const rBoth = await h.run('((api)=>{ const a = await api.doc.read("笔记"); const b = await api.doc.read("笔记/错题本"); return { a: a.content, b: b.content } })')
-  ok(
-    rBoth.ok && rBoth.content.includes('新的笔记\\n\\n第二段') && rBoth.content.includes('第一道错题'),
-    '「笔记」与「笔记/错题本」各自读到自己那份',
-    rBoth.content.slice(0, 200),
-  )
-  // 排版提醒（见 ops/assemble 的 layoutHintOf）：文档好不好看模型自己看不见，回执得说一句。
-  // 边界一起钉住：整篇写入 + 教学文档 + 够长 + HTML 与 Markdown 结构痕迹都没有，才提醒；
-  // 纯 Markdown 策略下整体不提（那档的正文本来就不该有 class，见 agent/docFormat）。
-  // 这几条会把当前节点的教学文档整篇覆盖掉——而它是**共享 fixture**（后面的 doc.find 等用例
-  // 还在这份正文上找东西），所以先原样存一份，测完写回去。
+
+  /*
+   * 节点宇宙（v2）：api.node 四函数 + 对象门面。行为主线——
+   * list 查全图 → get 取对象 → help() 现查 → content 读 / editContent 整份写回 → connect 连线。
+   */
+  /** 探针回执 = 结果 JSON + 「本次调用」尾巴：只取 JSON 段 */
+  const jsonOf = (r: { content: string }): unknown => JSON.parse(r.content.slice(0, r.content.indexOf('\n本次调用')))
+  const rList = await h.run("((api)=>{ const l = await api.node.list(); return { entry: l.goal.entry, docUuid: l.nodes.find((n)=>n.title==='极限').uuid, noteCount: l.nodes.find((n)=>n.title==='极限').notes.length } })")
+  ok(rList.ok && rList.content.includes('"docUuid"') && rList.content.includes('entry:n1'), 'node.list 列出全图（带 uuid 与挂件清单）', rList.content.slice(0, 240))
+  const listJson = jsonOf(rList) as { docUuid: string }
+  const docUuid = listJson.docUuid
+  const outlineUuidOf = 'o:' + docUuid
+
+  const rGet = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(docUuid) + "); return { kind: n.kind, title: n.title, ups: n.relations.filter((r)=>r.type==='up').length } })")
+  ok(rGet.ok && rGet.content.includes('"kind":"doc"') && rGet.content.includes('极限'), 'node.get 取到节点对象（身份 + 关系快照）', rGet.content.slice(0, 200))
+
+  const rHelp = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(docUuid) + "); const h = await n.help(); return { desc: h.description.slice(0, 6), hasEdit: !!h.edit, hasConn: !!h.connection } })")
+  ok(rHelp.ok && rHelp.content.includes('hasEdit":true') && rHelp.content.includes('hasConn":true'), '对象上的 help() 回三段自述（description/edit/connection）', rHelp.content.slice(0, 200))
+
+  const rContent = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(docUuid) + "); const c = await n.content; return { title: c.title, chars: c.teaching.length, status: c.status } })")
+  ok(rContent.ok && rContent.content.includes('极限') && rContent.content.includes('"chars"'), 'await n.content 读到整份快照（含正文与状态）', rContent.content.slice(0, 200))
+
   const keepTeaching = h.store().nodes.find((n) => n.id === childId)?.docs.teaching ?? ''
+  const newTeaching = '# 极限（节点宇宙版）\n\n先从数列极限讲起。'
+  const rEdit = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(docUuid) + "); const c = await n.content; return await n.editContent({ ...c, teaching: " + JSON.stringify(newTeaching) + " }) })")
+  ok(rEdit.ok && h.store().nodes.find((n) => n.id === childId)?.docs.teaching === newTeaching, 'editContent 整份写回（先读后写、落进 store）', rEdit.content.slice(0, 160))
+
+  const rEditMissing = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(docUuid) + "); return await n.editContent({ title: '极限' }) })")
+  ok(!rEditMissing.ok && rEditMissing.content.includes('description'), '缺字段被拦（整份替换，缺了等于清空）', rEditMissing.content.slice(0, 160))
+
+  // 排版提醒挂在整篇写入教学文档的回执上（节点 editContent 与 files.* 的镜像同步共用同一判定）：
+  // 整篇写入教学文档且毫无排版痕迹时，回执点一句
   const plainDoc = '这一段讲解只有最朴素的段落。'.repeat(40)
-  const rPlain = await h.run('((api)=>{ return await api.doc.write("", ' + JSON.stringify(plainDoc) + ') })')
+  const rPlain = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(docUuid) + "); const c = await n.content; return await n.editContent({ title: c.title, description: c.description, status: c.status, teaching: " + JSON.stringify(plainDoc) + " }) })")
   ok(rPlain.ok && rPlain.content.includes('排版痕迹'), '整篇写入的教学文档没有排版痕迹时，回执点一句排版提醒', rPlain.content.slice(0, 200))
-  const richDoc = '<div class="my-5 rounded-lg bg-sunken p-4"><p class="m-0 text-[14px] text-ink">' + plainDoc + '</p></div>'
-  const rRich = await h.run('((api)=>{ return await api.doc.write("", ' + JSON.stringify(richDoc) + ') })')
-  ok(rRich.ok && !rRich.content.includes('排版痕迹'), '带了工具类就不提醒', rRich.content.slice(0, 160))
-  const mdStructured = '> 引用块也是一种结构痕迹。\n\n' + plainDoc
-  const rMdStruct = await h.run('((api)=>{ return await api.doc.write("", ' + JSON.stringify(mdStructured) + ') })')
+
+  // 写回共享 fixture（后面的用例还要在它上面找东西）
+  const keepDesc = h.store().nodes.find((n) => n.id === childId)?.description ?? ''
+  await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(docUuid) + "); const c = await n.content; return await n.editContent({ title: '极限', description: " + JSON.stringify(keepDesc) + ", teaching: " + JSON.stringify(keepTeaching) + ", status: c.status }) })")
+  ok(h.store().nodes.find((n) => n.id === childId)?.docs.teaching === keepTeaching, '共享 fixture 的教学文档已原样写回', undefined)
+
+  // 笔记节点：建（create 即挂）→ 读 → 写
+  const rNote = await h.run("((api)=>{ const r = await api.node.create({ kind: 'note', title: '错题本', under: " + JSON.stringify(docUuid) + " }); const n = await api.node.get(r.uuid); await n.editContent({ text: '第一道错题' }); const c = await n.content; return { uuid: r.uuid, text: c.text } })")
   ok(
-    rMdStruct.ok && !rMdStruct.content.includes('排版痕迹'),
-    'Markdown 结构（引用 / 表格 / plot 围栏）同样算「有排版」，不提醒',
-    rMdStruct.content.slice(0, 160),
+    rNote.ok &&
+      rNote.content.includes('第一道错题') &&
+      h.store().nodes.find((n) => n.id === childId)?.notes.some((n) => n.name === '错题本'),
+    'create 挂件即挂上（under=文档 uuid），editContent 落正文',
+    rNote.content.slice(0, 160),
   )
-  const rNotePlain = await h.run('((api)=>{ return await api.doc.write("笔记/摘录", ' + JSON.stringify(plainDoc) + ') })')
-  ok(rNotePlain.ok && !rNotePlain.content.includes('排版痕迹'), '笔记不提醒（那是学习者自己写的地方）', rNotePlain.content.slice(0, 160))
-  const rTiny = await h.run('((api)=>{ return await api.doc.write("", "先占个位") })')
-  ok(rTiny.ok && !rTiny.content.includes('排版痕迹'), '太短的文档不提醒（占位很正常）', rTiny.content.slice(0, 160))
-  // 纯 Markdown 策略：同样的纯段落正文也不提醒（正文本来就不该有 class，提醒只会把人往反方向推）
-  const keepSettings = loadAgentSettings()
-  saveAgentSettings({ ...keepSettings, docFormat: 'markdown' })
-  const rMdPlain = await h.run('((api)=>{ return await api.doc.write("", ' + JSON.stringify(plainDoc) + ') })')
-  saveAgentSettings(keepSettings)
-  await h.run('((api)=>{ return await api.doc.write("", ' + JSON.stringify(keepTeaching) + ') })')
-  ok(rMdPlain.ok && !rMdPlain.content.includes('排版痕迹'), '纯 Markdown 策略下不提醒排版', rMdPlain.content.slice(0, 160))
+  const noteUuid = (jsonOf(rNote) as { uuid: string }).uuid
+
+  // 大纲节点：get("o:"+uuid) → editContent 整份写 → content 读回
+  const rOutline = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const w = await o.editContent({ intro: '探针路线', children: [{ title: '子甲', summary: '先学' }] }); const rd = await o.content; return { wrote: w.ok, count: rd.children.length, key: rd.children[0].key } })")
+  ok(rOutline.ok && rOutline.content.includes('"count":1') && rOutline.content.includes('子甲'), '大纲对象：editContent 整份落盘、content 读回对象', rOutline.content.slice(0, 200))
+
+  // 连接：唯一可手工组合「大纲 → 文档」——建子文档挂上去，重复连与挂件连都被拒
+  const rCreateDoc = await h.run("((api)=>{ const r = await api.node.create({ kind: 'doc', title: '夹逼定理', under: " + JSON.stringify(outlineUuidOf) + " }); return r })")
+  ok(rCreateDoc.ok && rCreateDoc.content.includes('夹逼定理'), 'node.create 建文档挂在大纲之下', rCreateDoc.content.slice(0, 160))
+  const subUuid = (jsonOf(rCreateDoc) as { uuid: string }).uuid
+  ok(h.store().edges.some((e) => e.from === childId && e.to === subUuid), '新文档的树边真的落了')
+  const rConnect = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const d = await api.node.get(" + JSON.stringify(docUuid) + "); return await o.connect(d, 'down') })")
+  ok(!rConnect.ok && rConnect.content.includes('已经连着'), '重复连接被拒（带人话）', rConnect.content.slice(0, 160))
+  const rBadConnect = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const n = await api.node.get(" + JSON.stringify(noteUuid) + "); return await o.connect(n, 'down') })")
+  ok(!rBadConnect.ok && rBadConnect.content.includes('笔记'), '挂件不能手工连（归属自动生成）', rBadConnect.content.slice(0, 160))
+
+  // 固定接口：创建带 portKey = 创建即认领（点目标项建文档的同一条路）；getPortData 拉回整条
+  const rClaimCreate = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const c = await o.content; return await api.node.create({ kind: 'doc', title: '认领甲', under: " + JSON.stringify(outlineUuidOf) + ", portKey: c.children[0].key }) })")
+  ok(rClaimCreate.ok && rClaimCreate.content.includes('认领了目标项'), 'node.create 带 portKey 创建即认领', rClaimCreate.content.slice(0, 200))
+  const claimUuid = (jsonOf(rClaimCreate) as { uuid: string }).uuid
+  ok(h.store().edges.some((e) => e.from === childId && e.to === claimUuid && !!e.portKey), '认领落在树边上（下游侧有效）')
+  const rPorts = await h.run("((api)=>{ const d = await api.node.get(" + JSON.stringify(claimUuid) + "); const data = await d.getPortData(); const up = d.relations.find((r) => r.type === 'up'); return { data, portKey: up && up.portKey } })")
+  ok(rPorts.ok && rPorts.content.includes('子甲') && rPorts.content.includes('先学') && rPorts.content.includes('"portKey"'), 'getPortData 拉到整条（key/label/data），manifest 关系带 portKey', rPorts.content.slice(0, 240))
+  const rPortTaken = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const c = await o.content; const made = await api.node.create({ kind: 'doc', title: '抢口乙' }); const d2 = await api.node.get(made.uuid); return await d2.connect(o, 'up', c.children[0].key) })")
+  ok(!rPortTaken.ok && rPortTaken.content.includes('一个接口只认领一个下游'), '一个接口只认领一个下游（人话拒绝）', rPortTaken.content.slice(0, 200))
+  const rPortFree = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const d = await api.node.get(" + JSON.stringify(claimUuid) + "); const un = await d.disconnect(o); const c = await o.content; const made = await api.node.create({ kind: 'doc', title: '补位丙' }); const d2 = await api.node.get(made.uuid); const re = await d2.connect(o, 'up', c.children[0].key); const gone = await d.getPortData(); return { un: un.ok, re: re.ok, gone } })")
+  ok(rPortFree.ok && rPortFree.content.includes('"re":true') && rPortFree.content.includes('"gone":[]'), '剪线解除认领：接口空出来可被别人认领，原文档 getPortData 归零', rPortFree.content.slice(0, 240))
+  const rBadPort = await h.run("((api)=>{ const o = await api.node.get(" + JSON.stringify(outlineUuidOf) + "); const made = await api.node.create({ kind: 'doc', title: '问口丁' }); const d = await api.node.get(made.uuid); return await d.connect(o, 'up', '没有这个口') })")
+  ok(!rBadPort.ok && rBadPort.content.includes('可认领的'), '不存在的接口报出可认领清单', rBadPort.content.slice(0, 200))
+
+  const rRename = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(subUuid) + "); const c = await n.content; return await n.editContent({ ...c, title: '夹逼定理（正式）' }) })")
+  ok(rRename.ok && h.store().nodes.some((n) => n.title === '夹逼定理（正式）'), '改名走 editContent（title 在 content 里）', rRename.content.slice(0, 160))
+  const rDupName = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(subUuid) + "); const c = await n.content; return await n.editContent({ ...c, title: '极限' }) })")
+  ok(!rDupName.ok && rDupName.content.includes('已经有'), '同名改名被拒绝', rDupName.content.slice(0, 160))
+
+  const rDel = await h.run("((api)=>{ return await api.node.delete(" + JSON.stringify(subUuid) + ") })")
+  ok(rDel.ok && !h.store().nodes.some((n) => n.title === '夹逼定理（正式）'), 'node.delete 删掉文档（删谁只删谁，行为在服务层）', rDel.content.slice(0, 160))
+  const rDelNote = await h.run("((api)=>{ return await api.node.delete(" + JSON.stringify(noteUuid) + ") })")
+  ok(rDelNote.ok && !(h.store().nodes.find((n) => n.id === childId)?.notes ?? []).some((n) => n.name === '错题本'), 'node.delete 删掉挂件只删它自己', rDelNote.content.slice(0, 160))
+
+  const rUnknown = await h.run("((api)=>{ return await api.node.invoke(" + JSON.stringify(docUuid) + ", '没有这个成员', []) })")
+  ok(!rUnknown.ok && rUnknown.content.includes('content / editContent'), '未知成员被拒并列出五件套清单', rUnknown.content.slice(0, 200))
+
+  const rOldGraph = await h.run('((api)=>{ return await api.graph.list() })')
+  ok(!rOldGraph.ok && rOldGraph.content.includes('api.node.list()'), '旧 api 名给出新写法（graph.list → node.list）', rOldGraph.content.slice(0, 200))
+
+  // 删谁只删谁（用户定的）：删大纲 = 清空计划（文档与树边不动）；删文档只删自己，下游断线成游离
+  const rDelOutline = await h.run("((api)=>{ return await api.node.delete(" + JSON.stringify(outlineUuidOf) + ") })")
+  ok(rDelOutline.ok && !h.store().nodes.find((n) => n.id === childId)?.outline, 'node.delete 删大纲 = 清空计划（文档还在、树边不动）', rDelOutline.content.slice(0, 200))
+  const rMid = await h.run("((api)=>{ return await api.node.create({ kind: 'doc', title: '中游', under: " + JSON.stringify(docUuid) + " }) })")
+  const midUuid = rMid.ok ? (jsonOf(rMid) as { uuid?: string }).uuid : undefined
+  ok(!!midUuid && h.store().nodes.some((n) => n.id === midUuid), '中游文档建出来', rMid.content.slice(0, 120))
+  const rLeaf = await h.run("((api)=>{ return await api.node.create({ kind: 'doc', title: '下游', under: 'o:" + midUuid + "' }) })")
+  const leafUuid = rLeaf.ok ? (jsonOf(rLeaf) as { uuid?: string }).uuid : undefined
+  ok(!!leafUuid, '下游挂在「中游」的大纲之下（under 认 o: 前缀）', rLeaf.content.slice(0, 160))
+  const rDelMid = await h.run("((api)=>{ return await api.node.delete(" + JSON.stringify(midUuid ?? '') + ") })")
   ok(
-    h.store().nodes.find((n) => n.id === childId)?.docs.teaching === keepTeaching,
-    '共享 fixture 的教学文档已原样写回（后面的用例还要在它上面找东西）',
-    h.store().nodes.find((n) => n.id === childId)?.docs.teaching,
+    rDelMid.ok && !h.store().nodes.some((n) => n.id === midUuid) &&
+      h.store().nodes.some((n) => n.id === leafUuid) &&
+      !h.store().edges.some((e) => e.from === midUuid),
+    '删「中游」只删它自己：「下游」断线成游离、不删除', rDelMid.content.slice(0, 240),
   )
-  const r4 = await h.run('((api)=>{ return await api.doc.replace("", { start: 0, end: 2, content: "改", expected: "不对的内容" }) })')
-  ok(!r4.ok && r4.content.includes('位置校验失败') && r4.content.includes('没有生效'), 'expected 不符时工具级失败，并说清是哪个 api 没生效', r4.content.slice(0, 200))
-  const r5 = await h.run('((api)=>{ await api.doc.write("微积分/笔记", "目标自己的笔记"); return (await api.doc.read("微积分/笔记")).content })')
-  ok(r5.ok && r5.content.startsWith('目标自己的笔记'), '跨节点写笔记（path 指名）', r5.content)
-  const r6 = await h.run('((api)=>{ const l = await api.node.list(); return { count: l.count, paths: l.nodes.map((n)=>n.path) } })')
-  ok(r6.ok && r6.content.includes('微积分/极限'), 'node.list 列出目标内节点', r6.content)
-  const r7 = await h.run('((api)=>{ const c = await api.node.create({ parent: "极限", title: "夹逼定理", description: "一句话" }); return c })')
-  ok(r7.ok && r7.content.includes('已创建节点「夹逼定理」'), 'node.create 建下级节点', r7.content)
-  const created = h.store().nodes.find((n) => n.title === '夹逼定理')
-  ok(!!created && created.goalId === goalId, '新节点归属目标', created)
-  ok(h.store().edges.some((e) => e.from === childId && e.to === created?.id), '新节点挂在请求的父节点下')
-  // 显式路径是新口径：不写 parent、或从「当前」出发，一律被拒（不再隐式建在当前节点下）
-  const r7a = await h.run('((api)=>{ return await api.node.create({ title: "无parent节点" }) })')
-  ok(!r7a.ok && r7a.content.includes('parent'), 'node.create 不写 parent 被拒', r7a.content.slice(0, 160))
-  const r7b = await h.run('((api)=>{ return await api.node.create({ parent: "当前", title: "当前下的节点" }) })')
-  ok(!r7b.ok && r7b.content.includes('当前'), 'parent 写「当前」也被拒', r7b.content.slice(0, 160))
-  // node.move：换父节点 = 摘掉旧父线挂到新父节点之下；根不能移、挂到自己下级成环也被拒
-  const rMove = await h.run('((api)=>{ return await api.node.move("夹逼定理", "微积分") })')
+
+  // 独立实体与换绑（用户定的）：不给 under = 游离；剪线 = 解绑不删内容；connect = 绑回
+  const rFree = await h.run("((api)=>{ return await api.node.create({ kind: 'note', title: '散记' }) })")
+  const freeUuid = rFree.ok ? (jsonOf(rFree) as { uuid?: string }).uuid : undefined
   ok(
-    rMove.ok &&
-      h.store().edges.some((e) => e.from === rootId && e.to === created?.id) &&
-      !h.store().edges.some((e) => e.from === childId && e.to === created?.id),
-    'node.move 换父节点（旧父线摘掉）',
-    rMove.content,
+    !!freeUuid && !(h.store().nodes.some((n) => (n.notes ?? []).some((x) => x.id === freeUuid))) &&
+      !!h.store().detached?.g1?.notes.some((n) => n.id === freeUuid),
+    '不给 under 建的是游离笔记（独立实体，在池子里不在任何文档名下）', rFree.content.slice(0, 200),
   )
-  const rMoveRoot = await h.run('((api)=>{ return await api.node.move("微积分", "夹逼定理") })')
-  ok(!rMoveRoot.ok && rMoveRoot.content.includes('总目标'), '目标的根不能移动', rMoveRoot.content.slice(0, 160))
-  const rCycle = await h.run('((api)=>{ await api.node.create({ parent: "极限", title: "环测试" }); return await api.node.move("极限", "环测试") })')
-  ok(!rCycle.ok && rCycle.content.includes('环'), '不能把节点挂到它自己的下级之下', rCycle.content.slice(0, 160))
-  const r8 = await h.run('((api)=>{ const t = await api.node.title("夹逼定理"); await api.node.rename("夹逼定理", "夹逼定理（正式）"); const t2 = await api.node.title("夹逼定理（正式）"); return { before: t.title, after: t2.title } })')
-  ok(r8.ok && r8.content.includes('夹逼定理（正式）'), 'node.title / node.rename（改名后路径仍能找到）', r8.content)
-  const r9 = await h.run('((api)=>{ return await api.node.rename("夹逼定理（正式）", "极限") })')
-  ok(!r9.ok && r9.content.includes('已经有叫'), '同名改名被拒绝', r9.content.slice(0, 160))
-  const r10 = await h.run('((api)=>{ return await api.node.delete("微积分") })')
-  ok(!r10.ok && r10.content.includes('学习目标本身'), '不能删学习目标', r10.content.slice(0, 160))
-  const r11 = await h.run('((api)=>{ return await api.node.delete("夹逼定理（正式）") })')
-  ok(r11.ok && !h.store().nodes.some((n) => n.title === '夹逼定理（正式）'), 'node.delete 删掉节点', r11.content)
-  const r12 = await h.run('((api)=>{ const f = await api.doc.find("", "极限"); return { matches: f.matches, first: f.hits[0] } })')
-  ok(r12.ok && r12.content.includes('"start"'), 'doc.find 只回位置', r12.content)
-  const r13 = await h.run('((api)=>{ return await api.description.update("只有内容的老写法") })')
-  ok(r13.ok && h.store().nodes.find((n) => n.id === childId)?.description === '只有内容的老写法', 'description.update 单参数兼容旧写法', r13.content)
-  const r14 = await h.run('((api)=>{ return await api.note.read() })')
-  ok(!r14.ok && r14.content.includes('files.read'), '旧 api 名给出新写法', r14.content.slice(0, 200))
-  const r15 = await h.run('((api)=>{ return await api.exam.read() })')
-  ok(!r15.ok && r15.content.includes('沙箱里没有这个 api'), '未注入 exam 时该组不存在', r15.content.slice(0, 160))
-  const r16 = await h.run('((api)=>{ await api.doc.write("", "# 正文"); await api.node.update("", { status: "mastered" }); return "ok" })')
-  ok(r16.ok && h.store().nodes.find((n) => n.id === childId)?.status === 'mastered', 'node.update 能改状态', r16.content)
-  const r17 = await h.run('((api)=>{ return (await api.node.read("")).docs })')
-  ok(r17.ok && r17.content.includes('教学文档'), 'node.read 回各文档字数', r17.content)
-  const r18 = await h.run('((api)=>{ return await api.doc.read("根本没有的节点") })')
-  ok(r18.ok === false && r18.content.includes('没有'), 'path 找不到时给出可读原因', r18.content.slice(0, 160))
-  // outline：整份写入 → 读回，key 由标题自动生成；两侧全空被拒（清空不是写入的活）
-  const rOut = await h.run('((api)=>{ const w = await api.outline.write("", { intro: "这一层的路线", children: [{ title: "子目标甲", summary: "先学这个" }, { title: "子目标乙", summary: "后学这个" }] }); const rd = await api.outline.read(""); return { wrote: w.ok, count: rd.children.length, key: rd.children[0].key } })')
-  ok(rOut.ok && rOut.content.includes('"count":2') && rOut.content.includes('子目标甲'), 'outline.write → outline.read 整份往返，key 自动生成', rOut.content.slice(0, 240))
-  ok(h.store().nodes.find((n) => n.id === childId)?.outline?.children.length === 2, '大纲真的落在节点上')
-  const rOutEmpty = await h.run('((api)=>{ return await api.outline.write("", { intro: "", children: [] }) })')
-  ok(!rOutEmpty.ok && rOutEmpty.content.includes('空'), '导语与子目标全空的大纲被拒', rOutEmpty.content.slice(0, 140))
+  const rWrite = await h.run("((api)=>{ return await api.node.invoke(" + JSON.stringify(freeUuid) + ", 'editContent', [{ text: '剪线也不删我' }]) })")
+  ok(rWrite.ok, '游离笔记照样能写（内容跟实体走，跟绑定无关）', rWrite.content.slice(0, 160))
+  const rBindBack = await h.run("((api)=>{ return await api.node.invoke(" + JSON.stringify(docUuid) + ", 'connect', [" + JSON.stringify(freeUuid) + ", 'down']) })")
+  ok(
+    rBindBack.ok && (h.store().nodes.find((n) => n.id === childId)?.notes ?? []).some((n) => n.id === freeUuid) &&
+      !(h.store().detached?.g1?.notes ?? []).some((n) => n.id === freeUuid),
+    'connect 绑回文档之下（从池子里挪进宿主，id 不变）', rBindBack.content.slice(0, 200),
+  )
+  const rUnbind = await h.run("((api)=>{ return await api.node.invoke(" + JSON.stringify(docUuid) + ", 'disconnect', [" + JSON.stringify(freeUuid) + "]) })")
+  const unbound = rUnbind.ok && (h.store().detached?.g1?.notes ?? []).find((n) => n.id === freeUuid)
+  ok(
+    !!unbound && unbound.content === '剪线也不删我' && !(h.store().nodes.find((n) => n.id === childId)?.notes ?? []).some((n) => n.id === freeUuid),
+    'disconnect 剪线 = 解绑：实体进池子、内容原样（什么都不删）', rUnbind.content.slice(0, 200),
+  )
+  const rOldDoc = await h.run('((api)=>{ return await api.doc.read("") })')
+  ok(!rOldDoc.ok && rOldDoc.content.includes('api.node.get'), '旧 api 名给出新写法（doc.read → 节点对象）', rOldDoc.content.slice(0, 200))
+
+  /*
+   * TypeScript 沙箱：body 可以直接写 TS——类型标注、接口在进 Worker 前被剥掉。
+   * 这条同时证明转译发生在宿主侧（探针的 fakeRunner 也走同一条 compileBody）。
+   */
+  const rTs = await h.run("((api: { node: { get(uuid: string): Promise<{ content: unknown; help(): { edit: string } }> } }) => { interface P { uuid: string } const p: P = { uuid: " + JSON.stringify(docUuid) + " }; const n = await api.node.get(p.uuid); const h = await n.help(); return { editHead: h.edit.slice(0, 2) } })")
+  ok(rTs.ok && rTs.content.includes('editHead'), 'execute 的 body 可以直接写 TypeScript（类型/接口被剥掉后执行）', rTs.content.slice(0, 200))
+
+  const r18 = await h.run('((api)=>{ return await api.node.get("根本没有的uuid") })')
+  ok(!r18.ok && r18.content.includes('没有'), 'uuid 找不到时给出可读原因', r18.content.slice(0, 160))
 }
 
 /* ---------- 4. api 名单与实现必须一致 ---------- */
@@ -169,17 +195,13 @@ export async function toolTests() {
  */
 export async function apiNameTests() {
   const calls: Record<string, string> = {
+    // 节点对象通道：多态内容读写的入口（行为用例见 toolTests 的「节点对象」一节）
+    // 节点宇宙：四条传输 + invoke 代调用（行为用例见 toolTests 的「节点宇宙」一节）
     'node.list': '',
-    'node.read': "''",
-    'node.paths': "''",
-    'node.create': "{ parent: '微积分', title: '临时节点' }",
-    'node.title': "''",
-    'node.rename': "'临时节点', '新临时节点'",
-    'node.update': "'', { description: '临时描述' }",
-    'node.annotate': "'', { term: '极限', body: '基本概念' }",
-    'node.delete': "''",
-    // 迁移：把刚建的临时节点挂到根之下（它已在根之下时回一句「已经在」，同样证明 api 在）
-    'node.move': "'临时节点', '微积分'",
+    'node.get': "'微积分'",
+    'node.create': "{ kind: 'note', title: '探针笔记', under: '微积分' }",
+    'node.delete': "'探针笔记'",  // 删上一行建出来的那份笔记（找不到也回执，同样证明 api 在）
+    'node.invoke': "'微积分', 'help', []",
     // 持久化函数（创建/列表/删除/调用）
     'method.list': '',
     'method.create': "{ name: '探针函数', code: '((api)=>{ return 1 })' }",
@@ -283,15 +305,6 @@ export async function apiNameTests() {
     // 名单扩张后补上的那批（数据面回归 api 组）：这批只问「名字真的注册了吗」，
     // 行为断言由各自领域的小节覆盖（examTests / methodAndSdocTests / workflowTests / workspaceTests …）
     'node.createTree': "{ tree: [{ title: '临时树节点' }] }",
-    'doc.read': "''",
-    'doc.readRange': "'', 0, 100",
-    'doc.find': "'', '极限'",
-    'doc.write': "'', '探针正文'",
-    'doc.replace': "'', { expected: '探针正文', content: '探针正文（改）' }",
-    'doc.append': "'', '探针追加'",
-    'doc.annotate': "'', { term: '夹逼定理', body: '用两个边界函数夹住目标函数。' }",
-    'outline.read': "''",
-    'outline.write': "'', { intro: '探针大纲', children: [{ title: '临时子目标' }] }",
     'state.read': "''",
     'state.update': "'', { mastery: 60, note: '探针' }",
     'state.mistake': "'', { pattern: '探针错法' }",
@@ -303,15 +316,10 @@ export async function apiNameTests() {
     'tmp.del': "'probe'",
     'tmp.list': '',
     'tmp.clear': '',
-    'exam.create': "{ title: '探针卷', kind: 'quiz', level: 'easy', minutes: 0, questions: [] }",
     'exam.read': "''",
     'exam.grade': '{ passed: true }',
     'exam.explain': "{ content: '探针讲解' }",
     'exam.delete': '{}',
-    'sdoc.list': "''",
-    'sdoc.read': "'', '探针文档'",
-    'sdoc.write': "'', '探针文档', '<!doctype html><html><body></body></html>'",
-    'sdoc.delete': "'', '探针文档'",
     'res.list': '',
     'res.info': "'probe-uuid'",
     'res.read': "'probe-uuid'",
@@ -510,9 +518,9 @@ export async function apiNameTests() {
   ok(sawOpenSuper === '探针文档', 'ui.superdoc 把要开的文档名递给了宿主', sawOpenSuper)
   // __help 三级：组 / 单条 / 根。假沙箱把它们当普通调用转回宿主，execute 的 callApi 兜底渲染
   const groupHelp = await tool.run({ description: '组 help', body: '((api)=>{ return await api.node.__help() })' }, { nodeId: childId, goalId })
-  ok(groupHelp.ok && groupHelp.content.includes('node.create'), 'api.node.__help() 列出组内 api', groupHelp.content.slice(0, 150))
-  const apiHelp = await tool.run({ description: '单条 help', body: '((api)=>{ return await api.doc.write.__help() })' }, { nodeId: childId, goalId })
-  ok(apiHelp.ok && apiHelp.content.includes('示例：') && apiHelp.content.includes('await api.doc.write'), 'api.doc.write.__help() 带签名与示例', apiHelp.content.slice(0, 150))
+  ok(groupHelp.ok && groupHelp.content.includes('node.get'), 'api.node.__help() 列出组内 api', groupHelp.content.slice(0, 150))
+  const apiHelp = await tool.run({ description: '单条 help', body: '((api)=>{ return await api.node.get.__help() })' }, { nodeId: childId, goalId })
+  ok(apiHelp.ok && apiHelp.content.includes('示例：') && apiHelp.content.includes('api.node.get'), 'api.node.get.__help() 带签名与示例', apiHelp.content.slice(0, 150))
   const rootHelp = await tool.run({ description: '根 help', body: '((api)=>{ return await api.__help() })' }, { nodeId: childId, goalId })
   ok(rootHelp.ok && rootHelp.content.includes('api.node') && rootHelp.content.includes('api.<组>.<api>.__help()'), 'api.__help() 是组总览并教用法', rootHelp.content.slice(0, 150))
   const bogusHelp = await tool.run({ description: '不存在的组', body: '((api)=>{ return await api.nope.__help() })' }, { nodeId: childId, goalId })
@@ -554,9 +562,9 @@ export async function apiNameTests() {
   // 触发口挂上之后还能钉一条：被拒的调用进不了 log，也就不会报模块 key。
   const deniedModules: string[] = []
   const sub = createExecuteTool({ ...ops, runSandbox: fakeRunner, apiAllow: ['web', 'tmp'], onPromptModule: (k) => deniedModules.push(k) })
-  const denied = await sub.run({ description: '越权读文档', body: '((api)=>{ return await api.doc.read("") })' }, { nodeId: childId, goalId })
+  const denied = await sub.run({ description: '越权取节点', body: '((api)=>{ return await api.node.list() })' }, { nodeId: childId, goalId })
   ok(!denied.ok && denied.content.includes('只开放了'), 'apiAllow 名单外的组当场被拒', denied.content.slice(0, 160))
-  ok(!deniedModules.includes('doc'), '被 apiAllow 拒掉的调用不触发注入', deniedModules)
+  ok(!deniedModules.includes('node'), '被 apiAllow 拒掉的调用不触发注入', deniedModules)
   const allowed = await sub.run({ description: '搜索', body: "((api)=>{ return await api.web.search('勾股定理') })" }, { nodeId: childId, goalId })
   ok(allowed.ok && (allowed.content.includes('baidu') || allowed.content.includes('百度百科') || allowed.content.includes('勾股定理')) && deniedModules.includes('web'), 'apiAllow 名单内的组照常放行并触发注入', { content: allowed.content.slice(0, 120), keys: deniedModules })
 
@@ -568,7 +576,7 @@ export async function apiNameTests() {
   await modTool.run({ description: '组触发', body: "((api)=>{ return await api.web.search('探针') })" }, { nodeId: childId, goalId })
   ok(sawModules.includes('web'), '调用 web 组把模块 key 报给了宿主', sawModules)
   await modTool.run(
-    { description: '内容触发', body: "((api)=>{ return await api.doc.append('笔记/探针', '看图：\\n\\n```plot\\n{ \"data\": [] }\\n```') })" },
+    { description: '内容触发', body: "((api)=>{ return await api.node.invoke('n2', 'editContent', [{ teaching: '看图：\\n\\n```plot\\n{ \"data\": [] }\\n```' }]) })" },
     { nodeId: childId, goalId },
   )
   ok(sawModules.includes('plot-forms'), '写入 plot 围栏把数据形态模块报给了宿主', sawModules)

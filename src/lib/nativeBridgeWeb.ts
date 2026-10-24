@@ -273,6 +273,17 @@ export function createWebNativeBridge(): NativeBridge {
       allowClose: () => {},
     },
 
+    // 上下文轨迹窗口是 Electron 独立窗口，Web 模式没有主进程可开窗：全给空实现
+    traceHost: {
+      open: () => Promise.resolve({ ok: false, error: '上下文轨迹窗口仅桌面端可用' }),
+      push: () => {},
+      onClosed: () => () => {},
+    },
+
+    traceGuest: {
+      onState: () => () => {},
+    },
+
     notice: {
       get: () => apiFetch<NoticeSettings>('/api/notice/get'),
       set: (patch: Partial<NoticeSettings>) =>

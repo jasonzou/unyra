@@ -12,14 +12,9 @@ import {
   Trash2,
 } from 'lucide-react'
 import { activeUserId } from '../../user/store'
-import { MIGRATION_SCRIPTS } from '../../lib/migration/scripts'
+import { LATEST_SCHEMA_STEP, MIGRATION_SCRIPTS, RELEASED_SCHEMA_STEP } from '../../lib/migration/scripts'
 import { planChain, runChain, runSingleScript } from '../../lib/migration/engine'
-import {
-  compareVersions,
-  detectSchemaVersion,
-  LATEST_SCHEMA_VERSION,
-  saveSchemaMeta,
-} from '../../lib/migration/version'
+import { detectSchemaStep, saveSchemaMeta } from '../../lib/migration/version'
 import type { MigrationScript, SchemaMeta } from '../../lib/migration/types'
 import Switch from '../Switch'
 import { pane } from '../Pane'
@@ -40,11 +35,19 @@ const fmtTime = (ts: number): string =>
     second: '2-digit',
   })
 
+/** 旧历史记录只有版本区间，新记录有序号 */
+const historyLabel = (h: { step?: number; fromVersion?: string; toVersion?: string }): string =>
+  typeof h.step === 'number'
+    ? t('第 {0} 次', String(h.step))
+    : h.fromVersion && h.toVersion
+      ? `v${h.fromVersion} → v${h.toVersion}`
+      : t('早期迁移')
+
 export function MigrationPanel({ onToast }: Props) {
   const uid = activeUserId() || 'default'
 
-  // 当前数据状态
-  const [currentVersion, setCurrentVersion] = useState<string>(LATEST_SCHEMA_VERSION)
+  // 当前数据状态（序号，不是版本号）
+  const [currentStep, setCurrentStep] = useState<number>(LATEST_SCHEMA_STEP)
   const [meta, setMeta] = useState<SchemaMeta | undefined>()
   const [loading, setLoading] = useState<boolean>(true)
 
@@ -58,12 +61,12 @@ export function MigrationPanel({ onToast }: Props) {
     setLogs((prev) => [...prev, msg])
   }, [])
 
-  // 探测并确保版本标识
+  // 探测当前数据序号
   const refreshStatus = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await detectSchemaVersion(uid)
-      setCurrentVersion(res.version)
+      const res = await detectSchemaStep(uid)
+      setCurrentStep(res.step)
       setMeta(res.meta)
     } finally {
       setLoading(false)
@@ -75,7 +78,7 @@ export function MigrationPanel({ onToast }: Props) {
   }, [refreshStatus])
 
   // 规划链式迁移
-  const chainPlan = planChain(currentVersion, LATEST_SCHEMA_VERSION)
+  const chainPlan = planChain(currentStep, LATEST_SCHEMA_STEP)
 
   // 切换启动期自动迁移
   const toggleAutoMigrate = async (enabled: boolean) => {
@@ -87,11 +90,7 @@ export function MigrationPanel({ onToast }: Props) {
     }
     setMeta(nextMeta)
     await saveSchemaMeta(uid, nextMeta)
-    onToast(
-      enabled
-        ? t('已开启启动期自动数据迁移')
-        : t('已关闭自动迁移（升级后需手动进入此页面执行）'),
-    )
+    onToast(enabled ? t('已开启启动期自动数据迁移') : t('已关闭自动迁移（升级后需手动进入此页面执行）'))
   }
 
   // 执行单步迁移
@@ -99,7 +98,7 @@ export function MigrationPanel({ onToast }: Props) {
     if (running) return
     setRunning(true)
     setActiveStepId(script.id)
-    appendLog(`>>> 单步触发迁移脚本：${script.title} (v${script.fromVersion} -> v${script.toVersion})`)
+    appendLog(`>>> 单步触发第 ${script.step} 次迁移：${script.title}`)
 
     try {
       const res = await runSingleScript(uid, script, appendLog)
@@ -119,12 +118,12 @@ export function MigrationPanel({ onToast }: Props) {
   const handleRunChain = async () => {
     if (running) return
     if (chainPlan.scripts.length === 0) {
-      onToast(t('当前已是最新版本，无需链式迁移'))
+      onToast(t('当前数据已是最新，无需链式迁移'))
       return
     }
 
     setRunning(true)
-    appendLog(`>>> 开始全自动链式数据迁移 (v${chainPlan.currentVersion} -> v${chainPlan.targetVersion})`)
+    appendLog(`>>> 开始链式数据迁移（第 ${chainPlan.currentStep} 次 → 第 ${chainPlan.targetStep} 次）`)
 
     try {
       const res = await runChain(
@@ -132,13 +131,13 @@ export function MigrationPanel({ onToast }: Props) {
         chainPlan.scripts,
         (cur, total, script) => {
           setActiveStepId(script.id)
-          appendLog(`--- [阶段 ${cur}/${total}] 开始迁移：${script.title} ---`)
+          appendLog(`--- [阶段 ${cur}/${total}] 第 ${script.step} 次迁移：${script.title} ---`)
         },
         appendLog,
       )
 
       if (res.ok) {
-        onToast(t('链式数据迁移完成！当前数据已升级至 v{0}', LATEST_SCHEMA_VERSION))
+        onToast(t('链式数据迁移完成！数据已升级到第 {0} 次', String(LATEST_SCHEMA_STEP)))
         await refreshStatus()
       } else {
         onToast(t('迁移中断：{0}', res.error || t('未知错误')))
@@ -157,6 +156,9 @@ export function MigrationPanel({ onToast }: Props) {
     setTimeout(() => setCopiedLog(false), 1500)
   }
 
+  const ahead = currentStep > LATEST_SCHEMA_STEP
+  const upToDate = currentStep === LATEST_SCHEMA_STEP
+
   return (
     <div className={pane(4, true)}>
       {/* 头部简介卡片 */}
@@ -167,7 +169,9 @@ export function MigrationPanel({ onToast }: Props) {
             <h2 className="text-[14px] font-semibold text-ink-strong">{t('数据迁移')}</h2>
           </div>
           <p className="mt-1 text-[11.5px] text-ink-soft">
-            {t('链式版本管理与迁移中心，避免版本更新时存储结构散落零碎，保障跨版本升级时数据平滑无损转换。')}
+            {t(
+              '按序号推进的数据迁移中心：数据结构每变一次加一个序号，与应用版本号无关，发版不涨序号。',
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -176,35 +180,58 @@ export function MigrationPanel({ onToast }: Props) {
             disabled={loading || running}
             onClick={() => void refreshStatus()}
             className="flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1 text-[11px] font-medium text-ink-soft transition hover:bg-paper-deep hover:text-ink disabled:opacity-40 shadow-2xs"
-            title={t('重新检查当前存储结构版本')}
+            title={t('重新检查当前数据序号')}
           >
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-            <span>{t('刷新版本')}</span>
+            <span>{t('刷新状态')}</span>
           </button>
           <div className="flex items-center gap-1.5 rounded-full border border-seal/30 bg-seal/10 px-2.5 py-1 text-[11px] text-seal-deep">
-            <span className="font-mono font-bold">v{LATEST_SCHEMA_VERSION}</span>
-            <span>{t('当前应用版本')}</span>
+            <span className="font-mono font-bold">{t('第 {0} 次', String(LATEST_SCHEMA_STEP))}</span>
+            <span>{t('最新迁移序号')}</span>
           </div>
         </div>
       </div>
 
-      {/* 1. 当前数据结构版本与标识 */}
+      {/* 1. 当前数据序号与标识 */}
       <section className="shrink-0 rounded-xl border border-line bg-card/60 p-4 shadow-2xs">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <FileCode2 size={15} className="text-seal" />
-              <h3 className="text-[13px] font-medium text-ink-strong">{t('数据版本标识')}</h3>
+              <h3 className="text-[13px] font-medium text-ink-strong">{t('数据迁移序号')}</h3>
             </div>
             <p className="mt-1 text-[11.5px] text-ink-faint">
-              {t('从当前版本开始，用户目录注入独立标识 schema.json，统一登记数据结构版本号与变更记录。')}
+              {t(
+                '用户目录里的 schema.json 只记「已应用到第几次迁移」，不再记版本号；版本号从此只属于应用发版。',
+              )}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
+            <span
+              className={`flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
+                ahead
+                  ? 'border-red-500/30 bg-red-500/10 text-red-700'
+                  : upToDate
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700'
+                    : 'border-amber-500/30 bg-amber-500/10 text-amber-700'
+              }`}
+              title={
+                ahead
+                  ? t(
+                      '数据序号比当前代码还新：可能是装回了旧版本，或本机跑过尚未发布的迁移。代码可能读不懂这份数据。',
+                    )
+                  : undefined
+              }
+            >
               <CheckCircle2 size={12} />
-              <span>{t('结构已就绪 (v{0})', currentVersion)}</span>
+              <span>
+                {ahead
+                  ? t('数据序号高于当前代码（第 {0} 次 > 第 {1} 次）', String(currentStep), String(LATEST_SCHEMA_STEP))
+                  : upToDate
+                    ? t('数据已是最新（第 {0} 次）', String(currentStep))
+                    : t('待迁移：第 {0} 次 → 第 {1} 次', String(currentStep), String(LATEST_SCHEMA_STEP))}
+              </span>
             </span>
           </div>
         </div>
@@ -212,14 +239,14 @@ export function MigrationPanel({ onToast }: Props) {
         {/* 详细指标行 */}
         <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-3 border-t border-line/60">
           <div className="rounded-lg border border-line bg-paper-deep/50 p-2.5">
-            <span className="text-[10.5px] text-ink-faint">{t('当前数据结构版本')}</span>
+            <span className="text-[10.5px] text-ink-faint">{t('当前数据序号')}</span>
             <div className="mt-0.5 font-mono text-[13px] font-bold text-ink-strong">
-              v{currentVersion}
+              {t('第 {0} 次', String(currentStep))}
             </div>
           </div>
 
           <div className="rounded-lg border border-line bg-paper-deep/50 p-2.5">
-            <span className="text-[10.5px] text-ink-faint">{t('版本标识文件')}</span>
+            <span className="text-[10.5px] text-ink-faint">{t('标识文件')}</span>
             <div className="mt-0.5 truncate font-mono text-[11.5px] text-ink-soft" title="schema.json">
               users/{uid}/schema.json
             </div>
@@ -239,12 +266,12 @@ export function MigrationPanel({ onToast }: Props) {
             on={meta?.autoMigrate !== false}
             onChange={(next) => void toggleAutoMigrate(next)}
             label={t('应用启动时自动检测并升级数据结构')}
-            hint={t('开启后，后续版本升级若存在待迁移脚本，将在启动载入前自动按序执行链式升级，无需手动点击。')}
+            hint={t('开启后，后续版本升级若存在待执行的迁移序号，将在启动载入前自动按序执行，无需手动点击。')}
           />
         </div>
       </section>
 
-      {/* 2. 链式数据迁移脚本列表 */}
+      {/* 2. 数据迁移脚本列表 */}
       <section className="shrink-0 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -260,7 +287,7 @@ export function MigrationPanel({ onToast }: Props) {
               className="flex items-center gap-1.5 rounded-xl bg-seal px-3.5 py-1.5 text-[11.5px] font-medium text-white shadow-2xs hover:bg-seal-deep disabled:opacity-40"
             >
               <Play size={12} className={running ? 'animate-pulse' : ''} />
-              <span>{t('一键链式迁移到 v{0}', LATEST_SCHEMA_VERSION)}</span>
+              <span>{t('一键迁移到第 {0} 次', String(LATEST_SCHEMA_STEP))}</span>
             </button>
           )}
         </div>
@@ -275,17 +302,18 @@ export function MigrationPanel({ onToast }: Props) {
             </h4>
             <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint max-w-[480px] mx-auto">
               {t(
-                '当前数据存储结构已是最新基准版本 (v{0})。链式数据迁移系统已就绪，后续若发布新版本且引入存储结构变动，对应的迁移脚本将在此显示，支持一键或按步链式升级。',
-                LATEST_SCHEMA_VERSION,
+                '当前数据已应用到第 {0} 次迁移。以后每改一次数据形状就在 scripts.ts 里接一个序号，脚本会自动出现在这里。',
+                String(LATEST_SCHEMA_STEP),
               )}
             </p>
           </div>
         ) : (
           <div className="space-y-2.5">
             {MIGRATION_SCRIPTS.map((script) => {
-              const isApplied = compareVersions(currentVersion, script.toVersion) >= 0
+              const isApplied = currentStep >= script.step
               const isPending = chainPlan.scripts.some((s) => s.id === script.id)
               const isStepActive = activeStepId === script.id
+              const isDraft = script.step > RELEASED_SCHEMA_STEP
 
               return (
                 <div
@@ -301,9 +329,17 @@ export function MigrationPanel({ onToast }: Props) {
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/60 pb-2.5">
                     <div className="flex items-center gap-2">
                       <span className="rounded-md bg-paper-deep px-2 py-0.5 font-mono text-[11px] font-bold text-ink-strong">
-                        v{script.fromVersion} → v{script.toVersion}
+                        {t('第 {0} 次', String(script.step))}
                       </span>
                       <h5 className="text-[12.5px] font-bold text-ink-strong">{script.title}</h5>
+                      {isDraft && (
+                        <span
+                          className="rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-700"
+                          title={t('这个序号还没随公开版本发出去，上线前可以并进前一次迁移')}
+                        >
+                          {t('未发布 · 可合并')}
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -360,9 +396,7 @@ export function MigrationPanel({ onToast }: Props) {
             {meta.history.map((h, idx) => (
               <li key={idx} className="flex items-center justify-between py-2 text-ink-soft">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-ink-strong">
-                    v{h.fromVersion} → v{h.toVersion}
-                  </span>
+                  <span className="font-mono text-ink-strong">{historyLabel(h)}</span>
                   <span className="text-ink-faint">{h.details || t('迁移完成')}</span>
                 </div>
                 <span className="font-mono text-[10.5px] text-ink-faint">{fmtTime(h.migratedAt)}</span>
@@ -371,7 +405,7 @@ export function MigrationPanel({ onToast }: Props) {
           </ul>
         ) : (
           <p className="text-[11.5px] text-ink-faint">
-            {t('暂无历史迁移记录（当前数据已直接初始化为 v{0} 基准版本）。', currentVersion)}
+            {t('暂无历史迁移记录（当前数据直接初始化在第 {0} 次）。', String(currentStep))}
           </p>
         )}
       </section>

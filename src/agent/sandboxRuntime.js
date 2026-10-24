@@ -66,11 +66,46 @@ function onTimeout() {
   })
 }
 
+/*
+ * 参数回传也要折：toWire 只覆盖节点门面自己方法的参数，普通 api 调用的 args 没人管——
+ * 模型把节点对象、没 await 的 Promise（n.content 是 getter）或函数塞进参数，结构化克隆
+ * 就在 postMessage 上炸，整批调用报废且报错指不到位置。这里深折一遍：
+ * - 节点对象 → 只带 uuid（按身份传，与 toWire 的 connect 语义一致）；
+ * - Promise / 函数 → 人话占位（调用照常发出，由各 api 自己的校验给「缺字段」的回执）。
+ */
+function foldArg(v, seen) {
+  if (!v || typeof v !== 'object') {
+    if (typeof v === 'function') return '［函数不能作为参数：把要传的值先算出来］'
+    return v
+  }
+  if (v.__node === true) return v.uuid
+  if (typeof v.then === 'function') return '［这是个没 await 的 Promise：先 await 拿到值再传］'
+  if (seen.has(v)) return '［循环引用］'
+  seen.add(v)
+  if (Array.isArray(v)) {
+    const out = v.map((x) => foldArg(x, seen))
+    seen.delete(v)
+    return out
+  }
+  const out = {}
+  for (const k of Object.keys(v)) out[k] = foldArg(v[k], seen)
+  seen.delete(v)
+  return out
+}
+
 function call(name, args) {
   return new Promise((resolve, reject) => {
     const id = ++seq
     pending.set(id, { resolve, reject })
-    self.postMessage({ kind: 'call', id, name, args })
+    let wire
+    try {
+      wire = { kind: 'call', id, name, args: foldArg(args, new Set()) }
+      self.postMessage(wire)
+    } catch (err) {
+      // 仍有漏网的不可克隆值：与其甩一句 DataCloneError，不如点名是哪条调用、该怎么改
+      reject(new Error('参数里有发不出去的值（' + (err && err.message ? err.message : '不可克隆') + '）：调用 ' + name + ' 的参数里出现了函数 / Promise / 节点对象。节点只传 uuid 字符串；Promise 先 await；要传内容就取它的纯数据字段。'))
+      return
+    }
   })
 }
 
@@ -129,6 +164,35 @@ function makeApi() {
   }
   api.ui = attachGroupHelp(api.ui || {}, 'ui')
   /**
+   * api.node.get(uuid)：节点对象门面。get 回 manifest（身份 + 关系快照），这里包成真对象：
+   * content 是异步 getter（await n.content 每次取最新）；editContent / help / connect /
+   * disconnect 走 node.invoke 通道（宿主记账、失败进清单）；connect / disconnect 的
+   * 节点对象参数在发送前折成 uuid。与进程内门面（sandbox/nodeObject 的 attachNodeFacade）
+   * 行为必须一致。
+   */
+  if (api.node && typeof api.node.get === 'function' && typeof api.node.invoke === 'function') {
+    const channel = api.node
+    // 先把宿主侧原始 get 摘下来再替换：channel 就是 api.node 本体，替换之后
+    // channel.get 解析到的是包装器自己——每次 node.get 都无限递归（栈溢出）。
+    // 与进程内门面（sandbox/nodeObject 的 attachNodeFacade）同一个坑，同一份教训。
+    const rawGet = channel.get.bind(channel)
+    const toWire = (args) =>
+      args.map((a) => (a && typeof a === 'object' && typeof a.uuid === 'string' && a.__node === true ? a.uuid : a))
+    const wrapManifest = (m) => {
+      const obj = { uuid: m.uuid, kind: m.kind, title: m.title, relations: m.relations, __node: true }
+      Object.defineProperty(obj, 'content', {
+        get: () => channel.invoke(m.uuid, 'content', []),
+        enumerable: true,
+      })
+      for (const name of ['editContent', 'help', 'connect', 'disconnect', 'getPortData']) {
+        obj[name] = (...args) =>
+          channel.invoke(m.uuid, name, toWire(args)).then((v) => (v && v.object === true ? wrapManifest(v) : v))
+      }
+      return obj
+    }
+    api.node.get = (uuid) => Promise.resolve(rawGet(uuid)).then((v) => (v && v.object === true ? wrapManifest(v) : v))
+  }
+  /**
    * api.ui.dom(fn)：宿主先建一个「会话」，回调拿到的是一层**门面**（facade）——
    * 它的每个方法都回到宿主去操作文档区根元素。只暴露选择器级别的读写与点击，
    * 因为 DOM 节点本身同样无法穿过 Worker 边界。
@@ -168,15 +232,19 @@ function makeApi() {
   return api
 }
 
+/**
+ * 报错兜底提示：编排代码里出现了**已退役的组名**时，把「现在该怎么写」直接附在报错后面。
+ * 只在真报错时按 body 命中；条目必须指向**当前真实存在**的 api——指向不存在的名字
+ * 只会把模型的纠错路径也带偏（api.memory 是正式 api，绝不能出现在这张表里）。
+ */
 const DEPRECATED_HINTS = {
-  docs: '没有 api.docs 这一组：文档请用 api.doc.*（先 await api.doc.__help()）。',
-  description: 'api.description 已退役：修改节点描述请用 await api.node.update(path, { description })。',
-  review: '没有 api.review：复习计划用 api.outline.write / api.state.* 表达，不要自己找数据文件。',
+  docs: '没有 api.docs 这一组：读写内容先 api.node.get(uuid) 取节点对象，await n.content 读、n.editContent(...) 写（先 await n.help() 看这个节点怎么说）。',
+  description: 'api.description 已退役：改描述走节点对象 const c = await n.content; c.description = 新描述; await n.editContent(c)。',
+  review: '没有 api.review：复习计划写进大纲节点（api.node.get("o:"+文档uuid) 后 editContent），学习状态用 api.state.*。',
   retrieval: '没有 api.retrieval：联网检索请用 api.web.search。',
-  note: '没有 api.note 这一组：笔记请用 api.doc.read / api.doc.write，路径写「节点/笔记/名字」。',
+  note: '没有 api.note 这一组：笔记是节点——api.node.list() 查 uuid，api.node.get(uuid) 后 editContent({ text })。',
   stats: 'api.stats 不存在：阅读事实用 api.reading.*，注意力用 api.attention.get。',
-  memory: 'api.memory 不存在：长期事实用 api.doc.* / api.state.*，可执行逻辑用 api.method.*。',
-  mind: 'api.mind 不存在：知识结构用 api.node.*，文档用 api.doc.*。',
+  mind: 'api.mind 不存在：知识结构用 api.node.list() / api.node.get(uuid)，记忆用 api.memory.*。',
   checkin: 'api.checkin 不存在：没有打卡数据这一组。',
   plot: 'api.plot 不存在：图像请写进教学文档（```plot 围栏），静态素材用 api.res.*。',
   methods: 'api.methods 不存在：方法调用请用 api.method.call(name, ...args)。',
@@ -205,14 +273,36 @@ async function run(body, timeoutMs) {
     clearTimeout(runTimer)
     runTimer = null
     /*
-     * 结果要能过结构化克隆。模型有时会 return 一个函数或带函数的对象，
-     * 那会让 postMessage 直接抛 DataCloneError——报错信息还错位到别处，极难自查。
-     * 这里先把不可克隆的部分换成一句可读的说明。
+     * 结果要能过结构化克隆。两类东西天然过不去，分两步处理：
+     * 1. **节点对象（__node 门面）**：content 是 getter（吐 Promise）、方法都是函数，
+     *    克隆必炸。返回值里遇到就折成一份纯数据快照（uuid/kind/title/relations）——
+     *    回执照样可读，模型要再用这个节点就按 uuid 重新 get。
+     * 2. 其余不可克隆的（函数、裸 Promise）：换成一句可读的说明。
      */
+    const foldNodes = (v, seen) => {
+      if (!v || typeof v !== 'object') return v
+      // __node 判定放在 seen 之前：节点对象折成快照就返回（终结点），不进路径也不该挡后面再次出现
+      if (v.__node === true) {
+        return { __node: true, uuid: v.uuid, kind: v.kind, title: v.title, relations: v.relations }
+      }
+      if (seen.has(v)) return '［循环引用］'
+      seen.add(v)
+      // seen 记的是「当前路径」而不是「见过的全部」：同一对象出现两次是重复，不是循环
+      if (Array.isArray(v)) {
+        const out = v.map((x) => foldNodes(x, seen))
+        seen.delete(v)
+        return out
+      }
+      const out = {}
+      for (const k of Object.keys(v)) out[k] = foldNodes(v[k], seen)
+      seen.delete(v)
+      return out
+    }
     let value
     try {
-      structuredClone(raw)
-      value = raw
+      const folded = foldNodes(raw, new Set())
+      structuredClone(folded)
+      value = folded
     } catch {
       value = typeof raw === 'function' ? '[函数] ' + String(raw).slice(0, 200) : String(raw)
     }

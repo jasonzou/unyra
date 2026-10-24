@@ -30,49 +30,6 @@ export interface PromptModule {
 
 export const PROMPT_MODULES: PromptModule[] = [
   {
-    key: 'sdoc',
-    title: '超级文档',
-    text: `超级文档（Superdoc）——自包含单页交互应用（HTML / SVG / JS / CSS），独立渲染在主文档区页签：
-
-一、物理路径体系与命名契约
-- 节点超级文档（推荐）：每个知识点节点下可包含多个超级文档，物理存放于 docs/.../superdocs/<名称>.html。
-  - 获取当前节点路径：先调用 const p = await api.node.paths()，返回对象中包含 dir、superdocsDir。
-  - 完整物理文件路径形如：\`\${p.dir}/superdocs/\${name}.html\`（例如 docs/微积分/superdocs/极限动态演化.html）。
-- 目标根级超级文档：存放于 \`superdocs/\${name}.html\`。
-- 命名契约：文件名强制以 .html 结尾；在界面中与 api.ui.superdoc 中引用的名称 name 不含 .html 后缀。
-
-二、怎么读与怎么写（核心动线，全部走 api.sdoc.*）
-1. 读取已有超级文档：
-   - 查验列表：await api.sdoc.list(path)；
-   - 读取源码：await api.sdoc.read(path, name)。
-2. 创建与写入：
-   - await api.sdoc.write(path, name, htmlCode)（同名覆盖，name 不含 .html）。
-   - 写入后立即在文档区展示：await api.ui.superdoc(p.path, name)（若为当前激活节点可直接 await api.ui.superdoc(name)）。
-   - 局部改动：读回源码改完再 api.sdoc.write 整份覆盖。
-   - 响应式同步机制已打通：api.sdoc.write 落进 store 后驱动 React 实时刷新，绝不会发生 0 字节清空或静默还原。
-
-三、技术格式规范
-- 自包含单页：HTML 中直接书写完整结构、<style> 内联样式与 <script> 交互代码。
-- 主题变量：自适应系统深浅色外观，使用 CSS 变量：
-  - 背景容器：var(--color-bg)、var(--color-sunken)、var(--color-surface)
-  - 文本排版：var(--color-ink)、var(--color-ink-strong)、var(--color-ink-soft)
-  - 边框与点缀：var(--color-seal)、var(--color-line)、var(--color-warn)、var(--color-success)
-- 富文本说明组件：在页面中嵌入 <moji-markdown># 实验原理\\nLaTeX数学公式 $f(x)=\\\\lim...$ 与要点</moji-markdown>，宿主会自动解析渲染为结构化 Markdown。
-- 沙箱脚本联动（持久化方法）：
-  - 页面内的按钮或交互如需执行复杂的计算、数据汇总或跨节点分析，可在沙箱中通过 api.method.create({ name: 'calc', code: '((api, ...args) => { ... })' }) 创建持久化方法。
-  - 超级文档内部 JS 通过 window.api.method.call('calc', ...args) 调用该方法。
-- 内置超链接协议：
-  - 静态资源：moji:static/{uuid}
-  - 超级文档跳转：moji:super/{name}
-  - 节点跳转：moji:node/{nodeId}
-
-四、读写边界与严禁行为
-- ✅ 能写：纯 HTML/CSS/JS 代码、SVG 矢量动画、moji-markdown 讲解、调用 window.api.method.call。
-- ✅ 读写一律走 api.sdoc.*（list / read / write / delete）；用前先 await api.sdoc.__help() 查用法。
-- ❌ 严禁用 api.files.* 直接读写 superdocs/ 下的 HTML——那是应用数据，files 通道会被拒绝。
-- ❌ 严禁写入非法路径：不要脱离 superdocs/ 目录写未归档的 HTML 文件。`,
-  },
-  {
     key: 'browser',
     title: '内置浏览器',
     text: `内置浏览器（browser.open / browser.tabs / browser.activate / browser.close / browser.snapshot / browser.point / browser.dom / browser.read / browser.capture / browser.logs / browser.logDetail / browser.fetch / browser.record / browser.text / browser.scroll）——这份规范在你第一次操作内置浏览器时注入：
@@ -129,7 +86,13 @@ export const PROMPT_MODULES: PromptModule[] = [
     既不中断程序，也省掉「试一次、看报错、再试」的额外轮次。
   - **截图是最后手段**：snapshot / read / dom 的 text 与 attr 拿得到的信息，不要用截图拿。
 - 网页是用户的真实登录会话：提交、支付、删除、发消息这类不可逆动作必须先 api.ask 确认；
-  用户没让关的页签不要 close。跨源 iframe 里的元素 ref 定位不到（此时 point/capture 兜底）。`,
+  用户没让关的页签不要 close。跨源 iframe 里的元素 ref 定位不到（此时 point/capture 兜底）。
+- 卡住了就问，别内耗：某一步无法独立完成（验证码、登录、系统权限弹窗）就 **api.ask 说清情况
+  等用户操作**；表单一分钟没人理会会自动超时（回执 timedOut: true）——那时自行判断：换路子继续，
+  或把手头的成果交付掉、说清卡在哪。**同一个目标连续两次尝试失败就停下交付**，反复重试耗的是
+  用户的 token。
+- 临近交付：这一轮开了很多页签的话，用 api.browser.close 把中间搜索页、试错页签挑没用的关掉，
+  留下用户可能还要看的。`,
   },
   {
     key: 'web',
@@ -196,70 +159,174 @@ export const PROMPT_MODULES: PromptModule[] = [
   {
     key: 'exam',
     title: '试卷与考试',
-    text: `试卷与考试（Exam & ExamAttempt）——数据文件收敛于真实文件系统，两层结构与严密读写边界：
+    text: `试卷与考试——两层结构与严密读写边界：
 
-一、两层架构与读写口径
-- 试卷是严密的【两层分离结构】：
-  - Exam（试卷本体）：题目、类型、难度、时限，是静态试题模板。
-  - ExamAttempt（历次考试记录）：用户的实际作答、击键流水、耗时统计、切屏记录与判分结论。同一试卷可反复考核，历次记录按 startedAt 升序保存在 attempts 数组中。
-- 读写一律走 api.exam.*（先 await api.exam.__help() 查用法），**不要用 api.files.* 碰 exams/ 目录**——那是应用数据，files 通道会被拒绝。
+一、试卷是节点，出题走节点宇宙
+- 出题：api.node.create({ kind: "exam", under: 文档uuid }) 建卷（画布上的空壳会被原位复用）→ await api.node.get(卷uuid).help() 看**题目 JSON 契约**（题型、options、answer、rubric、image 的完整格式都在它身上）→ editContent({ title, kind, level, minutes, questions }) 落卷。历次作答（attempts）不在 content 里，也绝不会被动到。
+- 两阶段流程：出题（如上）→ 交卷后 api.exam.read() 看作答、api.exam.grade(...) 判分、api.exam.explain(...) 写讲解。读任何时候都能调；判分与讲解受阶段约束。
 
-二、完整 JSON Schema 规范
-试卷文件必须严格符合以下 JSON 契约：
-{
-  "id": "exam_uuid", // 试卷唯一 ID（与文件名一致）
-  "nodeId": "node_id", // 所属知识点节点 ID
-  "goalId": "goal_id", // 所属学习目标 ID
-  "title": "试卷标题",
-  "kind": "quiz" | "test" | "exam", // 随堂小测(quiz) | 单元测验(test) | 综合大考(exam)
-  "level": "easy" | "medium" | "hard" | "extreme", // 简易 | 中等 | 难 | 极难
-  "minutes": 15, // 时限(分钟)；0 为不限时(随堂小测)，其余强制不低于题目数 × 2
-  "createdAt": 1728000000000,
-  "questions": [
-    {
-      "id": "q1",
-      "type": "single" | "multiple" | "truefalse" | "fill" | "short",
-      "stem": "题干内容（支持 Markdown 与 LaTeX 公式，如 $x^2 + y^2 = 1$）",
-      "options": [ // 单选、多选、对错必给；对错题选项为 true/false
-        { "id": "A", "text": "选项文字" },
-        { "id": "B", "text": "选项文字" }
-      ],
-      "answer": ["A"], // 参考答案选项 id 数组（如 ["A"]、["A","B"]、["true"]；填空题给 ["答案"]；简答通常留空）
-      "rubric": "给 Agent 的评分标准与解析说明",
-      "image": "<svg ...>完整的SVG配图源码（可选）</svg>",
-      "points": 2 // 本题分值
-    }
-  ],
-  "attempts": [] // 历次考试记录；Agent 出题时初始化为空数组 []
-}
-
-三、两阶段工作流：教 Agent 怎么读、怎么写
-1. 出题阶段（阶段一，Agent 生成试卷）：
-   - 读：先读节点讲义与掌握度（api.doc.read / api.state.read）；用 api.ask 询问用户期望的试卷类型与难度。
-   - 写：一条 await api.exam.create({ title?, kind?, level?, minutes?, questions }) 落卷——它自己生成 id、归属与空 attempts，不要手写试卷 JSON 文件。
-   - 纪律：出题阶段 attempts 必须为空，不要伪造或预置任何作答数据。
-2. 阅卷阶段（阶段二，用户交卷后批改）：
-   - 读：await api.exam.read(attemptId?) 读取试卷与最新作答（attempts[attempts.length - 1]，携带 attemptId）。
-   - 判分：客观题严格核对 answer；填空题与简答题依据 rubric 评判，生成 results 数组后，用 await api.exam.grade({ attemptId?, passed?, summary?, results }) 落账。
-   - 讲解：await api.exam.explain({ content, attemptId? }) 写错题讲解，它落在同一次考试上并自动打开试卷副本。
-   - 更新状态：调用 api.node.update(path, { status: passed ? 'mastered' : 'learning' }) 同步节点掌握状态。
-
-四、读写权限与严格边界（哪些能写、哪些绝对禁止篡改）
+二、读写权限与严格边界（哪些能写、哪些绝对禁止篡改）
 - 🔒 用户事实层（只读！Agent 绝对禁止篡改）：
   - attempt.id（attemptId）、startedAt、endedAt、forceSubmit、overtimeMs：真实的开考与交卷时戳；
   - attempt.dwell（各题驻留毫秒数）、attempt.blurs（切屏记录）：衡量作答犹豫度与防作弊的事实数据；
   - attempt.answers（用户填写的最终答案）、attempt.inputs（用户作答敲击流记录）：用户的原始作答铁证。
-  - ⚠️ Agent 严禁修改用户的 answers、inputs、dwell、blurs 中的任何一个字符或数据项！
 - ✏️ Agent 评价层（Agent 唯一允许填写的字段）：
   - attempt.status：设为 "graded"；
   - attempt.results：逐题判分数组 [{ questionId, correct: boolean, score, maxScore, comment: "错题点拨", by: "agent" }]；
   - attempt.passed：是否通过（boolean）；
   - attempt.summary：综合成绩与掌握分析（字符串）；
   - attempt.explanation：针对错题的详尽步骤推导与 Markdown 解析。
-- ❌ 严禁行为：
-  - 绝不用 api.files.* 直接读写 exams/ 目录（那是应用数据，files 通道会被拒绝），试卷读写一律走 api.exam.*；
-  - 绝不改写用户作答事实（answers / inputs / dwell / blurs）；
-  - 绝不改动或覆盖之前的历史 attempts 作答轮次。`,
+- ❌ 严禁行为：绝不用 api.files.* 直接读写节点文件；绝不改写用户作答事实（answers / inputs / dwell / blurs）；绝不改动或覆盖之前的历史 attempts 作答轮次。
+
+三、「出卷」流程（「出卷」工作流的执行规程）
+- 摸清可考范围：const n = await api.node.get(目标节点uuid) 读教学文档（c.teaching.slice 分段看），笔记与上级、同层内容看 api.node.list()。**可考范围 = 这些已有内容 + 学科常识**——出卷只消费内容，不生产内容：补讲、写文档、调整树都与出卷轮无关。文档还空着时两选一：出**导学卷**（围绕节点标题与上级文档），或 api.ask 问「先出导学卷还是等文档生成后再出？」。唯独「先建节点补内容再出卷」不是。
+- 问一次：api.ask 出一张表单——① 试卷类型（单选：随堂小测 / 小考 / 大考，选项写清题量规模）；② 难度（单选：简易 / 中等 / 难 / 极难）；最多再加一道「有没有特别想考的章节」。**不要多问**（响铃已由系统做好，不必再调 tiktok）。
+- 定时限：随堂小测不限时（minutes: 0）；其余按题量与难度估 minutes，下限 = 题目数 × 2，宁可宽一点。
+- 检索查证与落卷：**积极 api.web.search** 检索权威真题、标准题型、规范公式，并 **api.web.fetch 读 1~2 份真题原文**确认题型结构再命题，严禁凭主观意志编造。然后 api.node.create({ kind: "exam", under: 目标节点uuid })（空壳原位复用）→ await api.node.get(卷uuid).help() 对一眼格式 → editContent({ title, kind, level, minutes, questions }) 一次落卷。数学公式 LaTeX；需要图形的题给 image（完整 SVG）。
+- 收尾：对话里告诉用户试卷已生成并列出名称与题量，请用户开始作答。
+
+四、「阅卷」流程（「阅卷」工作流的执行规程；一次 execute 连着做完，不分两轮）
+- 第零步：await api.exam.__help() 把 grade / explain 的参数查清楚再动手。
+- 读卷：api.exam.read() 读当前节点的试卷与 attempts（给了「作答记录」attemptId 就读那一次，否则取最新）。**用户的 answers / inputs / dwell / blurs 是客观事实，严禁修改篡改任何字符**。
+- 判分：客观题对照参考答案、填空与简答依据 rubric，**一条 api.exam.grade({ attemptId, passed, summary, results }) 落账**（results = [{ questionId, correct, score, maxScore, comment, by: "agent" }]）。不要手写数据文件。
+- 讲解：api.exam.explain({ content, attemptId }) 写详尽的步骤推导解析（Markdown），它自动打开试卷副本。
+- 收尾：const n = await api.node.get(目标节点uuid)；const c = await n.content; c.status = passed ? "mastered" : "learning"; await n.editContent(c) 修正掌握状态；高频薄弱错法用 api.state.mistake(目标节点uuid, { pattern, cause }) 记进错误记忆。
+- 指令给了「目标节点」就只动它；**没给**就 api.node.list() 凭上下文判断（判断不了 api.ask）。`,
+  },
+  {
+    key: 'superlab',
+    title: '超级实验室',
+    text: `「超级实验室」工作流——在目标节点做一份**超级文档**：可交互的实验或小工具，用户在页签里点、文档干活并显示结果。本轮的交付物就这一份实验；知识树、教学文档都不动。
+- 问需求：api.ask 问用户想做什么实验 / 需要什么功能（一道简答题，给两三个贴合当前节点主题的示例选项帮他起意）。留空等于「你来定」：挑当前节点里最能帮助理解的一个知识点自拟实验，不必再问。
+- 先想后写：确定实验演示什么规律或验证什么结论、用户怎么交互（按什么、改什么、看什么结果）、界面按什么顺序排。
+- 落盘：指令给了「超级文档」（一份空壳的 uuid）就**写它**——const lab = await api.node.get(壳uuid)；没给就 const r = await api.node.create({ kind: "superdoc", title: 实验名, under: 目标节点uuid })。然后 await lab.help() 看格式规范（主题变量、moji-markdown、大小上限都在里面），await lab.editContent({ html }) 写入一份完整可运行的自包含 HTML（名字不含 .html 后缀）。复杂计算函数用 api.method.create 保存、页面里 window.api.method.call 调用。
+- 收尾：api.ui.superdoc('#'+目标节点uuid, '实验名') 打开该页签，再用一两句话告诉用户这个实验能玩什么。目标节点没给就 api.node.list() 凭上下文判断，判断不了 api.ask。`,
+  },
+  {
+    key: 'explain',
+    title: '了解（词条注解）',
+    text: `「了解」工作流——用户在文档里选中了一个词、点了「了解」，想要一句能挂在这段文字旁边的解释。严格按顺序做：
+- 先看它在讲什么：const n = await api.node.get(目标节点uuid)；const c = await n.content；取 c.teaching.slice(0, 2000) 读**这一段所在的上下文**。解释要贴着这篇文档讲——它在这里是什么意思、为什么这么说，而不是给一段百科式的通解。
+- 写注解：给 c.annotations 追加一条 { term: 词条, occurrence: 出现序号, body: '注解内容' }（其余条目原样保留），await n.editContent(c) 写回——注解就划在正文对应位置；同时可用 api.node.create({ kind: 'note', title: '词条解释', under: 目标节点uuid }) 把解释记进一份笔记。
+- 回话：一句话就够（例如「已把该词条的注解标在正文上」）。不要把那段解释再在对话中抄一遍。`,
+  },
+  {
+    key: 'teach-method',
+    title: '教学文档生成',
+    text: `「教学文档生成」方法——为知识节点产出一份针对性教学文档的完整流程。触发它的指令只给任务与参数，步骤一律照这里执行：
+
+一、先查再用
+- 本轮会用到 api.node.*、api.state.* 与 api.ask。动手前先 await api.<组>.__help() 把签名与示例查清楚，不要凭记忆猜参数。
+- 目标与节点现状用 api.node.list() 现查（回执带全图 uuid 与挂件清单）；要动当前这份文档，就 const n = await api.node.get(它的uuid)、await n.help() 看它自己的写法。
+
+二、前置知识与多源检索
+- 结合节点标题、上游节点的文档与学科判断，列出学会这个主题**绕不开的前置知识点**（一般 3~6 条：太少说明没拆开，太多说明没抓住主干）。
+- **必须积极使用 api.web.search 与 api.web.fetch** 检索当前主题的权威讲义、官方文档或前沿实践，并**挑 1~3 篇最权威的原文用 api.web.fetch 读正文**比对提炼（只看 snippet / summary 不算调研），严禁凭模型自身主观意志捏造教学内容。
+- 前置知识只进摸底表单与讲义正文，**不落成节点**——树由学习者在画布上生长（点大纲目标项挂文档、再逐个生成）。
+
+三、摸底提问
+- 用 api.ask 出一张表单，每条前置知识一道单选题「这个我已经掌握 / 会一点 / 完全不会」。表单会压在输入框上方，用户答完才继续——不要自问自答，也不要跳过。（触发响铃已由系统做好，不必再调 tiktok。）
+
+四、想清楚再动笔
+- 按摸底结果定详略：「完全不会」的前置在文档开头的**「预备知识」一节先补讲**（每条几段讲够用即止），「会一点」的点到为止，「已掌握」的直接用。
+- 想好文档结构：先讲什么、后讲什么、在哪衔接补讲的内容。前置之外的延伸方向留给文末「下一步」，不进正文。
+
+五、生成
+- 标题已就位，一般不动；明显词不达意才连标题一起改。const n = await api.node.get(uuid)；const c = await n.content——描述空着就把 c.description 写成 150~300 字，然后 c.teaching = 讲义，一次 await n.editContent(c) 写回（整份替换，先读后写）。循序渐进、先直觉与例子再定义与推导，对摸底暴露的盲点**正面讲解**。排版以当前「文档格式」策略为准，结构配方见「文档排版与图表」模块：至少两三处结构性元素，不要交一篇纯文本。
+- 使用了网络检索时，文档末尾必须带「## 📚 参考资料与权威来源」区块声明真实网址与名称，并在收口前 api.delivery.submit({ files, sources }) 登记本轮的文件变动与来源（对话正文不用再复述清单）。
+- **本轮不拆下一层大纲**（"o:"+uuid 的大纲节点不要动）：拆层是「生成大纲」流程的事，由用户在画布上触发；就算教学路线明显分阶段，也只把延伸方向写进文末「下一步」一节。
+
+六、状态记账与收尾
+- 用 api.state.read(uuid) 看学习状态：有错误记忆的这次讲解要正面处理那个错法；把摸底结果用 api.state.update / api.state.mistake 按用户的答案记准。用户留空的题当「会一点」处理，不要追问。
+- 写完用 api.ui.point() 把这份教学文档在文档区打开（已开着就切到它），请用户看刚生成的文档；若用了网络检索，对话回复里必须声明参考资料链接。
+
+七、任务边界（硬性）
+- 「开讲」是一次内容生成，不是建树：api.node.create 一个都不要调，也不要拆下一层大纲（"o:"+uuid 的大纲节点不要动）——拆层是「生成大纲」流程的事，由用户在画布上触发。
+- 指令给了「目标节点」就只写它；**没给**就先 api.node.list() 看现状，凭上下文判断这份讲义该落在哪个节点（判断不了就 api.ask 问一次）。
+- 若随指令附带了选段定位等上下文（这份文档落地哪条大纲目标项），以它为准。`,
+  },
+  {
+    key: 'goal-outline',
+    title: '学习大纲',
+    text: `「学习大纲」工作流——用户刚新建的目标的**第一轮**。用户的原话与参考资料在会话首条消息中，当前根节点的标题还是用户原话的临时形态；随指令附带的具体材料（文件、项目路径、大纲图片）必须优先研读。
+
+【第零步｜先判断这是哪一类目标（最重要，别跳过）】
+两类目标的差别只有一条——**要不要一棵知识树**：
+- **学习型**：用户想系统掌握一个领域（「从零学微积分」「系统学 Rust」「备考」）。交付物是**大纲树 + 逐节点讲义**，节点由浅入深、彼此有依赖。
+- **任务型**：用户只想让导师陪着把**一件具体的事**做完——读一个代码项目、精读一篇论文、弄懂一份报错或文档、临时答疑。这类目标没有长期路线，硬造大纲树只会塞满用户永远不会点开的空节点；交付物是**根节点文档**，要深入时用户会自己点名某个方向，那时再建**那一个**子节点。
+
+按下面的顺序判，命中即定，**不要凭感觉**：
+1. **先看有没有具体制品**：一个项目目录、一篇论文、一份报错日志、一段代码、一份外部文档。有 → **任务型**（用户要的是把这份东西读懂，不是学一门课）。
+2. **再看有没有长期意图**：「系统学 / 掌握 / 从零学 / 学习路线 / 分阶段 / 备考 / 课程」。有 → **学习型**。
+3. **都没有**（例如只有一句「帮我看看这个」「我想搞懂 X」）→ 按**任务型**处理：先把这件事在一份根节点文档里讲清楚。用户真要长期学，下一句会说，到时再补大纲完全来得及。
+4. **只有一种情况值得问**：同一句话里同时要「长期系统地学」和「只读我给的这一份材料」，两种走法的交付物差别很大。这时才用 api.ask 问一次（题目「这次想怎么用这个目标？」，选项：A 长期学习，拆成知识树 / B 一次性任务，只读这份材料）。**除此之外不要问**——反复确认比偶尔走错更烦人，而且走错了也好补救。
+
+【任务型｜只建根节点与根节点文档，绝不建大纲树】
+动手前先 api.node.list() 拿根节点 uuid，const root = await api.node.get(根uuid)、await root.help()。
+1. **先把文档打开**：api.ui.point() 打开根节点文档——用户要看着它长出来。
+2. 改标题：const c = await root.content; c.title = 主题名（读项目用项目名，读论文用论文标题短名）; await root.editContent(c)。
+3. description 写 100~200 字，说清这次要解决什么、材料是什么、边界在哪。
+4. 把根节点文档写成**这次任务的交付物**（editContent 的 teaching）：读项目先给定位与目录导读再讲核心模块、关键数据结构与上手路径（引用**真实**文件路径）；读论文按「问题 → 方法 → 实验 → 结论 → 局限」精读；答疑先给结论与依据。一律基于**真实读到的内容**（节点 content / api.web.search / api.web.fetch），禁止凭印象编造；用到网络资料按既有规范在末尾写「## 📚 参考资料与权威来源」并用网页 chip 声明。
+5. **不要**用 api.node.create 建任何子节点，**不要**写根节点的大纲（"o:"+根uuid 的 editContent 不要调）——大纲保持空白是正常状态。
+6. 收尾用一两句话告诉用户「读了什么、从哪开始看、接下来可以让我深入哪一块」。之后用户点名要深入时，再 api.node.create({ kind: "doc", title, under: 根uuid }) 建**那一个**子节点，不要提前铺开。
+
+【学习型｜先 api.ask 确认创建模式（强制）】
+表单题目：选择目标创建模式（单选）
+- 选项 A: 探索式（默认：生成根节点文档和初步大纲，后续节点由用户逐步确认生成）
+- 选项 B: 规划式（先规划再执行：生成根节点文档，并通过多源深度网络调研生成完整大纲树）
+- 选项 C: 完整式（一次性全套交付：完整大纲树 + 所有节点的完整教学文档）
+
+【多轮确认纪律（规划式二次、完整式三次）】
+- 探索式：选完立即执行。
+- 规划式第二次确认：api.ask（标题「确认规划完整大纲树」，说明将网络调研行业规范与课程大纲、耗时稍长），选项「确认开始规划完整大纲树」/「返回修改为探索式」。
+- 完整式第二次：api.ask（标题「耗时与生成规模评估」，说明一次性生成全部讲义消耗较多轮次与时间），选项「了解耗时，继续确认」/「返回修改为探索式」。第三次：api.ask（标题「最终确认启动全量生成」，提示保持网络通畅），选项「确认立即启动全量生成」/「取消并改为探索式」。
+
+【学习型第二步｜命名与描述】
+const root = await api.node.get(根uuid)；const c = await root.content。c.title = 准确的主题名（长成数据目录名，去掉问句成分）；c.description = 150~300 字目标描述；一次 editContent 写回。再取一次 content 把 c.teaching 写成总述（概述知识体系与起步建议）。参考了网络资料时**末尾必须带「## 📚 参考资料与权威来源」并使用网页类 chip**（#[{"type":"web","url":"...","title":"..."}]），严禁普通 Markdown 超链接；chip 的 title 精炼（15~25 汉字以内）。
+
+【学习型第三步｜按所选模式执行】
+- **探索式**：const o = await api.node.get("o:"+根uuid)；o.editContent({ intro, children }) 写根大纲（intro 一两段阶段划分，children 只写一层，每项 { title, summary }）。后续节点由用户逐步确认生成。
+- **规划式**：积极 api.web.search 检索行业规范与权威学术大纲，**逐个 api.node.create({ kind: "doc", title, description, under: 父uuid }) 生成完整大纲树**（各层大纲用 "o:"+uuid 的 editContent 填）。
+- **完整式**：在规划式的基础上**并为所有节点的 teaching 写入详尽讲义**（每篇末尾以网页类 chip 声明权威来源），一次性交付全套。
+全部完成后 api.ui.point() 打开根节点教学文档并在大纲页呈现完整学习路线；任务型按第 6 条收尾。`,
+  },
+  {
+    key: 'outline-method',
+    title: '大纲编写',
+    text: `「大纲编写」方法——为知识节点规划一份「这一层往下怎么学」的计划文件。触发它的指令只给任务与参数，规矩一律照这里执行：
+
+一、先查再用与看现状
+- const o = await api.node.get("o:" + 文档uuid)；await o.help() 看大纲节点自己的说法。
+- await o.content 看已有大纲（**有就整份重写，不要追加**；null = 还没写过），api.node.list() 看标题、描述与现有下级节点，await 节点.content 后取 teaching.slice(0, 2000) 扫教学文档的开头与标题结构（不要整篇读）。
+
+二、多源检索与规划
+- 多使用 api.web.search 与 api.web.fetch 获取该知识分支的权威分类目录与行业标准脉络——搜到之后要**用 api.web.fetch 打开其中最权威的 1~2 份大纲 / 目录读原文**再拆分层，只看摘要就动手等于凭印象臆造。
+- 这一层往下拆成哪几个**阶段目标**（一般 3~8 个，每个都能独立成篇、有明确的「学完会什么」）。已经有下级节点的，计划要与它们对齐——同一个人同一层不该有两套说法。
+
+三、落盘
+- await o.editContent({ intro, children })：intro 一两段（这一层按什么路线走、为什么这么分）；children 每项 { title, summary }，summary 两三句——学什么、为什么排在这个位置。key 由标题自动生成，不要自己编。
+- 收尾：写完用 api.ui.point() 打开大纲页，让用户看着路线更新。
+
+四、任务边界（硬性）
+- 只写直接子层级一层为止；本轮**不建节点**（目标项长成文档是「生成文档」流程在画布上做的事）。
+- 已有下级节点的，计划要与它们对齐——同一个人同一层不该有两套说法。
+- 指令给了「目标节点」就只写它那一层；**没给**就先 api.node.list() 看现状，凭上下文判断该规划哪一层（判断不了就 api.ask 问一次）。
+
+四、深度与树的生长规矩（硬性）
+- 只写**直接子层级**，一层为止——「爷爷知道儿子的存在，但不知道孙子的存在」。孙辈的大纲由那些子目标自己的大纲负责；children 里不要出现「1.1.1」这类两层以下的东西，summary 里也不要替孙辈规划。
+- 大纲只是当前节点的一份**计划文件**：目标项落地成文档由学习者在画布上驱动（点目标项挂文档、逐个开讲）——计划与落地是两段流程，写大纲的一轮不建节点。
+
+五、收尾
+- 写完用 api.ui.point() 把这份文档在文档区打开，让用户在大纲页里看这一层的路线。`,
+  },
+  {
+    key: 'prereq-outline',
+    title: '前置知识大纲',
+    text: `「前置知识大纲」工作流——给**还没拆过的文档**定「学它之前要先会什么」。流程照「大纲编写」那份声明的走（先看现状、多源检索读原文再拆层、落盘、写完打开大纲页），差异只有两处：
+- 提炼的是**前置知识**而不是往后学的阶段：不会它们就学不动这个节点，一般 3~6 条；已有的下级节点不算前置——它们是往后学的。
+- children 每项的 summary 写清「这条前置要会到什么程度」，**够用就行**，不要展开成完整课程。
+
+边界：只负责计划——目标项长成文档是「生成文档」流程在画布上做的事，本轮产出里没有新节点；写完在对话里用两三句说清定了哪几条前置、为什么。指令给了「目标节点」就只写它；没给就 api.node.list() 凭上下文判断，判断不了 api.ask。`,
   },
   {
     key: 'learning-process',
@@ -286,7 +353,7 @@ export const PROMPT_MODULES: PromptModule[] = [
 - api.method.create({ name, code })：把一段**可执行的函数源码**存进这个目标的函数库。
   code 写成匿名 async 函数，**第一个参数是 api**（整套沙箱 api 都在），其余参数是调用方传的实参：
 
-      api.method.create({ name: '统计句号', code: "((api, path) => { const d = await api.doc.read(path); return { count: (d.content.match(/。/g) ?? []).length, size: d.chars } })" })
+      api.method.create({ name: '统计句号', code: "((api, uuid) => { const n = await api.node.get(uuid); const c = await n.content; return { count: (c.teaching.match(/。/g) ?? []).length, size: c.teaching.length } })" })
 
 - 同名 create 就是**覆盖**（那是更新一个函数，不是重复建）。创建时会编译校验，
   编不过的当场被拒并给出原因。list() 只回名字与体量；delete(name) 删一个。
@@ -307,7 +374,47 @@ export const PROMPT_MODULES: PromptModule[] = [
 - note 是你补的那些假设，一两句话，它会显示给用户。
 - **先判有没有输出**：如果这段代码只有定义（类型、接口、函数、类、常量），没有任何会被执行的
   语句、也不会打印任何东西，那就**立刻停止、不要写 js**，改调 api.code.silent({ key, reason })
-  把那一块标成无输出（之后它不再显示编译与运行）。这不是失败，是这类代码块的正常归宿。`,
+  把那一块标成无输出（之后它不再显示编译与运行）。这不是失败，是这类代码块的正常归宿。
+  分寸：只要有哪怕一句会被执行的语句（一次调用、一个 print、一段循环、一次赋值后使用），就往下走，
+  别把能跑的代码判成无输出。
+- **残缺片段是常态**：那段代码多半从文档里摘出来时缺了上下文（少函数定义、少变量、少 import）。
+  api.node.get(所属文档uuid) 后读 content.teaching，从文档里把缺的东西补齐；文档里也找不到的，
+  按代码里的用法**模拟一份合理的假上下文**（假数据、假函数都行），让整段代码跑出可见结果——
+  **绝不要**因为片段不完整就回一句「无法编译」。
+- 运行环境就是一个 Web Worker：没有 window / document / DOM，没有 require / import / export，
+  装不了 npm 包；可以用 console.log、await、Promise、setTimeout、Math / JSON / Date / 正则、
+  TextEncoder / TextDecoder、crypto、URL；顶层可以直接 await；fetch 能用但要用户点一次同意。
+  要让用户看见结果就必须 console.log（对象会被结构化显示）。
+- 交货纪律：key 原样抄（别改也别自己编）；js 是完整自包含的可执行语句（不要包一层函数）；
+  note 一两句中文说明补了哪些假设。**save 必须调**——不调那块代码的「运行」永远不会亮。
+  代码原文不用回抄，也不要在对话里整段复述产物。`,
+  },
+  {
+    key: 'essay-commit',
+    title: '随笔整理',
+    text: `「随笔整理」工作流——用户提交了**当前的全部随笔**，把与上次相比的增量整理进知识树的笔记。快照是完整的，但之前的提交已经整理过其中大部分：只处理**新增、修改、删除**的部分，别把未变化的内容重做一遍。
+1. 先看知识树（api.node.list() 拿全部节点、大纲与挂件清单——每份笔记的 uuid 都在回执里），并读一读【已有整理记录】提到的那几份笔记，弄清上次整理到哪儿了。
+2. **只处理【本次新增的随笔】【本次修改的随笔】【本次删除的随笔（只剩标题）】**；【本次未变化的随笔】只用来理解上下文，**不要再写一遍**；【已有整理记录】里的内容已经进过笔记。
+3. 修改类随笔只给了改动处（>>> 新增 / 改动 <<< 之间）：把这段改动**合并进上次对应的笔记**，保留其余段落；确实要整篇写回时，先 await api.node.get(该笔记uuid) 取 content 读全文，改完 editContent 写回，不要整篇重写。
+4. 新增内容与某份已有笔记主题相同就合并进去；该节点还没有合适笔记时才新建「随笔整理」：api.node.create({ kind: "note", title: "随笔整理", under: 该文档uuid }) 后 editContent({ text })。
+5. 归不进任何已有节点的：并进最合适上级节点的「随笔整理」笔记；只有内容足够独立、值得单独成节时才 api.node.create({ kind: "doc", title, under: 父文档uuid }) 建子节点再给它建笔记。
+6. 删除类随笔：只在对应笔记里**清理只来自它的段落**，或改写进更合适的位置；不要因为一条随笔被删就删掉整份笔记。
+7. 只保留有长期价值的知识、结论、疑问与例子；合并重复内容，不要逐句照抄，不要编造材料里没有的东西。整理后的笔记要能独立读懂。
+8. 每改完一处，在回复里用一行列出「节点路径 → 笔记名（新建/更新）」。
+9. 最后为这次提交写一条**提交评论**，放在下面这对标记之间（两行标记必须原样保留，一个字都不能改；标记之间是 Markdown，**第一行是标题**——一句话概括这次整理，之后两三句正文说明把哪些内容归到了哪些节点、留下了什么疑问）。
+<!-- essay-commit-comment
+## （标题）
+（正文）
+-->`,
+  },
+  {
+    key: 'plot-fix',
+    title: '修复函数图像',
+    text: `「修复函数图像」工作流——文档里一个 \`\`\`plot 渲染失败，按报错与区间一次改完。**一轮完成，不要验证渲染结果**（没有渲染通道），验收标准就是下面的硬要求。
+- 修复（读 → 拼回 → 整份写）：const n = await api.node.get(目标节点uuid)；const c = await n.content；c.teaching = c.teaching.slice(0, 起始偏移) + 修好的完整围栏 + c.teaching.slice(结束偏移)；await n.editContent(c)。
+- 修好的围栏必须满足（这就是验收标准）：是完整的 \`\`\`plot 围栏（含首尾两行标记）；JSON 能通过 JSON.parse；data 非空且每项有 fn；xAxis / yAxis 只能是对象（区间用 domain 写），不能写成字符串；函数变量固定用 x（参数方程用 t，极坐标用 theta）。
+- 字符区间是 [0, 0)（未能自动定位，文档可能刚被改过）时：先在 c.teaching 里按围栏原文 indexOf 找到这段围栏，换算出区间再拼回。
+- 改完立即 api.delivery.submit 登记修复。不要读整篇文档，不要尝试渲染验证，不要复述修复过程。`,
   },
   {
     key: 'compact',
@@ -318,7 +425,17 @@ export const PROMPT_MODULES: PromptModule[] = [
 - 两个参数：tasks 是**还没做完的事**（逐条，写到能照着继续干：哪个节点、哪份文档、卡在哪一步），
   summary 是正文摘要（目标与背景 / 已讲清的内容 / 学习者的状态 / 约定与术语）。
 - 它**不立刻生效**：摘要先记下，等本轮 loop 结束后旧消息才失活、摘要成为第一条消息。
-  所以别重复调用，也别把摘要复述给用户。摘要太短会被拒（原始消息没了，摘要就是唯一的上下文）。`,
+  所以别重复调用，也别把摘要复述给用户。摘要太短会被拒（原始消息没了，摘要就是唯一的上下文）。
+- 摘要的写法（按顺序）：
+  1. 先列 tasks（**最容易丢、也最要命**）：这几轮里用户要的但还没交付的、正做到一半的、答应过
+     还没做的，逐条写清——哪个节点、哪份文档、哪个文件名、卡在哪、下一步做什么。要能让
+     「换一个人接手」照着继续干，不要写「继续完善文档」这种空话。做完了的不列。
+  2. 再写 summary（Markdown）：## 学习目标与背景 / ## 已经讲清的内容 / ## 学习者的状态
+     （自评、错在哪、还卡在哪）/ ## 约定与术语。用户表达「我想要什么」的话保留原意。
+  3. api.compact({ summary, tasks }) **只调这一次**；不要顺手改文档、建节点、出题。
+  4. 回一句话告诉用户已经压好，**不要复述摘要内容**。
+- 硬性要求：只写对话里真实出现过的东西——不推测、不补常识、不编造；概念名、公式、文件名写全；
+  summary 控制在 1200 字以内。`,
   },
   {
     key: 'subagent',
@@ -544,11 +661,10 @@ export function promptModuleByKey(key: string): PromptModule | null {
 }
 
 /**
- * api 名 → 模块 key 的触发映射：按组前缀（doc.write → doc），顶层名（wait / ask）用名字本身。
- * 只有「规范搬进了模块」的组才在这里；doc / node / state / ask 这些每轮必用的组不触发注入。
+ * api 名 → 模块 key 的触发映射：按组前缀（content.write → content），顶层名（wait / ask）用名字本身。
+ * 只有「规范搬进了模块」的组才在这里；content / graph / state / ask 这些每轮必用的组不触发注入。
  */
 const GROUP_MODULE: Record<string, string> = {
-  sdoc: 'sdoc',
   browser: 'browser',
   web: 'web',
   fetch: 'web',
@@ -568,7 +684,6 @@ const GROUP_MODULE: Record<string, string> = {
 }
 
 export function promptModuleForApiName(name: string): string | null {
-  if (name === 'ui.superdoc') return 'sdoc'
   const dot = name.indexOf('.')
   const group = dot < 0 ? name : name.slice(0, dot)
   return GROUP_MODULE[group] ?? null
@@ -576,45 +691,66 @@ export function promptModuleForApiName(name: string): string | null {
 
 /**
  * 写入内容里的标记 → 模块 key（内容触发）：模型写出 ```plot 图像或 SMIL / @keyframes
- * 动画时，对应的数据形态 / 动画写法模块就该在场。宿主在 execute 的 doc / sdoc 写入
- * 参数上嗅探（见 sandbox/execute 的 callApi）。
+ * 动画时，对应的数据形态 / 动画写法模块就该在场。宿主在 execute 的写入调用参数上
+ * 嗅探（见 sandbox/execute 的 callApi 与下面的 writableContentOf）。
+ *
+ * target 是这次写入的第一个参数（content.* 的定位对象）：part 写 superdoc:* 的写入
+ * 本来就是完整 HTML，不注入 doc-html 排版配方（那与超级文档的写法相冲），但 plot /
+ * 动画标记照常嗅探。
  */
-export function promptModuleForContent(content: string, apiName?: string): string[] {
+export function promptModuleForContent(content: string, superdoc: boolean, apiName?: string): string[] {
   const out: string[] = []
-  // 写教学文档（files.write / files.edit / doc.write / append / replace）就注入排版配方
-  if (apiName === 'files.write' || apiName === 'files.edit' || apiName?.startsWith('doc.')) out.push('doc-html')
+  // 写教学文档（files.write / files.edit / 节点对象的 editContent 写 teaching）就注入排版配方；
+  // 超级文档（payload 是完整 HTML）不注入 doc-html——排版配方与它的写法相冲
+  const writeish = apiName === 'files.write' || apiName === 'files.edit' || apiName === 'node.invoke'
+  if (!superdoc && writeish) {
+    out.push('doc-html')
+  }
   if (content.includes('```plot')) out.push('plot-forms')
   if (content.includes('<animate') || content.includes('@keyframes')) out.push('rich-animation')
   return out
 }
 
 /**
- * 从一次写入调用的参数里取出要嗅探的正文（供内容触发用，见 sandbox/execute 的 callApi）：
- * files.write 第二参数、files.edit 的 content 或 replace、doc.write / doc.append 第二参数等。
- * 其余调用不携带可嗅探的正文，回 null。
+ * 从一次写入调用里取出可嗅探的正文与「是不是完整 HTML（超级文档）」。
+ * 大纲等对象 payload 没有可嗅探的正文，回 null；其余调用不携带正文，也回 null。
  */
-export function writableContentOf(name: string, args: unknown[]): string | null {
-  if (name === 'files.write' || name === 'doc.write' || name === 'doc.append') return typeof args[1] === 'string' ? args[1] : null
+export interface WritableContent {
+  text: string
+  /** 超级文档：payload 本来就是完整 HTML，不注入排版配方 */
+  superdoc: boolean
+}
+
+export function writableContentOf(name: string, args: unknown[]): WritableContent | null {
+  if (name === 'files.write') {
+    return typeof args[1] === 'string' ? { text: args[1], superdoc: false } : null
+  }
   if (name === 'files.edit') {
     const payload = args[1]
     if (payload && typeof payload === 'object') {
       const p = payload as Record<string, unknown>
-      if (typeof p.content === 'string') return p.content
+      if (typeof p.content === 'string') return { text: p.content, superdoc: false }
       if (p.replace && typeof p.replace === 'object') {
         const rep = p.replace as Record<string, unknown>
-        if (typeof rep.replacement === 'string') return rep.replacement
-        if (typeof rep.new === 'string') return rep.new
+        if (typeof rep.replacement === 'string') return { text: rep.replacement, superdoc: false }
+        if (typeof rep.new === 'string') return { text: rep.new, superdoc: false }
       }
     }
     return null
   }
-  if (name === 'doc.replace') {
-    const payload = args[1]
-    const content =
-      payload && typeof payload === 'object' ? (payload as Record<string, unknown>).content : undefined
-    return typeof content === 'string' ? content : null
+  if (name === 'node.invoke') {
+    // 新协议：invoke(uuid, 成员名, 参数数组)——只有 editContent 带可嗅探的正文
+    const member = typeof args[1] === 'string' ? args[1] : ''
+    if (member !== 'editContent') return null
+    const rest = Array.isArray(args[2]) ? args[2] : []
+    const payload = rest[0]
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+    const p = payload as Record<string, unknown>
+    if (typeof p.teaching === 'string') return { text: p.teaching, superdoc: false }
+    if (typeof p.text === 'string') return { text: p.text, superdoc: false }
+    if (typeof p.html === 'string') return { text: p.html, superdoc: true }
+    return null
   }
-  if (name === 'sdoc.write') return typeof args[2] === 'string' ? args[2] : null
   return null
 }
 
@@ -641,8 +777,10 @@ export function missingPromptModules(messages: ConversationMessage[], keys: stri
 }
 
 /**
- * 一条模块消息：隐藏 user 消息，promptModule 供去重。
+ * 一条模块消息：隐藏 **assistant** 消息，promptModule 供去重。
  *
+ * 模块是「怎么做」的**声明**（排版配方、api 规程、方法流程）——固定内容、声明一次、
+ * 同上下文不重复，归 assistant 边；「做什么」的指令（工作流、用户消息）才是 user。
  * 与 personaMessage 同一个形状家族，也是一条**提示词注入**（inject: 'prompt'）：
  * 它不分割轮次，界面上并进那一轮的「思考、工具与提示词」过程组——与思考、工具调用
  * 同一层（见 agent/messageKind 与 panel/partGroups）。正文只在上下文里，展开看全文。
@@ -650,7 +788,7 @@ export function missingPromptModules(messages: ConversationMessage[], keys: stri
 export function promptModuleMessage(mod: PromptModule, uuid: string, at: number): ConversationMessage {
   return {
     id: uuid,
-    role: 'user',
+    role: 'assistant',
     parts: [{ type: 'text', text: mod.text }],
     ts: at,
     hidden: true,

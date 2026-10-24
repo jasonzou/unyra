@@ -3,7 +3,8 @@
  * （祖先 / 兄弟 / 知识深度）。笔记、考试、对话、阅读账都在各自的文件里。
  */
 import type { DocKind, KnowledgeNode, LearnStore } from '../types'
-import { emptyDocs, emptyOutline } from '../types'
+import { emptyDocs } from '../types'
+import { detachedPoolOf } from '../detached'
 import { withVisit } from '../learning'
 import { withoutTmpNodes } from '../../lib/tmpStore'
 import { allStoredTabs, closeIds, dropTabs, withOwners } from '../groups'
@@ -78,11 +79,11 @@ export function addNode(
     origin: input.origin ?? 'user',
     goalId: input.goalId,
     /*
-     * 大纲与教学文档在创建这一刻**同时**成形（见 OutlineDoc）：
-     * 教学文档落 `{节点}.md`、大纲落 `{节点}.outline.json`，都是空的，
-     * 等导师（或用户）往里写。老数据没有这一项也不补——那份大纲是「还没有」，不是「空」。
+     * **创建时不再附带大纲**（2026-10-24 用户定的）：大纲是显式的计划，只在两种时候
+     * 出现——node.create kind 'outline'（配对成形）与大纲节点的 editContent。
+     * 这里挂一份空大纲的话，点目标项建的文档、agent 建的文档会全都拖着一张
+     * 「还没有大纲」的子级大纲卡。
      */
-    outline: { ...emptyOutline(), updatedAt: now },
     createdAt: now,
     updatedAt: now,
   }
@@ -203,7 +204,7 @@ export function createChildNode(
 export function createNodeUnder(
   store: LearnStore,
   parentId: string,
-  input: { title: string; description?: string; origin?: 'ai' | 'user' },
+  input: { title: string; description?: string; origin?: 'ai' | 'user'; portKey?: string },
 ): { store: LearnStore; node: KnowledgeNode; created: boolean } {
   const parent = nodeById(store, parentId)
   if (!parent) throw new Error('父节点不存在')
@@ -215,13 +216,13 @@ export function createNodeUnder(
   })
   let next = added.store
   if (added.created && added.node.id !== parentId) {
-    next = addEdge(next, parentId, added.node.id).store
+    next = addEdge(next, parentId, added.node.id, input.portKey).store
   }
   return { store: next, node: added.node, created: added.created }
 }
 
 /**
- * 把一个节点迁移到另一个节点之下（Agent 的 api.node.move 走这里）。
+ * 把一个节点迁移到另一个节点之下（Agent 的 树边改挂（画布连线） 走这里）。
  *
  * 语义是「改这条父线」而不是「再多挂一个父节点」：先摘掉它现在的全部父边，
  * 再挂到新父节点之下——侧栏与大纲都按单一父线读层级，多父线会让「它在哪一层」
@@ -267,7 +268,13 @@ export function moveNode(
 }
 
 /**
- * 删除单个节点：连带它的边、试卷与临时变量；若它是某个目标的根，则整棵子树一并删除。
+ * 删除单个节点：只删它自己——相连的边摘掉、它名下的临时变量/页签一并清掉；
+ * 若它是某个目标的根，则整个目标一并删除（根就是目标的骨架）。
+ *
+ * **下游不连坐**（用户定的原则：节点都是独立的，关系可以解除）：树边摘掉之后，
+ * 下游文档变成「没有上游的游离文档」，还在画布上，随时可以重新连上或单独删除。
+ * 它名下的挂件也**不删**：笔记与超级文档挪进游离池（内容原样、id 不变，随时可以
+ * 绑到别的文档），试卷原地悬空（宿主 id 指向的节点已不在，绑定自然解除）。
  *
  * **会话不动**：上下文属于目标，删掉一个节点不代表「这个目标聊过的事」就不算数了——
  * 那正是节点级隔离改成目标级之后该有的样子。
@@ -278,38 +285,31 @@ export function deleteNode(store: LearnStore, id: string): LearnStore {
   const node = nodeById(store, id)
   if (!node) return store
   const parents = parentIds(store, id)
-
-  // 级联找出所有仅依赖被删节点及其后代的孤儿节点，一并清理，防止残留孤儿节点 (B5)
-  const doomedNodes = new Set<string>([id])
-  let expanded = true
-  while (expanded) {
-    expanded = false
-    for (const n of store.nodes) {
-      if (doomedNodes.has(n.id)) continue
-      const ps = parentIds(store, n.id)
-      if (ps.length > 0 && ps.every((p) => doomedNodes.has(p))) {
-        doomedNodes.add(n.id)
-        expanded = true
-      }
-    }
+  const doomedTabs = tabIdsOfNode(allStoredTabs(store.docArea), id)
+  const nodes = store.nodes.filter((n) => n.id !== id)
+  // 挂件解除绑定、就地独立：笔记与超级文档进游离池（宿主的 goal），试卷留在 exams 里悬空
+  const pool = detachedPoolOf(store, node.goalId)
+  const nextDetached: LearnStore['detached'] = {
+    ...(store.detached ?? {}),
+    [node.goalId]: {
+      notes: [...pool.notes, ...(node.notes ?? [])],
+      superdocs: [...pool.superdocs, ...(node.superdocs ?? [])],
+    },
   }
-
-  const doomed = Array.from(doomedNodes).flatMap((did) => tabIdsOfNode(allStoredTabs(store.docArea), did))
-  const nodes = store.nodes.filter((n) => !doomedNodes.has(n.id))
   return {
     ...store,
     nodes,
     // 它的有效阅读记录也一起清掉：留着就是一条指向不存在节点的空索引（见 learn/reading 的 pruneReading）。
     // 一个节点只属于一个目标，所以只动那一本账
     ...onNodeReadingPatch(store, node, (rec) => pruneReading(rec, new Set(nodes.map((n) => n.id)))),
-    edges: store.edges.filter((e) => !doomedNodes.has(e.from) && !doomedNodes.has(e.to)),
-    exams: store.exams.filter((e) => !doomedNodes.has(e.nodeId)),
-    // 节点没了，它那份临时变量（可能是几十万字符的中间数据）也不该留着
-    tmp: withoutTmpNodes(store.tmp, doomedNodes),
-    docArea: withOwners(closeIds(store.docArea, doomed), dropTabs(store.docArea.tabOwners, doomed)),
+    edges: store.edges.filter((e) => e.from !== id && e.to !== id),
+    // 试卷不删：宿主没了绑定自然解除（nodeId 悬空），用户随时可以把它绑到别的文档或单独删掉
+    tmp: withoutTmpNodes(store.tmp, new Set([id])),
+    detached: nextDetached,
+    docArea: withOwners(closeIds(store.docArea, doomedTabs), dropTabs(store.docArea.tabOwners, doomedTabs)),
     // 节点没了，它那几份没保存的正文也没有落点了（同页签：留着只会占着键）
-    drafts: dropDrafts(store.drafts, doomed),
-    activeNodeId: doomedNodes.has(store.activeNodeId ?? '') ? (parents[0] ?? null) : store.activeNodeId,
+    drafts: dropDrafts(store.drafts, doomedTabs),
+    activeNodeId: store.activeNodeId === id ? (parents[0] ?? null) : store.activeNodeId,
   }
 }
 

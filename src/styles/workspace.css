@@ -364,3 +364,62 @@
     opacity: 0.6;
   }
 }
+
+/* ---------- 结构画布 ---------- */
+
+/*
+ * 跳转之后目标节点亮一下边框：从「有一圈亮边」衰减到没有。
+ *
+ * 用 box-shadow 而不是 border：border 会改盒模型、把卡片挤动一像素，
+ * 而这圈光只是提示「你被带到这儿了」，不该让画面抖。
+ */
+@keyframes moji-structure-flash {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-seal) 70%, transparent);
+  }
+  35% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-seal) 42%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+
+.moji-structure-flash {
+  animation: moji-structure-flash 0.9s ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moji-structure-flash {
+    animation: none;
+  }
+}
+
+/*
+ * 从节点列表拖出一张卡时，**能当它上级**的卡描一圈呼吸的光——
+ * 「手松在我身上能接住」的视觉语言。同样是 box-shadow：border 会挤动盒模型。
+ */
+@keyframes moji-structure-candidate {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--color-seal) 45%, transparent),
+      0 0 14px color-mix(in srgb, var(--color-seal) 28%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2.5px color-mix(in srgb, var(--color-seal) 80%, transparent),
+      0 0 22px color-mix(in srgb, var(--color-seal) 48%, transparent);
+  }
+}
+
+.moji-structure-candidate {
+  animation: moji-structure-candidate 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moji-structure-candidate {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-seal) 60%, transparent);
+  }
+}

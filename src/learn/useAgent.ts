@@ -19,13 +19,13 @@ import {
   type PendingFile,
   type PendingImage,
 } from '../agent/types'
-import { runAgent } from '../agent/runtime'
+import { runAgent, type AgentInjection } from '../agent/runtime'
 import { emptyDelivery, hasDelivery, mergeDelivery, normalizeDelivery } from '../agent/delivery'
 import { createExecuteTool, type AskAnswers, type AskFormPayload, type ExamToolDeps } from '../agent/tools'
 import { ASK_IDLE_TIMEOUT_MS } from '../agent/sandbox/limits'
 import { ensureActivityListeners, userIdleMs } from '../lib/userActivity'
-import { recordContext } from '../agent/contextFilter'
-import { assertPrefixStable, resetPrefixGate } from '../agent/prefixGate'
+import { captureDrop, noteRequest } from '../agent/contextDebug'
+import { assertPrefixStable, currentEpoch, lastCacheRead, noteCacheRead, resetPrefixGate } from '../agent/prefixGate'
 import { globalContextWindow, hasApiKey, loadAiSettings, resolveGlobal } from '../ai/settings'
 import type { ReasoningEffort } from '../ai/types'
 import { appendFreeMessage, freeConversationById, mutateFreeConversation, FREE_GOAL_ID } from './freeChat'
@@ -42,7 +42,7 @@ import { MIN_ACTIVE_MESSAGES, activeMessages, applyCompaction, shouldCompact } f
 import { needsPersonaAnnounce, personaMessage } from '../agent/persona'
 import { needsDocFormatAnnounce, docFormatMessage, docFormatAllowsModule } from '../agent/docFormat'
 import { conversationById, nodeById, resolveDisplayedConversation, addConversation } from './graph'
-import { currentNodeBlock, makeExamTool } from './agentOps'
+import { makeExamTool } from './agentOps'
 import { findWorkflow, renderWorkflowInstruction, resolveWorkflowEffort, workflowPrep, workflowModules } from './workflows'
 import { generateConversationTitle, namingSource } from './title'
 import { createMemoryOps } from './memory'
@@ -114,6 +114,11 @@ export function useAgent(opts: {
   examDeps?: (nodeId: string) => ExamToolDeps | undefined
   /** ui.* 与截图需要的能力（见 AgentUiDeps） */
   ui?: AgentUiDeps
+  /**
+   * 节点编辑成功后的宿主动作（出卷后的视觉自检等）：由界面层注入，
+   * learnSandboxOps 会把它接到节点通道的 afterEdit 上。
+   */
+  afterNodeEdit?: (uuid: string, kind: string) => void
   /** browser.* 的宿主依赖工厂（web 页签动作与活信息，见 learn/web/browserOps）；不注入就没有这一组 */
   browserDeps?: () => BrowserDeps | undefined
 }) {
@@ -123,10 +128,14 @@ export function useAgent(opts: {
    * 直接解构会永远拿到首轮那份旧回调（页签换过之后，point 就指到别的文档上去了）。
    */
   const uiRef = useRef(opts.ui)
+  const afterNodeEditRef = useRef(opts.afterNodeEdit)
+  useEffect(() => {
+    uiRef.current = opts.ui
+    afterNodeEditRef.current = opts.afterNodeEdit
+  })
   /** browser.* 的宿主依赖（web 页签动作与活信息）：同 uiRef 的理由，每渲染刷新 */
   const browserFnRef = useRef(opts.browserDeps)
   useEffect(() => {
-    uiRef.current = opts.ui
     browserFnRef.current = opts.browserDeps
   })
   const [streaming, setStreaming] = useState<Record<string, { conversationId: string; messageId: string; parts: AgentPart[] }>>(
@@ -371,6 +380,8 @@ export function useAgent(opts: {
        * 标记的自动跳过，同一上下文绝不重复注入。
        */
       modules?: PromptModule[],
+      /** 工作流启动实参（runWorkflow 的 params）：随隐藏指令落库，分界条展开时展示 */
+      wfParams?: Record<string, string | number>,
     ) => {
       const trimmed = text.trim()
       // 与 runTurn 同一道门：纯图片/纯文件（无字）放行——图片转存与消息组装都在后面
@@ -412,11 +423,17 @@ export function useAgent(opts: {
         updatedAt: Date.now(),
       }
       /**
-       * 当前节点信息跟着每条消息走：系统提示词固定在目标一级（切节点不作废前缀缓存），
-       * 「此刻在哪个节点、它写过什么」就只能靠这条隐藏上下文交代。调用方给的上下文
-       * （如选段位置）接在后面，两者一起进模型、都不显示在气泡里。
+       * **节点上下文不再自动注入**（2026-10-23 的架构决定）：「当前学习目标 / 目标规划 /
+       * 当前节点 / 写入目标」那几行曾经每轮拼进消息——它是随节点与进度**每轮都在变**的
+       * 内容，不属于任何一边（既不是固定的提示词，也不是当次的指令），还会在新对话的
+       * 第一条指令前面垫上一大块，把指令本身覆盖掉。现在：
+       * - 沙箱的「当前节点」语义照旧（省略 path 的 doc.write / outline.write 落在
+       *   target.nodeId 上，宿主解析，模型不必知道路径）；
+       * - 模型需要目标 / 节点 / 规划状态时**自己去查**：api.node.list()（回执带 current
+       *   与全部节点）、节点对象 content、api.state.read()；
+       * - 调用方真正要交给模型的**当次参数**（画布的目标项定位、选段位置）仍走 context
+       *   参数——那是指令的一部分，不是会变的背景。
        */
-      const nodeContext = currentNodeBlock(before, target.goalId, target.nodeId)
       const extraContext = context?.trim()
       const userMsg: ConversationMessage = {
         id: crypto.randomUUID(),
@@ -431,7 +448,10 @@ export function useAgent(opts: {
          * 两者从前混在一条分界条上，几条一起注入时那行字会被挤爆（见 agent/messageKind）。
          */
         ...(hidden && mark ? { mark, inject: 'instruction' as const } : {}),
-        context: extraContext ? nodeContext + '\n\n' + extraContext : nodeContext,
+        // 工作流的启动实参：界面的分界条展开时画参数行、并高亮指令里对应的文字
+        ...(hidden && mark && wfParams ? { wfParams } : {}),
+        // 只带调用方给的当次参数（选段位置 / 画布意图）；节点背景不再自动注入（见上面的说明）
+        ...(extraContext ? { context: extraContext } : {}),
         ...(quote ? { quote } : {}),
         ...(attached.images.length ? { images: attached.images } : {}),
         ...(attachedFiles.files.length ? { files: attachedFiles.files } : {}),
@@ -445,6 +465,22 @@ export function useAgent(opts: {
        */
       const agentSettings = loadAgentSettings()
       const personaId = agentSettings.persona
+      /*
+       * 系统提示词固化进对话（见 agent/types 的 Conversation.systemPrompt）：第一次请求
+       * 抓一份、之后每一轮都用固化的那份，不再每轮现拼。老数据没有这个字段——在这里
+       * 现场抓一份补上，随下面 conv 组装后的 persist 一并落盘，之后与新数据完全一致。
+       */
+      let teacherSystem = conv.systemPrompt
+      if (!teacherSystem) {
+        teacherSystem = buildTeacherSystem({
+          // 画像**不在这里传**：导师要贴合这个人时自己 api.userInfo.get() 取（见 ai 的说明）
+          extraSystemPrompt:
+            agentSettings.extraSystemPromptEnabled && agentSettings.extraSystemPrompt?.trim()
+              ? agentSettings.extraSystemPrompt.trim()
+              : undefined,
+        })
+        conv = { ...conv, systemPrompt: teacherSystem }
+      }
       const announcer = needsPersonaAnnounce(conv.messages, personaId)
         ? [personaMessage(personaId, Date.now(), crypto.randomUUID(), agentSettings.customPersonas)]
         : []
@@ -562,6 +598,7 @@ export function useAgent(opts: {
         // 这一轮冲着来的节点是沙箱里的「当前节点」——不是界面上此刻选中的那个
         nodeId: () => target.nodeId,
         goalId: () => target.goalId,
+        ...(afterNodeEditRef.current ? { afterNodeEdit: afterNodeEditRef.current } : {}),
         /**
          * wf.invoke 的落点（见 WorkflowOps.invoke）：**只排队，不当场跑**。
          * 这一轮还在跑，工作流的指令要作为一条新的 user 消息进上下文，只能等收口（见下面 finally）。
@@ -833,20 +870,12 @@ export function useAgent(opts: {
           // 工作流轮的档位由触发方按三态配置解析好传进来；聊天轮用全局滑条
           reasoningEffort: effortOverride ?? global.effort,
           /**
-           * 系统提示词只描述**目标**，不含当前节点。
-           *
-           * 这是目标级上下文的关键：切节点时系统提示词一字不变，服务端的前缀缓存
-           * 才不会被整段作废；「此刻在哪个节点」由每条消息带的隐藏上下文交代
-           * （见 currentNodeBlock）。目标问题取自用户原话，Agent 之后改标题也不会动它。
+           * 系统提示词用**对话里固化的那份**（见上面的固化逻辑）：只描述目标、不含当前
+           * 节点，切节点一字不变（前缀缓存不被整段作废）；节点背景不再随消息注入，
+           * 模型需要时自己 api.node.list / 节点对象 content 现查。固化之后，这段对话
+           * 生命周期内的 system 段逐字节稳定——设置中途改动也不会把进行中的对话前缀打断。
            */
-          system: buildTeacherSystem({
-            goalQuestion: getLatest().goals.find((g) => g.id === target.goalId)?.question ?? '',
-            // 画像**不在这里传**：导师要贴合这个人时自己 api.userInfo.get() 取（见 ai 的说明）
-            extraSystemPrompt:
-              agentSettings.extraSystemPromptEnabled && agentSettings.extraSystemPrompt?.trim()
-                ? agentSettings.extraSystemPrompt.trim()
-                : undefined,
-          }),
+          system: teacherSystem,
           /**
            * 历史里的图片要先读回内存：落盘的只有一条引用（见 agent/types 的 MessageImage），
            * 字节在 {目标}/images 下。整段历史都读，而不是只读这一轮新增的那张——
@@ -862,8 +891,9 @@ export function useAgent(opts: {
           ctx: { nodeId: target.nodeId, goalId: target.goalId },
           signal: ctrl.signal,
           /**
-           * 上下文过滤器：每跳请求发出前把实发的上下文交给过滤器记录（见 agent/contextFilter）。
-           * 只在开发者模式的调试器开着时才记——快照会拷下整段历史，平时不值得花这个内存。
+           * 上下文对比调试器的记账口：每跳请求发出前收下实发的上下文（见 agent/contextDebug）。
+           * 滚动只留最近两份、不累积；命中骤降时由哨兵定格成报告（开不开着窗口都在记，
+           * 这正是「不录制、只在出事时摆出来」的前提）。
            */
           onContext: (snapshot) => {
             // 前缀门禁：此刻的 system / messages / tools 与实发完全一致（见 agent/runtime），
@@ -873,7 +903,7 @@ export function useAgent(opts: {
               snapshot.messages,
               snapshot.tools as Parameters<typeof assertPrefixStable>[2],
             )
-            if (loadAgentSettings().dev.contextDebugger) recordContext(snapshot)
+            noteRequest(target.conversationId, snapshot)
           },
           /**
            * 动态提示词注入的边界通道（触发在 execute 里发生，onPromptModule 只入队）。
@@ -882,10 +912,18 @@ export function useAgent(opts: {
            * 把它追加到请求流末尾并继续 loop——不等整轮结束。
            *
            * 镜像方式：模块记成回复里的一个 prompt-module **片段**（与思考/工具同层，
-           * 界面渲染成轮内折叠块，不分割轮次），toChatHistory 在片段位置补发 user 消息
-           * （见 agent/history）——数组顺序天然与实发一致，不需要任何切分。
+           * 界面渲染成轮内折叠块，不分割轮次），toChatHistory 在片段位置补发 assistant
+           * 消息（见 agent/history）——数组顺序天然与实发一致，不需要任何切分。
            */
-          injections: async () => {
+          injections: async (): Promise<AgentInjection | null> => {
+            /**
+             * 工作流轮与隐藏指令轮（mark 在）**跳间不注入**：模块若在多跳中途插到
+             * 请求流末尾，下一跳它就成了「最后一条 user 消息」——注意力权重最高，
+             * 排版配方这类规范会压过本轮工作流指令的职责约束（「本轮交付物是 X」）。
+             * 工作流自带的模块在轮前已注入（userMsg 之前，那才是它该在的位置）；
+             * execute 动态触发的延后到轮末 finally 统一落库，作为历史进入下一轮。
+             */
+            if (mark) return null
             if (!moduleQueue.size) return null
             const stored = conversationById(getLatest(), target.conversationId)
             if (!stored) {
@@ -903,7 +941,8 @@ export function useAgent(opts: {
             parts.push({ type: 'prompt-module', key: mod.key, text: mod.text })
             // 片段立即落库（与工具卡片同一条里程碑纪律）：进程被杀也不丢这笔账
             flushTurn()
-            return mod.text
+            // 模块是「怎么做」的声明：以 assistant 边进历史（与轮前的模块消息同一分工）
+            return { role: 'assistant', content: mod.text }
           },
           onEvent: (e) => {
             if (e.type === 'usage') {
@@ -915,7 +954,22 @@ export function useAgent(opts: {
               tally.miss += Math.max(0, e.usage.input - e.usage.cacheRead)
               tally.estimated = tally.estimated || e.usage.estimated === true
               // 留最后一跳的值：状态条要的是「现在吐字多快」，不是全程平均
-              if (e.usage.tps) {
+              // 缓存哨兵：同一会话的前缀逐字节只增（前缀门禁在管），命中因此只许涨不许跌。
+            // 跌了（且超过一块的量）= 服务端看到的前缀与我们发的不一致，或缓存被部分逐出——
+            // 当场把数字喊出来，配合开发者模式的上下文调试器（两份快照逐条比对）就能定位到条。
+            // 账本带纪元、挂在门禁上：设计内的前缀搬家（超预算裁剪 / 压缩·编辑后的重置）
+            // 服务商缓存是真丢，但那不是分叉——跨了纪元的读数不比较，不喊狼来了。
+            const prevRead = lastCacheRead(convKey)
+            if (prevRead && prevRead.epoch === currentEpoch(convKey) && e.usage.cacheRead + 512 < prevRead.read) {
+              // 定格：把前后两份实发上下文摆进对比调试器（断点已标注，见 agent/contextDebug）
+              captureDrop(convKey, prevRead.read, e.usage.cacheRead)
+              console.warn(
+                `[cache-watch] ${convKey} 命中骤降：${prevRead.read} → ${e.usage.cacheRead}（-${prevRead.read - e.usage.cacheRead}）。` +
+                  '前后两份上下文已摆进对比调试器（断点已标注）。',
+              )
+            }
+            noteCacheRead(convKey, e.usage.cacheRead)
+            if (e.usage.tps) {
                 tally.tps = e.usage.tps
                 setTps((prev) => ({ ...prev, [convKey]: e.usage.tps as number }))
               }
@@ -1098,11 +1152,13 @@ export function useAgent(opts: {
       effortOverride?: ReasoningEffort,
       /** 工作流触发时随指令注入的提示词模块（见 runTurnUnchecked 同名参数） */
       modules?: PromptModule[],
+      /** 工作流启动实参（见 runTurnUnchecked 同名参数） */
+      wfParams?: Record<string, string | number>,
     ) => {
       /*
        * 空文本 + 带附件（纯图片 / 纯文件）也是合法消息：气泡（MessageBubble 只在
-       * 有字时才画文字泡）与历史组装（agent/history 的 nodeContext 恒在正文里，
-       * 不会发出空块）都为「只发图」留好了位置——门只拦「什么都没有」的那条。
+       * 有字时才画文字泡）与历史组装（agent/history 只在 context 有值时才带）都为
+       * 「只发图」留好了位置——门只拦「什么都没有」的那条。
        */
       if (!text.trim() && !(pending?.length || files?.length)) return
       if (!hasApiKey(loadAiSettings())) {
@@ -1118,7 +1174,7 @@ export function useAgent(opts: {
       chain.set(target.conversationId, ticket)
       try {
         if (prev) await prev
-        await runTurnUnchecked(target, text, hidden, context, quote, pending, files, mark, isCompactTurn, effortOverride, modules)
+        await runTurnUnchecked(target, text, hidden, context, quote, pending, files, mark, isCompactTurn, effortOverride, modules, wfParams)
       } finally {
         release()
         if (chain.get(target.conversationId) === ticket) chain.delete(target.conversationId)
@@ -1231,6 +1287,17 @@ export function useAgent(opts: {
           if (!stored) return
           const settings = loadAiSettings()
           const agentSettings = loadAgentSettings()
+          // 自由聊天的系统提示词同样固化进会话（见 Conversation.systemPrompt）：第一次请求抓一份、之后每轮用它
+          let freeSystem = stored.systemPrompt
+          if (!freeSystem) {
+            freeSystem = buildFreeChatSystem({
+              extraSystemPrompt:
+                agentSettings.extraSystemPromptEnabled && agentSettings.extraSystemPrompt?.trim()
+                  ? agentSettings.extraSystemPrompt.trim()
+                  : undefined,
+            })
+            mutateFreeConversation(conversationId, (c) => ({ ...c, systemPrompt: freeSystem }))
+          }
           const global = resolveGlobal(settings)
           const window = globalContextWindow(settings)
           const assistantId = crypto.randomUUID()
@@ -1241,27 +1308,23 @@ export function useAgent(opts: {
           const ctrl = new AbortController()
           abortMapRef.current.set(convKey, ctrl)
 
-          // 聊天沙箱只提供 web API 组（api.web.search 与 api.fetch），其他均不提供
-          const dummyDocOps = {
-            read: () => '',
-            write: () => false,
-            readMetadata: () => null,
-            writeMetadata: () => false,
-          }
-          const dummyNodeOps = {
-            title: () => '',
-            create: () => '',
-            update: () => false,
-            delete: () => false,
-            list: () => [],
-            read: () => null,
-          }
+          /*
+           * 聊天沙箱只开放 web / fetch / schedule（apiAllow），文档与节点两组永远到不了——
+           * 但 buildApi 无条件装配它们，所以要给一份占位。用 Proxy 而不是手写方法表：
+           * 接口再加方法也不会漂（早先手写的那份就已经和真实接口对不上了）。
+           */
+          const unreachableOps = <T extends object>(label: string): T =>
+            new Proxy({} as T, {
+              get: () => () => {
+                throw new Error('自由聊天沙箱没有' + label + '能力')
+              },
+            })
           const freeSandbox: SandboxOptions = {
             nodeId: () => null,
             resolveNode: () => ({ ok: false, message: '自由聊天不挂在知识节点上' }),
-            resolveDoc: () => ({ ok: false, message: '自由聊天不挂在教学文档上' }),
-            docOps: dummyDocOps as unknown as SandboxOptions['docOps'],
-            nodeOps: dummyNodeOps as unknown as SandboxOptions['nodeOps'],
+            resolveDoc: () => ({ ok: false, message: '自由聊天不挂载教学文档上' }),
+            docOps: unreachableOps<SandboxOptions['docOps']>('文档'),
+            nodes: { service: () => null },
             web: {
               fetch: fetchForAgent,
               search: searchForAgent,
@@ -1291,12 +1354,7 @@ export function useAgent(opts: {
               provider: global.provider,
               model: global.model,
               reasoningEffort: global.effort,
-              system: buildFreeChatSystem({
-                extraSystemPrompt:
-                  agentSettings.extraSystemPromptEnabled && agentSettings.extraSystemPrompt?.trim()
-                    ? agentSettings.extraSystemPrompt.trim()
-                    : undefined,
-              }),
+              system: freeSystem,
               messages: toChatHistory(stored.messages),
               tools,
               ctx: { nodeId: '', goalId: FREE_GOAL_ID },
@@ -1517,6 +1575,8 @@ export function useAgent(opts: {
         // 触发时随指令注入的提示词模块（内置 promptModule / 登记的 prompt；
         // 同一上下文只注一次，重复触发靠活消息上的标记去重）
         workflowModules(found),
+        // 启动实参随指令落库：分界条展开时画参数行、高亮指令里对应的文字
+        opts?.params,
       )
     },
     [nodeId, conversationId, getLatest, runTurn],
@@ -1624,6 +1684,7 @@ export function useAgent(opts: {
       runWorkflow(goal ? 'goal-outline' : 'teach-node', {
         target,
         hint: extra,
+        params: { target: target.nodeId },
         images: attachments?.images,
         files: attachments?.files,
       })

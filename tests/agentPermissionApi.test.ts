@@ -17,18 +17,8 @@ const dummyOpts: SandboxOptions = {
   docOps: {
     read: () => '',
     write: () => ({ ok: true, content: '' }),
-    replace: () => ({ ok: true, content: '' }),
-    append: () => ({ ok: true, content: '' }),
-    annotate: () => ({ ok: true, content: '' }),
   },
-  nodeOps: {
-    list: () => [],
-    read: () => ({ ok: false }),
-    create: () => ({ ok: false, content: '' }),
-    update: () => ({ ok: false, content: '' }),
-    remove: () => ({ ok: false, content: '' }),
-    move: () => ({ ok: false, content: '' }),
-  },
+  nodes: { service: () => null },
 }
 
 type AskStub = (form: unknown) => Promise<unknown>

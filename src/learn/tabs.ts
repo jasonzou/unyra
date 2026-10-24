@@ -195,7 +195,7 @@ export function tabTitle(
   if (ref.kind === 'note') return ref.note
   if (ref.kind === 'super') return ref.name
   if (ref.kind === 'exam') return examTitle?.(ref.examId, ref.attemptId) ?? t('试卷副本')
-  if (ref.kind === 'outline') return (nodeTitle(ref.nodeId) ?? t('已删除的节点')) + t(' · 大纲')
+  if (ref.kind === 'outline') return (nodeTitle(ref.nodeId) ?? t('已删除的节点')) + t(' · 结构')
   if (ref.kind === 'web') {
     // 页面的真标题是活信息（见 types 的 WebTabMeta），这里只能兜底出域名；起始页没有域名
     if (!ref.url) return t('新网页页签')

@@ -186,26 +186,10 @@ export async function examTests() {
     docOps: {
       read: () => '',
       write: () => ({ ok: true, content: 'ok' }),
-      replace: () => ({ ok: true, content: 'ok' }),
-      append: () => ({ ok: true, content: 'ok' }),
     },
-    nodeOps: {
-      list: () => ({ count: 1, nodes: [] }),
-      read: () => ({}),
-      create: () => ({ ok: true, content: 'ok' }),
-      update: () => ({ ok: true, content: 'ok' }),
-      remove: () => ({ ok: true, content: 'ok' }),
-    },
+    nodes: { service: () => null },
     tmp: () => ({ nodeId: childId, entries: {}, onChange: () => {} }),
     exam: {
-      create: (payload) => {
-        // 与工作区里那一段同构：题目格式不过关就是 ok:false + 一句话，不抛异常，
-        // 而且**什么都不落下**（所以被驳回的那一份连宿主都到不了）
-        const parsed = parseQuestions(payload.questions)
-        if (!parsed.ok) return { ok: false, content: parsed.message }
-        captured.push(payload)
-        return { ok: true, content: '已生成' }
-      },
       read: (attemptId?: string) => ({ ok: true, content: '（卷子' + (attemptId ? ':' + attemptId : '') + '）' }),
       grade: () => ({ ok: true, content: '已记录' }),
       explain: () => ({ ok: true, content: '已讲解' }),
@@ -213,12 +197,12 @@ export async function examTests() {
     },
     runSandbox: fakeRunner,
   })
+  void captured
   const bare = await stub.run(
-    { description: '出题', body: '((api)=>{ return await api.exam.create([' + '{ type: "single", stem: "x", options: ["a", "b"], answer: "A" }' + ']) })' },
+    { description: '看卷', body: '((api)=>{ return await api.exam.read() })' },
     { nodeId: childId, goalId },
   )
-  ok(captured.length === 1 && Array.isArray(captured[0].questions), 'exam.create 直接收到数组时按 questions 理解', captured)
-  ok(bare.ok, '这一路真的走通了', bare.content.slice(0, 160))
+  ok(bare.ok, '读卷这一路真的走通了', bare.content.slice(0, 160))
 
   /* 4b) 读永远是读：没有卷子也是一种答案，不该进「没有生效」那份清单 */
   const readOk = await stub.run(
@@ -227,17 +211,19 @@ export async function examTests() {
   )
   ok(readOk.ok && !readOk.content.includes('没有生效'), 'exam.read 拿到内容时不算失败', readOk.content.slice(0, 160))
 
-  /* 4c) 写失败：结果最前面必须写清「哪个 api + 为什么」，模型才不用猜 */
-  const badCreate = await stub.run(
-    { description: '出题', body: '((api)=>{ return await api.exam.create([' + '{ type: "truefalse", stem: "x", answer: "嗯" }' + ']) })' },
-    { nodeId: childId, goalId },
+  /* 4c) 写失败：出题走节点通道——坏题目在 editContent 被拒，清单点名 node.invoke。
+     用真 ops 的 harness（stub 的节点通道关着，接不了 editContent）。 */
+  const h = harness(baseStore(), childId)
+  const badCreate = await h.run(
+    "((api)=>{ const r = await api.node.create({ kind: 'exam', under: '" + childId + "' }); return await api.node.invoke(r.uuid, 'editContent', [{ questions: [{ type: 'truefalse', stem: 'x', answer: '嗯' }] }]) })",
   )
   ok(!badCreate.ok, '写操作没落地时工具级失败（界面上是红的）', badCreate.ok)
   ok(badCreate.content.startsWith('⛔'), '清单顶在结果最前面，不用模型去 result 里翻', badCreate.content.slice(0, 60))
-  ok(badCreate.content.includes('exam.create'), '清单里点名是哪个 api', badCreate.content.slice(0, 160))
+  ok(badCreate.content.includes('node.invoke'), '清单里点名是哪个 api', badCreate.content.slice(0, 160))
   ok(badCreate.content.includes('对错题只认 true / false'), '清单里带上「为什么」，一句话就能照着改', badCreate.content.slice(0, 240))
   ok(badCreate.content.includes('不要用 try/catch'), '明说写失败不抛异常：别拿 try/catch 判断成败', badCreate.content.slice(0, 400))
-  ok(!captured.some((p) => JSON.stringify(p).includes('嗯')), '被驳回的那一份根本没有进到宿主（不会留下半份卷子）')
+  // 被驳回的那份没进 store（不留下半份卷子）：harness 的 store 里没有带「嗯」的题
+  ok(!JSON.stringify(h.store().exams).includes('嗯'), '被驳回的那一份根本没有进到宿主（不会留下半份卷子）')
 
   /* 4d) exam.delete：作废走宿主；能不能删的判据在 examDeleteBlock */
   const del = await stub.run({ description: '删除', body: '((api)=>{ return await api.exam.delete() })' }, { nodeId: childId, goalId })
@@ -286,8 +272,8 @@ export async function examTests() {
    */
   const nonePayload = JSON.parse(examReadPayload({ exams: [], childNodes: [] }))
   ok(
-    nonePayload.status === 'none' && String(nonePayload.note).includes('exam.create'),
-    '一份卷子都没有时：说清「还没有卷」，并指出要出题就直接 create',
+    nonePayload.status === 'none' && String(nonePayload.note).includes('editContent') && String(nonePayload.note).includes('node.create'),
+    '一份卷子都没有时：说清「还没有卷」，并指出出题走节点通道（create 拿 uuid → editContent 出卷）',
     nonePayload,
   )
   const freshPayload = JSON.parse(
@@ -466,9 +452,11 @@ export async function examTests() {
   ok(compileBody('((api)=>{ return 1 })();').ok, '结尾的分号与自调用括号被摘掉')
   ok(compileBody('((api)=>{ return 1 })(api)').ok, '(api) 自调用也摘掉——留着它沙箱会给模型函数传 undefined')
   ok(normalizeBody('async (api) => { return 1 }') === 'async (api) => { return 1 }', '已经写了 async 的原样不动')
+  // 语句体兜底（2026-10-24）：直接写一段语句不再被形状拒绝——包一层匿名 async 箭头照跑
   const stmt = compileBody('const x = 1; return x')
-  ok(!stmt.ok && stmt.content.includes('匿名函数'), '语句片段在宿主就被挡住，并说清该写成什么样', stmt.content)
-  const inner = compileBody('((api)=>{ const f = () => { return await api.doc.read() }; return f })')
+  ok(stmt.ok && stmt.body.startsWith('(async (api) => {'), '语句片段包一层匿名箭头照跑（return 由模型自己写）', stmt.ok ? stmt.body : 'no')
+  ok(!compileBody('const r = (').ok, '真语法错照旧在宿主挡住')
+  const inner = compileBody('((api)=>{ const f = () => { return await api.node.list() }; return f })')
   ok(!inner.ok && inner.content.includes('await') && inner.content.includes('非 async'), '内层非 async 函数里的 await 被点出来（旧实现只在沙箱里报一句无指向的语法错）', inner.content)
 
   /* 6) 端到端：那条真实触发过语法错的写法，现在必须跑通 */
@@ -489,14 +477,16 @@ export async function examTests() {
 export async function methodAndSdocTests() {
   const h = harness(baseStore(), childId)
   // 先写一篇已知的文档，method 函数读它来算句号——结果可预言（3 个「。」）
-  const seed = await h.run("((api)=>{ return await api.doc.write('', '一。二。三。') })")
+  const listReply = await h.run("((api)=>{ return await api.node.list() })")
+  const seedUuid = JSON.parse(listReply.content.slice(0, listReply.content.indexOf('\n本次调用'))).nodes.find((n) => n.title === '极限').uuid
+  const seed = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(seedUuid) + "); const c = await n.content; return await n.editContent({ ...c, teaching: '一。二。三。' }) })")
   ok(seed.ok, '前置：教学文档写入已知内容', seed.content.slice(0, 120))
 
-  const code = '((api, path) => { const d = await api.doc.read(path); return (d.content.match(/。/g) ?? []).length })'
+  const code = "((api, uuid) => { const n = await api.node.get(uuid); const c = await n.content; return (c.teaching.match(/。/g) ?? []).length })"
   const created = await h.run('((api)=>{ return await api.method.create({ name: "数句号", code: ' + JSON.stringify(code) + ' }) })')
   ok(created.ok && created.content.includes('数句号'), 'method.create 建一个函数（语法先过编译）', created.content.slice(0, 160))
 
-  const called = await h.run('((api)=>{ return { n: await api.method.call("数句号", "") } })')
+  const called = await h.run('((api)=>{ return { n: await api.method.call("数句号", ' + JSON.stringify(seedUuid) + ') } })')
   ok(called.ok && called.content.includes('"n":3'), 'method.call 执行函数并注入了 api（数出 3 个句号）', called.content.slice(0, 160))
 
   const listed = await h.run('((api)=>{ return await api.method.list() })')
@@ -515,19 +505,23 @@ export async function methodAndSdocTests() {
   const missing = await h.run('((api)=>{ return await api.method.call("数句号") })')
   ok(!missing.ok && missing.content.includes('没有叫'), '删掉之后 call 明确说没有这个函数', missing.content.slice(0, 160))
 
+  // 超级文档是节点宇宙的一员：create（即挂）→ editContent({ html }) 整份写 → content 读回 → delete
   const doc = '<button id="b">数一数</button><script>void api</script>'
-  const wrote = await h.run('((api)=>{ return await api.sdoc.write("", "句号器", ' + JSON.stringify(doc) + ') })')
-  ok(wrote.ok && wrote.content.includes('句号器'), 'sdoc.write 新建一份超级文档', wrote.content.slice(0, 160))
-  const read = await h.run('((api)=>{ return await api.sdoc.read("", "句号器") })')
-  ok(read.ok && read.content.includes('<button'), 'sdoc.read 取回 HTML 原文', read.content.slice(0, 160))
-  const overwrite = await h.run('((api)=>{ return await api.sdoc.write("", "句号器", "<p>第二版</p>") })')
-  ok(overwrite.ok && overwrite.content.includes('更新'), 'sdoc.write 同名是覆盖', overwrite.content.slice(0, 160))
-  const list = await h.run('((api)=>{ return await api.sdoc.list("") })')
-  ok(list.ok && list.content.includes('句号器'), 'sdoc.list 列出该节点的超级文档', list.content.slice(0, 160))
+  const sdocCreated = await h.run("((api)=>{ return await api.node.create({ kind: 'superdoc', title: '句号器', under: '" + childId + "' }) })")
+  ok(sdocCreated.ok && sdocCreated.content.includes('句号器'), 'node.create(superdoc) 新建一份空超级文档', sdocCreated.content.slice(0, 160))
+  const sdocUuid = JSON.parse(sdocCreated.content.slice(0, sdocCreated.content.indexOf('\n本次调用'))).uuid
+  const wrote = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(sdocUuid) + "); return await n.editContent({ html: " + JSON.stringify(doc) + " }) })")
+  ok(wrote.ok && wrote.content.includes('句号器'), '超级文档 editContent({ html }) 落正文', wrote.content.slice(0, 160))
+  const read = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(sdocUuid) + "); const c = await n.content; return c.html })")
+  ok(read.ok && read.content.includes('<button'), '超级文档 content 读回 HTML 原文', read.content.slice(0, 160))
+  const overwrite = await h.run("((api)=>{ const n = await api.node.get(" + JSON.stringify(sdocUuid) + "); return await n.editContent({ html: '<p>第二版</p>' }) })")
+  ok(overwrite.ok && overwrite.content.includes('覆盖'), '同名 editContent 是覆盖', overwrite.content.slice(0, 160))
+  const list = await h.run("((api)=>{ return await api.node.list() })")
+  ok(list.ok && list.content.includes('句号器'), 'node.list 带着超级文档清单', list.content.slice(0, 200))
   const count = h.store().nodes.find((n) => n.id === childId)?.superdocs?.length ?? -1
   ok(count === 1, '同名覆盖不会留两份', count)
-  const del = await h.run('((api)=>{ return await api.sdoc.delete("", "句号器") })')
-  ok(del.ok && (h.store().nodes.find((n) => n.id === childId)?.superdocs?.length ?? 1) === 0, 'sdoc.delete 删掉一份', del.content.slice(0, 120))
+  const del = await h.run("((api)=>{ return await api.node.delete(" + JSON.stringify(sdocUuid) + ") })")
+  ok(del.ok && (h.store().nodes.find((n) => n.id === childId)?.superdocs?.length ?? 1) === 0, 'node.delete 删掉一份超级文档', del.content.slice(0, 120))
 
   /* 落盘往返：超级文档进节点 meta、method 进目标目录的 method.json，重启后都得还在 */
   const roundTrip = await (async () => {
@@ -542,7 +536,7 @@ export async function methodAndSdocTests() {
   })()
   ok(
     !!roundTrip && roundTrip.nodes.find((n) => n.id === childId)?.superdocs?.[0]?.html === '<p>rt</p>',
-    '超级文档随 meta.json 落盘并读回',
+    '超级文档随节点文件落盘并读回',
     roundTrip?.nodes.find((n) => n.id === childId)?.superdocs,
   )
   ok(

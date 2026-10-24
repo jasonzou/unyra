@@ -137,7 +137,7 @@ function NodeRowComponent({
     else onSelectNode(node.id)
   }
   /** 目标行的文字提示：说的是「切到它的页签组」，不再是「打开文档」 */
-  const textHint = isRoot ? t('切到「{0}」的目标页签组（大纲与它的教学文档）', nodeTitle) : t('打开学习文档「{0}」', nodeTitle)
+  const textHint = isRoot ? t('切到「{0}」的目标页签组（结构与它的教学文档）', nodeTitle) : t('打开学习文档「{0}」', nodeTitle)
 
   const wsBase = isRoot ? wsRelOf(store, node.id) : null
   const [hasWsFiles, setHasWsFiles] = useState(false)
@@ -340,8 +340,8 @@ function NodeRowComponent({
             <button
               type="button"
               data-reveal={`row:doc:outline:${node.id}`}
-              title={t('打开「{0}」的大纲页', nodeTitle)}
-              aria-label={t('大纲')}
+              title={t('打开「{0}」的结构页', nodeTitle)}
+              aria-label={t('结构')}
               onClick={(e) => {
                 e.stopPropagation()
                 docs.onOpenOutline(node.id)

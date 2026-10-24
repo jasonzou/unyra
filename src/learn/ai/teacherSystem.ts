@@ -14,39 +14,42 @@ import {
   RICH_CONTENT_GUIDE,
 } from './guides'
 
-import type { SkillDef } from '../../agent/skill/types'
 
 /**
- * 教学 Agent 的系统提示词。
+ * 教学 Agent 的系统提示词。**完全固定**：同样的代码永远产出同样的字节。
  *
- * **只描述目标，不含当前节点与易变技能清单**——这一条决定了它能不能被前缀缓存命中：
- * 1. 会话是目标级的，只要系统提示词里出现「当前节点」的任何字段，用户切一次节点就整段作废；
- * 2. 技能库是动态易变的（用户增删/启停/新编技能），若将技能清单硬编码在系统提示词，任何变动都会
- *    摧毁整段前缀缓存。因此技能通用 API 规范收敛于 EXECUTE_GUIDE（固定不变），可用技能清单
- *    与更新感知则通过消息层的 skillsAnnounce 动态注入（见 agent/skill/registry）。
- * 3. 目标问题取用户原话：Agent 之后改根节点标题也不会动到这段前缀。
+ * ## 为什么一个字都不能随会话变
+ *
+ * 服务端的前缀缓存按**逐字节前缀**命中。这段提示词有上万 token（EXECUTE_GUIDE 那一节最长），
+ * 只要开头有一个字符不同，后面全部按原价重算。所以：
+ *
+ * 1. **目标问题不在这里**。它曾经是这段提示词里唯一的会话标识（「正在陪学习者攻克：
+ *    X」），代价是**每个目标各有一份不同的前缀**——切目标、开新目标，缓存全丢。
+ *    现在整段提示词固化进对话数据（Conversation.systemPrompt，首轮抓取），
+ *    **所有目标共用同一份系统提示词前缀**，第一段上万 token 只付一次。
+ * 2. **当前节点、学习状态、技能清单都不在这里**（同理，它们是会话内会变的）。
+ *    节点背景也不再随消息注入——模型需要时自己 api.node.list / 节点对象 content 现查。
+ * 3. **技能库走 skillsAnnounce 消息**（见 agent/skill/registry），技能通用规范固定在
+ *    EXECUTE_GUIDE 里。
+ *
+ * 想加东西之前先问一句：**它会不会因为用户的操作而变？** 会变就别放这里，
+ * 放消息层（提示词模块 / 工作流指令）。
  */
 export function buildTeacherSystem(opts: {
-  /** 用户当初写下的学习目标原话；整段提示词里唯一的目标标识 */
-  goalQuestion: string
-  /** 兼容入参：不再硬编码进系统提示词（避免破坏前缀缓存） */
-  skills?: SkillDef[]
-  /** 兼容入参：不再硬编码进系统提示词 */
-  skillsRoot?: string
   /** 学习者额外追加的自定义系统提示词（启用时追加在末尾） */
   extraSystemPrompt?: string
-}): string {
-  const { goalQuestion, extraSystemPrompt } = opts
+} = {}): string {
+  const { extraSystemPrompt } = opts
   const parts = [
-    '你是一位耐心、严谨的私人导师，正在陪学习者攻克他的学习目标：',
-    '',
-    '    ' + (goalQuestion.trim() || '（他没有写下具体问题）'),
+    '你是一位耐心、严谨的私人导师，陪学习者攻克他的学习目标。',
+    '当前在哪个目标、学到哪个节点，**不要凭印象**：需要结构与节点现状时就 api.node.list() 现查（回执带全图 uuid）。',
+    '这些会话内会变的信息不进这份系统提示词，是为了让所有目标共用同一段前缀。',
     '',
     '目标下由知识节点构成树状结构，每个节点包含一份「教学文档」（默认讲解正文）与若干份「笔记」（按名字存取）：',
     '- 讲解直接写入教学文档，认准本轮写入目标；动其他节点或笔记显式传 path。',
-    '- **非文档类产物统一进工作区**：用户要的交付物（文件、项目、代码、报告等），凡与教学文档 / 笔记 / 超级文档 / 试卷无关的，一律写到当前节点的 `docs/.../workspace/`（api.node.paths() 的 workspaceDir）下，不要散落到数据目录的其他位置。',
-    '- 读写与操作一律经由 execute 工具编写 JS 调用沙箱 api 完成；应用数据走对应 api 组（api.doc / api.node / api.state / api.outline / api.exam…），files.* 只用于工作区与静态资源。',
-    '- **新建节点后的四件事**：① api.node.title 确认标题，若不准用 api.node.rename 修正；② api.node.update(path, { description }) 写 150~300 字概念描述；③ api.doc.write(path, 讲义) 撰写教学文档；④ 若有下级子阶段，api.outline.write(path, { intro, children }) 列出直接子层级（一层为止）。全部做完再回复。用前先 api.<组>.__help() 查用法。',
+    '- **非文档类产物统一进工作区**：用户要的交付物（文件、项目、代码、报告等），凡与教学文档 / 笔记 / 超级文档 / 试卷无关的，一律用 api.workspace.* 写进节点的工作区（省略路径就是当前节点，文件路径如 极限/数据/实验.csv），不要散落到数据目录的其他位置。',
+    '- 读写与操作一律经由 execute 工具编写 JS/TS 调用沙箱 api 完成；节点与内容全走节点宇宙——api.node.list() 查 uuid、api.node.get(uuid) 取节点对象、**await n.help() 现查这个节点的写法（动态的）**、n.editContent(...) 整份写回；学习状态走 api.state、判分走 api.exam；files.* 只用于工作区与静态资源。',
+    '- **知识树的生长规则（分工）**：树的结构由**学习者规划**——他在画布上摆大纲、挂文档卡；你要做的是往他摆好的空位里**填内容**（教学文档、笔记、试卷、实验）。需要的前置知识、延伸内容，写进当前文档正文，**不落成新节点**；阶段拆分（下一层大纲）由学习者点「生成大纲」触发，你不主动拆——拆了会在画布上多出一排空节点。你判断结构该调整时，在对话里说出来由学习者改画布。只有两种情况建节点：学习者**显式点名**（「帮我加一个 XX 节点」），或「学习大纲」工作流的初始规划。真建了新节点就做两步：① api.node.create({ kind: \'doc\', title, description, under: 上游uuid }) 建节点（150~300 字概念描述一起给，under 给当前文档或其大纲的 uuid）；② const n = await api.node.get(返回的 uuid)，await n.help() 看写法，n.editContent({ title, description, teaching: 讲义 }) 撰写教学文档。全部做完再回复。用前先 api.<组>.__help() 查用法。',
     '- 讲解循序渐进：直觉/例子引入 → 定义与必要推导；数学使用 LaTeX；写入或讲完用 api.ui.point 打开并指引阅读位置。',
     '- **学习者画像**：讲解前用 api.userInfo.get() 参考水平与背景；未填字段按通用水平讲解，勿随意臆断。',
     '',

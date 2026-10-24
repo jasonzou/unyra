@@ -11,6 +11,7 @@ import { buildApi, clip, imagesOf } from './api'
 import { renderApiHelp, renderGroupHelp, renderRootHelp } from './apiRegistry'
 import { safeJson } from './askForm'
 import { compileBody } from './body'
+import { foldNodes } from './fold'
 import { asText } from './refs'
 import { DEFAULT_SANDBOX_TIMEOUT_MS, MAX_LOGGED_CALLS } from './limits'
 import type { ExecuteTool, SandboxCall, SandboxOptions } from './types'
@@ -30,12 +31,14 @@ const EXECUTE_PARAMETERS = {
       type: 'string',
       description:
         '一段匿名函数源码，形如 ((api)=>{ ... return 结果 })，也可以写成 ((api)=>{...})()。可以用 await；' +
+        '**可以直接写 TypeScript**（类型标注、接口、泛型都行，不做类型检查）；' +
         '返回值会被回给你（超过 3.2 万字符会截断）。' +
         '**写操作的失败不抛异常**：回 { ok:false, content:"哪一步没做成、该怎么改" }，并汇总在结果最前面' +
         '那份「没有生效」清单里——判断成败看清单，不要用 try/catch，也不要追加读接口确认。' +
         '**先查再用**：每个组、每条 api 都挂着 __help()——await api.<组>.__help() 看这一组有哪些 api，' +
-        'await api.<组>.<api>.__help() 看这一条的参数、返回与示例；不要凭记忆猜 api 名或参数。' +
-        '应用数据（文档/笔记/大纲/状态/试卷/超级文档/工作流/画像/阅读）一律走对应 api 组；' +
+        'await api.<组>.<api>.__help() 看这一条的参数、返回与示例；节点对象先 const n = await api.node.get(uuid)，' +
+        '再 await n.help() 看它自己的内容格式与连接规则——**每个节点的 help 是动态的，别凭记忆写**。' +
+        '应用数据一律走对应 api 组（节点与内容 = api.node.*，学习状态 = api.state.*，试卷判分 = api.exam.*…）；' +
         'api.files.* 只用于 workspace/、static/、skills/ 与外部文件，碰应用数据会被拒绝并提示该用哪一组。' +
         '调试用 api.log(...)，输出随结果一起回给你。' +
         '沙箱里没有 window / document / fetch。',
@@ -85,14 +88,15 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
   return {
     name: 'execute',
     description: opts.apiBrief
-      ? '执行一段 JS 来完成任务：api 按本会话的授权开放（完整签名见参数说明，也可用 api.<组>.__help() 现查）。' +
+      ? '执行一段 JS/TS 来完成任务：api 按本会话的授权开放（完整签名见参数说明，也可用 api.<组>.__help() 现查）。' +
         '多步、批量、需要判断或循环的活用代码一次做完，不要把中间结果写进对话；' +
         '体量大的中间数据用 api.tmp.set 暂存或 api.workspace.write 落盘，只把结论带回来。'
-      : '执行一段 JS 来操作学习数据——**唯一的工具**：文档与笔记（api.doc.*）、节点（api.node.*）、' +
-        '大纲（api.outline.*）、学习状态（api.state.*）、试卷（api.exam.*）、超级文档（api.sdoc.*）、' +
-        '工作流（api.wf.*）、人机协作与界面操作都只能通过这里调用。多步、批量、需要判断或循环的活用代码一次做完，' +
-        '不要把中间结果写进对话。**每个组、每条 api 都有 __help()**：先用 api.<组>.__help() 查签名与示例再动手。' +
-        '应用数据不走 api.files.*——它只用于工作区、静态资源、技能与外部文件。',
+      : '执行一段 JS/TS 来操作学习数据——**唯一的工具**。节点与内容的读写全走节点宇宙：' +
+        'api.node.list() 查全图（带 uuid）→ const n = await api.node.get(uuid) → await n.help() 看这个节点的内容格式与连接规则（**动态的，别凭记忆写**）→ ' +
+        'await n.content 读、n.editContent(...) 整份写回、a.connect(b, "down") 连线。' +
+        '其余：学习状态（api.state.*）、试卷判分与讲解（api.exam.*）、工作流（api.wf.*）、人机协作与界面操作各自的组。' +
+        '多步、批量、需要判断或循环的活用代码一次做完，不要把中间结果写进对话。' +
+        '**每个组、每条 api 都有 __help()**：先查再用。应用数据不走 api.files.*——它只用于工作区、静态资源、技能与外部文件。',
     parameters: executeParameters(opts.apiBrief),
     run: async (args) => {
       const description = asText(args.description).trim()
@@ -110,7 +114,10 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
        * 宿主负责去重与落库，这里绝不改会话。
        */
       const moduleKeys = new Set<string>()
-      const { api } = buildApi(opts, log)
+      // 进程内 runner（测试探针 / 超级文档桥的直调）才有节点对象门面；真 Worker
+      // 通道的回执要过结构化克隆，api.node.get 必须回纯 manifest（见 buildApi 的
+      // nodeFacade 说明）。
+      const { api } = buildApi(opts, log, { nodeFacade: !!opts.runSandbox })
       /**
        * 本次编排里 api 附带的图片（目前只有 res.read 会带）。它们不能进 content
        * （文本通道会把 base64 截成乱码），随工具结果的 images 交回运行时，
@@ -187,7 +194,9 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
           const segs = name.split('.')
           let targetObj: unknown = api
           for (const s of segs) {
-            if (!targetObj || typeof targetObj !== 'object') {
+            // 命名空间可以是函数（api.node 是可调用门面，同时挂着 get/invoke）：
+            // 只认对象会把整组 api 判成「不存在」
+            if (!targetObj || (typeof targetObj !== 'object' && typeof targetObj !== 'function')) {
               targetObj = undefined
               break
             }
@@ -201,10 +210,10 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
           // 内容触发：这次写入的东西里带 plot 围栏或动画标记，对应模块就该在场。
           // 格式策略过滤：纯 Markdown 不注入 doc-html（HTML 排版配方与策略冲突，见 agent/docFormat）
           if (opts.onPromptModule) {
-            const content = writableContentOf(name, callArgs)
-            if (content) {
+            const writable = writableContentOf(name, callArgs)
+            if (writable) {
               const docFormat = loadAgentSettings().docFormat
-              for (const key of promptModuleForContent(content, name)) {
+              for (const key of promptModuleForContent(writable.text, writable.superdoc, name)) {
                 if (docFormatAllowsModule(key, docFormat)) moduleKeys.add(key)
               }
             }
@@ -264,12 +273,16 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
         }
       }
       lastFailure = ''
+      // 节点对象（__node 门面）进回执前折成纯数据快照（见 sandbox/fold；真沙箱在同
+      // 一位置有一份自包含副本）。进程内直调没有克隆这道关，但 getter 与函数进
+      // safeJson 也只会变成 {}，照样得折。
+      const folded = reply.value === undefined ? undefined : foldNodes(reply.value)
       const result =
-        reply.value === undefined
+        folded === undefined
           ? '（这段代码没有 return 任何值）'
-          : typeof reply.value === 'string'
-            ? reply.value
-            : safeJson(reply.value)
+          : typeof folded === 'string'
+            ? folded
+            : safeJson(folded)
       /**
        * 有一次 api 调用没有生效（例如 expected 与现状不符），整次编排就算失败：
        * 光把 { ok: false } 交给模型是不够的——它可能没检查返回值就接着往下走，

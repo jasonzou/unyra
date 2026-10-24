@@ -60,6 +60,8 @@ const dict: Record<string, string> = {
   '播放倍速：{0}x': 'Playback rate: {0}x',
   '已静音': 'Muted',
   '已取消静音': 'Unmuted',
+  '静音': 'Mute',
+  '取消静音': 'Unmute',
   '画面已开启水平镜像': 'Horizontal mirror enabled',
   '画面已恢复正常': 'Normal display restored',
   '视频尚未就绪，无法截图': 'Video not ready for screenshot',

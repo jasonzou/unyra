@@ -232,6 +232,20 @@ export function normalizeConversation(
          * （见 agent/types 的 mark）——丢了就等于「那次回忆」在对话里凭空消失。
          */
         ...(typeof mr.mark === 'string' && mr.mark ? { mark: mr.mark } : {}),
+        /*
+         * 工作流的启动实参：丢了会让分界条展开时的「参数行」变空、指令里的实参高亮失效
+         * （见 agent/types 的 wfParams 与 MessageBubble 的 HiddenDivider）。
+         */
+        ...(mr.wfParams && typeof mr.wfParams === 'object' && !Array.isArray(mr.wfParams)
+          ? {
+              wfParams: Object.fromEntries(
+                Object.entries(mr.wfParams as Record<string, unknown>).filter(
+                  (entry): entry is [string, string | number] =>
+                    typeof entry[1] === 'string' || typeof entry[1] === 'number',
+                ),
+              ),
+            }
+          : {}),
         // 人格指令的标记：丢了会让「人格交代过没有」重新变成「没交代」，每轮都补一条
         ...(typeof mr.persona === 'string' && mr.persona ? { persona: mr.persona } : {}),
         // 文档格式策略的标记（agent/docFormat）：与 persona 同一条纪律——丢了会每轮重注
@@ -268,6 +282,9 @@ export function normalizeConversation(
    * 归一化里含：形状不对整桶丢弃；进程被杀时残留的「运行中」复位为「被中断」。
    */
   const subagents = normalizeSubBucket(r.subagents)
+  // 固化的系统提示词（见 agent/types 的 Conversation.systemPrompt）：有就带上；
+  // 没有的老数据不用在这里补——下一轮请求前会现场抓一份并落盘（见 useAgent 的固化逻辑）
+  const systemPrompt = typeof r.systemPrompt === 'string' && r.systemPrompt ? r.systemPrompt : undefined
   const conv: Conversation = {
     id: typeof r.id === 'string' ? r.id : crypto.randomUUID(),
     goalId,
@@ -279,6 +296,7 @@ export function normalizeConversation(
     ...(summary ? { summary } : {}),
     ...(inflight ? { inflight } : {}),
     ...(subagents ? { subagents } : {}),
+    ...(systemPrompt ? { systemPrompt } : {}),
   }
   /*
    * 先做中断恢复，再应用挂着的压缩摘要：恢复出来的消息若遇上「没应用完的压缩」

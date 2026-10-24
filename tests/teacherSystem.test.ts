@@ -10,13 +10,14 @@ import { describe, expect, it } from 'vitest'
 
 import { buildTeacherSystem } from '../src/learn/ai/teacherSystem'
 
-const system = buildTeacherSystem({ goalQuestion: '我想弄懂微积分' })
+const system = buildTeacherSystem()
 
 describe('产物归属规则（用户定的）', () => {
   it('非文档类产物统一进工作区：规则在系统提示词里，且给了准确路径出处', () => {
     expect(system).toContain('非文档类产物统一进工作区')
-    expect(system).toContain('workspaceDir')
-    expect(system).toContain('workspace/')
+    // 准确的「怎么写」出处：api.workspace 省略路径就是当前节点（不再引用已删除的 api.graph.paths）
+    expect(system).toContain('api.workspace.*')
+    expect(system).toContain('省略路径就是当前节点')
   })
 
   it('路径索引里也有节点工作区一行（executeGuide 的组索引给出 api.workspace）', () => {

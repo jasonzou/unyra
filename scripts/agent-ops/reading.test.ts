@@ -133,7 +133,7 @@ export async function learningStateTests() {
   const goodKind = parseCheck({ kind: '主动回忆', mentioned: ['导数定义'], missed: ['隐函数求导'], misconceptions: ['把导数当成增加的量'] })
   ok(goodKind.ok && goodKind.check.kind === 'recall', '中文「主动回忆」认得出', goodKind)
 
-  /* 6) 落盘往返：学习状态跟着 meta.json 走，没评估过的节点不留这个键 */
+  /* 6) 落盘往返：学习状态跟着节点文件（.node.json）走，没评估过的节点不留这个键 */
   let s = updateLearning(baseStore(), childId, { self: 'unsure', selfBy: 'user', mastery: 62, masteryNote: '探针答对大半，漏了内外函数' })
   s = noteMistake(s, childId, { pattern: '漏乘内部导数', cause: '内外函数的概念不稳' })!.store
   s = addCheck(s, childId, {
@@ -150,7 +150,7 @@ export async function learningStateTests() {
   ok(child?.learning?.mistakes?.[0].pattern === '漏乘内部导数' && child?.learning?.mistakes?.[0].cause === '内外函数的概念不稳', '错误记忆往返', child?.learning?.mistakes)
   ok(child?.learning?.checks?.[0].kind === 'recall' && child?.learning?.checks?.[0].missed?.[0] === '隐函数求导', '回忆的三分类往返', child?.learning?.checks)
   ok(round?.nodes.find((n) => n.id === rootId)?.learning === undefined, '没评估过的节点读回来仍然没有 learning 这一项', round?.nodes.find((n) => n.id === rootId)?.learning)
-  ok(!buildDocs(baseStore()).get('docs/微积分/极限/极限.meta.json')!.includes('"learning":'), '没评估过就不写这一项（不留空壳）')
+  ok(!buildDocs(baseStore()).get('docs/微积分/极限/极限.node.json')!.includes('"learning":'), '没评估过就不写这一项（不留空壳）')
   ok(learningLine(child!).includes('掌握度 62/100') && learningLine(child!).includes('错过的：'), 'learningLine 把状态压成一行给提示词', learningLine(child!))
 
   /* 7) 知识深度是图的层数，不是人的水平（design 第六节） */

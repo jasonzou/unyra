@@ -2,9 +2,12 @@
  * 链式数据迁移执行引擎。
  *
  * 负责：
- * 1. 分析当前版本与最新版本之间的升级路径，规划有向有序执行链；
+ * 1. 按**序号**规划要跑哪几步（`step > 当前序号` 的全部，升序）；
  * 2. 构造隔离的迁移运行时上下文 (MigrationContext)；
- * 3. 逐步执行迁移脚本、自动备份与写入审计历史，确保每一步幂等安全。
+ * 3. 逐步执行、写审计历史、推进 `schemaStep`。
+ *
+ * 与早先那版的差别只有一件事：规划不再是"在版本区间里找首尾相连的脚本"，
+ * 而是"挑出序号比当前大的"。少了 fallback 分支，也再不会因为版本号没对齐而漏跑一步。
  */
 
 import {
@@ -19,7 +22,7 @@ import {
   writeText,
   writeYaml,
 } from '../storage'
-import { MIGRATION_SCRIPTS } from './scripts'
+import { latestStep, MIGRATION_SCRIPTS } from './scripts'
 import type {
   ChainPlan,
   MigrationContext,
@@ -28,65 +31,30 @@ import type {
   MigrationStepResult,
   SchemaMeta,
 } from './types'
-import {
-  compareVersions,
-  detectSchemaVersion,
-  LATEST_SCHEMA_VERSION,
-  saveSchemaMeta,
-} from './version'
+import { detectSchemaStep, saveSchemaMeta } from './version'
 
-/** 规划迁移链条 */
-export function planChain(
-  fromVersion: string,
-  toVersion: string = LATEST_SCHEMA_VERSION,
-): ChainPlan {
-  const cmp = compareVersions(fromVersion, toVersion)
-  if (cmp >= 0) {
-    return {
-      currentVersion: fromVersion,
-      targetVersion: toVersion,
-      scripts: [],
-      isUpToDate: true,
-    }
-  }
-
-  // 按首尾相连寻找迁移路线
-  const scripts: MigrationScript[] = []
-  let cursor = fromVersion
-
-  while (compareVersions(cursor, toVersion) < 0) {
-    const nextScript = MIGRATION_SCRIPTS.find(
-      (s) => s.fromVersion === cursor && compareVersions(s.toVersion, toVersion) <= 0,
-    )
-    if (!nextScript) {
-      // 如果没有精确匹配起始版本的脚本，寻找第一个覆盖范围内的前瞻脚本
-      const fallbackScript = MIGRATION_SCRIPTS.find(
-        (s) => compareVersions(s.fromVersion, cursor) >= 0 && compareVersions(s.toVersion, toVersion) <= 0,
-      )
-      if (fallbackScript) {
-        scripts.push(fallbackScript)
-        cursor = fallbackScript.toVersion
-        continue
-      }
-      break
-    }
-    scripts.push(nextScript)
-    cursor = nextScript.toVersion
-  }
-
+/**
+ * 规划迁移链条：序号比 `fromStep` 大的脚本，按序号升序。
+ *
+ * **这里不需要知道用户装的是哪个应用版本**——只要知道"已经跑到第几步"，
+ * 没跑过的那几步按序补上就行。版本号跨几代、中间跳过多少个版本，都不影响：
+ * 脚本是线性的，1、2、3 依次执行即可。
+ */
+export function planChain(fromStep: number, toStep: number = latestStep()): ChainPlan {
+  const scripts = MIGRATION_SCRIPTS.filter((s) => s.step > fromStep && s.step <= toStep).sort(
+    (a, b) => a.step - b.step,
+  )
   return {
-    currentVersion: fromVersion,
-    targetVersion: toVersion,
+    currentStep: fromStep,
+    targetStep: toStep,
     scripts,
     isUpToDate: scripts.length === 0,
+    dataAhead: fromStep > toStep,
   }
 }
 
 /** 构造迁移上下文 */
-export function createMigrationContext(
-  uid: string,
-  onLog: (msg: string) => void,
-): MigrationContext {
+export function createMigrationContext(uid: string, onLog: (msg: string) => void): MigrationContext {
   return {
     uid,
     userDir: userRel(uid),
@@ -115,43 +83,45 @@ export async function runSingleScript(
   onLog: (msg: string) => void,
 ): Promise<MigrationStepResult> {
   const ctx = createMigrationContext(uid, onLog)
-  ctx.log(`========== 开始执行迁移脚本：${script.title} (${script.fromVersion} -> ${script.toVersion}) ==========`)
+  ctx.log(`========== 开始执行第 ${script.step} 次迁移：${script.title} (${script.id}) ==========`)
 
   try {
     const res = await script.migrate(ctx)
     if (!res.ok) {
-      ctx.log(`[错误] 迁移失败：${res.error || '未知原因'}`)
+      ctx.log(`[错误] 第 ${script.step} 次迁移失败：${res.error || '未知原因'}`)
       return res
     }
 
-    // 记录历史履历并推进 Schema 版本号
-    const { meta: prevMeta } = await detectSchemaVersion(uid)
+    const { step: prevStep, meta: prevMeta } = await detectSchemaStep(uid)
     const historyItem: MigrationHistoryItem = {
+      step: script.step,
       scriptId: script.id,
-      fromVersion: script.fromVersion,
-      toVersion: script.toVersion,
       migratedAt: Date.now(),
       success: true,
       modifiedFiles: res.modifiedFiles,
       details: res.details,
     }
 
+    /**
+     * 序号只进不退：单步重跑一个更早的脚本（界面上有「重新执行」）不该把序号往回拨，
+     * 否则下一次启动会把后面的脚本再跑一遍。
+     */
     const nextMeta: SchemaMeta = {
-      schemaVersion: script.toVersion,
+      ...(prevMeta ?? {}),
+      schemaStep: Math.max(prevStep, script.step),
       updatedAt: Date.now(),
-      history: [...(prevMeta?.history || []), historyItem],
+      history: [...(prevMeta?.history ?? []), historyItem],
     }
 
     await saveSchemaMeta(uid, nextMeta)
-    ctx.log(`[完成] 成功迁移至版本 v${script.toVersion}，版本元数据已持久化。`)
+    ctx.log(`[完成] 第 ${script.step} 次迁移成功，当前数据序号 = ${nextMeta.schemaStep}。`)
     return res
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
-    ctx.log(`[异常] 迁移过程发生未捕获异常：${errorMsg}`)
+    ctx.log(`[异常] 第 ${script.step} 次迁移发生未捕获异常：${errorMsg}`)
     return {
       ok: false,
-      fromVersion: script.fromVersion,
-      toVersion: script.toVersion,
+      step: script.step,
       modifiedFiles: [],
       error: errorMsg,
     }
@@ -177,7 +147,7 @@ export async function runChain(
     executed.push(res)
 
     if (!res.ok) {
-      const err = `链式迁移在第 ${i + 1} 步中断 (${script.fromVersion} -> ${script.toVersion}): ${res.error}`
+      const err = `链式迁移在第 ${i + 1} 步（第 ${script.step} 次迁移 · ${script.title}）中断：${res.error}`
       logger(`[中断] ${err}`)
       return { ok: false, executed, error: err }
     }

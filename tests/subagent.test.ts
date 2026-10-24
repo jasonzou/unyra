@@ -16,6 +16,8 @@
 import { describe, expect, it } from 'vitest'
 import { createSubAgentManager, type SubAgentManagerDeps } from '../src/agent/subagent/manager'
 import { normalizeSubBucket, createSession, withTaskMessage } from '../src/agent/subagent/registry'
+import { SUBAGENT_ALLOWED_GROUPS, apiBriefForGroups } from '../src/agent/subagent/groups'
+import { API_GROUPS } from '../src/agent/sandbox/apiRegistry'
 import type { SubAgentBucket, SubAgentDef } from '../src/agent/types'
 import { createExecuteTool } from '../src/agent/sandbox/execute'
 import type { SandboxOptions, SandboxRequest, SandboxReply } from '../src/agent/sandbox/types'
@@ -136,12 +138,12 @@ describe('subagent.create', () => {
     ).toContain('ui、ask')
     expect(bucket().defs).toHaveLength(0)
     expect(bucket().sessions).toHaveLength(0)
-    const ok = await manager.api.create({ key: 'worker', name: '工人', system: '一个足够长的系统提示词，写清角色与交付纪律。', tools: ['doc', 'tmp'] })
+    const ok = await manager.api.create({ key: 'worker', name: '工人', system: '一个足够长的系统提示词，写清角色与交付纪律。', tools: ['node', 'tmp'] })
     expect(ok.ok).toBe(true)
     expect(bucket().defs).toHaveLength(1)
     // 只登记：会话一个都没有（run 才启动）
     expect(bucket().sessions).toHaveLength(0)
-    expect(bucket().defs[0]!.apiGroups).toEqual(['doc', 'tmp'])
+    expect(bucket().defs[0]!.apiGroups).toEqual(['node', 'tmp'])
     // 同 key 再登记即覆盖
     await manager.api.create({ key: 'worker', system: '换一个也足够长的系统提示词，写清新的角色与交付纪律。' })
     expect(bucket().defs).toHaveLength(1)
@@ -440,6 +442,33 @@ describe('execute 的 apiAllow 通道口', () => {
     )
     expect(r.ok).toBe(false)
     expect(r.content).toContain('只开放了')
+  })
+})
+
+/**
+ * 白名单与注册表的对账：SUBAGENT_ALLOWED_GROUPS 里写错组名（如已改名的 node），
+ * 后果是「放行了空气」——apiBrief 匹配不到条目，而真正想开放的组反被 apiAllow 硬闸拦死。
+ * 这张表手抄自注册表，必须有一条测试钉住两边不漂。
+ */
+describe('api 组白名单对账（groups ↔ apiRegistry）', () => {
+  it('白名单里的每个组都是注册表的真实组 key', () => {
+    const keys = new Set(API_GROUPS.map((g) => g.key))
+    for (const g of SUBAGENT_ALLOWED_GROUPS) {
+      expect(keys.has(g), g).toBe(true)
+    }
+  })
+
+  it('白名单里每个组都能生成非空的 api 清单（brief 拿得到真东西）', () => {
+    for (const g of SUBAGENT_ALLOWED_GROUPS) {
+      expect(apiBriefForGroups([g]).length, g).toBeGreaterThan(10)
+    }
+  })
+
+  it('子代理可以读写内容与节点拓扑（node 在名单里；旧 content / graph 组已退役）', () => {
+    expect(apiBriefForGroups(['node'])).toContain('node.get')
+    expect(apiBriefForGroups(['node'])).toContain('node.list')
+    // 退役组不再产出条目说明
+    expect(apiBriefForGroups(['graph'] as never)).not.toContain('graph.list')
   })
 })
 

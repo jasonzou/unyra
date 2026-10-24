@@ -7,7 +7,7 @@ import { pruneDocReading, readingDocKey, readingOfGoal, withGoalReading } from '
  * 超级文档的纯逻辑：新建 / 覆盖 / 删除 / 找到，以及「名字怎么取才不撞车」。
  *
  * 与 learn/notes 同构（都是「一个节点多份、名字即身份」），但它是 Agent 那条路
- * 专用的：界面暂时没有新建/改名入口，超级文档由 api.sdoc.write 创建与更新，
+ * 专用的：界面暂时没有新建/改名入口，超级文档由超级文档节点的 editContent 创建与更新，
  * 同名**覆盖**而不是让开——超级文档是「一份交互件」的多个版本，覆盖正是更新本身。
  * 撞名让路（笔记那套 allocate）在这里反而是错的：模型「写同一份」的两次调用
  * 会悄悄变成两份，调用它的按钮从此找不到函数。
@@ -50,7 +50,7 @@ export function writeSuperDocIn(
     return { node: { ...node, superdocs: list.map((d) => (d === existing ? next : d)), updatedAt: at }, name: existing.name }
   }
   const finalName = uniqueSuperDocName(list, name || SUPERDOC_DEFAULT_NAME)
-  const doc: SuperDocFile = { name: finalName, html, createdAt: at, updatedAt: at }
+  const doc: SuperDocFile = { id: crypto.randomUUID(), name: finalName, html, createdAt: at, updatedAt: at }
   return { node: { ...node, superdocs: [...list, doc], updatedAt: at }, name: finalName }
 }
 

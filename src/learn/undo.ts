@@ -30,6 +30,7 @@ import type { Exam } from './exam'
 import type { Conversation } from '../agent/types'
 import type { DocReading, NodeReading, ReadingStore } from './reading'
 import { readingDocKey, readingOfGoal, withGoalReading } from './reading'
+import { scrubDetached } from './detached'
 import { findNote, notesOf } from './notes'
 import { findSuperDoc } from './superdocs'
 import { superDocsOf } from './types'
@@ -234,6 +235,11 @@ export function applyUndo(store: LearnStore, entry: ExplorerUndo): { store: Lear
       tmp: { ...s.tmp, ...entry.tmp },
     }
     if (entry.readingSlice) next = restoreNodeReadingSlice(next, entry)
+    // 节点带回来的挂件以节点记录里的那份为准：游离池里的孤儿副本（删除时挪进去的）清掉
+    const restoredIds = new Set(
+      backNodes.flatMap((n) => [...(n.notes ?? []).map((x) => x.id), ...(n.superdocs ?? []).map((x) => x.id)]),
+    )
+    next = scrubDetached(next, restoredIds)
     return { store: next, ok: true, message: t('已撤回：{0}', entry.label) }
   }
   if (entry.kind === 'note') {

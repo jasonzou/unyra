@@ -31,8 +31,10 @@ export const EXECUTE_GUIDE = `唯一的工具是 execute(description, body)：
 （唯一的例外是下面单独成节的 api.see：它的用法直接写在提示词里，当作本能用。）
 
 **应用数据一律走 api 组，files.* 不许碰**
-- 教学文档与笔记 → api.doc.*　知识点树 → api.node.*　大纲 → api.outline.*
-- 学习状态 → api.state.*　试卷 → api.exam.*　超级文档 → api.sdoc.*
+- 节点与内容（正文 / 大纲 / 笔记 / 试卷卷面 / 超级文档）→ api.node：list() 查 uuid、
+  get(uuid) 取节点对象；await n.help() 看这个节点自己的内容格式与连接规则（**动态的，别凭记忆写**），
+  await n.content 读现状、n.editContent(...) 整份写回、a.connect(b, "down") 连线
+- 学习状态 → api.state.*　考试（读卷 / 判分 / 讲解 / 删卷）→ api.exam.*　出题走节点对象
 - 工作流 → api.wf.*　持久化函数 → api.method.*　画像 → api.userInfo.*
 - 阅读事实 → api.reading.*　临时变量 → api.tmp.*　静态资源 → api.res.*
 - files.* 只用于：workspace/（用户交付物，优先 api.workspace.*）、static/、skills/、

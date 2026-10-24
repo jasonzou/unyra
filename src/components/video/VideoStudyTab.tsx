@@ -24,6 +24,7 @@ import { formatClock, segmentIndexAt } from '../../video/transcript'
 import type { Transcript, VideoSource } from '../../video/types'
 import type { PluginSettingField } from '../../lib/plugins'
 import type { VideoResource } from '../../learn/types'
+import { registerVideoAudio } from '../../learn/video/videoRegistry'
 import VideoPlayer, { type VideoPlayerHandle } from './VideoPlayer'
 
 /** 创建态的输入记忆：下次打新建视频，上次粘的链接还在 */
@@ -67,9 +68,11 @@ interface Props {
   onProgress?: (positionMs: number, source: string) => void
   /** 选集切换：把「停在的那一项」写进资源（重开回到同一集） */
   onSelection?: (source: string, title: string) => void
+  /** 自己的页签 id：音频控制登记的键（页签条的快捷静音按钮按它找上来） */
+  tabId?: string
 }
 
-export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress, onSelection }: Props) {
+export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress, onSelection, tabId }: Props) {
   const bound = !!video
   /** 创建态输入（绑定态不用它——页里没有输入组件） */
   const [input, setInput] = useState(() => video?.input ?? readLastInput())
@@ -171,6 +174,21 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
   const [switchStill, setSwitchStill] = useState<{ token: string; src: string } | null>(null)
 
   const playerRef = useRef<VideoPlayerHandle | null>(null)
+
+  /**
+   * 音频控制登记（见 learn/video/videoRegistry）：页签条上的快捷静音按钮跨组件
+   * 读 / 写播放器自己的静音态。流解析出来（relayUrl 就绪、播放器挂载）那一刻
+   * <video> 元素才存在，所以登记跟着 relayUrl 重挂一次把元素带上。
+   */
+  useEffect(() => {
+    if (!tabId) return
+    registerVideoAudio(tabId, {
+      getMuted: () => playerRef.current?.getMuted() ?? false,
+      setMuted: (muted) => playerRef.current?.setMuted(muted),
+      element: playerRef.current?.getVideoElement() ?? null,
+    })
+    return () => registerVideoAudio(tabId, null)
+  }, [tabId, relayUrl])
   /** 上次上报进度时的位置：节流用（每 5 秒最多写一次存档） */
   const lastProgressRef = useRef(0)
   /** 当前解析的是哪一项（选集 source）：进度要带上它，别把上一集的进度续到这一集 */

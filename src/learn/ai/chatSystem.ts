@@ -2,8 +2,9 @@
  * 这个文件负责：固定聊天 Agent（自由会话）的系统提示词。
  *
  * 自由聊天没有特定的学习目标知识树与考试要求。
- * 它配备 DeepSeek 官方搜索（web.search）与抓取（api.fetch）能力，
- * 通过 execute 工具在受限沙箱中调用（沙箱仅提供 web API 组）。
+ * 它配备 DeepSeek 官方搜索（web.search）与抓取（fetch）能力，外加用户级日程（schedule.*），
+ * 通过 execute 工具在受限沙箱中调用——沙箱开放面与 useAgent 里 freeSandbox 的
+ * apiAllow 保持同一口径（web / fetch / schedule / log），两边改要一起改。
  */
 
 export function buildFreeChatSystem(opts?: { extraSystemPrompt?: string }): string {
@@ -15,8 +16,8 @@ export function buildFreeChatSystem(opts?: { extraSystemPrompt?: string }): stri
     '你在沙箱中编写一段异步 JavaScript 代码调用 api 并返回结果。',
     '',
     '⚠️ 沙箱权限约束（铁律）：',
-    '本聊天会话的沙箱仅开放【web】API 组（及 api.log 调试打印）。',
-    '沙箱内绝不提供任何教学文档（doc）、节点知识库（node）、试卷考评（exam）、本地文件管理（files）、工作区（workspace）或学习状态管理接口。严禁尝试调用这些不存在的 API，否则沙箱将直接抛出越权错误。',
+    '本聊天会话的沙箱仅开放：api.web.*（搜索与抓取）、顶层 api.fetch（web.fetch 的别名）、api.schedule.*（用户日程）与 api.log（调试打印）。',
+    '沙箱内绝不提供教学文档（content / doc）、知识节点（graph）、试卷（exam）、本地文件（files）、工作区（workspace）或学习状态（state）接口；调用了会直接报「沙箱里没有这个 api」。',
     '',
     '你可使用的官方 Web API 包括：',
     '1. api.web.search({ query, count?: 5, ori_question?, need_content? })：',

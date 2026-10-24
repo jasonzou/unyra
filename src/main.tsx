@@ -5,6 +5,7 @@ import './index.css'
 import App from './App.tsx'
 import BootError from './components/BootError'
 import ExamWindow from './components/exam/ExamWindow'
+import TraceWindow from './components/agent/TraceWindow'
 import { bootApp } from './lib/boot'
 import { reportStartupMarks, startupMark } from './lib/startupTrace'
 import { allProviderBaseUrls } from './ai/settings'
@@ -48,7 +49,10 @@ document.addEventListener(
  * 数据不在这一侧：索引为 1 的那个窗口一笔都不写，作答全通过 examGuest 发回主窗口
  * （见 learn/useExamBridge）。所以这里不必读学习数据，只求「长得一样、能收发消息」。
  */
-const inExamWindow = new URLSearchParams(location.search).get('examWindow') === '1'
+const params = new URLSearchParams(location.search)
+const inExamWindow = params.get('examWindow') === '1'
+/** 上下文轨迹窗口（第三个 BrowserWindow，见 electron/app/traceWindow）：纯只读的会话轨迹 */
+const inTraceWindow = params.get('contextTrace') === '1'
 
 startupMark('r:boot-start')
 bootApp()
@@ -58,6 +62,15 @@ bootApp()
       root.render(
         <StrictMode>
           <ExamWindow />
+        </StrictMode>,
+      )
+      return
+    }
+    if (inTraceWindow) {
+      // 轨迹窗口同样是「长得一样、能收发消息」就够：不读学习数据，会话数据全靠主窗口推
+      root.render(
+        <StrictMode>
+          <TraceWindow />
         </StrictMode>,
       )
       return

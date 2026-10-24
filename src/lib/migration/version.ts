@@ -1,16 +1,36 @@
 /**
- * 数据 Schema 版本探测与元数据管理。
+ * 数据 Schema 的**序号**探测与元数据管理。
  *
- * 从当前版本 (0.6.3) 开始增加持久化版本标识：
- * - 用户的每个数据目录（users/{uid}/）下拥有独立的 schema.json，记录 schemaVersion 与迁移历史；
- * - state.json 同步盖印 schemaVersion；
- * - 后续版本升级时，数据迁移页面将根据此标识判断数据属于哪个版本，并执行对应链式迁移。
+ * ## 从版本号改成序号（2026-10-22）
+ *
+ * 早先这里是 `LATEST_SCHEMA_VERSION = '0.7.1'`，每个迁移脚本写 `fromVersion → toVersion`。
+ * 后果是**每改一次数据形状就要涨一次版本号**——迁移加到第三次，发版号就被推到 0.8，
+ * 而线上其实才 0.6.7。版本号被迁移绑架之后，既表达不了"这次发版改了什么"，
+ * 也没法在上线前合并几次迁移。
+ *
+ * 现在：
+ * - `schema.json` 记 `schemaStep`（已应用到第几次迁移），不记版本字符串；
+ * - 版本号只属于应用发版，数据只认序号；
+ * - 老数据里的 `schemaVersion` **只读**，用 `stepOfLegacyVersion` 折算成序号，折算完按新形状写回。
+ *
+ * ## 没有标识的老用户怎么算
+ *
+ * 三种情况分开处理（见 `detectSchemaStep`）：
+ * 1. 有 `schemaStep` —— 直接用；
+ * 2. 只有 `schemaVersion`（0.7.1 及更早写的）—— 折算成序号；
+ * 3. 什么都没有 —— **看 `docs/` 里有没有数据**：有数据说明是很老的用户，从 0 开始跑全部迁移；
+ *    没数据说明是全新用户，直接落在最新序号（不该白跑一遍迁移）。
+ *
+ * 第 3 条是这次顺手修的一个坑：早先没标识时**一律按最新版本**算，于是 0.6.3 之前的老用户
+ * 永远不迁移，数据形状一直停在旧的那一套。
  */
 
-import { readJson, userRel, writeJson } from '../storage'
+import { DOCS_DIR } from '../../learn/layout'
+import { listDir, readJson, userRel, writeJson } from '../storage'
+import { LATEST_SCHEMA_STEP } from './scripts'
 import type { SchemaMeta } from './types'
 
-export const LATEST_SCHEMA_VERSION = '0.6.3'
+export { LATEST_SCHEMA_STEP }
 
 export const SCHEMA_FILE = 'schema.json'
 export const STATE_FILE = 'state.json'
@@ -29,58 +49,102 @@ export function compareVersions(v1: string, v2: string): number {
   return 0
 }
 
-/** 探测并确保指定用户的当前存储结构版本号与元数据 */
-export async function detectSchemaVersion(uid: string): Promise<{
-  version: string
-  isExplicit: boolean
-  meta?: SchemaMeta
-}> {
-  // 1. 读取本版本引入的显式 schema.json
-  const schemaPath = userRel(uid, SCHEMA_FILE)
-  const meta = await readJson<SchemaMeta>(schemaPath)
-  if (meta && typeof meta.schemaVersion === 'string' && meta.schemaVersion.trim()) {
-    return {
-      version: meta.schemaVersion.trim(),
-      isExplicit: true,
-      meta,
-    }
+/**
+ * 旧版本号 → 序号。
+ *
+ * 这张表只在**读回老数据**时用一次（0.7.1 及更早的 `schema.json`）。
+ * 以后新写出的数据都带 `schemaStep`，不会再走到这里。
+ */
+const LEGACY_VERSION_STEPS: ReadonlyArray<readonly [version: string, step: number]> = [
+  ['0.7.0', 1],
+  ['0.7.1', 2],
+]
+
+export function stepOfLegacyVersion(version: string): number {
+  const v = version.trim()
+  if (!v) return 0
+  let step = 0
+  for (const [legacy, s] of LEGACY_VERSION_STEPS) {
+    if (compareVersions(v, legacy) >= 0) step = s
   }
+  return step
+}
 
-  // 2. 检查 state.json 中是否已有 schemaVersion
-  const statePath = userRel(uid, STATE_FILE)
-  const state = await readJson<Record<string, unknown>>(statePath)
-  const existingVer =
-    state && typeof state.schemaVersion === 'string' && state.schemaVersion.trim()
-      ? state.schemaVersion.trim()
-      : LATEST_SCHEMA_VERSION
-
-  // 3. 从本版本开始增加标识：如果尚未创建 schema.json，自动初始化基准元数据
-  const initialMeta: SchemaMeta = {
-    schemaVersion: existingVer,
-    updatedAt: Date.now(),
-    history: [],
-  }
-  await saveSchemaMeta(uid, initialMeta)
-
+/** 读 `schema.json`，兼容"只有 schemaVersion 的老文件" */
+async function readSchemaMeta(uid: string): Promise<SchemaMeta | null> {
+  const raw = await readJson<Partial<SchemaMeta>>(userRel(uid, SCHEMA_FILE))
+  if (!raw || typeof raw !== 'object') return null
   return {
-    version: existingVer,
-    isExplicit: true,
-    meta: initialMeta,
+    schemaStep: typeof raw.schemaStep === 'number' && Number.isFinite(raw.schemaStep) ? raw.schemaStep : -1,
+    updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : Date.now(),
+    ...(typeof raw.autoMigrate === 'boolean' ? { autoMigrate: raw.autoMigrate } : {}),
+    history: Array.isArray(raw.history) ? raw.history : [],
+    ...(typeof raw.schemaVersion === 'string' ? { schemaVersion: raw.schemaVersion } : {}),
   }
 }
 
-/** 保存 schema.json 并同步标记 state.json */
+/**
+ * 什么都没有的用户落在哪一档。
+ *
+ * 有 `docs/` 内容 = 很老的用户（0.6.3 之前没有 schema.json），从 0 开始跑全部迁移；
+ * 空目录 = 全新用户，直接算最新，别让他白跑一遍。
+ */
+async function stepForBareUser(uid: string): Promise<number> {
+  const entries = await listDir(userRel(uid, DOCS_DIR))
+  return entries.length ? 0 : LATEST_SCHEMA_STEP
+}
+
+/** 探测并确保指定用户的数据迁移序号 */
+export async function detectSchemaStep(uid: string): Promise<{
+  step: number
+  isExplicit: boolean
+  meta?: SchemaMeta
+}> {
+  // 1. 新形状：schemaStep 直接可用
+  const meta = await readSchemaMeta(uid)
+  if (meta && meta.schemaStep >= 0) {
+    return { step: meta.schemaStep, isExplicit: true, meta }
+  }
+
+  // 2. 老形状：只有 schemaVersion —— 折算一次，然后按新形状写回（下次就不再折算）
+  if (meta && meta.schemaVersion) {
+    const step = stepOfLegacyVersion(meta.schemaVersion)
+    const next: SchemaMeta = { ...meta, schemaStep: step, updatedAt: Date.now() }
+    await saveSchemaMeta(uid, next)
+    return { step, isExplicit: true, meta: next }
+  }
+
+  // 3. state.json 里可能还留着老标记
+  const state = await readJson<Record<string, unknown>>(userRel(uid, STATE_FILE))
+  const legacy = typeof state?.schemaVersion === 'string' ? state.schemaVersion : ''
+  const step = legacy ? stepOfLegacyVersion(legacy) : await stepForBareUser(uid)
+
+  const initial: SchemaMeta = {
+    schemaStep: step,
+    updatedAt: Date.now(),
+    history: meta?.history ?? [],
+    ...(meta?.autoMigrate === false ? { autoMigrate: false } : {}),
+  }
+  await saveSchemaMeta(uid, initial)
+  return { step, isExplicit: true, meta: initial }
+}
+
+/**
+ * 保存 `schema.json`，并同步在 `state.json` 里盖一枚 `schemaStep`（双重校验）。
+ *
+ * **不再写 `schemaVersion`**：版本号与应用发版绑定，数据只认序号。
+ * （降级到旧版本应用不在支持范围内：旧代码会按版本号判断，然后按旧解析器读新数据。）
+ */
 export async function saveSchemaMeta(uid: string, meta: SchemaMeta): Promise<boolean> {
   const schemaPath = userRel(uid, SCHEMA_FILE)
   const ok = await writeJson(schemaPath, meta)
 
-  // 顺带同步印入 state.json 形成双重校验保障
   const statePath = userRel(uid, STATE_FILE)
   const state = await readJson<Record<string, unknown>>(statePath)
   if (state && typeof state === 'object') {
     await writeJson(statePath, {
       ...state,
-      schemaVersion: meta.schemaVersion,
+      schemaStep: meta.schemaStep,
       schemaUpdatedAt: meta.updatedAt,
     })
   }

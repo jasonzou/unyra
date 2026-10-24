@@ -107,41 +107,43 @@ export function tabRefFromChip(store: LearnStore, p: ChipPayload): TabRef | null
   }
 
   const want = p.path ? normPath(p.path) : null
-  /** 这条路径是不是正指着它（chip 没给路径时只信 nodeId） */
-  const matches = (rel: string | null): boolean => !!rel && (!want || normPath(rel) === want)
 
-  // 先按带出来的 nodeId 对号：宿主拖出来的 chip 都带，一次查表就够
+  /**
+   * 先按带出来的 nodeId 对号：宿主拖出来的 chip 都带，一次查表就够。
+   *
+   * **这里不再拿路径去核对**：节点内容合并成一个 `.node.json` 之后，正文/大纲/笔记
+   * 的路径全都指向同一个文件，路径已经没有区分能力；而且老会话里的 chip 存的是
+   * 旧布局的路径（`{节点}.md`），拿它对号只会让一批历史引用点不开。
+   * 于是判据换成「nodeId 在 + 那份东西还在」——路径退化成没有 nodeId 时的兜底。
+   */
   const node = p.nodeId ? nodeById(store, p.nodeId) : undefined
   if (node) {
-    const rel =
-      p.type === 'note'
-        ? nodeDocPath(store, node.id, { kind: 'note', note: p.note ?? '' })
-        : p.type === 'outline'
-          ? nodeDocPath(store, node.id, { kind: 'outline' })
-          : nodeDocPath(store, node.id, { kind: 'teaching' })
-    if (p.type === 'doc' && matches(rel)) return { kind: 'teach', nodeId: node.id }
-    if (p.type === 'note' && p.note && matches(rel)) return { kind: 'note', nodeId: node.id, note: p.note }
-    if (p.type === 'outline' && matches(rel)) return { kind: 'outline', nodeId: node.id }
-    if (p.type === 'super' && p.name && matches(rel)) return { kind: 'super', nodeId: node.id, name: p.name }
+    if (p.type === 'doc') return { kind: 'teach', nodeId: node.id }
+    if (p.type === 'outline') return { kind: 'outline', nodeId: node.id }
+    if (p.type === 'note' && p.note) {
+      return notesOf(node).some((n) => n.name === p.note)
+        ? { kind: 'note', nodeId: node.id, note: p.note }
+        : null
+    }
+    if (p.type === 'super' && p.name) {
+      return (node.superdocs ?? []).some((s) => s.name === p.name)
+        ? { kind: 'super', nodeId: node.id, name: p.name }
+        : null
+    }
   }
 
-  // 反查：遍历全部节点，谁的哪份文档路径正好是它。节点量级几十个，点击时跑一次无所谓
+  // 兜底：chip 没带 nodeId，只有一条路径。节点量级几十个，点击时跑一次无所谓
   if (want) {
     for (const n of store.nodes) {
-      const teachRel = nodeDocPath(store, n.id, { kind: 'teaching' })
+      const rel = nodeDocPath(store, n.id, { kind: 'teaching' })
+      if (!rel || normPath(rel) !== want) continue
+      if (p.type === 'doc') return { kind: 'teach', nodeId: n.id }
+      if (p.type === 'outline') return { kind: 'outline', nodeId: n.id }
+      if (p.type === 'note' && p.note) {
+        if (notesOf(n).some((x) => x.name === p.note)) return { kind: 'note', nodeId: n.id, note: p.note }
+      }
       if (p.type === 'super' && p.name) {
-        // 超级文档没有自己的文件（存在节点数据里）：按「节点教学文档路径 + 名字」认
-        if (teachRel && normPath(teachRel) === want) return { kind: 'super', nodeId: n.id, name: p.name }
-        continue
-      }
-      if (p.type === 'doc' && teachRel && normPath(teachRel) === want) return { kind: 'teach', nodeId: n.id }
-      if (p.type === 'outline' && nodeDocPath(store, n.id, { kind: 'outline' }) === want) {
-        return { kind: 'outline', nodeId: n.id }
-      }
-      for (const note of notesOf(n)) {
-        if (nodeDocPath(store, n.id, { kind: 'note', note: note.name }) === want) {
-          return { kind: 'note', nodeId: n.id, note: note.name }
-        }
+        if ((n.superdocs ?? []).some((s) => s.name === p.name)) return { kind: 'super', nodeId: n.id, name: p.name }
       }
     }
   }

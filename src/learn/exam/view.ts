@@ -276,7 +276,8 @@ export function examReadPayload(input: {
     return JSON.stringify({
       status: 'none',
       note:
-        '这个知识点还没有任何试卷。要出题就 api.exam.create({ title, kind, level, minutes, questions })：' +
+        '这个知识点还没有任何试卷。要出题就两步：api.node.create({ kind: \'exam\', under: 节点uuid, title }) 拿到 uuid，' +
+        '再 await node.invoke(uuid, \'editContent\', [{ kind, level, minutes, questions }])（题目格式见试卷节点的 help()）。' +
         'kind 认 quiz（随堂小测，不限时）/ test（小考）/ exam（大考）；minutes 是时限（分钟），' +
         '不得低于**题目数 × ' + EXAM_MINUTES_PER_QUESTION + '**，小测不用给。' +
         '还不知道用户想要哪种、什么难度，就先 api.ask 问一次（见系统提示词的出卷一节），别替他决定。',

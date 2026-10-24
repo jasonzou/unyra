@@ -8,7 +8,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
 import { t } from '../i18n'
 import { startupBackground } from '../storage'
-import { DEV_SERVER_URL } from './startup'
+import { DEV_SERVER_URL, isDev } from './startup'
 import { appIcon } from './icon'
 import { attachConsoleForwarding, hardenLinks } from './windows'
 
@@ -160,6 +160,14 @@ export async function openExamWindow(payload: unknown): Promise<{ ok: boolean; r
       await win.loadURL(DEV_SERVER_URL + '?examWindow=1')
     } else {
       await win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), { query: { examWindow: '1' } })
+    }
+    /**
+     * 开发环境下自动打开 DevTools（与主窗口同一套规矩，见 windows.ts）：
+     * dev 运行一律打开，方便调考试窗口自己的分支；打包运行用
+     * MOJI_DEVTOOLS=1 显式打开。detach 模式：独立窗口，不挤占考试卷面。
+     */
+    if (isDev || process.env.MOJI_DEVTOOLS === '1') {
+      win.webContents.openDevTools({ mode: 'detach' })
     }
     return { ok: true }
   } catch (err) {

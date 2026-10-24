@@ -6,12 +6,13 @@
  */
 import { needleForDoc } from '../../lib/docDom'
 import { TmpVars, type TmpInfo } from '../../lib/tmpStore'
-import type { MessageImage } from '../types'
 import { normalizeAskForm } from './askForm'
 import { compileBody } from './body'
-import { MAX_LOGGED_CALLS, MAX_RESULT_CHARS } from './limits'
-import { asExamPayload, asIndex, asOptionalPath, asRecord, asText, type DocRef, type NodeRef } from './refs'
-import { apiDocOf, renderApiHelp, renderGroupHelp, renderRootHelp } from './apiRegistry'
+import { MAX_RESULT_CHARS } from './limits'
+import { asIndex, asOptionalPath, asRecord, asText, type DocRef, type NodeRef } from './refs'
+import { renderRootHelp } from './apiRegistry'
+import { attachNodeFacade, registerNodeApi } from './nodeObject'
+import { wrapApi, imagesOf } from './wrap'
 import { filesAccessError } from './dataPaths'
 import type { SandboxCall, SandboxOptions } from './types'
 import { getLoadedSkills, getActiveSkills } from '../skill/registry'
@@ -41,94 +42,7 @@ interface BuiltApi {
   tmp: TmpVars | null
 }
 
-/**
- * api 的失败表达方式：
- * 结构性失败一律回 { ok:false, error }，作为值回给模型，避免抛异常带崩同批次其它调用。
- */
-function isFailedValue(v: unknown): boolean {
-  if (!v || typeof v !== 'object') return false
-  const r = v as { ok?: unknown; error?: unknown }
-  return r.ok === false || typeof r.error === 'string'
-}
-
-/** api 返回值里夹带的图片引用（如 res.read 看了一张图）：见 ResourceOps 的说明 */
-export function imagesOf(value: unknown): MessageImage[] {
-  if (!value || typeof value !== 'object') return []
-  const imgs = (value as { images?: unknown }).images
-  return Array.isArray(imgs) ? (imgs as MessageImage[]) : []
-}/**
- * 这次调用失败了吗——失败的话把那句话记进 record（供结果顶部那份清单用）。
- * `{ok:false}` 与 `{error}` 两种写法都认，见 isFailedValue。
- */
-function markFailed(record: SandboxCall, value: unknown): void {
-  if (!isFailedValue(value)) return
-  record.ok = false
-  const v = value as { content?: unknown; error?: unknown }
-  const text =
-    typeof v.error === 'string' && v.error.trim()
-      ? v.error
-      : typeof v.content === 'string' && v.content.trim()
-        ? v.content
-        : ''
-  // 压成一行再截断：这句话要进结果顶部的清单，太长会把别的调用挤没
-  if (text) record.message = text.replace(/\s+/g, ' ').trim().slice(0, 300)
-}
-
-/** 把工具动作包成 api 方法：每次调用记一笔，异常转为结构化失败返回值，防止炸掉整批编排 */
-function wrapApi(api: Record<string, unknown>, name: string, fn: (args: unknown[]) => unknown, log: SandboxCall[]) {
-  /*
-   * 注册表是唯一入口：没登记的名字不许出现在沙箱里。
-   * 这条检查在 buildApi 阶段就炸，而不是等模型调到一半才发现「有这个 api 但没人知道怎么用」。
-   */
-  if (!apiDocOf(name)) {
-    throw new Error('[sandbox] api 未在 apiRegistry 登记：' + name + '（先在 apiRegistry.ts 补签名、用法与示例）')
-  }
-  const wrapped = (...args: unknown[]): unknown => {
-    const record: SandboxCall = { name, ok: true }
-    if (log.length < MAX_LOGGED_CALLS) log.push(record)
-    try {
-      const value = fn(args)
-      // 异步 api:
-      if (value instanceof Promise) {
-        return value.then(
-          (settled) => {
-            markFailed(record, settled)
-            return settled
-          },
-          (err: unknown) => {
-            record.ok = false
-            record.message = err instanceof Error ? err.message : 'api 调用失败'
-            return { ok: false, error: record.message }
-          },
-        )
-      }
-      markFailed(record, value)
-      return value
-    } catch (err) {
-      record.ok = false
-      record.message = err instanceof Error ? err.message : 'api 调用失败'
-      return { ok: false, error: record.message }
-    }
-  }
-  // 宿主侧（测试 / 超级文档桥）也挂一份同步 help；真沙箱由 sandboxRuntime 再挂一次
-  ;(wrapped as unknown as { __help: () => string }).__help = () => renderApiHelp(name)
-  const segs = name.split('.')
-  if (segs.length === 1) {
-    api[name] = wrapped
-    return
-  }
-  let cur = api
-  for (let i = 0; i < segs.length - 1; i++) {
-    const k = segs[i]
-    cur = ((cur[k] as Record<string, unknown>) || (cur[k] = {})) as Record<string, unknown>
-  }
-  const groupKey = segs[0]
-  const group = api[groupKey] as Record<string, unknown>
-  if (group && typeof group.__help !== 'function') {
-    ;(group as unknown as { __help: () => string }).__help = () => renderGroupHelp(groupKey)
-  }
-  cur[segs[segs.length - 1]] = wrapped
-}
+export { imagesOf }
 
 /**
  * 组装一次编排可用的 api。
@@ -136,7 +50,18 @@ function wrapApi(api: Record<string, unknown>, name: string, fn: (args: unknown[
  * 全部按 path 寻址（见 SandboxOptions 的说明）：解析失败不抛异常，而是把「找不到 +
  * 候选清单」当成正常返回值交回去——模型读到就能自己改对，抛异常只会得到一句栈。
  */
-export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  const api: Record<string, unknown> = {}
+export function buildApi(
+  opts: SandboxOptions,
+  log: SandboxCall[],
+  /**
+   * nodeFacade：要不要把 api.node.get 包成「进程内节点对象门面」。**默认关**——
+   * 门面对象带吐 Promise 的 getter 与函数成员，只能活在进程内；真 Worker 通道的
+   * 回执要过结构化克隆，api.node.get 必须回纯 manifest（Worker 侧自己包成门面，
+   * 见 sandboxRuntime 的 wrapManifest）。进程内直调（编排测试 / 探针的 fakeRunner /
+   * 超级文档桥）才开。
+   */
+  addons?: { nodeFacade?: boolean },
+): BuiltApi {  const api: Record<string, unknown> = {}
   const tmpView = opts.tmp?.()
   const tmp = tmpView ? new TmpVars(tmpView) : null
 
@@ -147,260 +72,6 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
   const nodeRef = (path: unknown): { ref: NodeRef } | { error: string } => {
     const r = opts.resolveNode(asText(path))
     return r.ok ? { ref: r.ref } : { error: r.message }
-  }
-  /**
-   * 只有一个参数的写法：模型很容易漏掉 path（尤其旧习惯里的 doc.append('内容')），
-   * 这时按「当前节点的教学文档」理解，而不是把它当成一个节点标题去找。
-   */
-  const splitPathAndValue = (args: unknown[]): { path: string; value: string } =>
-    args.length >= 2 ? { path: asText(args[0]), value: args[1] as string } : { path: '', value: args[0] as string }
-
-  wrapApi(api, 'doc.read', (args) => {
-    const r = docRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const content = opts.docOps.read(r.ref.id, r.ref.kind, r.ref.note)
-    return { path: r.ref.docLabel, doc: r.ref.kind, chars: content.length, content }
-  }, log)
-
-  wrapApi(api, 'doc.readRange', (args) => {
-    const r = docRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const content = opts.docOps.read(r.ref.id, r.ref.kind, r.ref.note)
-    const start = asIndex(args[1] ?? (args.length > 1 ? args[1] : undefined)) ?? 0
-    const end = asIndex(args[2]) ?? Math.min(content.length, start + 1500)
-    return {
-      path: r.ref.docLabel,
-      text: content.slice(start, end),
-      start,
-      end: Math.min(end, content.length),
-      total: content.length,
-    }
-  }, log)
-
-  wrapApi(api, 'doc.find', (args) => {
-    const r = docRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const content = opts.docOps.read(r.ref.id, r.ref.kind, r.ref.note)
-    const needle = asText(args[1])
-    if (!needle) return { error: '要找的内容为空' }
-    const opt = asRecord(args[2])
-    const from = asIndex(opt.from) ?? 0
-    const limit = Math.min(asIndex(opt.limit) ?? 10, 50)
-    const hits: Array<{ start: number; end: number; around: string }> = []
-    let idx = content.indexOf(needle, from)
-    while (idx >= 0 && hits.length < limit) {
-      hits.push({
-        start: idx,
-        end: idx + needle.length,
-        around: content.slice(Math.max(0, idx - 40), Math.min(content.length, idx + needle.length + 40)),
-      })
-      idx = content.indexOf(needle, idx + Math.max(1, needle.length))
-    }
-    return { path: r.ref.docLabel, query: needle, total: content.length, matches: hits.length, hits }
-  }, log)
-
-  wrapApi(api, 'doc.write', (args) => {
-    const { path, value } = splitPathAndValue(args)
-    const r = docRef(path)
-    if ('error' in r) return { error: r.error }
-    return opts.docOps.write(r.ref.id, r.ref.kind, r.ref.note, asText(value))
-  }, log)
-
-  wrapApi(api, 'doc.replace', (args) => {
-    // 文档类 api 的区间写法统一是 (path, { start, end, content, expected })
-    const r = docRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const a = asRecord(args[1])
-    return opts.docOps.replace(r.ref.id, r.ref.kind, r.ref.note, {
-      start: asIndex(a.start),
-      end: asIndex(a.end),
-      content: asText(a.content),
-      expected: typeof a.expected === 'string' ? a.expected : undefined,
-    })
-  }, log)
-
-  wrapApi(api, 'doc.append', (args) => {
-    const { path, value } = splitPathAndValue(args)
-    const r = docRef(path)
-    if ('error' in r) return { error: r.error }
-    return opts.docOps.append(r.ref.id, r.ref.kind, r.ref.note, asText(value))
-  }, log)
-
-  wrapApi(api, 'doc.annotate', (args) => {
-    // 两种写法都收：doc.annotate({ term, body }) 与 doc.annotate(path, { term, body })
-    const first = args[0]
-    const payloadFirst = !!first && typeof first === 'object'
-    const r = docRef(payloadFirst ? '' : first)
-    if ('error' in r) return { error: r.error }
-    const a = asRecord(payloadFirst ? first : args[1])
-    return opts.docOps.annotate(r.ref.id, {
-      term: asText(a.term),
-      occurrence: asIndex(a.occurrence),
-      // 正文允许几种写法：模型对字段名的猜测从来不止一种（同 exam.explain）
-      body: asText(a.body ?? a.content ?? a.text),
-    })
-  }, log)
-
-  wrapApi(api, 'node.list', () => opts.nodeOps.list(), log)
-
-  wrapApi(api, 'node.read', (args) => {
-    const r = nodeRef(args[0])
-    if ('error' in r) return { error: r.error }
-    return opts.nodeOps.read(r.ref.id)
-  }, log)
-
-  wrapApi(api, 'node.title', (args) => {
-    const r = nodeRef(args[0])
-    if ('error' in r) return { error: r.error }
-    return { path: r.ref.label, id: r.ref.id, title: r.ref.title }
-  }, log)
-
-  if (opts.nodeOps.paths) {
-    const np = opts.nodeOps.paths
-    wrapApi(api, 'node.paths', (args) => {
-      const p = args.length ? asText(args[0]).trim() : undefined
-      const r = nodeRef(p)
-      if ('error' in r) return { error: r.error }
-      return np(r.ref.id)
-    }, log)
-  }
-
-  wrapApi(api, 'node.rename', (args) => {
-    const raw = asText(args[0]).trim()
-    if (!raw) return { ok: false, error: 'node.rename 必须指定要重命名的节点路径或 ID，不允许省略节点路径' }
-    const r = nodeRef(raw)
-    if ('error' in r) return { error: r.error }
-    const title = asText(args[1]).trim()
-    if (!title) return { error: '新标题不能为空' }
-    return opts.nodeOps.update(r.ref.id, { title })
-  }, log)
-
-  wrapApi(api, 'node.annotate', (args) => {
-    const first = args[0]
-    const payloadFirst = !!first && typeof first === 'object'
-    const r = nodeRef(payloadFirst ? '' : first)
-    if ('error' in r) return { error: r.error }
-    const a = asRecord(payloadFirst ? first : args[1])
-    if (opts.nodeOps.annotate) {
-      return opts.nodeOps.annotate(r.ref.id, {
-        term: asText(a.term),
-        occurrence: asIndex(a.occurrence),
-        body: asText(a.body ?? a.content ?? a.text),
-      })
-    }
-    return opts.docOps.annotate(r.ref.id, {
-      term: asText(a.term),
-      occurrence: asIndex(a.occurrence),
-      body: asText(a.body ?? a.content ?? a.text),
-    })
-  }, log)
-
-  wrapApi(api, 'node.update', (args) => {
-    const r = nodeRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const p = asRecord(args[1])
-    const patch: { title?: string; description?: string; status?: 'learning' | 'mastered' } = {}
-    if (typeof p.title === 'string' && p.title.trim()) patch.title = p.title.trim()
-    if (typeof p.description === 'string') patch.description = p.description
-    if (p.status === 'learning' || p.status === 'mastered') patch.status = p.status
-    if (!Object.keys(patch).length) return { error: '没有给出要改的字段（title / description / status）' }
-    return opts.nodeOps.update(r.ref.id, patch)
-  }, log)
-
-  wrapApi(api, 'node.create', (args) => {
-    const first = args[0]
-    // 两种写法都收：node.create({ title, parent, description }) 与 node.create('标题')
-    const a = typeof first === 'string' ? { title: first } : asRecord(first)
-    const title = asText(a.title).trim()
-    if (!title) return { error: 'node.create 需要一个 title（新节点的标题）' }
-    /*
-     * parent 是**必填**的（2026-09 的口径收紧）：不再隐式建在「当前节点」之下。
-     * 「在哪个节点下就在哪个节点下建」是隐患——上下文是目标级的，模型一轮里同时碰好几个
-     * 节点，「当前」到底是哪一个，只有写明白路径才算数。从「当前」出发的写法一并拒掉：
-     * 它只是隐式当前节点的另一种拼写。
-     */
-    const rawParent = typeof a.parent === 'string' ? a.parent.trim() : ''
-    if (!rawParent) {
-      return {
-        error:
-          'node.create 必须写明 parent（新建到哪个节点之下）：写一个标题（如 "极限"）、一段路径' +
-          '（如 "微积分/极限"）或 #id。不再隐式建在「当前节点」之下——先 api.node.list() 挑准父节点。',
-      }
-    }
-    const head = rawParent.split('/')[0]?.trim().toLowerCase() ?? ''
-    if (['当前', '当前节点', '本节点', 'this', 'current', '.', '@'].includes(head)) {
-      return {
-        error:
-          'parent 不要从「当前」出发（那还是隐式的）：写从目标根出发的路径（"父标题" 或 "上级/父标题"）' +
-          '或 #id，指明新节点到底挂在哪个节点之下。',
-      }
-    }
-    const pr = nodeRef(rawParent)
-    if ('error' in pr) return { error: pr.error }
-    return opts.nodeOps.create(pr.ref.id, { ...a, title })
-  }, log)
-
-  wrapApi(api, 'node.createTree', (args) => {
-    if (!opts.nodeOps.createTree) return { error: '当前环境不支持 node.createTree' }
-    const input = asRecord(args[0])
-    const rawParent = input.parent !== undefined ? String(input.parent).trim() : ''
-    let parentId: string | undefined
-    if (rawParent && !['当前', '当前节点', '本节点', 'this', 'current', '.', '@'].includes(rawParent)) {
-      const pr = nodeRef(rawParent)
-      if ('error' in pr) return { error: pr.error }
-      parentId = pr.ref.id
-    }
-    return opts.nodeOps.createTree(parentId, input)
-  }, log)
-
-  wrapApi(api, 'node.move', (args) => {
-    const r = nodeRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const pr = nodeRef(args[1])
-    if ('error' in pr) return { error: pr.error }
-    return opts.nodeOps.move(r.ref.id, pr.ref.id)
-  }, log)
-
-  wrapApi(api, 'node.delete', (args) => {
-    const r = nodeRef(args[0])
-    if ('error' in r) return { error: r.error }
-    const opt = args.length > 1 ? asRecord(args[1]) : undefined
-    return opts.nodeOps.remove(r.ref.id, opt ? { cascade: opt.cascade === true, dryRun: opt.dryRun === true } : undefined)
-  }, log)
-
-  wrapApi(api, 'description.read', (args) => {
-    const r = nodeRef(args[0])
-    if ('error' in r) return { error: r.error }
-    return { path: r.ref.label, description: (opts.nodeOps.read(r.ref.id) as { description?: string }).description ?? '' }
-  }, log)
-
-  wrapApi(api, 'description.update', (args) => {
-    // 兼容只有内容的旧写法：description.update(内容) 改的是当前节点
-    const hasPath = args.length >= 2
-    const r = nodeRef(hasPath ? args[0] : '')
-    if ('error' in r) return { error: r.error }
-    const content = hasPath ? asText(args[1]) : asText(args[0])
-    if (!content.trim()) return { error: '内容为空，未做修改' }
-    return opts.nodeOps.update(r.ref.id, { description: content })
-  }, log)
-
-  if (opts.outline) {
-    const outline = opts.outline
-    wrapApi(api, 'outline.read', (args) => {
-      const r = nodeRef(args[0])
-      if ('error' in r) return { error: r.error }
-      return outline.read(r.ref.id)
-    }, log)
-
-    wrapApi(api, 'outline.write', (args) => {
-      // 两种写法都收：outline.write(path, { intro, children }) 与 outline.write({ intro, children })
-      const first = args[0]
-      const payloadFirst = !!first && typeof first === 'object'
-      const r = nodeRef(payloadFirst ? '' : first)
-      if ('error' in r) return { error: r.error }
-      const a = asRecord(payloadFirst ? first : args[1])
-      return outline.write(r.ref.id, { intro: a.intro, children: a.children })
-    }, log)
   }
 
   if (opts.state) {
@@ -474,12 +145,11 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
 
   if (opts.exam) {
     const exam = opts.exam
-    wrapApi(api, 'exam.create', (args) => exam.create(asExamPayload(args[0])), log)
-    // 读卷可以指名某一次考试（历史记录里的 attemptId）：判分与错题讲解都要看历史
+    // 出题走节点宇宙（api.node.create + editContent，阶段闸门在 NodeOps.guard）；
+    // exam.* 只留作答侧：读卷、判分、讲解与删卷
     wrapApi(api, 'exam.read', (args) => exam.read(asText(args[0]).trim() || undefined), log)
     wrapApi(api, 'exam.grade', (args) => exam.grade(asRecord(args[0])), log)
     wrapApi(api, 'exam.explain', (args) => exam.explain(asRecord(args[0])), log)
-    // 只认一个可选的 id：省略就是「最新那份」，模型通常不记 id
     wrapApi(api, 'exam.delete', (args) => exam.remove(asRecord(args[0])), log)
   }
 
@@ -524,7 +194,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
       }
       /**
        * 执行就发生在宿主这一侧：编译持久化的源码、把**当前这次编排的 api** 交给它。
-       * 函数体里 await api.doc.read(...) 用的就是这份 api——它与编排里的其它调用
+       * 函数体里 await api.node.get(uuid) 的 content 用的就是这份 api——它与编排里的其它调用
        * 看到同一个 store，读写顺序与书写顺序一致。
        */
       const compiled = compileBody(entry.code)
@@ -538,30 +208,6 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
       } catch (err) {
         return { error: '「' + entry.name + '」执行失败：' + (err instanceof Error ? err.message : String(err)) }
       }
-    }, log)
-  }
-
-  if (opts.superdocs) {
-    const sd = opts.superdocs
-    wrapApi(api, 'sdoc.list', (args) => {
-      const r = nodeRef(args[0])
-      if ('error' in r) return { error: r.error }
-      return sd.list(r.ref.id)
-    }, log)
-    wrapApi(api, 'sdoc.read', (args) => {
-      const r = nodeRef(args[0])
-      if ('error' in r) return { error: r.error }
-      return sd.read(r.ref.id, asText(args[1]).trim())
-    }, log)
-    wrapApi(api, 'sdoc.write', (args) => {
-      const r = nodeRef(args[0])
-      if ('error' in r) return { error: r.error }
-      return sd.write(r.ref.id, asText(args[1]).trim() || undefined, asText(args[2]))
-    }, log)
-    wrapApi(api, 'sdoc.delete', (args) => {
-      const r = nodeRef(args[0])
-      if ('error' in r) return { error: r.error }
-      return sd.remove(r.ref.id, asText(args[1]).trim())
     }, log)
   }
 
@@ -657,6 +303,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
       return web.fetch(typeof first === 'object' && first !== null ? { ...first, url } : { url })
     }
     // 支持 api.fetch 与 api.web.fetch
+    // 顶层 fetch 是 web.fetch 的快捷别名：提示词里教的就是 api.fetch，别删
     wrapApi(api, 'fetch', handleFetch, log)
     wrapApi(api, 'web.fetch', handleFetch, log)
 
@@ -1023,7 +670,7 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     wrapApi(api, 'res.list', () => res.list(), log)
     wrapApi(api, 'res.info', (args) => res.info(uuid(args[0])), log)
     wrapApi(api, 'res.read', (args) => {
-      // 区间写法与 doc.readRange 一致：res.read(uuid, { start, end })
+      // 区间读法：res.read(uuid, { start, end })
       const a = asRecord(args[1])
       return res.read(uuid(args[0]), { start: asIndex(a.start), end: asIndex(a.end) })
     }, log)
@@ -1177,10 +824,11 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
       if (isMd && opts.docOps?.write) {
         const kind = resolved.ref.kind === 'note' ? 'note' : 'teaching'
         opts.docOps.write(nodeId, kind, resolved.ref.note, content)
-      } else if (isOutline && opts.outline?.write) {
+      } else if (isOutline) {
+        // 大纲镜像：解析成对象交给大纲节点的 editContent（节点宇宙的正规写入口）
         try {
           const parsed = JSON.parse(content)
-          opts.outline.write(nodeId, parsed)
+          opts.nodes?.service()?.get('o:' + nodeId)?.editContent(parsed)
         } catch {
           // 忽略非标准 json
         }
@@ -1200,17 +848,15 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
     if (!trimmed) {
       const curDoc = opts.resolveDoc('')
       if (curDoc.ok) {
-        if (opts.nodeOps.paths) {
-          const info = opts.nodeOps.paths(curDoc.ref.id) as { ok?: boolean; doc?: string }
-          if (info && info.ok && typeof info.doc === 'string') {
-            return { ok: true, path: resolveSandboxedPath(info.doc) }
-          }
+        const disk = opts.docPath?.(curDoc.ref.id)
+        if (disk) {
+          return { ok: true, path: resolveSandboxedPath(disk) }
         }
         const label = curDoc.ref.label.replace(/\\/g, '/')
         const title = curDoc.ref.title
         return { ok: true, path: resolveSandboxedPath(`docs/${label}/${title}.md`) }
       }
-      return { ok: false, error: '未指定文件路径且当前无激活的教学节点，请显式提供目标文件路径（例如 "docs/..." 或使用 api.node.paths() 获取路径）' }
+      return { ok: false, error: '未指定文件路径且当前无激活的教学节点，请显式提供目标文件路径（例如 "docs/..." 或用 api.workspace.list() 查）' }
     }
     return { ok: true, path: resolveSandboxedPath(trimmed) }
   }
@@ -1667,6 +1313,14 @@ export function buildApi(opts: SandboxOptions, log: SandboxCall[]): BuiltApi {  
       ...(exitCode !== 0 ? { error: `脚本退出异常，退出码: ${exitCode}` } : {}),
     }
   }, log)
+
+  /*
+   * 节点宇宙（api.node）：create / get / list / delete 四条传输 + 对象门面。
+   * 行为在 learn/nodeKinds 的类型子类里（多态），这里只透传（见 sandbox/nodeObject）。
+   * 放最后：门面要读已注册的 node.get / node.invoke。
+   */
+  registerNodeApi(api, opts.nodes, log)
+  if (addons?.nodeFacade) attachNodeFacade(api)
 
   // 根 help：顶层函数与各组的总览。真沙箱由 sandboxRuntime 再挂一次（同步、不花宿主往返）
   ;(api as unknown as { __help: () => string }).__help = () => renderRootHelp()

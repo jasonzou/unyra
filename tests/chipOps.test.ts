@@ -43,10 +43,10 @@ function fixture(): LearnStore {
         id: 'c1',
         title: '极限',
         notes: [
-          { name: '错题本', content: '错题', createdAt: NOW, updatedAt: NOW },
-          { name: '摘录', content: '摘录', createdAt: NOW, updatedAt: NOW },
+          { id: 'n-' + crypto.randomUUID(), name: '错题本', content: '错题', createdAt: NOW, updatedAt: NOW },
+          { id: 'n-' + crypto.randomUUID(), name: '摘录', content: '摘录', createdAt: NOW, updatedAt: NOW },
         ],
-        superdocs: [{ name: '句号计数器', html: '<p>x</p>', createdAt: NOW, updatedAt: NOW }] as KnowledgeNode['superdocs'],
+        superdocs: [{ id: 's-' + crypto.randomUUID(), name: '句号计数器', html: '<p>x</p>', createdAt: NOW, updatedAt: NOW }] as KnowledgeNode['superdocs'],
       }),
     ],
     edges: [{ from: 'r1', to: 'c1', createdAt: NOW }],

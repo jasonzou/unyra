@@ -144,11 +144,13 @@ export function toChatHistory(
       }
       /**
        * 动态注入的提示词模块（learn/ai/prompt-modules）：它发生在跳的边界——线上实发
-       * 是「这一跳的消息 + 一条模块 user 消息」，所以还原时按它在片段里的位置补发。
-       * 逐字节镜像纪律与上面的图片消息同一条：差一个字符，前缀缓存从这里整段作废。
+       * 是「这一跳的消息 + 一条模块 **assistant** 消息」（模块是「怎么做」的声明，归
+       * assistant 边，见 agent/runtime 的介入通道），所以还原时按它在片段里的位置补发，
+       * role 与实发一致。逐字节镜像纪律与上面的图片消息同一条：差一个字符，前缀缓存
+       * 从这里整段作废。
        */
       for (const p of seg) {
-        if (p.type === 'prompt-module') out.push({ role: 'user', content: p.text })
+        if (p.type === 'prompt-module') out.push({ role: 'assistant', content: p.text })
       }
     }
   }

@@ -38,6 +38,7 @@ const node = (notes: NoteFile[]): KnowledgeNode => ({
 })
 
 const note = (name: string, content = ''): NoteFile => ({
+  id: crypto.randomUUID(),
   name,
   content,
   createdAt: AT,

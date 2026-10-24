@@ -29,8 +29,12 @@ export interface NodeDocActions {
   onNewProject: (nodeId: string) => void
   /** 新增一份试卷：跑内置工作流「出卷」，导师会先问类型与难度 */
   onNewExam: (nodeId: string) => void
-  /** 新建一份超级文档：跑内置工作流「超级实验室」 */
-  onNewSuperDoc: (nodeId: string) => void
+  /**
+   * 新建一份超级文档：跑内置工作流「超级实验室」。shellName 是画布上那份额外
+   * 超级文档实体的名字（实体先行：拖出即建壳）——给了它，工作流就写进这份壳，
+   * 不另起名字；从右键菜单等入口发起时没有壳，名字由导师问用户后自定。
+   */
+  onNewSuperDoc: (nodeId: string, shellName?: string) => void
   onOpenNote: (nodeId: string, name: string) => void
   onRenameNote: (nodeId: string, from: string, to: string) => void
   onDeleteNote: (nodeId: string, name: string) => void
@@ -67,6 +71,8 @@ export interface ExamActions {
   onGrade: (nodeId: string) => void
   /** 删除一份试卷（两档确认由上层弹） */
   onDelete: (exam: Exam) => void
+  /** 打开一次作答的只读副本页签（卷子 + 作答 + 判分 + 错题讲解） */
+  onOpenRecord: (nodeId: string, examId: string, attemptId: string) => void
   /** 正在考的那一份试卷 id：那一行只显示「回到考试」 */
   liveExamId: string | null
   /** 导师正在判分 / 讲解：那颗按钮显示进度并禁用 */

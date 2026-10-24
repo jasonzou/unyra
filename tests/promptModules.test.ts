@@ -45,30 +45,35 @@ describe('模块注册表', () => {
   })
 
   it('搬进模块的域都在注册表里；promptModuleByKey 认不出的回 null', () => {
-    for (const key of ['sdoc', 'browser', 'web', 'res', 'exam', 'workspace', 'method', 'code', 'compact', 'subagent', 'ui', 'learning-process', 'plot-forms', 'rich-animation']) {
+    for (const key of ['browser', 'web', 'res', 'exam', 'teach-method', 'outline-method', 'doc-html', 'workspace', 'method', 'code', 'compact', 'subagent', 'ui', 'learning-process', 'plot-forms', 'rich-animation']) {
       expect(promptModuleByKey(key)?.text, key).toBeTruthy()
     }
     expect(promptModuleByKey('不存在的')).toBeNull()
   })
 
-  it('模块文本自包含：考试模块带着 create 的 payload 字段，子代理模块带着范式与监督回路', () => {
-    expect(promptModuleByKey('exam')!.text).toContain('minutes')
+  it('sdoc 已退役（规范住进了超级文档节点的 help()），注册表里不再有它', () => {
+    expect(promptModuleByKey('sdoc')).toBeNull()
+    expect(PROMPT_MODULES.some((m) => m.key === 'sdoc')).toBe(false)
+  })
+
+  it('模块文本自包含：考试模块带着出题与判分口径，子代理模块带着范式与监督回路', () => {
+    expect(promptModuleByKey('exam')!.text).toContain('editContent')
     expect(promptModuleByKey('exam')!.text).toContain('attemptId')
     expect(promptModuleByKey('subagent')!.text).toContain('wait')
     expect(promptModuleByKey('subagent')!.text).toContain('监督回路')
-    expect(promptModuleByKey('sdoc')!.text).toContain('moji-markdown')
+    expect(promptModuleByKey('teach-method')!.text).toContain('api.node.get')
+    expect(promptModuleByKey('outline-method')!.text).toContain('o:')
   })
 })
 
 describe('触发映射', () => {
-  it('api 组前缀落到正确的模块；高频组（doc/node/state/tmp/ask）绝不触发', () => {
-    expect(promptModuleForApiName('sdoc.write')).toBe('sdoc')
+  it('api 组前缀落到正确的模块；高频组（node/state/tmp/ask）绝不触发', () => {
     expect(promptModuleForApiName('browser.snapshot')).toBe('browser')
     expect(promptModuleForApiName('web.search')).toBe('web')
     expect(promptModuleForApiName('web.fetch')).toBe('web')
     expect(promptModuleForApiName('fetch')).toBe('web')
     expect(promptModuleForApiName('res.read')).toBe('res')
-    expect(promptModuleForApiName('exam.create')).toBe('exam')
+    expect(promptModuleForApiName('exam.grade')).toBe('exam')
     expect(promptModuleForApiName('workspace.list')).toBe('workspace')
     expect(promptModuleForApiName('method.call')).toBe('method')
     expect(promptModuleForApiName('code.save')).toBe('code')
@@ -79,40 +84,56 @@ describe('触发映射', () => {
     expect(promptModuleForApiName('attention.get')).toBe('learning-process')
     expect(promptModuleForApiName('focus.status')).toBe('learning-process')
     // 每轮必用的组不触发——进了模块反而每轮都要注入一遍
-    expect(promptModuleForApiName('doc.write')).toBeNull()
-    expect(promptModuleForApiName('node.read')).toBeNull()
+    expect(promptModuleForApiName('node.get')).toBeNull()
+    expect(promptModuleForApiName('node.invoke')).toBeNull()
     expect(promptModuleForApiName('state.update')).toBeNull()
-    expect(promptModuleForApiName('outline.write')).toBeNull()
     expect(promptModuleForApiName('wait')).toBeNull()
     expect(promptModuleForApiName('ask')).toBeNull()
     expect(promptModuleForApiName('log')).toBeNull()
   })
 
   it('内容嗅探：plot 围栏与动画标记各归各的模块，两者都命中就都报；普通正文不报', () => {
-    expect(promptModuleForContent('看图：\n\n```plot\n{ "data": [] }\n```')).toEqual(['plot-forms'])
-    expect(promptModuleForContent('<style>.x{animation:@keyframes p{}}</style>')).toEqual(['rich-animation'])
-    expect(promptModuleForContent('<animateMotion dur="3s"/>')).toEqual(['rich-animation'])
-    expect(promptModuleForContent('## 教学正文\n\n一些 $x^2$ 公式。')).toEqual([])
-    const both = promptModuleForContent('```plot\n{}\n``` <animate a/>')
+    expect(promptModuleForContent('看图：\n\n```plot\n{ "data": [] }\n```', false)).toEqual(['plot-forms'])
+    expect(promptModuleForContent('<style>.x{animation:@keyframes p{}}</style>', false)).toEqual(['rich-animation'])
+    expect(promptModuleForContent('<animateMotion dur="3s"/>', false)).toEqual(['rich-animation'])
+    expect(promptModuleForContent('## 教学正文\n\n一些 $x^2$ 公式。', false)).toEqual([])
+    const both = promptModuleForContent('```plot\n{}\n``` <animate a/>', false)
     expect(both).toContain('plot-forms')
     expect(both).toContain('rich-animation')
   })
 
-  it('写教学文档就带上排版配方：不挑内容（纯 Markdown 的正文也要能学到新写法），超级文档不算', () => {
-    expect(promptModuleForContent('## 一段纯 Markdown 讲解', 'doc.write')).toEqual(['doc-html'])
-    expect(promptModuleForContent('<div class="grid grid-cols-2">x</div>', 'doc.append')).toContain('doc-html')
-    expect(promptModuleForContent('{ content: "改写" }', 'doc.replace')).toContain('doc-html')
-    // 超级文档渲染在 iframe 里，装的是另一套写法（见 sdoc 模块）
-    expect(promptModuleForContent('<p class="sd-card">页</p>', 'sdoc.write')).toEqual([])
+  it('写教学文档就带上排版配方：node.invoke 的 editContent 写 teaching / text；写 html（超级文档）不算', () => {
+    expect(writableContentOf('node.invoke', ['u1', 'editContent', [{ title: '极限', teaching: '## 一段纯 Markdown 讲解' }]]))
+      .toMatchObject({ text: '## 一段纯 Markdown 讲解', superdoc: false })
+    expect(promptModuleForContent('## 一段纯 Markdown 讲解', false, 'node.invoke')).toEqual(['doc-html'])
+    // files.write / files.edit 同一条口径
+    expect(promptModuleForContent('<div class="grid grid-cols-2">x</div>', false, 'files.write')).toContain('doc-html')
+    expect(promptModuleForContent('改写后的内容', false, 'files.edit')).toContain('doc-html')
   })
 
-  it('写入参数的嗅探面：doc.write/append 取第二参、doc.replace 取 payload.content、sdoc.write 取 html，其它调用不嗅探', () => {
-    expect(writableContentOf('doc.write', ['', '```plot\n{}\n```'])).toContain('plot')
-    expect(writableContentOf('doc.append', ['笔记/x', '<animate/>'])).toBe('<animate/>')
-    expect(writableContentOf('doc.replace', ['', { content: '@keyframes p{}' }])).toBe('@keyframes p{}')
-    expect(writableContentOf('sdoc.write', ['', '名', '<p>页</p>'])).toBe('<p>页</p>')
-    expect(writableContentOf('doc.read', ['', '```plot\n{}\n```'])).toBeNull()
-    expect(writableContentOf('node.rename', ['', '```plot\n{}\n```'])).toBeNull()
+  it('嗅探入口统一走 writableContentOf：成员不对、payload 形状不对都回 null', () => {
+    expect(writableContentOf('node.invoke', ['u1', 'help', []])).toBeNull()
+    expect(writableContentOf('node.invoke', ['u1', 'editContent', ['不是对象']])).toBeNull()
+    expect(writableContentOf('node.invoke', ['u1', 'editContent', [{ intro: '', children: [] }]])).toBeNull()
+    // 超级文档的 html：superdoc 标志为 true（不注入排版配方），plot / 动画标记照常嗅探
+    expect(writableContentOf('node.invoke', ['u1', 'editContent', [{ html: '<p class="sd-card">页</p>' }]]))
+      .toMatchObject({ superdoc: true })
+    expect(promptModuleForContent('<p class="sd-card">页</p>', true, 'node.invoke')).toEqual([])
+    expect(promptModuleForContent('<animate a/>', true, 'node.invoke')).toEqual(['rich-animation'])
+  })
+
+
+  it('写入参数的嗅探面（新协议）：files.* 与 node.invoke 的 editContent；读与其它成员不嗅探', () => {
+    expect(writableContentOf('files.write', ['', '```plot\n{}\n```'])).toMatchObject({ text: '```plot\n{}\n```', superdoc: false })
+    expect(writableContentOf('files.edit', ['', { replace: { replacement: '@keyframes p{}' } }])).toMatchObject({ text: '@keyframes p{}', superdoc: false })
+    // node.invoke(uuid, 成员名, 参数数组)：editContent 的 payload 按字段取
+    expect(writableContentOf('node.invoke', ['u1', 'editContent', [{ title: 'x', teaching: '# 正文' }]])).toMatchObject({ text: '# 正文', superdoc: false })
+    expect(writableContentOf('node.invoke', ['u1', 'editContent', [{ text: '<animate/>' }]])).toMatchObject({ text: '<animate/>' })
+    expect(writableContentOf('node.invoke', ['u1', 'editContent', [{ html: '<p>页</p>' }]])).toMatchObject({ text: '<p>页</p>', superdoc: true })
+    // 读与其它成员不携带正文
+    expect(writableContentOf('node.invoke', ['u1', 'read', []])).toBeNull()
+    expect(writableContentOf('node.invoke', ['u1', 'help', []])).toBeNull()
+    expect(writableContentOf('log', ['x'])).toBeNull()
   })
 })
 
@@ -155,10 +176,10 @@ describe('去重判据', () => {
 })
 
 describe('模块消息', () => {
-  it('隐藏 user 消息：mark 是分界条文案、promptModule 供去重、正文是模块全文', () => {
+  it('隐藏 assistant 消息（提示词=声明归 assistant 边）：mark 是过程组文案、promptModule 供去重、正文是模块全文', () => {
     const mod = promptModuleByKey('browser')!
     const m = promptModuleMessage(mod, 'uuid-1', AT)
-    expect(m.role).toBe('user')
+    expect(m.role).toBe('assistant')
     expect(m.hidden).toBe(true)
     expect(m.promptModule).toBe('browser')
     expect(m.mark).toContain('内置浏览器')
@@ -167,12 +188,11 @@ describe('模块消息', () => {
 })
 
 describe('系统提示词确实瘦了（减负的验收线）', () => {
-  const system = buildTeacherSystem({ goalQuestion: '我想弄懂微积分' })
+  const system = buildTeacherSystem()
 
   it('系统提示词只给 api 集：组索引在场，具体签名靠 __help 现查', () => {
-    // 组索引在场（模型必须知道能力存在）
-    expect(system).toContain('api.node — 知识点节点')
-    expect(system).toContain('api.doc — 教学文档与笔记')
+    // 组索引在场（模型必须知道能力存在）；doc/outline/sdoc 是 legacy 旧写法，不进索引
+    expect(system).toContain('api.node — 节点宇宙')
     expect(system).toContain('api.state — 学习状态')
     expect(system).toContain('api.browser')
     expect(system).toContain('api.subagent')
@@ -185,7 +205,7 @@ describe('系统提示词确实瘦了（减负的验收线）', () => {
     expect(system).not.toContain('监督回路')
     expect(system).not.toContain('dom(tabId?')
     // 具体 api 的签名不再压在系统提示词里——那是 __help() 的活
-    expect(system).not.toContain('node.read(path)')
+    expect(system).not.toContain('graph.read(path)')
     expect(system).not.toContain('exam.create({')
     // 低频 api 的行为细节随模块走，系统提示词里不再逐条展开
     expect(system).not.toContain('api.res.refs(uuid)：谁在引用它')
@@ -206,7 +226,9 @@ describe('系统提示词确实瘦了（减负的验收线）', () => {
 
   it('删除的 api 与历史漂移一并清掉', () => {
     expect(system).not.toContain('iwanna')
+    // 建节点的收尾步骤：阶段拆分已归「生成大纲」流程，建节点不再顺手写大纲（create + editContent 两步）
+    expect(system).not.toContain('四件事')
     expect(system).not.toContain('三件事')
-    expect(system).toContain('四件事')
+    expect(system).toContain('node.create')
   })
 })

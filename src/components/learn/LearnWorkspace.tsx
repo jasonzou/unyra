@@ -31,7 +31,7 @@ import {
   type ComponentProps,
   type ReactNode,
 } from 'react'
-import { ExternalLink, Globe } from 'lucide-react'
+import { ExternalLink, Globe, Maximize2, Minimize2 } from 'lucide-react'
 import type {
   DocKind,
   DocView,
@@ -43,7 +43,6 @@ import type {
   KnowledgeNode,
   LearnStore,
   LearnTab,
-  OutlineEntry,
   TabRef,
   WebTabMeta,
 } from '../../learn/types'
@@ -120,7 +119,6 @@ import {
   removeExam,
   touchNode,
   updateMessageText,
-  updateNode,
   deleteNote,
   writeNote,
 } from '../../learn/graph'
@@ -137,6 +135,7 @@ import {
   type AgentTabCloseBlock,
 } from '../../learn/agentTabs'
 import type { AgentTabRef } from '../../learn/types'
+import type { StructureMap } from '../../learn/structure'
 import type { TabCloseMode } from '../../learn/tabs'
 import { attemptBrief, examAttempted, examTotalPoints } from '../../learn/exam'
 import type { Exam } from '../../learn/exam'
@@ -153,6 +152,7 @@ import {
 } from '../../learn/reading'
 import { makeConversation, makeGoal, nodeDocRel } from '../../learn/store'
 import { loadAgentSettings, saveAgentSettings, subscribeAgentSettings } from '../../agent/settings'
+import { subscribeDrops } from '../../agent/contextDebug'
 import { personaOf } from '../../agent/persona'
 import { docFormatOf } from '../../agent/docFormat'
 import AgentSettingsPanel from '../AgentSettingsPanel'
@@ -164,6 +164,8 @@ import FloatWindow from '../FloatWindow'
 import { usePresence } from '../../lib/presence'
 import ExamCopyView from './ExamCopyView'
 import { OutlinePane } from './workspace/OutlinePane'
+import { NodeService, type GNodeKind } from '../../learn/nodeKinds'
+import { noteEntityOf } from './workspace/panes'
 import { pruneImages } from '../../learn/images'
 import { dropDrafts } from '../../learn/drafts'
 import { queueOf, shouldEnqueue } from '../../learn/agentQueue'
@@ -298,6 +300,7 @@ import { useFocusFlow } from './workspace/useFocusFlow'
 import { useScheduleFlow, useScheduleReminder } from './workspace/useScheduleFlow'
 import { useWorkflowStarters } from './workspace/useWorkflowStarters'
 import { examNeedingWork, makeExamDeps } from './workspace/examTools'
+import { hasExamFigures, selfCheckExamFigures } from './workspace/examImageCheck'
 import { t } from '../../i18n'
 
 /**
@@ -416,6 +419,43 @@ export default function LearnWorkspace({
    */
   /** 上下文比对调试器：悬浮窗口（可拖动），只在开发者模式里打开（见 AgentSettingsPanel 的开发者分页） */
   const debugWin = usePresence()
+  const openContextDebugger = debugWin.setOpen
+  // 命中骤降定格成报告时自动弹出（开发者开关开着才弹；见 agent/contextDebug 与 ToolsTab 的开关）
+  useEffect(
+    () =>
+      subscribeDrops(() => {
+        if (loadAgentSettings().dev.contextDebugger) openContextDebugger(true)
+      }),
+    [openContextDebugger],
+  )
+  /**
+   * 上下文轨迹：**独立的 Electron 窗口**（与考试窗口同一套结构，见 electron/app/traceWindow）。
+   * 主窗口是数据拥有者：打开时把当前激活会话整份递过去，开着期间随数据变化持续 push；
+   * 窗口关掉（onClosed）就停。轨迹是只读的，那边没有任何回发通道。
+   */
+  const [traceWinOpen, setTraceWinOpen] = useState(false)
+  const storeConvRef = useRef(store)
+  storeConvRef.current = store
+  const openContextTrace = useCallback(() => {
+    const s = storeConvRef.current
+    const conv = s.conversations.find((c) => c.id === s.activeConversationId) ?? null
+    void native()
+      .traceHost.open(conv)
+      .then((r) => {
+        if (r.ok) setTraceWinOpen(true)
+      })
+      .catch(() => {})
+  }, [])
+  // 窗口开着：会话数据一变就推一份（activate 会话切换、流式里程碑落库都会走到）
+  useEffect(() => {
+    if (!traceWinOpen) return
+    const s = storeConvRef.current
+    native()
+      .traceHost.push(s.conversations.find((c) => c.id === s.activeConversationId) ?? null)
+    // 依赖里不放 store 整体（每次轮转都换引用）——只盯 conversations 与激活会话两个字段
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [traceWinOpen, store.conversations, store.activeConversationId])
+  useEffect(() => native().traceHost.onClosed(() => setTraceWinOpen(false)), [])
   /*
    * 文档区查找 / 替换条：null = 关着，'find' = 只有查找行，'replace' = 展开替换行。
    * focusTick 每次按快捷键都 +1：条子开着时再按一次 Ctrl+F，要把焦点抢回查找框。
@@ -436,7 +476,7 @@ export default function LearnWorkspace({
    * 不把新的这一版交下去，撤掉暂存的那一刻编辑器会回落到打开时读到的旧内容。
    */
   const [localSaved, setLocalSaved] = useState<{ path: string; text: string } | null>(null)
-  // 删除确认：pendingDelete 非空时弹出确认框（整棵子树会一起没，问一句再删）
+  // 删除确认：pendingDelete 非空时弹出确认框（删谁只删谁，问一句再删；根文档=整个目标）
   const [pendingDelete, setPendingDelete] = useState<{
     nodeId: string
     title: string
@@ -1024,6 +1064,15 @@ export default function LearnWorkspace({
   const browserDepsRef = useRef<BrowserDeps | null>(null)
 
   const agent = useAgent({
+    afterNodeEdit: (uuid, kind) => {
+      // 出卷后的视觉自检：带图题渲染成位图交给模型看，坏图自动重画（见 examImageCheck）
+      if (kind !== 'exam') return
+      const s0 = getLatest()
+      const exam = s0.exams.find((e) => e.id === uuid)
+      if (exam && hasExamFigures(exam.questions)) {
+        void selfCheckExamFigures({ getLatest, set, onToast }, exam.id, exam.questions)
+      }
+    },
     store,
     set,
     getLatest,
@@ -1531,9 +1580,12 @@ export default function LearnWorkspace({
       }
       const s = getLatest()
       let ref = targetRef
+      // 游离笔记的页签：nodeId 放的是笔记自己的 id，对不上节点、却对得上游离池 = 合法页签
+      //（与绑定笔记同一套用法，差别只是没有那条关系线——见 workspace/panes 的 noteEntityOf）
+      const freeNote = ref.kind === 'note' ? noteEntityOf(s, ref) : null
       const initialNodeId = tabNodeId(ref)
       const initialNode = initialNodeId ? nodeById(s, initialNodeId) : undefined
-      if (initialNodeId && !initialNode) return
+      if (initialNodeId && !initialNode && !freeNote) return
       if (ref.kind === 'outline' && initialNode) {
         const goal = s.goals.find((g) => g.id === initialNode.goalId)
         if (goal && ref.nodeId !== goal.rootNodeId) {
@@ -1543,7 +1595,7 @@ export default function LearnWorkspace({
       }
       const nodeId = tabNodeId(ref)
       const node = nodeId ? nodeById(s, nodeId) : undefined
-      if (nodeId && !node) return
+      if (nodeId && !node && !freeNote) return
       const wasActive = focusedTab(s.docArea)?.id === tabKey(ref)
       const base = node ? touchNode(retargetNode(s, node.id), node.id) : s
       /*
@@ -1576,7 +1628,7 @@ export default function LearnWorkspace({
        * 于是切到那个目标时它就出现在栏上、切走时跟着收起来——「所有这个目标下任何层级
        * 的文档打开都会被 tab 组记录」正是这一行。
        */
-      const owner = refOwner(ref, (id) => nodeById(base, id)?.goalId ?? null)
+      const owner = refOwner(ref, (id) => nodeById(base, id)?.goalId ?? null) ?? freeNote?.goalId ?? null
       set({ ...base, docArea: withOwners(opened, claimTab(opened.tabOwners, owner, tabKey(ref))) })
       if (wasActive) requestReveal()
       setSidebarOpen(false)
@@ -2596,7 +2648,7 @@ export default function LearnWorkspace({
        *
        * 这样点「开始学习」当场就有节点、有侧栏条目、有对话开始跑，用户马上看到东西在动；
        * 旧流程要先等一次「生成描述」的模型往返，那几秒里界面是空的。标题随后会被
-       * api.node.rename 改掉，数据目录名跟着变（改标题＝目录改名，早已支持）。
+       * 改标题（节点 editContent 的 title）改掉，数据目录名跟着变（改标题＝目录改名，早已支持）。
        */
       const rootNode: KnowledgeNode = {
         id: crypto.randomUUID(),
@@ -2770,7 +2822,7 @@ export default function LearnWorkspace({
    *
    * 对应场景：
    * 1. tab 变动：打开新页签、关闭页签、切换激活页签、分屏或焦点变化。
-   * 2. 文件变动：导师改写/追加教学文档（api.doc.write）、笔记修改、超级文档保存、试卷提交或草稿更新。
+   * 2. 文件变动：导师改写教学文档（节点 editContent）、笔记修改、超级文档保存、试卷提交或草稿更新。
    *
    * 守卫与约束：
    * - 首次挂载只记录初始快照，不触发弹出（避免应用启动时违背用户上一次保存的收起偏好）。
@@ -2997,6 +3049,7 @@ export default function LearnWorkspace({
     startSuperLab,
     startBrowserUse,
     startOutline,
+    startPrereqOutline,
     workflowRows,
     runWorkflowRow,
     removeWorkflowRow,
@@ -3570,7 +3623,7 @@ export default function LearnWorkspace({
     const pending = pendingDelete
     if (!pending) return
     setPendingDelete(null)
-    // 先备货再动手：撤回项捕获的是删除前那一刻的旧引用（整棵子树、边、试卷、会话与两本账）
+    // 先备货再动手：撤回项捕获的是删除前那一刻的旧引用（节点本身、相连的边、试卷、会话与两本账）
     const entry = captureNodeDelete(getLatest(), pending.nodeId)
     if (entry) pushUndo(entry)
     // agent 栏的页签跟着收拾：整目标被删时它的导师页签一并退场（读盘归一是同一条规矩）
@@ -3578,36 +3631,8 @@ export default function LearnWorkspace({
     onToast(pending.isRoot ? t('已删除该学习目标，可按 Ctrl+Z 撤回') : t('已删除该节点，可按 Ctrl+Z 撤回'))
   }
 
-  /**
-   * 大纲页里「创建并开讲」：把大纲条目真的建成子目标。
-   *
-   * 复用 openConcept 的整条路径（建点、补描述、开教学文档页签、交给导师开讲），
-   * 只是不改写父文档的链接——大纲条目不是正文里的词，没有可替换的链接。
-   * 建出来的节点 key 与条目一致（都来自标题），大纲页靠它对上号。
-   */
-  const createOutlineChild = useCallback(
-    (parentNode: KnowledgeNode, entry: OutlineEntry) => {
-      openConcept(parentNode.id, entry.title, { hint: entry.summary, rewriteLink: false })
-    },
-    [openConcept],
-  )
-
-  const handleOpenOutlineNode = useCallback(
-    (id: string) => {
-      openTab({ kind: 'teach', nodeId: id })
-    },
-    [openTab],
-  )
-
-  const handleGenerateOutline = useCallback(
-    (n: KnowledgeNode) => {
-      startOutline(n.id)
-    },
-    [startOutline],
-  )
-
   const generateTeachingDoc = useCallback(
-    (targetNode: KnowledgeNode) => {
+    (targetNode: KnowledgeNode, hint?: string) => {
       if (!hasKey) {
         onToast(t('生成教学文档需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
         onOpenSettings()
@@ -3620,7 +3645,8 @@ export default function LearnWorkspace({
         set(nextStore)
         convId = conversation.id
       }
-      agent.autoTeach({ goalId: targetNode.goalId, nodeId: targetNode.id, conversationId: convId }, false)
+      // hint 是发起方的意图上下文（如结构画布的「落地哪条目标项」），跟着这一轮进模型
+      agent.autoTeach({ goalId: targetNode.goalId, nodeId: targetNode.id, conversationId: convId }, false, hint)
       onToast(t('已开始为「{0}」生成教学文档', targetNode.title))
     },
     [hasKey, providerName, onToast, onOpenSettings, getLatest, set, agent],
@@ -3645,6 +3671,198 @@ export default function LearnWorkspace({
   const handleOutlineFocusHandled = useCallback(() => {
     setOutlineFocus(null)
   }, [])
+
+  /**
+   * 结构图变了：整张换上去（v2 只剩坐标表）。空表不留在 store 里——
+   * `structure.json` 的空壳没有意义，读盘那一侧按「空 = 还没拖过」处理。
+   */
+  const updateStructure = useCallback(
+    (goalId: string, next: StructureMap) => {
+      const s = getLatest()
+      const structure = { ...(s.structure ?? {}) }
+      if (Object.keys(next.positions).length) structure[goalId] = next
+      else delete structure[goalId]
+      set({ ...s, structure: Object.keys(structure).length ? structure : undefined })
+    },
+    [getLatest, set],
+  )
+
+  /**
+   * 结构画布拖出一张笔记节点时用：建一份**真实的空笔记**，把名字交回去。
+   *
+   * 与侧栏的「新建笔记」不同，这里**不打开页签**——用户要的是先在图上有这张卡，
+   * 想写的时候点标题再打开。笔记不需要上下文，所以这一步是纯本地的、同步的。
+   */
+  /*
+   * 节点服务（统一通道）：画布的建 / 删 / 连 / 改名与 agent 的 api.node 走的是
+   * **同一个 NodeService**——画布上不再有任何「只存在于图里」的状态。目标的坐标
+   * 由派生自动铺排，删除时顺手把坐标表里那条清掉（别留死键）。
+   */
+  const makeNodeService = useCallback(
+    () => new NodeService({ getLatest, set, goalId: () => getLatest().activeGoalId ?? '' }),
+    [getLatest, set],
+  )
+
+  const dropPositionOf = useCallback(
+    (uuid: string) => {
+      const s = getLatest()
+      if (!s.structure) return
+      const structure = { ...s.structure }
+      let touched = false
+      for (const [gid, map] of Object.entries(structure)) {
+        if (!(uuid in map.positions)) continue
+        const { [uuid]: _drop, ...rest } = map.positions
+        structure[gid] = { ...map, positions: rest }
+        touched = true
+      }
+      if (touched) set({ ...s, structure })
+    },
+    [getLatest, set],
+  )
+
+  const canvasCreateNode = useCallback(
+    (kind: GNodeKind, under: string | null) => makeNodeService().create({ kind, ...(under ? { under } : {}) }),
+    [makeNodeService],
+  )
+
+  /**
+   * 画布垃圾桶是**用户的**删除通道，与服务那条 agent 通道共用同一套「删谁只删谁」：
+   * 大纲卡删除 = 清空计划（文档与下级文档都在）；试卷卡走**用户自己的两档确认**
+   * （与试卷列表同一条路：列出连带删掉什么 → 二次确认 → 可撤回），正在考的先挡下；
+   * 其余走统一服务（文档只删自己，下游断线成游离）。
+   */
+  const canvasDeleteNode = useCallback(
+    (uuid: string) => {
+      const target = getLatest().exams.find((e) => e.id === uuid)
+      if (target) {
+        if (exam.live && exam.live.examId === uuid) {
+          onToast(t('有一场考试正在进行，先把它考完或放弃'))
+          return { ok: true as const }
+        }
+        setPendingExamDelete(target)
+        setExamDeleteStage(examAttempted(target) ? 'warn' : 'final')
+        return { ok: true as const }
+      }
+      // 删根文档 = 删整个目标（根就是目标的骨架）：从画布的删除键触发也必须走两档确认
+      if (getLatest().goals.some((g) => g.rootNodeId === uuid)) {
+        const node = nodeById(getLatest(), uuid)
+        setPendingDelete({ nodeId: uuid, title: node?.title ?? uuid, isRoot: true, count: goalSubtreeSize(uuid) })
+        return { ok: true as const }
+      }
+      const r = makeNodeService().delete(uuid)
+      if ('ok' in r) dropPositionOf(uuid)
+      return r
+    },
+    [getLatest, makeNodeService, dropPositionOf, onToast, exam.live],
+  )
+
+  const canvasConnect = useCallback(
+    (fromUuid: string, toUuid: string, portKey?: string) => {
+      const svc = makeNodeService()
+      const from = svc.get(fromUuid)
+      const to = svc.get(toUuid)
+      if (!from || !to) return { error: '有一个节点刚刚不在了（可能被删除）' }
+      return from.connect(to, 'down', portKey)
+    },
+    [makeNodeService],
+  )
+
+  const canvasDisconnect = useCallback(
+    (fromUuid: string, toUuid: string) => {
+      const svc = makeNodeService()
+      const from = svc.get(fromUuid)
+      const to = svc.get(toUuid)
+      if (!from || !to) return { error: '有一个节点刚刚不在了（可能被删除）' }
+      return from.disconnect(to)
+    },
+    [makeNodeService],
+  )
+
+  const canvasRenameNote = useCallback(
+    (noteUuid: string, to: string) => {
+      const svc = makeNodeService()
+      const node = svc.get(noteUuid)
+      if (!node || node.kind !== 'note') return { error: '这份笔记已经不在了' }
+      const c = node.content as { text?: string }
+      return node.editContent({ title: to, text: typeof c.text === 'string' ? c.text : '' })
+    },
+    [makeNodeService],
+  )
+
+  const canvasAddOutlineEntry = useCallback(
+    (outlineUuid: string, title: string) => {
+      const svc = makeNodeService()
+      const outline = svc.get(outlineUuid)
+      if (!outline || outline.kind !== 'outline') return
+      const current = (outline.content as { intro?: string; children?: Array<{ title: string; summary: string }> } | null) ?? null
+      const r = outline.editContent({
+        intro: current?.intro ?? '',
+        children: [...(current?.children ?? []), { title, summary: '' }],
+      })
+      if ('error' in r) onToast(r.error)
+      else onToast(t('已添加目标项「{0}」', title))
+    },
+    [makeNodeService, onToast],
+  )
+
+  /**
+   * 在目标项上挂一份带标题的空文档（统一通道）：create 的同目标去重让同一标题
+   * 永远指向同一份实体；只建实体不写正文——正文由「生成文档」交给 AI。
+   */
+  const createChildDoc = useCallback(
+    (ownerNodeId: string, title: string, portKey?: string): string | null => {
+      const r = makeNodeService().create({ kind: 'doc', title, under: ownerNodeId, ...(portKey ? { portKey } : {}) })
+      return 'uuid' in r ? r.uuid : null
+    },
+    [makeNodeService],
+  )
+
+  /** 空文档卡上的「生成文档」：复用正文区那颗按钮同一条路径；hint 为画布侧的意图 */
+  const generateDocForNode = useCallback(
+    (nodeId: string, hint?: string) => {
+      const n = nodeById(getLatest(), nodeId)
+      if (n) generateDocRef.current(n, hint)
+    },
+    [getLatest],
+  )
+
+  /**
+   * 右键「设为入口」：把一份**没有上级**的文档立为那张图的入口（目标的根）。
+   * 一张图有且只有一个——换入口就是旧的退位（它还挂在图上，多半从此变成游离卡）。
+   */
+  const canvasSetEntry = useCallback(
+    (docUuid: string) => {
+      const s = getLatest()
+      const node = nodeById(s, docUuid)
+      if (!node) return { error: t('这份文档已经不在了') }
+      const goal = s.goals.find((g) => g.id === node.goalId)
+      if (!goal) return { error: t('这个文档不属于任何学习目标') }
+      if (goal.rootNodeId === docUuid) return { error: t('它已经是入口了') }
+      if (s.edges.some((e) => e.to === docUuid)) {
+        return { error: t('「{0}」已经有上级了——只有没有上级的文档能立为入口', node.title) }
+      }
+      set({ ...s, goals: s.goals.map((g) => (g.id === goal.id ? { ...g, rootNodeId: docUuid, updatedAt: Date.now() } : g)) })
+      return { ok: true, note: t('已把「{0}」立为入口：这门课从这里开始（原入口文档还在图上）', node.title) }
+    },
+    [getLatest, set],
+  )
+
+  /** 画布统一通道（一个稳定对象：OutlinePane 按 referential equality 冻结比较） */
+  const canvasChannel = useMemo(
+    () => ({
+      onCreateNode: canvasCreateNode,
+      onDeleteNode: canvasDeleteNode,
+      onConnect: canvasConnect,
+      onDisconnect: canvasDisconnect,
+      onSetEntry: canvasSetEntry,
+      onCreateChildDoc: createChildDoc,
+      onRenameNote: canvasRenameNote,
+      onAddOutlineEntry: canvasAddOutlineEntry,
+      onGenerateDoc: generateDocForNode,
+      onGenerateOutline: (docUuid: string) => startPrereqOutline(docUuid),
+    }),
+    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, canvasSetEntry, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline],
+  )
 
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
   const getNoteActions = useCallback(
@@ -4398,6 +4616,7 @@ export default function LearnWorkspace({
                   onToast(t('超级导师设置已保存'))
                 }}
                 onOpenContextDebugger={() => debugWin.setOpen(true)}
+                onOpenContextTrace={openContextTrace}
                 flowRows={workflowRows}
                 onRunWorkflow={runWorkflowRow}
                 onRemoveWorkflow={removeWorkflowRow}
@@ -4648,13 +4867,11 @@ export default function LearnWorkspace({
                   active={isActive}
                   store={store}
                   node={oNode}
-                  onOpenNode={handleOpenOutlineNode}
-                  onCreateChild={createOutlineChild}
-                  onGenerate={handleGenerateOutline}
-                  onSetTint={setNodeTint}
+                  onChangeStructure={updateStructure}
                   docs={explorerDocs}
                   exams={explorerExams}
-                  activeTab={gTab?.ref ?? null}
+                  channel={canvasChannel}
+                  onToast={onToast}
                   focusTarget={outlineFocus}
                   onFocusHandled={handleOutlineFocusHandled}
                 />
@@ -4824,6 +5041,27 @@ export default function LearnWorkspace({
           )}
 
           {/*
+            画布页签（大纲页）右上角的纯净阅读入口：悬浮组不画 outline（它不是文档），
+            这颗补位。画布内的双击归画布自己（适应画布 / 聚焦节点），进纯净阅读
+            只走这颗按钮与 F11——两套双击手势不再打架。
+          */}
+          {gTab?.ref.kind === 'outline' && (
+            <button
+              type="button"
+              title={pure ? t('退出纯净阅读（F11 / Esc）') : t('纯净阅读：收起两侧栏、页签栏与顶栏，只留正文（F11）')}
+              aria-pressed={pure}
+              onClick={toggleZen}
+              className={
+                pure
+                  ? 'absolute right-4 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-lg border border-line-strong bg-line/50 text-ink transition'
+                  : 'absolute right-4 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-card/90 text-ink-soft shadow-sm backdrop-blur transition hover:bg-line/50 hover:text-ink'
+              }
+            >
+              {pure ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </button>
+          )}
+
+          {/*
             拖页签的落点高亮：指针停在某一格的边上时，把那半边画出来——
             松手就长成新的一格。中间那一块是「放进这一格」，画满整格。
           */}
@@ -4907,7 +5145,8 @@ export default function LearnWorkspace({
       onNewNote: (nodeId) => createNodeNote(nodeId),
       onNewProject: (nodeId) => newProject(nodeId),
       onNewExam: (nodeId) => newExam(nodeId),
-      onNewSuperDoc: (nodeId) => startSuperLab(nodeId),
+      // 壳名必须带到：画布空壳卡上的「生成」说的是「就写这一份」，丢了它导师会另建一份（两份超级文档的元凶）
+      onNewSuperDoc: (nodeId, shellName) => startSuperLab(nodeId, shellName),
       onOpenNote: (nodeId, name) => openTab({ kind: 'note', nodeId, note: name }),
       onRenameNote: (nodeId, from, to) => renameNodeNote(nodeId, from, to),
       onDeleteNote: (nodeId, name) => setPendingNoteDelete({ nodeId, name }),
@@ -4937,6 +5176,7 @@ export default function LearnWorkspace({
         exam.openExam(examId)
       },
       onGrade: (nodeId) => requestGrading(nodeId),
+      onOpenRecord: (nodeId, examId, attemptId) => openExamCopy(nodeId, examId, attemptId),
       onDelete: (target) => {
         setPendingExamDelete(target)
         setExamDeleteStage(examAttempted(target) ? 'warn' : 'final')
@@ -4944,24 +5184,7 @@ export default function LearnWorkspace({
       liveExamId: exam.live?.examId ?? null,
       grading,
     }),
-    [exam.openExam, exam.reveal, exam.live, selectNode, onToast, requestGrading, grading],
-  )
-
-  /**
-   * 改某个节点在思维导图上的自定义颜色（右键节点改色）。
-   *
-   * 只是节点上的一笔（KnowledgeNode.tint），走 updateNode 那条正规写路径：跟着
-   * store 一起落盘，因此刷新、重启、换设备都还在。传 null = 回到「随分支走」，
-   * 这时写回空串——updateNode 的对象展开会留一个值为 undefined 的键，落盘（JSON）
-   * 时它自己会消失，读盘那一侧也把空串当「没有」，两头都不留一个悬空的值。
-   */
-  const setNodeTint = useCallback(
-    (nodeId: string, tint: string | null) => {
-      const s = getLatest()
-      if (!nodeById(s, nodeId)) return
-      set(updateNode(s, nodeId, { tint: tint ?? '' }))
-    },
-    [getLatest, set],
+    [exam.openExam, exam.reveal, exam.live, selectNode, onToast, requestGrading, grading, openExamCopy],
   )
 
   const explorerState = useMemo<NodeStateActions>(
@@ -5282,8 +5505,8 @@ export default function LearnWorkspace({
       )}
 
       {/*
-        上下文比对调试器：可拖动的悬浮窗（见 components/FloatWindow）。
-        开着才有记录——快照由 agent 设置里的开发者开关控制（见 useAgent 的 onContext）。
+        上下文对比调试器：可拖动的悬浮窗（见 components/FloatWindow）。
+        平时不录制；命中骤降时 contextDebug 定格报告，开发者开关开着就自动弹出来。
       */}
       {debugWin.mounted && (
         <FloatWindow width={760} height={680} closing={debugWin.closing}>
@@ -5387,7 +5610,7 @@ export default function LearnWorkspace({
           message={
             pendingDelete.isRoot
               ? t('「{0}」是学习目标（总目标），删除后它及其下 {1} 个阶段目标、所有对话与试卷都会一并移除，且无法恢复。', pendingDelete.title, pendingDelete.count - 1)
-              : t('将删除「{0}」及其全部下级阶段目标、试卷与对话。删错了这个动作可以撤回——删除后按 Ctrl+Z 即可恢复（关掉的页签要重新打开）。', pendingDelete.title)
+              : t('只删除「{0}」本身：与它相连的线一并解开，它的下级阶段目标会留在画布上（成为没有上游的游离卡），挂在该文档上的笔记与试卷随它一起移除。删错可按 Ctrl+Z 撤回。', pendingDelete.title)
           }
           confirmLabel={pendingDelete.isRoot ? t('删除目标') : t('删除')}
           onConfirm={commitRemoveNode}

@@ -4,12 +4,14 @@
  * 实现见同目录的 api / body / askForm / worker / execute。
  */
 import type { AgentTool, AgentToolResult, MessageImage } from '../types'
-import type { TmpEntry, MasteryStatus } from '../../learn/types'
+import type { TmpEntry } from '../../learn/types'
 import type { ProfileField } from '../../user/fields'
 /* SandboxDocKind 定义在 ./refs（DocRef 要用它），这里既要它进本文件的作用域、又要对外转出：
    import type 管前者，export type ... from 管后者——少写前者，下面那些引用会全变成「找不到名字」。 */
 import type { ResolvedDocRef, ResolvedNodeRef, SandboxDocKind } from './refs'
+import type { NodeOps } from './nodeObject'
 export type { SandboxDocKind } from './refs'
+export type { NodeOps } from './nodeObject'
 
 export interface SandboxCall {
   name: string
@@ -82,47 +84,21 @@ export interface SandboxOptions {
   nodeId: () => string | null
   /** path → 节点；解析失败时 message 直接作为结果回给模型 */
   resolveNode: (path: string) => ResolvedNodeRef
-  /** path → 节点 + 文档 */
+  /** path → 节点 + 文档（ui.point / files 镜像同步还在用 path 这套寻址） */
   resolveDoc: (path: string) => ResolvedDocRef
-  /** 文档读写（按已解析出的 id、文档类型与笔记名操作；note 只对 'note' 有意义） */
+  /** 文档读写的最小面（ui.point 的定位文本与 files.* 的磁盘镜像同步用） */
   docOps: {
     read: (nodeId: string, kind: SandboxDocKind, note?: string) => string
     write: (nodeId: string, kind: SandboxDocKind, note: string | undefined, content: string) => AgentToolResult
-    replace: (
-      nodeId: string,
-      kind: SandboxDocKind,
-      note: string | undefined,
-      range: { start?: number; end?: number; content: string; expected?: string },
-    ) => AgentToolResult
-    append: (nodeId: string, kind: SandboxDocKind, note: string | undefined, content: string) => AgentToolResult
-    /**
-     * 写一条注解（正文旁边的虚线词条）。注解挂在**节点**上，kind / note 只用于报错措辞，
-     * 因此这里只收 nodeId 与词条本身。见 agentOps 的实现说明。
-     */
-    annotate: (nodeId: string, input: { term: string; occurrence?: number; body: string }) => AgentToolResult
   }
-  /** 节点管理：列、看、建、改名、改属性、删、移 */
-  nodeOps: {
-    list: () => unknown
-    read: (nodeId: string) => unknown
-    create: (parentId: string, input: { title: string; description?: string; status?: MasteryStatus; [k: string]: unknown }) => AgentToolResult
-    update: (
-      nodeId: string,
-      patch: { title?: string; description?: string; status?: MasteryStatus },
-    ) => AgentToolResult
-    remove: (nodeId: string, opts?: { cascade?: boolean; dryRun?: boolean }) => AgentToolResult
-    /** 迁移节点到另一个节点之下（改父线；根/跨目标/成环会被拒，见 graph/nodes 的 moveNode） */
-    move: (nodeId: string, newParentId: string) => AgentToolResult
-    /** 获取节点的完整物理路径索引（{ id, title, path, dir, doc, notesDir, outline, meta }） */
-    paths?: (nodeId: string) => unknown
-    /** 批量/递归创建大纲树结构与节点 */
-    createTree?: (
-      parentId: string | undefined,
-      input: { tree?: unknown; [k: string]: unknown },
-    ) => AgentToolResult
-    /** 划词注解：挂在节点上 */
-    annotate?: (nodeId: string, input: { term: string; occurrence?: number; body: string }) => AgentToolResult
-  }
+  /**
+   * 节点宇宙（api.node）：create / get / list / delete 四条传输 + 对象成员代调用。
+   * 行为在 learn/nodeKinds 的类型子类里（多态），通道见 sandbox/nodeObject。
+   * 不注入就没有这一组。
+   */
+  nodes?: NodeOps
+  /** 节点在数据根下的磁盘路径（files.* 空路径兜底与镜像对账用）；不注入就退回按标题拼 */
+  docPath?: (nodeId: string) => string | null
   /** 临时变量：拿最新的一份，写入时回调给 store 落盘。作用域是当前节点；不注入就没有 tmp 这一组 */
   tmp?: () => {
     nodeId?: string
@@ -170,17 +146,10 @@ export interface SandboxOptions {
    * 目标级持久化函数（method.*，见 learn/methods）；未注入就没有 method 这一组。
    *
    * find 返回的是**源码**而不是执行结果：执行发生在 buildApi 的 method.call 里——
-   * 那里才能拿到「当前这次编排的 api」注入给函数（函数体里 await api.doc.read(...)
+   * 那里才能拿到「当前这次编排的 api」注入给函数（函数体里 await api.node.get(uuid) 的 content
    * 用的就是它）。测试探针与超级文档的桥各自拿到的 api 不同，但执行语义一致。
    */
   methods?: MethodOps
-  /** 超级文档（sdoc.*，可交互 HTML，绑定节点，见 learn/superdocs）；未注入就没有 sdoc 这一组 */
-  superdocs?: SuperDocOps
-  /**
-   * 目标大纲（outline.*，见 learn/outline）：每个节点一份的结构化计划。
-   * read 回 OutlineDoc 或 null（还没写过）；write 整份覆盖。未注入就没有 outline 这一组。
-   */
-  outline?: OutlineOps
   /** 工作流登记表（wf.*，见 learn/workflows）；未注入就没有 wf 这一组 */
   workflows?: WorkflowOps
   /** 代码块伪编译的交付口（见 lib/codeArtifacts）；未注入就没有 code 这一组 */
@@ -644,36 +613,6 @@ export interface MethodOps {
   find: (name: string) => { name: string; code: string } | null
 }
 
-/* ---------- sdoc：超级文档 ---------- */
-
-/**
- * sdoc.* 的宿主实现（见 learn/superdocs）：绑定在节点上的可交互 HTML 文档。
- * 操作都作用在「path 解析出的那个节点」上，name 是文档在该节点内的身份。
- */
-export interface SuperDocOps {
-  /** 清单：这个节点有哪些超级文档（名字、体量、更新时间） */
-  list: (nodeId: string) => unknown
-  /** 读正文；没有那份就回 { error } */
-  read: (nodeId: string, name: string) => unknown
-  /** 写入（同名覆盖、没有就新建），回最终名字 */
-  write: (nodeId: string, name: string | undefined, html: string) => unknown
-  /** 删除一份 */
-  remove: (nodeId: string, name: string) => unknown
-}
-
-/* ---------- outline：目标大纲 ---------- */
-
-/**
- * outline.* 的宿主实现（见 learn/outline）：大纲是结构化的计划（导语 + 一层子目标），
- * 不是 Markdown——它在页签里打开是交互页面。write 是整份覆盖（与 sdoc.write 同一语义）。
- */
-export interface OutlineOps {
-  /** 读某个节点的大纲；还没有时回 null（这不是错误，模型据此知道要先写） */
-  read: (nodeId: string) => unknown
-  /** 整份写入；校验（条目形状、一层深度、数量上限）不过时回 ok:false 与原因 */
-  write: (nodeId: string, input: { intro?: unknown; children?: unknown }) => AgentToolResult
-}
-
 /* ---------- wf：工作流登记表 ---------- */
 
 /**
@@ -827,7 +766,7 @@ export interface BrowserOps {
    */
   dom(tabId: string | undefined, ref: number | { ref: number }, op: string, arg?: string): Promise<{ ok: true; result?: unknown }>
   /** 整页转 markdown（与 web.webFetch 同一条管线：短的回全文，长的落盘回大纲 + uuid）；
-   *  opts { maxChars?, offset? } 把回文切段（doc.readRange 同一哲学） */
+   *  opts { maxChars?, offset? } 把回文切段（与整篇读取同一哲学） */
   read(tabId?: string, opts?: Record<string, unknown>): Promise<unknown>
   /** 页面截图 → 资源库 + 挂到下一跳（与 ui.screenshot 同一条通道）——snapshot/read 拿不到时才用 */
   capture(tabId?: string): Promise<{ ok: true; note?: string; images: MessageImage[] } | { ok: false; error: string }>

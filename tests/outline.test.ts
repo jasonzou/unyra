@@ -62,7 +62,7 @@ function fixture(): LearnStore {
     version: 2,
     nodes: [
       makeNode({ id: 'n1', title: '微积分', outline: undefined }),
-      makeNode({ id: 'n2', title: '极限', notes: [{ name: '笔记', content: '我记的笔记', createdAt: NOW, updatedAt: NOW }] }),
+      makeNode({ id: 'n2', title: '极限', notes: [{ id: 'n-' + crypto.randomUUID(), name: '笔记', content: '我记的笔记', createdAt: NOW, updatedAt: NOW }] }),
       makeNode({ id: 'n3', title: '夹逼定理' }),
     ],
     edges: [
@@ -122,11 +122,10 @@ describe('moveNode：迁移节点到另一个节点之下', () => {
 })
 
 describe('大纲：写入、对上号与落盘往返', () => {
-  it('createNodeUnder 建出的节点自带一份空大纲（创建时两份文件同时成形）', () => {
+  it('createNodeUnder 建出的节点不再自动附大纲（大纲是显式的计划：kind outline 创建或 editContent 写入）', () => {
     const r = createNodeUnder(fixture(), 'n2', { title: '洛必达法则' })
     const created = r.store.nodes.find((n) => n.title === '洛必达法则')
-    expect(created?.outline).toBeDefined()
-    expect(created?.outline?.children).toEqual([])
+    expect(created?.outline).toBeUndefined()
   })
 
   it('writeOutline 整份写入，key 由标题生成；同 key 条目只留一份', () => {
@@ -156,15 +155,17 @@ describe('大纲：写入、对上号与落盘往返', () => {
     expect(child?.title).toBe('洛必达法则')
   })
 
-  it('落盘往返：{节点}.outline.json 写得出、读得回；老节点没有大纲也不凭空造文件', () => {
+  it('落盘往返：大纲写进节点文件的 parts、读得回；老节点没有大纲就不写那一条', () => {
     let s = fixture()
     const r = writeOutline(s, 'n2', { intro: '这一层的路线', children: [{ title: '洛必达法则', summary: '先学' }] }, NOW)
     if (!r.ok) throw new Error('writeOutline 应当成功')
     s = r.store
     const files = buildDocs(s)
-    expect(files.has('docs/微积分/极限/极限.outline.json')).toBe(true)
-    // n1 的 outline 是 undefined（老数据的形状）：不写文件
-    expect(files.has('docs/微积分/微积分.outline.json')).toBe(false)
+    const n2File = JSON.parse(files.get('docs/微积分/极限/极限.node.json') ?? '{}')
+    expect(n2File.parts.some((x: { kind: string }) => x.kind === 'outline')).toBe(true)
+    // n1 的 outline 是 undefined（老数据的形状）：parts 里没有那一条
+    const n1File = JSON.parse(files.get('docs/微积分/微积分.node.json') ?? '{}')
+    expect(n1File.parts.some((x: { kind: string }) => x.kind === 'outline')).toBe(false)
 
     const back = parseDocs(files, { activeGoalId: 'g1', activeNodeId: 'n1', activeConversationId: 'c1' })
     expect(back).not.toBeNull()
@@ -190,15 +191,18 @@ describe('大纲：写入、对上号与落盘往返', () => {
     expect(normalizeOutline({ intro: '' })).toBeNull()
   })
 
-  it('大纲页签的身份：o: 前缀、标题带「· 大纲」', () => {
+  it('结构页签的身份：o: 前缀、标题带「· 结构」', () => {
+    // 页签内部 kind 仍叫 'outline'（改它要牵动资源管理器、右键菜单、api.outline 几十处），
+    // 变的只是给人看的那个后缀：这一页已经不是「大纲树」而是「节点图」了。
     const ref = { kind: 'outline', nodeId: 'n2' } as const
     expect(tabKey(ref)).toBe('o:n2')
-    expect(tabTitle(ref, (id) => (id === 'n2' ? '极限' : undefined))).toBe('极限 · 大纲')
+    expect(tabTitle(ref, (id) => (id === 'n2' ? '极限' : undefined))).toBe('极限 · 结构')
   })
 
-  it('nodeDocPath 能指到大纲文件（资源管理器里定位用，与教学文档同一套口径）', () => {
-    expect(nodeDocPath(fixture(), 'n2', { kind: 'outline' })).toBe('docs/微积分/极限/极限.outline.json')
-    expect(nodeDocPath(fixture(), 'n1', { kind: 'outline' })).toBe('docs/微积分/微积分.outline.json')
+  it('nodeDocPath 指到节点文件：正文 / 大纲 / 笔记合并后是同一个文件', () => {
+    expect(nodeDocPath(fixture(), 'n2', { kind: 'outline' })).toBe('docs/微积分/极限/极限.node.json')
+    expect(nodeDocPath(fixture(), 'n2', { kind: 'teaching' })).toBe('docs/微积分/极限/极限.node.json')
+    expect(nodeDocPath(fixture(), 'n1', { kind: 'outline' })).toBe('docs/微积分/微积分.node.json')
   })
 })
 

@@ -1,9 +1,8 @@
-import { BUILTIN_SKILLS } from './builtins'
 import type { SkillDef, SkillSettings } from './types'
 import type { ConversationMessage } from '../types'
 
-/** 内存中缓存的技能列表（默认是内置技能，被物理扫描或用户修改时更新） */
-let memorySkills: SkillDef[] = [...BUILTIN_SKILLS]
+/** 内存中缓存的技能列表（磁盘扫描或用户修改时更新；技能全部来自磁盘与用户自定义） */
+let memorySkills: SkillDef[] = []
 const listeners = new Set<() => void>()
 
 export function getLoadedSkills(): SkillDef[] {
@@ -33,7 +32,7 @@ export function subscribeSkills(listener: () => void): () => void {
  * 优先读取独立技能目录缓存集合，并与设置兼容合并。
  */
 export function getEffectiveSkills(settings?: SkillSettings | null): SkillDef[] {
-  const baseList = memorySkills.length > 0 ? memorySkills : BUILTIN_SKILLS
+  const baseList = memorySkills
 
   const customList = settings?.skills ?? []
   if (!customList.length) {
@@ -145,7 +144,9 @@ export function needsSkillsAnnounce(messages: ConversationMessage[], currentDige
 }
 
 /**
- * 构造技能清单动态注入消息（作为中途进入历史的一条隐藏 user 消息，不破坏系统提示词前缀缓存）
+ * 构造技能清单动态注入消息（作为中途进入历史的一条隐藏 **assistant** 消息——
+ * 技能清单是「有什么能力」的声明，归 assistant 边，见 personaMessage 的分工说明；
+ * 不破坏系统提示词前缀缓存）
  */
 export function skillsAnnounceMessage(
   skills: SkillDef[],
@@ -158,7 +159,7 @@ export function skillsAnnounceMessage(
   const text = formatSkillsDiscoveryPrompt(skills, skillsRoot)
   return {
     id: uuid,
-    role: 'user',
+    role: 'assistant',
     parts: [{ type: 'text', text }],
     ts: at,
     hidden: true,

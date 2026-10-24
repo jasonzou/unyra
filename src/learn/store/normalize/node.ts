@@ -72,21 +72,27 @@ function docsRecord(raw: Record<string, unknown>): Record<string, unknown> {
 function normalizeNotes(raw: Record<string, unknown>): NoteFile[] {
   const now = Date.now()
   const out: NoteFile[] = []
-  const push = (name: unknown, content: unknown, createdAt: unknown, updatedAt: unknown): void => {
+  const push = (name: unknown, content: unknown, createdAt: unknown, updatedAt: unknown, id: unknown): void => {
     const text = typeof content === 'string' ? content : ''
     const at = typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : now
     const seenAt = typeof updatedAt === 'number' && Number.isFinite(updatedAt) ? updatedAt : at
-    out.push({ name: uniqueNoteName(out, typeof name === 'string' ? name : ''), content: text, createdAt: at, updatedAt: seenAt })
+    out.push({
+      id: typeof id === 'string' && id ? id : crypto.randomUUID(),
+      name: uniqueNoteName(out, typeof name === 'string' ? name : ''),
+      content: text,
+      createdAt: at,
+      updatedAt: seenAt,
+    })
   }
   if (Array.isArray(raw.notes)) {
     for (const item of raw.notes) {
       if (!item || typeof item !== 'object') continue
       const r = item as Record<string, unknown>
-      push(r.name, r.content, r.createdAt, r.updatedAt)
+      push(r.name, r.content, r.createdAt, r.updatedAt, r.id)
     }
   }
   const legacy = docsRecord(raw).note
-  if (typeof legacy === 'string' && legacy.trim()) push('笔记', legacy, undefined, undefined)
+  if (typeof legacy === 'string' && legacy.trim()) push('笔记', legacy, undefined, undefined, undefined)
   return out
 }
 
@@ -105,7 +111,13 @@ function normalizeSuperDocs(raw: Record<string, unknown>): SuperDocFile[] {
     const at = typeof r.createdAt === 'number' && Number.isFinite(r.createdAt) ? r.createdAt : now
     const seenAt = typeof r.updatedAt === 'number' && Number.isFinite(r.updatedAt) ? r.updatedAt : at
     const name = uniqueSuperDocName(out, typeof r.name === 'string' ? r.name : '')
-    out.push({ name, html, createdAt: at, updatedAt: seenAt })
+    out.push({
+      id: typeof r.id === 'string' && r.id ? r.id : crypto.randomUUID(),
+      name,
+      html,
+      createdAt: at,
+      updatedAt: seenAt,
+    })
   }
   return out
 }

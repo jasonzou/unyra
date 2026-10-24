@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BookOpen, CornerDownRight, CornerLeftUp, FileX, FoldHorizontal, Globe, OctagonX, Plus, Star, Unlink, X } from 'lucide-react'
+import { BookOpen, CornerDownRight, CornerLeftUp, FileX, FoldHorizontal, Globe, OctagonX, Plus, Star, Unlink, Volume2, VolumeX, X } from 'lucide-react'
 import { DocTypeIcon, WebTabTypeIcon } from './docTypes'
 import type { DependencyEdge, LearnStore, LearnTab, TabRef, WebTabMeta } from '../../learn/types'
 import { TAB_CLOSE_LABEL, dragSlotDelta, isBlankTab, isDocumentTab, tabNodeId, type TabCloseMode } from '../../learn/tabs'
@@ -9,6 +9,7 @@ import { docChipDrop, docChipHover, type ChipPayload } from '../../lib/docChip'
 import { CHIP_MIME, parseChipJson } from '../../lib/chipSyntax'
 import { useClampToViewport, useDismissOn } from '../../lib/useDismiss'
 import { TAB_EXIT_MS, useTabPresence } from '../../lib/tabPresence'
+import { subscribeVideoAudio, videoAudioOf } from '../../learn/video/videoRegistry'
 import { t } from '../../i18n'
 
 /**
@@ -430,6 +431,41 @@ const tabIdOf = (tab: LearnTab): string => tab.id
  * 那一格占住原先留给「与关闭键等宽的空档」的 16px（见下面页签里那格），
  * 于是标题仍然是在整条页签里居中的——图标只是把空档填成了有用信息。
  */
+/**
+ * 视频页签上的快捷静音：页签在后台播、人在读文档时，不用切回去就能让它闭嘴。
+ * 控制的是播放器自己的静音态（登记表，见 learn/video/videoRegistry）；
+ * 播放器内部的静音 / 调音量通过元素的 volumechange 事件同步到图标上。
+ * 登记表里还没有控制器的（创建态 / 流没解析出来）什么都不画。
+ */
+function VideoAudioButton({ tabId }: { tabId: string }) {
+  const [, bump] = useState(0)
+  useEffect(() => subscribeVideoAudio(() => bump((n) => n + 1)), [])
+  const ctrl = videoAudioOf(tabId)
+  const el = ctrl?.element ?? null
+  useEffect(() => {
+    if (!el) return
+    const sync = () => bump((n) => n + 1)
+    el.addEventListener('volumechange', sync)
+    return () => el.removeEventListener('volumechange', sync)
+  }, [el])
+  if (!ctrl) return null
+  const muted = ctrl.getMuted()
+  return (
+    <button
+      type="button"
+      title={muted ? t('取消静音') : t('静音')}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation()
+        ctrl.setMuted(!muted)
+      }}
+      className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-seal transition hover:bg-line-strong/60"
+    >
+      {muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
+    </button>
+  )
+}
+
 function TabTypeIcon({ tab, favicon, loading }: { tab: TabRef; favicon?: string; loading?: boolean }) {
   // 网页页签的图标带活信息（转圈/站点图标，见 docTypes 的 WebTabTypeIcon）
   if (tab.kind === 'web') return <WebTabTypeIcon favicon={favicon} loading={loading} />
@@ -1240,6 +1276,8 @@ export default function TabBar({
                 {trail && <span className="min-w-0 truncate text-ink-faint">{trail} · </span>}
                 <span className="min-w-0 truncate">{title}</span>
               </span>
+              {/* 视频页签的快捷静音：流解析出来（登记表有控制器）才出现 */}
+              {tab.ref.kind === 'video' && <VideoAudioButton tabId={tab.id} />}
               {/* 关闭键固定在右端（标题 flex-1 把它顶过去）；未保存时它被一颗圆点盖住。
                   选中与否都只在鼠标扫过这一条页签时才亮出来：常驻的 × 是一排噪声，
                   真正高频的状态（标题）不该被挤到次要位置 */}

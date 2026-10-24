@@ -17,7 +17,7 @@ import {
   type AgentToolResult,
   type MessageImage,
 } from './types'
-import type { ContextSnapshot } from './contextFilter'
+import type { ContextSnapshot } from './contextDebug'
 import { MAX_REQUEST_RETRIES, isRetryable, retryDelayMs, sleepMs } from './retry'
 import { t } from '../i18n'
 
@@ -44,6 +44,12 @@ import { t } from '../i18n'
  * 循环没有轮次上限，单轮输出也不设上限：长任务（写大纲 → 逐个展开 → 出题）
  * 由模型自己决定何时收尾，需要中断时由用户点「停止」。
  */
+
+/** 边界注入的一条内容：role 由调用方定——声明归 assistant 边，指令归 user 边（见 injections） */
+export interface AgentInjection {
+  role: 'user' | 'assistant'
+  content: string
+}
 
 export interface AgentRunOptions {
   /** 当前提供商（含 baseUrl / Key / quirks），由 ai/settings 解析后注入 */
@@ -81,17 +87,19 @@ export interface AgentRunOptions {
   /**
    * 上下文过滤器钩子：**每一次**把上下文发往 API 之前调用（此时 system、messages、
    * 工具声明都已拼装完成，拿到的是与实发完全一致的那一份）。调试器据此记录快照、
-   * 比对两轮之间上下文差异出现在哪个部位（见 agent/contextFilter）。
+   * 对比调试器在发送前收下这份快照做滚动比对（见 agent/contextDebug）。
    * 不注入就没有任何开销。
    */
   onContext?: (snapshot: ContextSnapshot) => void
   /**
-   * 介入通道（子代理并发模型的钩子，导师不注入）：在「当前这条消息已经完整」的边界
-   * （工具结果之后、或无工具调用的消息完结之后）拉一次；返回要插入的指令文本，没有就
-   * null。指令以一条 user 消息进历史——调用方负责把「半场落库 + 指令入账」同步进自己的
-   * 会话账本（镜像纪律）。绝不打断半截输出：流式还在进行时，插入只会发生在消息完整之后。
+   * 介入通道（消息边界钩子，导师的提示词模块与子代理的介入指令共用）：在「当前这条
+   * 消息已经完整」的边界（工具结果之后、或无工具调用的消息完结之后）拉一次；返回要
+   * 插入的内容，没有就 null。**role 由调用方给**：「怎么做」的声明（提示词模块）归
+   * assistant 边，「做什么」的指令（子代理介入）才是 user——同一条分工见 personaMessage。
+   * 插入以对应角色的消息进历史——调用方负责把「半场落库 + 入账」同步进自己的会话账本
+   * （镜像纪律）。绝不打断半截输出：流式还在进行时，插入只会发生在消息完整之后。
    */
-  injections?: () => Promise<string | null>
+  injections?: () => Promise<AgentInjection | null>
 }
 
 /** 服务端资源不足属于瞬时故障，允许对「空结果」自动重试的次数 */
@@ -399,12 +407,13 @@ export async function runAgent(opts: AgentRunOptions): Promise<void> {
           return
         }
         /*
-         * 介入通道：当前这条消息（连同工具结果）已经完整。有指令就作为一条 user
-         * 消息插进历史——模型下一跳先看到它再继续；没有就照常进下一跳。
+         * 介入通道：当前这条消息（连同工具结果）已经完整。有内容就按调用方给的
+         * role 插进历史——「怎么做」的声明（提示词模块）是 assistant，「做什么」的
+         * 指令（子代理介入）是 user；模型下一跳先看到它再继续；没有就照常进下一跳。
          */
         if (opts.injections) {
           const injected = await opts.injections()
-          if (injected !== null) messages.push({ role: 'user', content: injected })
+          if (injected !== null) messages.push({ role: injected.role, content: injected.content })
         }
         /*
          * 跳边界：这一跳到此为止，下面开始的是下一跳。它只服务于历史还原——
@@ -418,15 +427,15 @@ export async function runAgent(opts: AgentRunOptions): Promise<void> {
       }
 
       /*
-       * 没有工具调用本该收场；但介入通道里还挂着指令时，把它当成新的一轮：
+       * 没有工具调用本该收场；但介入通道里还挂着内容时，把它当成新的一轮：
        * 这条最终消息此刻才补进历史（正常收场时不进——循环要继续就必须进，镜像才对得上），
-       * 指令作为 user 消息跟在后面，模型据此调整方向接着干。
+       * 注入内容按调用方给的 role 跟在后面（同上：声明 assistant / 指令 user），模型据此继续干。
        */
       if (opts.injections) {
         const injected = await opts.injections()
         if (injected !== null) {
           if (result.content) messages.push({ role: 'assistant', content: result.content })
-          messages.push({ role: 'user', content: injected })
+          messages.push({ role: injected.role, content: injected.content })
           onEvent({ type: 'hop' })
           continue
         }

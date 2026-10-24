@@ -59,7 +59,7 @@ const preview = (s: string): string => {
   return oneLine.length > 100 ? oneLine.slice(0, 100) + '…' : oneLine
 }
 
-function findViolation(prev: Snapshot, curr: Snapshot): Violation | null {
+function findViolation(prev: Snapshot, curr: Snapshot, onTrim?: () => void): Violation | null {
   if (prev.tools !== curr.tools) {
     return {
       message: '工具声明在两次请求之间变了，前缀缓存将从第一跳起整段作废',
@@ -102,7 +102,12 @@ function findViolation(prev: Snapshot, curr: Snapshot): Violation | null {
         break
       }
     }
-    if (ok) return null
+    if (ok) {
+      // 设计内的前缀搬家（超预算从最旧一头裁掉一段）：门禁放行，但服务商缓存从
+      // 搬家点起真丢了——换一届纪元，哨兵这次不与旧读数比较。
+      onTrim?.()
+      return null
+    }
   }
   return {
     message: `上下文前缀被改写（第 ${diverged + 1} 条消息与上一次实发不一致），本次请求已拦截`,
@@ -124,7 +129,7 @@ export function assertPrefixStable(key: string, messages: readonly ChatMessage[]
   const prev = baselines.get(key)
   baselines.set(key, curr)
   if (!prev) return
-  const violation = findViolation(prev, curr)
+  const violation = findViolation(prev, curr, () => bumpEpoch(key))
   if (!violation) return
   console.error('[prefix-gate] ' + violation.message + '\n' + violation.detail)
   throw new PrefixGateError(violation.message)
@@ -133,9 +138,44 @@ export function assertPrefixStable(key: string, messages: readonly ChatMessage[]
 /** 设计内的历史改写（压缩 / 编辑 / 删除 / 清空）之后调用：这一会话的账重新开始记 */
 export function resetPrefixGate(key: string): void {
   baselines.delete(key)
+  bumpEpoch(key)
+  cacheReads.delete(key)
 }
 
 /** 测试隔离用：清空全部账本 */
 export function clearPrefixGatesForTests(): void {
   baselines.clear()
+  cacheEpochs.clear()
+  cacheReads.clear()
+}
+
+/* ---------- 缓存哨兵的账本（与门禁同生命周期） ---------- */
+
+/*
+ * 服务商的缓存命中只认「与上次实发的前缀逐字节相同」。门禁保证我方载荷只增不改，
+ * 但**设计内的前缀搬家**——超预算裁剪（这次开头对上上次中段，门禁放行）与压缩/
+ * 编辑后的重置——服务商那边就是真丢：新前缀从搬家点起没被缓存过，命中数自然骤跌。
+ * 这不是分叉，哨兵不该喊。所以命中读数带**纪元**：前缀搬家一次纪元换一届，
+ * 跨纪元的读数不比较（本届第一次读数自己锚底）。
+ */
+const cacheEpochs = new Map<string, number>()
+const cacheReads = new Map<string, { epoch: number; read: number }>()
+
+function bumpEpoch(key: string): void {
+  cacheEpochs.set(key, (cacheEpochs.get(key) ?? 0) + 1)
+}
+
+/** 哨兵在每次 usage 事件时记账（带当前纪元） */
+export function noteCacheRead(key: string, read: number): void {
+  cacheReads.set(key, { epoch: cacheEpochs.get(key) ?? 0, read })
+}
+
+/** 哨兵比对的上一笔读数；跨了纪元（或刚重置）就比不得 */
+export function lastCacheRead(key: string): { epoch: number; read: number } | undefined {
+  return cacheReads.get(key)
+}
+
+/** 当前纪元（哨兵比对用：读数的纪元对不上当前的，就当没读过） */
+export function currentEpoch(key: string): number {
+  return cacheEpochs.get(key) ?? 0
 }

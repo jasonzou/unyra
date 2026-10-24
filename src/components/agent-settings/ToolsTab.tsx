@@ -5,6 +5,7 @@ import {
   Copy,
   Cpu,
   Layers,
+  ListTree,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -15,7 +16,7 @@ import {
 } from 'lucide-react'
 import type { AgentSettings, AgentDevSettings } from '../../agent/settings'
 import { SANDBOX_API_CATALOG } from '../../agent/apiCatalog'
-import { clearRecords as clearContextRecords } from '../../agent/contextFilter'
+import { clearDropReports } from '../../agent/contextDebug'
 import type { BaseProcessInfo } from '../../../shared/ipc'
 import Switch from '../Switch'
 import { pane } from '../Pane'
@@ -25,9 +26,10 @@ interface ToolsTabProps {
   settings: AgentSettings
   onChange: (next: AgentSettings) => void
   onOpenContextDebugger: () => void
+  onOpenContextTrace: () => void
 }
 
-export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTabProps) {
+export function ToolsTab({ settings, onChange, onOpenContextDebugger, onOpenContextTrace }: ToolsTabProps) {
   // 选项卡内部视图：'all' | 'context' | 'catalog' | 'process'
   const [subTab, setSubTab] = useState<'all' | 'context' | 'catalog' | 'process'>('all')
 
@@ -77,7 +79,7 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
 
   // 清理快照记录
   const handleClearSnapshots = () => {
-    clearContextRecords()
+    clearDropReports()
     setClearedSnapshot(true)
     setTimeout(() => setClearedSnapshot(false), 2000)
   }
@@ -86,7 +88,7 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
   const patchDev = (patch: Partial<AgentDevSettings>) => {
     const next = { ...settings, dev: { ...settings.dev, ...patch } }
     onChange(next)
-    if (patch.contextDebugger === false) clearContextRecords()
+    if (patch.contextDebugger === false) clearDropReports()
   }
 
   // 强制终止进程
@@ -216,6 +218,14 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
                 <Bug size={13} />
                 <span>{t('打开对比调试器')}</span>
               </button>
+              <button
+                type="button"
+                onClick={onOpenContextTrace}
+                className="flex items-center gap-1.5 rounded-xl bg-seal px-3 py-1.5 text-[11.5px] font-medium text-white shadow-2xs transition hover:bg-seal-deep"
+              >
+                <ListTree size={13} />
+                <span>{t('打开上下文轨迹')}</span>
+              </button>
             </div>
           </div>
 
@@ -224,8 +234,8 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
             <Switch
               on={settings.dev?.contextDebugger === true}
               onChange={(next) => patchDev({ contextDebugger: next })}
-              label={t('实时记录发往 API 的上下文快照')}
-              hint={t('在每次向大模型发送请求前抓取一份不可变快照，用于两轮之间逐字节对账定位')}
+              label={t('命中骤降时自动弹出对比调试器')}
+              hint={t('平时不录制任何上下文；只有某次请求的缓存命中字数低于上一次，才把前后两份摆进调试器（滚动只留最近两份请求用于比对）')}
             />
           </div>
 
@@ -433,19 +443,6 @@ export function ToolsTab({ settings, onChange, onOpenContextDebugger }: ToolsTab
                             <code className="shrink-0 rounded bg-paper-deep border border-line/60 px-2 py-0.5 font-mono text-[11px] font-semibold text-seal-deep">
                               api.{item.signature}
                             </code>
-                            {item.availability && item.availability !== 'always' && (
-                              <span className="shrink-0 rounded bg-line/60 px-1.5 py-px text-[9.5px] text-ink-soft">
-                                {item.availability === 'exam'
-                                  ? t('考试在场')
-                                  : item.availability === 'subagent'
-                                    ? t('导师专用')
-                                    : item.availability === 'mcp'
-                                      ? t('已配置 MCP 时')
-                                      : item.availability === 'conditional'
-                                        ? t('宿主注入时')
-                                        : t('窗口界面')}
-                              </span>
-                            )}
                           </div>
 
                           <button

@@ -88,22 +88,22 @@ describe('超级文档的纯逻辑', () => {
   })
 
   it('uniqueSuperDocName 给撞车的名字补序号（归一化/手改数据兜底用）', () => {
-    const docs = [{ name: '甲', html: '', createdAt: AT, updatedAt: AT }]
+    const docs = [{ id: crypto.randomUUID(), name: '甲', html: '', createdAt: AT, updatedAt: AT }]
     // allocate 的格式是「名字 + 空格 + 序号」（与笔记同一条路）
     expect(uniqueSuperDocName(docs, '甲')).toBe('甲 (2)')
     expect(uniqueSuperDocName(docs, '')).toBe(SUPERDOC_DEFAULT_NAME)
   })
 
   it('findSuperDoc 大小写不敏感', () => {
-    const docs = [{ name: '句号器', html: '', createdAt: AT, updatedAt: AT }]
+    const docs = [{ id: crypto.randomUUID(), name: '句号器', html: '', createdAt: AT, updatedAt: AT }]
     expect(findSuperDoc(docs, '句号器')).toBeDefined()
     expect(findSuperDoc(docs, '')).toBeUndefined()
   })
 
   it('removeSuperDocIn 只删匹配的那一份', () => {
     const docs = [
-      { name: '甲', html: '', createdAt: AT, updatedAt: AT },
-      { name: '乙', html: '', createdAt: AT, updatedAt: AT },
+      { id: crypto.randomUUID(), name: '甲', html: '', createdAt: AT, updatedAt: AT },
+      { id: crypto.randomUUID(), name: '乙', html: '', createdAt: AT, updatedAt: AT },
     ]
     const next = removeSuperDocIn(node(docs), '甲', AT)
     expect(next.superdocs?.map((d) => d.name)).toEqual(['乙'])

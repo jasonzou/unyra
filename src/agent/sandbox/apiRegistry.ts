@@ -12,16 +12,10 @@
  * - **不登记就不存在**：`wrapApi` 遇到未登记的名字会当场抛错（测试与运行都拦）。
  * - **应用数据不写文件路径**：doc / state / outline / exam / sdoc / wf / method
  *   的用法里只出现对应 api，不教模型拼 `*.json`。
+ * - **旧写法组标 `legacy`**：等价的新组是唯一被宣传的入口（系统提示词组索引与
+ *   根 help 只列非 legacy 组）；legacy 组仍登记、仍可调用（老对话的历史里还有它的
+ *   调用），直查 `api.<组>.__help()` 也照常——只是不再向模型推荐。
  */
-
-export type ApiAvailability =
-  | 'always'
-  | 'exam'
-  | 'ui'
-  | 'browser'
-  | 'subagent'
-  | 'mcp'
-  | 'conditional'
 
 export interface ApiDoc {
   /** 组内方法名，如 `read` */
@@ -42,14 +36,6 @@ export interface ApiDoc {
   example: string
   /** 附加示例 */
   examples?: string[]
-  /** 只读 api 标 false；写操作省略或 true */
-  mutates?: boolean
-  /** 可用性：条件组在宿主没注入时调用会得到「沙箱里没有这个 api」 */
-  availability?: ApiAvailability
-  /** false = 不进 Worker 名单（保留实现做兼容/内部用） */
-  exposed?: boolean
-  /** 退役说明：有它就不进名单，帮助里也会标出来 */
-  deprecated?: string
 }
 
 export interface ApiGroupDoc {
@@ -61,6 +47,10 @@ export interface ApiGroupDoc {
   usage: string
   /** 组级示例（可选） */
   example?: string
+  /** 旧写法兼容组：不再进系统提示词组索引与根 help（见文件头纪律） */
+  legacy?: boolean
+  /** legacy 组的替换写法说明（renderGroupHelp 的旧写法提示；不给则指向 content.*） */
+  legacyNote?: string
   apis: ApiDoc[]
 }
 
@@ -82,12 +72,14 @@ const g = (
   usage: string,
   apis: ApiSeed[],
   example?: string,
+  extra: Partial<Pick<ApiGroupDoc, 'legacy' | 'legacyNote'>> = {},
 ): ApiGroupDoc => ({
   key,
   label,
   intro,
   usage,
   ...(example ? { example } : {}),
+  ...extra,
   apis: apis.map((x) => ({
     ...x,
     full: x.full ?? (key === 'core' ? x.name : `${key}.${x.name}`),
@@ -127,7 +119,7 @@ export const API_GROUPS: ApiGroupDoc[] = [
       ),
       a('tiktok', 'tiktok()', '响一声系统提示音', '需要把用户视线叫回来时用；不要连续响。', 'await api.tiktok()'),
       a('compact', 'compact({ summary, tasks? })', '提交上下文交接摘要', '只在本轮是压缩轮时调用；summary 是正文摘要，tasks 是未完成事项。本轮结束后旧消息才失活。', `await api.compact({ summary: '## 已讲清\\n- 极限的定义', tasks: ['继续讲夹逼定理'] })`),
-      a('fetch', 'fetch(url | { url })', '抓网页并转 Markdown', '返回 { ok, title, content, error? }。失败不抛异常，先判 ok；不要对同一 URL 死循环重试。', `const page = await api.fetch({ url: 'https://example.com/spec' })`),
+      a('fetch', 'fetch(url | { url })', '抓网页并转 Markdown（web.fetch 的别名）', '与 api.web.fetch 完全等价，提示词里教的就是这个名字。回 { ok, title, content, error? }，失败不抛异常，先判 ok。', `const page = await api.fetch({ url: 'https://example.com/spec' })`),
       a(
         'see',
         'see(url | base64 | { url?, base64?, mime?, name? } | { pdf?, page?, name? })',
@@ -149,60 +141,39 @@ const p = await api.see({ pdf: 'moji:static/<uuid>', page: [1, 3] })`,
   /* ---------- 学习数据 ---------- */
   g(
     'node',
-    '知识点节点',
-    '知识点树：列表、详情、路径、创建、改名、更新、移动、删除、注解。',
-    `节点是学习数据的骨架。所有 path 都按「本目标内标题唯一」寻址：
-- '' 或 '当前' = 当前节点；
-- '极限' = 本目标里标题为「极限」的节点；
-- '微积分/极限' = 从根逐段走；
-- '#<id>' = 直接给节点 id（api.node.list() 里有）。
-path 找不到时回执会列候选子节点，照着改一次就对。`,
+    '节点宇宙',
+    'api.node.list() 查全图（带 uuid）→ get(uuid) 取节点对象 → help() 现查写法 → content 读 / editContent 写 / connect 连线。',
+    `节点是学习数据的全部骨架：**文档**（讲义）、**大纲**（计划）、**笔记**、**试卷**、**超级文档**、**入口**——每一种都是节点，uuid 是唯一身份（api.node.list() 的回执里全带）。读写内容、建删节点、连线全部经由节点对象：
+
+    const list = await api.node.list()            // 全图清单（uuid / 标题 / path / 挂件）
+    const n = await api.node.get(list.nodes[0].uuid)
+    const h = await n.help()                      // 这个节点自己的内容格式与连接规则
+    const c = await n.content                     // 当下内容（整份快照）
+    await n.editContent({ ...c, teaching: 新正文 })  // 整份写回（先读后写）
+    const o = await api.node.get('o:' + 文档uuid)   // 大纲；入口是 'entry:' + 根文档uuid
+    await o.connect(子文档对象, 'down')             // 把子文档挂到这一层（唯一可手工建立的连接）
+
+对象成员**全类型同构**：content / editContent / help / connect / disconnect。规矩：
+- editContent 是**整份替换**：先 await n.content 读现状，改字段，再整份写回——不要凭记忆默写；
+- help() 随节点状态与上游**动态变化**（空卷讲出题格式、空文档讲写作纪律）——动手前必看；
+- 挂件（笔记 / 试卷 / 超级文档）创建即挂：api.node.create({ kind, title, under: 文档uuid })，不能改挂；
+- 连接里只有「大纲 → 文档」是手工的：connect(文档, 'down') 挂上、disconnect 摘下；
+- 编排代码可以直接写 TypeScript。`,
     [
-      a('list', 'node.list()', '本目标全部节点', '回 path / id / title / status / 描述摘要 / 字数 / 掌握度。规划路线、找父节点、核对是否存在时先调它。', 'const all = await api.node.list()'),
-      a('read', 'node.read(path?)', '单个节点详情', '含描述、状态、各文档字数、上级/下级、学习状态。想知道「这个节点写过什么」先看它，不要整篇读文档。', `const n = await api.node.read('极限')`),
-      a('title', 'node.title(path?)', '读节点标题', '只回标题，用于轻量确认；要看描述/状态/字数用 node.read。', `const t = await api.node.title('极限')`),
-      a('paths', 'node.paths(path?)', '节点路径索引', '回 { id, title, path, dir, doc, notesDir, outline, meta, superdocsDir, examsDir, workspaceDir }。需要引用真实文件时用它取，不要自己拼目录名。', `const p = await api.node.paths()`),
-      a('create', 'node.create({ parent, title, description?, status? })', '新建子节点', 'parent 必填（标题 / 路径 / #id），不接受「当前」这种隐式起点；同名节点会被拒绝。建完教学文档与大纲同时就位。', `await api.node.create({ parent: '微积分', title: '夹逼定理', description: '用两个边界函数夹住目标函数求极限' })`),
-      a('createTree', 'node.createTree({ parent?, tree })', '批量/递归建大纲树', 'tree 每项 { title, description?, status?, content?, outline?, children? }。规划式/完整式目标一次建整棵树时用；不要拿它建重复节点。', `await api.node.createTree({ parent: '微积分', tree: [{ title: '极限', children: [{ title: '夹逼定理' }] }] })`),
-      a('rename', 'node.rename(path, 新标题)', '改节点标题', '标题就是路径，改名等于换目录；同目标重名会被拒绝。', `await api.node.rename('极限', '极限与连续')`),
-      a('update', 'node.update(path?, { title?, description?, status? })', '改节点属性', 'status 只认 learning / mastered。描述写 150~300 字；改标题优先用 rename。', `await api.node.update('极限', { description: '从数列极限到函数极限的完整入门。', status: 'learning' })`),
-      a('annotate', 'node.annotate(path?, { term, occurrence?, body })', '写正文划词注解', 'term 是正文里那一小段文字；occurrence 从 0 起，同一个词多次出现时指定第几处。注解挂在节点上。', `await api.node.annotate('极限', { term: '夹逼定理', body: '用两个边界函数夹住目标函数。' })`),
-      a('move', 'node.move(path, 新父节点)', '迁移节点', '改父线；根节点、跨目标、成环都会被拒。', `await api.node.move('夹逼定理', '极限')`),
-      a('delete', 'node.delete(path, { cascade?, dryRun? })', '删除节点', '学习目标本身不能删；cascade 连子节点一起删，dryRun 只回影响面。删用户内容前先确认。', `await api.node.delete('草稿节点')`),
+      a('list', 'node.list()', '目标的全图清单', '回 goal（含入口 uuid）与 nodes：每份文档带 uuid / 标题 / path / 状态 / 上游 / 大纲（目标项数）/ 笔记 / 试卷 / 超级文档（各带 uuid）。导航、找落点、核对存在性全靠它。', 'const list = await api.node.list()'),
+      a('get', 'node.get(uuid)', '取一个节点对象', '回执在门面里被包成真对象（content / editContent / help / connect / disconnect）。uuid 全部来自 list()，不要手拼——大纲与入口的前缀规则 help() 里会讲。', "const n = await api.node.get(list.nodes[0].uuid)"),
+      a('create', 'node.create({ kind, title?, under? , ...? })', '建节点（画布与 agent 同一条通道）', 'kind: doc / outline / note / exam / superdoc。under 给了 = 创建即绑（挂件挂到那份文档、文档挂进那一层，同目标同名文档复用不另建）；under 不给 = **独立游离实体**（笔记/超级文档进游离池、试卷宿主悬空、文档无父无纲），之后拖线 / connect 绑定。outline 配宿主文档一起成形：不给 under 就建「新文档+空大纲」，给了 under 就给那份文档补空卷大纲。试卷遇空壳复用原位。', `await api.node.create({ kind: 'note', title: '错题本', under: 文档uuid })`),
+      a('delete', 'node.delete(uuid)', '删节点（删谁只删谁）', '删文档只删它自己：相连的线摘掉、下游文档断线成游离（不删除）、名下的笔记/试卷/超级文档随它走；删大纲 = 清空那份计划（文档与树边不动）；删挂件只删它自己。删试卷走 api.exam.delete（要先确认没有待判分的考试）。', `await api.node.delete(笔记uuid)`),
+      a('invoke', 'node.invoke(uuid, 成员名, 参数数组)', '调节点对象的成员', '门面自动走它（n.editContent(...) 最终就是一次 node.invoke）；connect / disconnect 的对象参数会被折成 uuid。直接调时参数是数组形状。', `await api.node.invoke(文档uuid, 'editContent', [{ title: '极限', description: '', teaching: '# 极限', status: 'learning' }])`),
     ],
-  ),
-  g(
-    'doc',
-    '教学文档与笔记',
-    '教学文档与笔记的读、分段读、查找、整篇写、区间改、追加、注解。',
-    `doc.* 是应用数据里最常用的读写口：
-- 省略 path = 当前节点的教学文档；
-- '极限/笔记' = 该节点的笔记（第一份）；'极限/笔记/错题本' = 指定名字的笔记；
-- 笔记不存在时 write 会自动新建。
-不要用 files.* 读写教学文档或笔记——那条路会被拒绝。`,
-    [
-      a('read', 'doc.read(path?)', '读一份文档全文', '回 { path, doc, chars, content }。整篇很长时改用 readRange / find。', `const d = await api.doc.read('极限')`),
-      a('readRange', 'doc.readRange(path?, start?, end?)', '分段读文档', 'start/end 是字符下标；省略 end 默认 1500 字。长文档先读开头与标题结构。', `const head = await api.doc.readRange('极限', 0, 2000)`),
-      a('find', 'doc.find(path?, 要找的文字, { from?, limit? }?)', '在文档里找文字', '回命中位置与前后 40 字上下文；limit 最多 50。改一处措辞前先用它定位。', `const hits = await api.doc.find('极限', '夹逼')`),
-      a('write', 'doc.write(path?, content)', '整篇写入文档', '不存在就新建（笔记同理）；空内容会被拒绝。整篇覆盖前先读，不要覆盖用户已有内容。', `await api.doc.write('极限', '# 极限\\n\\n从数列极限开始……')`),
-      a('replace', 'doc.replace(path?, { start?, end?, content, expected? })', '按区间改文档', '给 start/end 或 expected（原文字符串，必须先匹配）再替换。改一处用 replace，不要整篇重写。', `await api.doc.replace('极限', { expected: '旧的一句话', content: '新的一句话' })`),
-      a('append', 'doc.append(path?, content)', '追加到文档末尾', '不覆盖已有正文；适合补一段。', `await api.doc.append('极限', '\\n\\n## 补充：夹逼定理的几何直觉')`),
-      a('annotate', 'doc.annotate(path?, { term, occurrence?, body })', '写正文划线注解', '与 node.annotate 同义，保留给按文档寻址的旧写法。', `await api.doc.annotate('极限', { term: '夹逼定理', body: '用两个边界函数夹住目标函数。' })`),
-    ],
-  ),
-  g(
-    'outline',
-    '结构化大纲',
-    '每个节点一份大纲：intro + 直接子目标一层 children。',
-    `大纲是结构化的计划，不是 Markdown。write 整份覆盖，只收直接子层级一层：
-「爷爷知道儿子的存在，但不知道孙子的存在」。孙辈由子目标自己的 outline 负责。`,
-    [
-      a('read', 'outline.read(path?)', '读节点大纲', '还没写过时回 null——那不是错误，说明要先写一份。', `const o = await api.outline.read('微积分')`),
-      a('write', 'outline.write(path?, { intro, children })', '整份写大纲', 'children 每项 { title, summary }，key 由标题自动生成，不要自己编；最多 24 条。', `await api.outline.write('微积分', {
-  intro: '先补前置，再进极限与导数。',
-  children: [{ title: '极限', summary: '从数列到函数极限' }, { title: '导数', summary: '从切线到求导法则' }],
-})`),
-    ],
+    `const list = await api.node.list()
+const doc = list.nodes.find((n) => n.title === '极限')
+if (doc) {
+  const n = await api.node.get(doc.uuid)
+  await n.help()                       // 先看这个节点自己怎么说
+  const c = await n.content
+  await n.editContent({ ...c, teaching: c.teaching + '\\n\\n## 补充' })
+}`,
   ),
   g(
     'state',
@@ -283,37 +254,16 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
   ),
   g(
     'exam',
-    '试卷与考试',
-    '出卷、读卷、判分、写错题讲解、删卷。',
-    `exam.* 是两阶段流程：
-1. 出题：exam.create({ title?, kind?, level?, minutes?, questions })；
-2. 交卷后：exam.read() 看作答，exam.grade(...) 判分，exam.explain(...) 写讲解。
-读任何时候都能调；写受阶段约束（有卷待收尾时不能再出卷）。用户作答事实（answers/inputs/dwell/blurs）严禁改写。`,
+    '考试（作答侧）',
+    '读卷、判分、写错题讲解、删卷——出题走节点宇宙（api.node.create + editContent）。',
+    `试卷是节点宇宙的一员：出题 = api.node.create({ kind: "exam", under: 文档uuid }) 建卷（或复用画布上的空壳）→ const n = await api.node.get(卷uuid) → await n.help() 看题目格式 → n.editContent({ questions }) 落卷。
+exam.* 只管**作答侧**：交卷后 exam.read() 看作答，exam.grade(...) 判分，exam.explain(...) 写讲解。
+读任何时候都能调；判分与讲解受阶段约束（有卷待收尾时不能删）。用户作答事实（answers/inputs/dwell/blurs）严禁改写。`,
     [
-      a('create', 'exam.create({ title?, kind?, level?, minutes?, questions })', '出一份试卷', 'kind: quiz / test / exam；level: easy / medium / hard / extreme；minutes 小测为 0，其余不低于题数×2。每道题 { type, stem, options?, answer?, rubric, points, image? }。', `await api.exam.create({
-  title: '极限 · 随堂小测',
-  kind: 'quiz',
-  level: 'easy',
-  minutes: 0,
-  questions: [{ type: 'single', stem: '夹逼定理需要几个边界函数？', options: [{ id: 'A', text: '1 个' }, { id: 'B', text: '2 个' }], answer: ['B'], rubric: '两侧各一个', points: 1 }],
-})`),
       a('read', 'exam.read(attemptId?)', '读试卷与作答', '不给 attemptId 读最新一份；回题目、历次 attempts、判分与讲解状态。没有卷子也是一种答案（不是失败）。', `const paper = await api.exam.read()`),
       a('grade', 'exam.grade({ attemptId?, passed?, summary?, results })', '判分并落账', 'results 每项 { questionId, correct, score, maxScore, comment, by }；passed 决定节点是否标记已掌握。只改评价层，不改用户作答事实。', `await api.exam.grade({ passed: true, summary: '基础题全对，放缩方向还需巩固。', results: [{ questionId: 'q1', correct: true, score: 1, maxScore: 1, comment: '正确', by: 'agent' }] })`),
       a('explain', 'exam.explain({ content, attemptId? })', '写错题讲解', '判分之后的第二步，落在同一次考试上；content 是 Markdown 讲解，写完自动打开试卷副本。', `await api.exam.explain({ content: '## 错题解析\\n\\n第 2 题错在……' })`),
       a('delete', 'exam.delete({ id? })', '删一份没考过的卷子', '考过的卷子是学习记录，agent 删不掉；只清理空卷/废稿。', `await api.exam.delete({ id: 'ex_xxx' })`),
-    ],
-  ),
-  g(
-    'sdoc',
-    '超级文档',
-    '绑定在节点上的可交互 HTML 文档：列表、读、写、删。',
-    `超级文档是自包含单页 HTML（HTML/CSS/JS/SVG），可以嵌 <moji-markdown> 与主题变量。
-写完用 api.ui.superdoc(path, name) 打开。不要用 files.* 直接写 superdocs/。`,
-    [
-      a('list', 'sdoc.list(path?)', '列这个节点的超级文档清单', '回名称、体量、更新时间；写入之前先看名字在不在，避免覆盖别人的实验。', `const list = await api.sdoc.list('极限')`),
-      a('read', 'sdoc.read(path?, name)', '读超级文档源码', '回 HTML 全文；没有那份就回 error。改局部时先 read 再整份 write。', `const html = await api.sdoc.read('极限', '夹逼实验')`),
-      a('write', 'sdoc.write(path?, name?, html)', '写入超级文档', '同名覆盖；name 不含 .html；html 必须自包含。', `await api.sdoc.write('极限', '夹逼实验', '<!doctype html><html>…</html>')`),
-      a('delete', 'sdoc.delete(path?, name)', '删一份超级文档', '不可逆；删除前先 api.sdoc.list 确认名字，并告知用户删了什么。', `await api.sdoc.delete('极限', '夹逼实验')`),
     ],
   ),
   g(
@@ -407,7 +357,7 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
     [
       a('list', 'wf.list({ full?, brief? }?)', '列可用工作流', '默认简略（只给 id/name/tier/description/chars）；full:true 带完整指令。', `const flows = await api.wf.list()`),
       a('get', 'wf.get(idOrName)', '看一条工作流的完整定义', '回 instruction、params 与说明；不含 prompt 规程正文（它在触发时注入）。', `const flow = await api.wf.get('开讲')`),
-      a('create', 'wf.create({ name, instruction, description?, prompt?, tier? })', '登记/覆盖工作流', 'instruction 必填；prompt 是可选规程（同上下文只注一次）；tier 省略=目标级，global=跨目标。同名同级覆盖。', `await api.wf.create({ name: '课前摸底', instruction: '第一步：用 api.ask 摸底；第二步：按盲点写 api.doc.write。' })`),
+      a('create', 'wf.create({ name, instruction, description?, prompt?, tier? })', '登记/覆盖工作流', 'instruction 必填；prompt 是可选规程（同上下文只注一次）；tier 省略=目标级，global=跨目标。同名同级覆盖。', `await api.wf.create({ name: '课前摸底', instruction: '第一步：用 api.ask 摸底；第二步：按盲点把讲义写进节点（n.editContent）。' })`),
       a('remove', 'wf.remove(idOrName)', '删除一条登记工作流', '内置工作流删不掉；删除后设置里的工作流列表同步消失，efforts 配置一并清掉。', `await api.wf.remove('课前摸底')`),
       a('invoke', 'wf.invoke(idOrName, { params? })', '触发一条工作流', '不对：它只排队。回执说「已排队」就不要再调、也不要自己做。一次编排最多排一条，链上最多连三条。', `await api.wf.invoke('出卷', { params: { node: '极限' } })`),
     ],
@@ -513,25 +463,26 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
       a('point', 'ui.point(path?, tab?)', '打开并定位文档', '把教学文档/笔记在文档区打开并定位；交付后指引用户看这里。', `await api.ui.point('极限')`),
       a('scroll', 'ui.scroll({ to?, by? })', '滚文档区', 'to: top/bottom；by: 像素。滚的是文档区，不是网页。', `await api.ui.scroll({ to: 'top' })`),
       a('screenshot', 'ui.screenshot()', '截文档区', '截图进资源库并挂到下一跳；只在视觉必须亲眼看时用。', `await api.ui.screenshot()`),
-      a('superdoc', 'ui.superdoc(path?, name)', '打开超级文档页签', '写完 api.sdoc.write 后用它让用户看到。', `await api.ui.superdoc('极限', '夹逼实验')`),
+      a('superdoc', 'ui.superdoc(path?, name)', '打开超级文档页签', '写完节点对象的 editContent({ html }) 后用它让用户看到（path 给文档的 #uuid 或标题）。', `await api.ui.superdoc('#' + 文档uuid, '夹逼实验')`),
       a('dom', 'ui.dom(async (root) => { ... })', '受控 DOM 读写', 'root 提供 exists/count/query/text/attr/html/rect/click 等；只用于文档区。', `await api.ui.dom(async (root) => { return await root.text('h1') })`),
     ],
   ),
   g(
     'subagent',
     '子代理',
-    '并发派活：创建、运行、恢复、干预、中断、查看、删除、等待。',
-    `子代理适合长文档通读、繁重检索、独立并行任务。它们的 api 面按 apiGroups 白名单裁剪；
-不要指望子代理有 wf/state/exam 这些导师专用组。`,
+    '并发派活：登记定义、派任务、等待交付、恢复、干预、中断、查看、删除。',
+    `子代理适合长文档通读、繁重检索、独立并行任务。它们的 api 面按 create 时给的 tools
+白名单裁剪（可选组见回执说明）；不要指望子代理有 wf/state/exam 这些导师专用组。
+地址一律认 key（name 是显示名，碰巧写 name 也能对上）。`,
     [
-      a('create', 'subagent.create({ name?, task, apiGroups?, ... })', '创建一个子代理任务', '任务写清楚交付物与边界；apiGroups 只从允许名单里选。', `const sa = await api.subagent.create({ name: '读论文', task: '通读这篇论文并给出方法-实验-结论摘要', apiGroups: ['web', 'res'] })`),
-      a('run', 'subagent.run({ id? })', '启动子代理任务', '启动后用 subagent.wait 收交付；不要对同一个重复 run。', `await api.subagent.run({ id: sa.id })`),
-      a('resume', 'subagent.resume(id)', '继续一个已完成的子代理', '在同一份会话上追加指令接着跑，上下文不丢。', `await api.subagent.resume(sa.id)`),
-      a('intervene', 'subagent.intervene(id, message)', '给运行中的子代理插一条指令', '用于纠偏；消息排队等子代理下一跳消费，不要频繁打断。', `await api.subagent.intervene(sa.id, '先只看第 3 节')`),
-      a('interrupt', 'subagent.interrupt(id)', '中断一个子代理任务', '立刻停跑但保留已产出的内容；之后可用 resume 继续。', `await api.subagent.interrupt(sa.id)`),
-      a('view', 'subagent.view(id)', '查看子代理会话详情', '回状态、消息流与交付；判断它卡没卡、跑偏没跑偏时用。', `const detail = await api.subagent.view(sa.id)`),
-      a('delete', 'subagent.delete(id)', '删除一个子代理会话', '不可逆；交付没拿走前不要删。', `await api.subagent.delete(sa.id)`),
-      a('wait', 'subagent.wait({ seconds? })', '等子代理交付', '回已完成/仍在跑/出错三类；不要用 sleep 轮询。', `const done = await api.subagent.wait({ seconds: 60 })`),
+      a('create', 'subagent.create({ key, system, tools?, name? })', '登记一个子代理（只登记、未启动）', 'key 是地址（字母开头，≤32 字符，可用字母/数字/-/_）；system ≥20 字，写清角色、工作方式与交付纪律（子代理看不到导师的对话）；tools 从允许名单里选，默认 [web, tmp]。同 key 再 create 即覆盖定义（会话保留，新提示词从下一次任务生效）。', `const r = await api.subagent.create({ key: 'paper', system: '你是论文研读员：通读给定论文，交付方法-实验-结论三段摘要。只用 api.web 与 api.res。', tools: ['web', 'res'] })`),
+      a('run', 'subagent.run({ agent, task })', '派任务并后台启动', 'agent 认 key；task 写全：做什么、什么口径、交付什么格式。run 立即返回、任务并发跑，用 wait 收交付；同一个子代理同一时刻只跑一场。', `await api.subagent.run({ agent: 'paper', task: '通读 https://example.com/paper.pdf，交付 500 字摘要与三个关键结论' })`),
+      a('resume', 'subagent.resume(key)', '继续一个被中断的子代理', '在同一份会话上接着跑，上下文保留、不加新指令；只对被中断过的有效。', `await api.subagent.resume('paper')`),
+      a('intervene', 'subagent.intervene(key, message)', '给运行中的子代理插一条指令', '用于纠偏；消息排队等子代理下一跳消费，不要频繁打断。', `await api.subagent.intervene('paper', '先只看第 3 节')`),
+      a('interrupt', 'subagent.interrupt(key)', '中断一个子代理任务', '立刻停跑但保留已产出的内容；之后可用 resume 继续。', `await api.subagent.interrupt('paper')`),
+      a('view', 'subagent.view(key)', '查看子代理会话详情', '回状态、最近过程与上次交付；判断它卡没卡、跑偏没跑偏时用。', `const detail = await api.subagent.view('paper')`),
+      a('delete', 'subagent.delete(key)', '删除一个子代理的定义与会话', '不可逆；交付没拿走前不要删。', `await api.subagent.delete('paper')`),
+      a('wait', 'subagent.wait({ seconds })', '等子代理交付', '回已完成/仍在跑/超时三类；seconds 是本次愿意等的最大时长。不要用 sleep 轮询。', `const done = await api.subagent.wait({ seconds: 60 })`),
     ],
   ),
   g(
@@ -564,11 +515,11 @@ files.* 碰到它们会被拒绝，并提示该用哪一组。`,
       a('read', 'files.read(path, { encoding?, offset?, maxBytes? }?)', '读真实文件', '只读非应用数据；文本支持 offset/maxBytes，二进制用 base64。', `const src = await api.files.read('docs/目标/节点/workspace/main.py')`),
       a('write', 'files.write(path, content, { encoding?, overwrite? }?)', '写真实文件', '父目录自动建；只写非应用数据。交付物优先 api.workspace.write。', `await api.files.write('docs/目标/节点/workspace/notes.txt', 'hello')`),
       a('edit', 'files.edit(path, { replace?, edits?, content?, start?, end? }?)', '改真实文件', '支持字符串替换、多项编辑、区间替换；只改非应用数据。', `await api.files.edit('docs/目标/节点/workspace/main.py', { replace: { target: 'print(1)', replacement: 'print(2)' } })`),
-      a('list', 'files.list(path?)', '列一个目录的清单', '只列非应用数据目录；应用数据（docs/ 下的数据文件）会被拒绝，用 api.node.list / api.doc.*。', `const items = await api.files.list('docs/目标/节点/workspace')`),
+      a('list', 'files.list(path?)', '列一个目录的清单', '只列非应用数据目录；应用数据（docs/ 下的数据文件）会被拒绝，用 api.node.list()。', `const items = await api.files.list('docs/目标/节点/workspace')`),
       a('stat', 'files.stat(path)', '查文件或目录的属性', '回大小、类型与时间戳；只查非应用数据。', `const st = await api.files.stat('docs/目标/节点/workspace/main.py')`),
       a('mkdir', 'files.mkdir(path)', '创建一个目录', '父级自动递归；只建非应用数据目录（workspace/、static/、skills/、外部）。', `await api.files.mkdir('docs/目标/节点/workspace/output')`),
       a('copy', 'files.copy(from, to, { overwrite? }?)', '复制文件或目录', '两端都必须是非应用数据；目标存在时按 overwrite 决定是否覆盖。', `await api.files.copy('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
-      a('move', 'files.move(from, to)', '移动/重命名', '两端都必须是非应用数据；应用数据改名用 node.rename / doc.write。', `await api.files.move('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
+      a('move', 'files.move(from, to)', '移动/重命名', '两端都必须是非应用数据；应用数据改名走节点对象的 editContent。', `await api.files.move('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
       a('delete', 'files.delete(path)', '删除文件/目录', '只删非应用数据；不可逆，先确认。', `await api.files.delete('docs/目标/节点/workspace/tmp.txt')`),
     ],
   ),
@@ -607,16 +558,6 @@ files.* 碰到它们会被拒绝，并提示该用哪一组。`,
   ),
 
   /* ---------- 兼容/内部：不进 Worker 名单 ---------- */
-  g(
-    'description',
-    '节点描述（兼容）',
-    '旧的 description.* 兼容层；新写法用 node.update。',
-    `保留实现是为了老对话与老探针；新编排不要用。请直接 api.node.update(path, { description })。`,
-    [
-      a('read', 'description.read(path?)', '读节点描述', '等价于 node.read(path).description。', `const d = await api.description.read('极限')`, { exposed: false, deprecated: '用 api.node.update(path, { description })' }),
-      a('update', 'description.update(path?, content)', '改节点描述', '等价于 node.update(path, { description })。', `await api.description.update('极限', '新描述')`, { exposed: false, deprecated: '用 api.node.update(path, { description })' }),
-    ],
-  ),
 ]
 
 /** full → doc 的索引：wrapApi、__help、目录共用 */
@@ -643,37 +584,27 @@ export function apiGroupOf(full: string): ApiGroupDoc | null {
   return GROUP_OF_FULL.get(full) ?? null
 }
 
-/** 是否真的进 Worker 名单 */
-export function isExposed(api: ApiDoc): boolean {
-  return api.exposed !== false && !api.deprecated
-}
-
-/** 对外可见的组（至少有一条 exposed api） */
+/** 对外可见的组（在注册表里登记过、能被调用的全部组，含 legacy 兼容组） */
 export function exposedGroups(): ApiGroupDoc[] {
-  return API_GROUPS.filter((group) => group.apis.some(isExposed))
+  return API_GROUPS
 }
 
-/** Worker 的 API_NAMES：从注册表派生，不再手抄 */
+/** 被宣传的组：系统提示词组索引与根 help 只列这些（legacy 旧写法组除外，见文件头纪律） */
+export function promotedGroups(): ApiGroupDoc[] {
+  return API_GROUPS.filter((group) => !group.legacy)
+}
+
+/** Worker 的 API_NAMES：从注册表派生，不再手抄（legacy 组也在——老对话还要调它） */
 export function exposedApiNames(): string[] {
-  return API_GROUPS.flatMap((group) => group.apis.filter(isExposed).map((api) => api.full))
+  return API_GROUPS.flatMap((group) => group.apis.map((api) => api.full))
 }
 
 /* ---------- 渲染 ---------- */
 
-const AVAILABILITY_LABEL: Record<ApiAvailability, string> = {
-  always: '恒可用',
-  exam: '试卷组：宿主注入 exam 时可用',
-  ui: '界面组：宿主注入 ui 时可用',
-  browser: '浏览器组：宿主注入 browser 时可用',
-  subagent: '子代理组：导师专用',
-  mcp: 'MCP 组：用户启用 MCP 时可用',
-  conditional: '条件组：宿主注入时可用；没有注入时调用会回「沙箱里没有这个 api」',
-}
-
 /** `api.__help()` 的正文 */
 export function renderRootHelp(): string {
   const lines = ['execute 沙箱 api 集（先查组，再查单条 api）：', '']
-  for (const group of exposedGroups()) {
+  for (const group of promotedGroups()) {
     lines.push(
       group.key === 'core'
         ? '- 顶层函数 — ' + group.label + '：' + group.intro
@@ -696,10 +627,19 @@ export function renderRootHelp(): string {
 export function renderGroupHelp(key: string): string {
   const group = API_GROUPS.find((x) => x.key === key)
   if (!group) return '没有 api.' + key + ' 这一组。先 await api.__help() 看有哪些组。'
-  const items = group.apis.filter(isExposed)
+  const items = group.apis
   if (!items.length) return 'api.' + key + ' 这一组在当前版本没有可用的 api。'
   const title = key === 'core' ? '顶层函数（api.<name>）' : 'api.' + key + ' — ' + group.label
-  const lines = [title, '', group.usage, '', '可用 api：']
+  const lines = [
+    title +
+      (group.legacy
+        ? '（旧写法：' + (group.legacyNote ?? '旧写法，等价入口见系统提示词的组索引') + '）'
+        : ''),
+    '',
+    group.usage,
+    '',
+    '可用 api：',
+  ]
   for (const api of items) {
     lines.push('- ' + api.signature + ' — ' + api.summary)
   }
@@ -732,10 +672,6 @@ export function renderApiHelp(full: string): string {
   if (api.returns) lines.push('', '返回：' + api.returns)
   lines.push('', '示例：', api.example)
   for (const ex of api.examples ?? []) lines.push('', ex)
-  if (api.availability && api.availability !== 'always') {
-    lines.push('', '可用性：' + AVAILABILITY_LABEL[api.availability])
-  }
-  if (api.deprecated) lines.push('', '已退役：' + api.deprecated)
   return lines.join('\n')
 }
 
@@ -754,16 +690,16 @@ export function buildSandboxHelp(): SandboxHelp {
   const apis: Record<string, string> = {}
   for (const group of exposedGroups()) {
     groups[group.key] = renderGroupHelp(group.key)
-    for (const api of group.apis.filter(isExposed)) {
+    for (const api of group.apis) {
       apis[api.full] = renderApiHelp(api.full)
     }
   }
   return { root: renderRootHelp(), groups, apis }
 }
 
-/** 系统提示词里的 api 集索引：只给组名与一句说明，不给具体签名 */
+/** 系统提示词里的 api 集索引：只给组名与一句说明，不给具体签名（legacy 组不宣传） */
 export function groupIndexForSystemPrompt(): string {
-  return exposedGroups()
+  return promotedGroups()
     .map((group) =>
       group.key === 'core'
         ? '- 顶层函数：' + group.intro
@@ -777,17 +713,16 @@ export function catalogGroups(): Array<{
   key: string
   label: string
   intro: string
-  items: Array<{ name: string; signature: string; summary: string; availability: ApiAvailability }>
+  items: Array<{ name: string; signature: string; summary: string }>
 }> {
   return exposedGroups().map((group) => ({
     key: group.key,
     label: group.label,
     intro: group.intro,
-    items: group.apis.filter(isExposed).map((api) => ({
+    items: group.apis.map((api) => ({
       name: api.full,
       signature: api.signature,
       summary: api.summary,
-      availability: api.availability ?? 'always',
     })),
   }))
 }
