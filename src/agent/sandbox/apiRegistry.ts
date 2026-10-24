@@ -163,7 +163,7 @@ const p = await api.see({ pdf: 'moji:static/<uuid>', page: [1, 3] })`,
       a('list', 'node.list()', '目标的全图清单', '回 goal（含入口 uuid）与 nodes：每份文档带 uuid / 标题 / path / 状态 / 上游 / 大纲（目标项数）/ 笔记 / 试卷 / 超级文档（各带 uuid）。导航、找落点、核对存在性全靠它。', 'const list = await api.node.list()'),
       a('get', 'node.get(uuid)', '取一个节点对象', '回执在门面里被包成真对象（content / editContent / help / connect / disconnect）。uuid 全部来自 list()，不要手拼——大纲与入口的前缀规则 help() 里会讲。', "const n = await api.node.get(list.nodes[0].uuid)"),
       a('create', 'node.create({ kind, title?, under, ...? })', '建节点（画布与 agent 同一条通道）', 'kind: doc / note / exam / superdoc；under 是宿主文档或其大纲的 uuid。文档建在大纲之下（title 必给，同目标同名复用不另建）；挂件建在文档之下（试卷遇到空壳会复用原位）。', `await api.node.create({ kind: 'note', title: '错题本', under: 文档uuid })`),
-      a('delete', 'node.delete(uuid)', '删节点（级联按类型）', '删文档连带它的子树与挂件；删挂件只删它自己。试卷的删除走 api.exam.delete（要先确认没有待判分的考试）。', `await api.node.delete(笔记uuid)`),
+      a('delete', 'node.delete(uuid)', '删节点（删谁只删谁）', '删文档只删它自己：相连的线摘掉、下游文档断线成游离（不删除）、名下的笔记/试卷/超级文档随它走；删大纲 = 清空那份计划（文档与树边不动）；删挂件只删它自己。删试卷走 api.exam.delete（要先确认没有待判分的考试）。', `await api.node.delete(笔记uuid)`),
       a('invoke', 'node.invoke(uuid, 成员名, 参数数组)', '调节点对象的成员', '门面自动走它（n.editContent(...) 最终就是一次 node.invoke）；connect / disconnect 的对象参数会被折成 uuid。直接调时参数是数组形状。', `await api.node.invoke(文档uuid, 'editContent', [{ title: '极限', description: '', teaching: '# 极限', status: 'learning' }])`),
     ],
     `const list = await api.node.list()

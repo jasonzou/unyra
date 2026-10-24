@@ -1077,10 +1077,13 @@ export const StructureCanvas = memo(function StructureCanvas({
         e.preventDefault()
         const from = cards.find((c) => c.uuid === selectedEdge.from)
         const to = cards.find((c) => c.uuid === selectedEdge.to)
-        if (from?.kind === 'outline' && to?.kind === 'doc' && onDisconnect) {
+        const pair = [from?.kind, to?.kind]
+        if (onDisconnect && ((pair[0] === 'outline' && pair[1] === 'doc') || (pair[0] === 'doc' && pair[1] === 'outline'))) {
+          // 大纲 ↔ 文档之间的线都可摘：大纲 → 子文档 = 拆那条树边（对方成游离）；
+          // 文档 ↔ 它自己的大纲 = 删除那份大纲（计划清空）。两端节点都不动。
           report(onDisconnect(selectedEdge.from, selectedEdge.to))
         } else {
-          onToast?.(t('这条连线是自动的（挂件归属 / 目标绑定），不能手工断开'))
+          onToast?.(t('这条线是挂件的归属（挂件存在文档里）——要解除就删挂件那张卡，删卡只删它自己'))
         }
         setSelectedEdge(null)
         return

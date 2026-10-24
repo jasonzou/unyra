@@ -364,7 +364,7 @@ describe('NodeService：create / get / list / delete（画布与 agent 同一条
     expect(aRow?.exams).toEqual([{ uuid: 'exam1', title: '极限卷', questions: 0, attempts: 0 }])
   })
 
-  it('delete：挂件只删自己；文档级联（挂件随葬）；试卷指去 exam.delete；大纲与入口拒删', () => {
+  it('delete：删谁只删谁——挂件只删自己；文档只删自己；大纲删除=清空计划；试卷指去 exam.delete；入口拒删', () => {
     const h = harness()
     const svc = h.service()
     expect(svc.delete('note1')).toMatchObject({ ok: true })
@@ -372,14 +372,69 @@ describe('NodeService：create / get / list / delete（画布与 agent 同一条
     expect(h.store.nodes.some((n) => n.id === 'a')).toBe(true)
 
     expect(svc.delete('exam1')).toMatchObject({ error: expect.stringContaining('exam.delete') })
-    expect(svc.delete(outlineUuid('a'))).toMatchObject({ error: expect.stringContaining('随文档') })
     expect(svc.delete(entryUuid('r'))).toMatchObject({ error: expect.stringContaining('目标') })
 
+    // 删大纲 = 清空计划：宿主文档、树边、下级文档都原样保留（先给 a 写一份大纲）
+    expect(svc.get(outlineUuid('a'))!.editContent({ intro: '', children: [{ title: '洛必达', summary: '' }] })).toMatchObject({ ok: true })
+    expect(svc.delete(outlineUuid('a'))).toMatchObject({ ok: true })
+    expect(h.store.nodes[1].outline).toBeUndefined()
+    expect(h.store.nodes[0].outline).toBeTruthy()
+    expect(h.store.nodes.some((n) => n.id === 'a')).toBe(true)
+    expect(h.store.edges.some((e) => e.from === 'r' && e.to === 'a')).toBe(true)
+
+    // 删文档只删它自己（这里 a 是叶子）；试卷是它名下的，随它走
     const r2 = svc.delete('a')
     expect(r2).toMatchObject({ ok: true })
     expect(h.store.nodes.some((n) => n.id === 'a')).toBe(false)
-    // a 的试卷跟着它走（挂件随葬，不产生孤儿实体）；r 自己的超级文档不受牵连
     expect(h.store.exams).toEqual([])
     expect(h.store.nodes[0].superdocs).toHaveLength(1)
+  })
+
+  it('delete：文档删除不再连坐下游——下游断线成游离（用户定的：节点独立、关系可解除）', () => {
+    const h = harness()
+    const b = { ...makeNode('b', '洛必达'), docs: { teaching: '' } }
+    h.ctx.commit({
+      ...h.store,
+      nodes: [...h.store.nodes, b],
+      edges: [...h.store.edges, { from: 'a', to: 'b', createdAt: 1 }],
+    })
+    const r = h.service().delete('a')
+    expect(r).toMatchObject({ ok: true })
+    // a 没了，b 还在——只是那条父子线摘掉了
+    expect(h.store.nodes.some((n) => n.id === 'a')).toBe(false)
+    expect(h.store.nodes.some((n) => n.id === 'b')).toBe(true)
+    expect(h.store.edges.some((e) => e.to === 'b')).toBe(false)
+  })
+
+  it('disconnect：文档 ↔ 它自己的大纲摘线 = 删除大纲；大纲 → 子文档摘线 = 拆那条树边（都不删节点）', () => {
+    const h = harness()
+    const b = { ...makeNode('b', '洛必达'), docs: { teaching: '' } }
+    h.ctx.commit({
+      ...h.store,
+      nodes: [...h.store.nodes, b],
+      edges: [...h.store.edges, { from: 'a', to: 'b', createdAt: 1 }],
+    })
+    const svc = h.service()
+    const doc = svc.get('a')
+    const outline = svc.get(outlineUuid('a'))
+    expect(doc && outline).toBeTruthy()
+    // a 还没写过大纲：先写一份（大纲节点的 editContent）
+    expect(outline!.editContent({ intro: '', children: [{ title: '洛必达', summary: '' }] })).toMatchObject({ ok: true })
+    expect(h.store.nodes[1].outline).toBeTruthy()
+
+    // 大纲侧摘：大纲.disconnect(宿主文档) → 计划清空，文档与树边不动
+    expect(outline!.disconnect(doc)).toMatchObject({ ok: true })
+    expect(h.store.nodes[1].outline).toBeUndefined()
+    expect(h.store.edges.some((e) => e.from === 'r' && e.to === 'a')).toBe(true)
+
+    // 文档侧摘：doc.disconnect(大纲对象) → 同一个语义
+    expect(outline!.editContent({ intro: '', children: [{ title: '洛必达', summary: '' }] })).toMatchObject({ ok: true })
+    expect(doc!.disconnect(outline)).toMatchObject({ ok: true })
+    expect(h.store.nodes[1].outline).toBeUndefined()
+
+    // 大纲 → 子文档：拆一条树边，子文档成游离（不删除）
+    expect(outline!.disconnect(svc.get('b'))).toMatchObject({ ok: true })
+    expect(h.store.edges.some((e) => e.from === 'a' && e.to === 'b')).toBe(false)
+    expect(h.store.nodes.some((n) => n.id === 'b')).toBe(true)
   })
 })

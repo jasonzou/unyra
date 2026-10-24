@@ -465,7 +465,7 @@ export default function LearnWorkspace({
    * 不把新的这一版交下去，撤掉暂存的那一刻编辑器会回落到打开时读到的旧内容。
    */
   const [localSaved, setLocalSaved] = useState<{ path: string; text: string } | null>(null)
-  // 删除确认：pendingDelete 非空时弹出确认框（整棵子树会一起没，问一句再删）
+  // 删除确认：pendingDelete 非空时弹出确认框（删谁只删谁，问一句再删；根文档=整个目标）
   const [pendingDelete, setPendingDelete] = useState<{
     nodeId: string
     title: string
@@ -3609,7 +3609,7 @@ export default function LearnWorkspace({
     const pending = pendingDelete
     if (!pending) return
     setPendingDelete(null)
-    // 先备货再动手：撤回项捕获的是删除前那一刻的旧引用（整棵子树、边、试卷、会话与两本账）
+    // 先备货再动手：撤回项捕获的是删除前那一刻的旧引用（节点本身、相连的边、试卷、会话与两本账）
     const entry = captureNodeDelete(getLatest(), pending.nodeId)
     if (entry) pushUndo(entry)
     // agent 栏的页签跟着收拾：整目标被删时它的导师页签一并退场（读盘归一是同一条规矩）
@@ -3712,16 +3712,13 @@ export default function LearnWorkspace({
   )
 
   /**
-   * 画布垃圾桶是**用户的**删除通道，与服务那条 agent 通道（api.node.delete）语义不同：
-   * - 大纲卡不是独立节点（跟着文档走），删不得——说清该怎么做；
-   * - 试卷卡走**用户自己的两档确认**（与试卷列表同一条路：列出连带删掉什么 → 二次确认 → 可撤回），
-   *   正在考的那份先挡下；agent 的「指路」报错不该弹给用户。
+   * 画布垃圾桶是**用户的**删除通道，与服务那条 agent 通道共用同一套「删谁只删谁」：
+   * 大纲卡删除 = 清空计划（文档与下级文档都在）；试卷卡走**用户自己的两档确认**
+   * （与试卷列表同一条路：列出连带删掉什么 → 二次确认 → 可撤回），正在考的先挡下；
+   * 其余走统一服务（文档只删自己，下游断线成游离）。
    */
   const canvasDeleteNode = useCallback(
     (uuid: string) => {
-      if (uuid.startsWith('o:')) {
-        return { error: '大纲不是独立的节点，跟着文档走——删掉文档才会连大纲一起删' }
-      }
       const target = getLatest().exams.find((e) => e.id === uuid)
       if (target) {
         if (exam.live && exam.live.examId === uuid) {
@@ -5548,7 +5545,7 @@ export default function LearnWorkspace({
           message={
             pendingDelete.isRoot
               ? t('「{0}」是学习目标（总目标），删除后它及其下 {1} 个阶段目标、所有对话与试卷都会一并移除，且无法恢复。', pendingDelete.title, pendingDelete.count - 1)
-              : t('将删除「{0}」及其全部下级阶段目标、试卷与对话。删错了这个动作可以撤回——删除后按 Ctrl+Z 即可恢复（关掉的页签要重新打开）。', pendingDelete.title)
+              : t('只删除「{0}」本身：与它相连的线一并解开，它的下级阶段目标会留在画布上（成为没有上游的游离卡），挂在该文档上的笔记与试卷随它一起移除。删错可按 Ctrl+Z 撤回。', pendingDelete.title)
           }
           confirmLabel={pendingDelete.isRoot ? t('删除目标') : t('删除')}
           onConfirm={commitRemoveNode}

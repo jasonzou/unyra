@@ -136,14 +136,15 @@ function plainText(md: string): string {
 /* ---------- 派生 ---------- */
 
 /**
- * 这份文档的大纲卡要不要上画布：根文档无条件要；其余要看它有没有内容——
- * 有目标项、或有子文档（树边）都算「这张大纲有话说」，纯空壳不上（占地方没有意义）。
+ * 这份文档的大纲卡要不要上画布：根文档无条件要；其余看「计划」在不在——
+ * 有目标项或有导语才算一份大纲。树连接不依赖这张卡（没有卡时连线直接画在
+ * 文档与子文档之间），所以删掉大纲（清空计划）不会带走任何连接。
  */
 function outlineVisible(store: LearnStore, docId: string, isRoot: boolean): boolean {
   if (isRoot) return true
   const node = nodeById(store, docId)
   if (!node) return false
-  return (node.outline?.children.length ?? 0) > 0 || prereqIds(store, docId).length > 0
+  return (node.outline?.children.length ?? 0) > 0 || (node.outline?.intro ?? '').trim().length > 0
 }
 
 /**
@@ -218,15 +219,18 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     add(p)
   }
 
-  // 树边：父的大纲 → 子的文档；子的 depth = 父文档 + 2（隔着自己的大纲）
+  // 树边：大纲卡在场时画「它的大纲 → 子文档」（隔着大纲 hop，深度 +2）；
+  // 大纲卡不在场（没写过计划 / 已删除）就直接画「父文档 → 子文档」（深度 +1）。
+  // 连线永远跟着事实走：删除大纲只拆卡，不拆连接。
   for (const node of docs) {
     const child = docPending.get(node.id)
     if (!child) continue
     for (const pid of parentIds(store, node.id)) {
       const parent = docPending.get(pid)
       if (!parent) continue
-      edges.push({ from: outlineUuid(pid), to: node.id })
-      child.depth = Math.max(child.depth, parent.depth + 2)
+      const hub = outlineVisible(store, pid, pid === goal.rootNodeId)
+      edges.push(hub ? { from: outlineUuid(pid), to: node.id } : { from: pid, to: node.id })
+      child.depth = Math.max(child.depth, parent.depth + (hub ? 2 : 1))
     }
   }
 

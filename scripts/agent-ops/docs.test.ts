@@ -109,7 +109,7 @@ export async function toolTests() {
   ok(!rDupName.ok && rDupName.content.includes('已经有'), '同名改名被拒绝', rDupName.content.slice(0, 160))
 
   const rDel = await h.run("((api)=>{ return await api.node.delete(" + JSON.stringify(subUuid) + ") })")
-  ok(rDel.ok && !h.store().nodes.some((n) => n.title === '夹逼定理（正式）'), 'node.delete 删掉文档（级联规则在服务层）', rDel.content.slice(0, 160))
+  ok(rDel.ok && !h.store().nodes.some((n) => n.title === '夹逼定理（正式）'), 'node.delete 删掉文档（删谁只删谁，行为在服务层）', rDel.content.slice(0, 160))
   const rDelNote = await h.run("((api)=>{ return await api.node.delete(" + JSON.stringify(noteUuid) + ") })")
   ok(rDelNote.ok && !(h.store().nodes.find((n) => n.id === childId)?.notes ?? []).some((n) => n.name === '错题本'), 'node.delete 删掉挂件只删它自己', rDelNote.content.slice(0, 160))
 
@@ -118,6 +118,23 @@ export async function toolTests() {
 
   const rOldGraph = await h.run('((api)=>{ return await api.graph.list() })')
   ok(!rOldGraph.ok && rOldGraph.content.includes('api.node.list()'), '旧 api 名给出新写法（graph.list → node.list）', rOldGraph.content.slice(0, 200))
+
+  // 删谁只删谁（用户定的）：删大纲 = 清空计划（文档与树边不动）；删文档只删自己，下游断线成游离
+  const rDelOutline = await h.run("((api)=>{ return await api.node.delete(" + JSON.stringify(outlineUuidOf) + ") })")
+  ok(rDelOutline.ok && !h.store().nodes.find((n) => n.id === childId)?.outline, 'node.delete 删大纲 = 清空计划（文档还在、树边不动）', rDelOutline.content.slice(0, 200))
+  const rMid = await h.run("((api)=>{ return await api.node.create({ kind: 'doc', title: '中游', under: " + JSON.stringify(docUuid) + " }) })")
+  const midUuid = rMid.ok ? (jsonOf(rMid) as { uuid?: string }).uuid : undefined
+  ok(!!midUuid && h.store().nodes.some((n) => n.id === midUuid), '中游文档建出来', rMid.content.slice(0, 120))
+  const rLeaf = await h.run("((api)=>{ return await api.node.create({ kind: 'doc', title: '下游', under: 'o:" + midUuid + "' }) })")
+  const leafUuid = rLeaf.ok ? (jsonOf(rLeaf) as { uuid?: string }).uuid : undefined
+  ok(!!leafUuid, '下游挂在「中游」的大纲之下（under 认 o: 前缀）', rLeaf.content.slice(0, 160))
+  const rDelMid = await h.run("((api)=>{ return await api.node.delete(" + JSON.stringify(midUuid ?? '') + ") })")
+  ok(
+    rDelMid.ok && !h.store().nodes.some((n) => n.id === midUuid) &&
+      h.store().nodes.some((n) => n.id === leafUuid) &&
+      !h.store().edges.some((e) => e.from === midUuid),
+    '删「中游」只删它自己：「下游」断线成游离、不删除', rDelMid.content.slice(0, 240),
+  )
   const rOldDoc = await h.run('((api)=>{ return await api.doc.read("") })')
   ok(!rOldDoc.ok && rOldDoc.content.includes('api.node.get'), '旧 api 名给出新写法（doc.read → 节点对象）', rOldDoc.content.slice(0, 200))
 

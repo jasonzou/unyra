@@ -17,6 +17,7 @@ import {
   upsertExam,
 } from '../graph'
 import { nodePathOf } from '../paths'
+import { clearOutline } from '../outline'
 import { notesOf } from '../notes'
 import { SUPERDOC_DEFAULT_NAME, removeSuperDoc, writeSuperDoc } from '../superdocs'
 import { superDocsOf, type LearnStore } from '../types'
@@ -258,31 +259,36 @@ export class NodeService {
     }
   }
 
-  /** 删除节点（级联规则按类型：文档连带子树与挂件；挂件只删它自己） */
+  /** 删除节点（删谁只删谁；摘线不连坐——下游断线成游离，不删除） */
   delete(uuid: string): NodeResult {
     const store = this.deps.getLatest()
     const raw = (uuid ?? '').trim()
     const loc = locateUuid(store, raw)
     if (!loc) return { error: '没有 uuid 为「' + raw + '」的节点；先 api.node.list() 查清楚' }
 
-    if (loc.kind === 'outline') return { error: '大纲随文档存在，删文档才会一起没' }
+    if (loc.kind === 'outline') {
+      // 大纲是文档的「计划」层：删除 = 清空计划。文档、树边、下游文档都原样保留。
+      const node = nodeById(store, loc.docId)
+      const next = clearOutline(store, loc.docId, Date.now())
+      if (!next) return { error: '这份大纲还没有写过内容，没有可删的东西' }
+      this.deps.set(next)
+      return { ok: true, note: '已删除「' + (node?.title ?? loc.docId) + '」的大纲：计划清空，文档与它的下级文档都还在' }
+    }
     if (loc.kind === 'entry') return { error: '入口由目标绑定生成，删不掉（目标删了它自然消失）' }
     if (loc.kind === 'exam') {
       return { error: '试卷的删除走 api.exam.delete——要先确认没有等着判分 / 讲解的考试' }
     }
 
     if (loc.kind === 'doc') {
-      const before = store.nodes.length
-      const next = deleteNode(store, loc.docId)
-      const removed = before - next.nodes.length
       const node = nodeById(store, loc.docId)
+      const next = deleteNode(store, loc.docId)
       if (next === store) return { error: '这个文档已经不在了' }
       this.deps.set(next)
       return {
         ok: true,
         note:
-          '已删除「' + (node?.title ?? loc.docId) + '」' +
-          (removed > 1 ? '及其 ' + (removed - 1) + ' 个只依赖它的下级（含挂件）' : '（含它的大纲、笔记、试卷与超级文档）'),
+          '已删除「' + (node?.title ?? loc.docId) + '」本身：下游文档只是断了线，还在画布上；' +
+          '它名下的笔记、试卷与超级文档随它一起走了',
       }
     }
 

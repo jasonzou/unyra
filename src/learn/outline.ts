@@ -93,6 +93,23 @@ export function writeOutline(
 }
 
 /**
+ * 清空某个节点的大纲（删除大纲节点 = 这一个动作）。
+ *
+ * 只动「计划」这一层：宿主文档、树边、下游的文档都原样保留——下游是独立节点，
+ * 它们的连接是文档与文档之间的真关系，不随计划的有无而消失。画布上那份大纲卡
+ * 随之消失（卡是派生的），有树连接时连线直接画在文档与子文档之间。
+ * 没有大纲可清时返回 null（调用方据此回「已经不在了」）。
+ */
+export function clearOutline(store: LearnStore, nodeId: string, at: number): LearnStore | null {
+  const node = store.nodes.find((n) => n.id === nodeId)
+  if (!node?.outline) return null
+  return {
+    ...store,
+    nodes: store.nodes.map((n) => (n.id === nodeId ? { ...n, outline: undefined, updatedAt: at } : n)),
+  }
+}
+
+/**
  * 一个条目的去重键：自带的那份不可用时就按标题现算，绝不返回 undefined。
  *
  * 为什么要多这一层：`key` 是 normalizeOutline / writeOutline 算出来的，

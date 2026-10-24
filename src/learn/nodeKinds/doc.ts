@@ -8,6 +8,7 @@
 import { loadAgentSettings } from '../../agent/settings'
 import { layoutHintOf } from '../../agent/docFormat'
 import { examsOfNode, nodeById, parentIds, titleTaken, updateDoc, updateNode } from '../graph'
+import { clearOutline } from '../outline'
 import { notesOf } from '../notes'
 import { superDocsOf, type KnowledgeNode } from '../types'
 import { entryUuid, outlineUuid, GNode, type ConnectFilter, type NodeCtx, type NodeHelp, type NodeRelation, type NodeResult } from './base'
@@ -156,7 +157,7 @@ export class DocGNode extends GNode {
         root
           ? '上游是入口（entry:，由目标绑定自动生成，不能手工连）。'
           : '上游是大纲（o: 前缀）：把这份文档挂到某份大纲下，先取那份大纲的对象再 connect(我, "down")。',
-        '下游（大纲 / 笔记 / 试卷 / 超级文档）全部自动连着：api.node.create({ kind, under: 我的 uuid }) 创建即挂上，不能手工连线，也不能改挂别人。',
+        '下游（大纲 / 笔记 / 试卷 / 超级文档）全部自动连着：api.node.create({ kind, under: 我的 uuid }) 创建即挂上。与自己的大纲之间可以 disconnect（= 删除那份大纲，计划清空）；挂件的归属线摘不掉，要解除就删挂件那张卡（只删它自己）。',
       ].join('\n'),
     }
   }
@@ -174,5 +175,19 @@ export class DocGNode extends GNode {
       '挂件（大纲 / 笔记 / 试卷 / 超级文档）与文档的连线由归属自动生成：' +
       'api.node.create({ kind, under: "' + this.uuid + '" }) 创建那一刻就挂上了，不需要手工连'
     )
+  }
+
+  /**
+   * 摘线（按对象分派）：与自己的大纲之间摘掉 = 删除那份大纲（计划清空，文档本身不动）；
+   * 与挂件之间的线是「存在在哪」的归属，摘不掉——要解除就删挂件那张卡（删卡只删它自己）。
+   */
+  protected unlink(target: GNode): NodeResult {
+    if (target.kind === 'outline' && target.uuid === outlineUuid(this.uuid)) {
+      const next = clearOutline(this.ctx.store(), this.uuid, Date.now())
+      if (!next) return { error: '这份大纲已经不在了（还没有写过内容）' }
+      this.ctx.commit(next)
+      return { ok: true, note: '已删除「' + this.title + '」的大纲：计划清空，文档与它的下级文档都还在' }
+    }
+    return { error: '挂件（笔记 / 试卷 / 超级文档）存在这份文档里面，这条归属线摘不掉——要解除就删挂件那张卡（只删它自己）' }
   }
 }
