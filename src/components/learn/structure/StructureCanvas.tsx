@@ -124,6 +124,78 @@ export interface StructureCanvasProps {
  */
 const PALETTE: GNodeKind[] = ['doc', 'outline', 'note', 'exam', 'superdoc']
 
+/** 网格背景的点距（世界坐标 px）：平移/缩放时按相机换算，见画布根的 backgroundImage */
+const GRID_PX = 28
+
+/**
+ * palette 行的图标：全部 24×24、描边 2、圆角端点——与 lucide 同一套笔画语言
+ * （自绘图标纪律：比例先对齐成熟图形语言，不自造异形字）。图形口径：
+ * 文档=带折角与行线的纸、大纲=圆点列表、笔记=折角便签、试卷=带勾的夹板、
+ * 超级文档=闪光。
+ */
+function KindIcon({ kind }: { kind: GNodeKind }) {
+  const common = {
+    width: 14,
+    height: 14,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  }
+  if (kind === 'doc') {
+    return (
+      <svg {...common}>
+        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+        <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+        <path d="M10 9H8" />
+        <path d="M16 13H8" />
+        <path d="M16 17H8" />
+      </svg>
+    )
+  }
+  if (kind === 'outline') {
+    return (
+      <svg {...common}>
+        <path d="M3 6h.01" />
+        <path d="M3 12h.01" />
+        <path d="M3 18h.01" />
+        <path d="M8 5h13" />
+        <path d="M8 12h13" />
+        <path d="M8 19h13" />
+      </svg>
+    )
+  }
+  if (kind === 'note') {
+    return (
+      <svg {...common}>
+        <path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z" />
+        <path d="M15 21v-4a2 2 0 0 1 2-2h4" />
+      </svg>
+    )
+  }
+  if (kind === 'exam') {
+    return (
+      <svg {...common}>
+        <rect width="8" height="4" x="8" y="2" rx="1" />
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+        <path d="m9 14 2 2 4-4" />
+      </svg>
+    )
+  }
+  return (
+    <svg {...common}>
+      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L13.663 8.5a2 2 0 0 0 1.401 1.398l6.135 1.581a.5.5 0 0 1 0 .964L13.5 14.063a2 2 0 0 0-1.4 1.402l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+      <path d="M20 3v4" />
+      <path d="M22 5h-4" />
+      <path d="M4 17v2" />
+      <path d="M5 18H3" />
+    </svg>
+  )
+}
+
 /** 全景缩略图的窗口大小（屏幕像素） */
 const MINI_W = 248
 const MINI_H = 160
@@ -1240,7 +1312,17 @@ export const StructureCanvas = memo(function StructureCanvas({
       onContextMenu={onContextMenu}
       onKeyDown={onKeyDown}
       className="relative h-full w-full select-none overflow-hidden bg-paper outline-none dark:bg-card/30"
-      style={{ cursor: hoverDot ? 'pointer' : spaceDown ? 'grab' : undefined }}
+      style={{
+        cursor: hoverDot ? 'pointer' : spaceDown ? 'grab' : undefined,
+        /*
+         * 网格背景：随相机平移缩放（点阵铺在世界坐标 28px 的整数倍上，缩放时点距
+         * 跟着缩放）。颜色用 ink 的低透明混合——亮暗主题都自动成立。
+         */
+        backgroundImage:
+          'radial-gradient(circle, color-mix(in oklab, var(--color-ink, #000) 14%, transparent) 1.1px, transparent 1.3px)',
+        backgroundSize: `${GRID_PX * camera.zoom}px ${GRID_PX * camera.zoom}px`,
+        backgroundPosition: `${camera.x}px ${camera.y}px`,
+      }}
     >
       {/*
         画布平面：纯 2D（只有平移与缩放，没有倾斜、没有 z 轴）。
@@ -1578,8 +1660,9 @@ export const StructureCanvas = memo(function StructureCanvas({
                   style={{ top: EDGE_ANCHOR_Y }}
                 />
               )}
-              {/* 进线接口（左）：实心、不透明。入口不画——没有任何类型能把线连进入口 */}
-              {card.kind !== 'entry' && (
+              {/* 进线接口（左）：实心、不透明。入口不画——没有任何类型能把线连进入口；
+                  入口就是根文档自己（card.entry），它同样不该有进线点 */}
+              {card.kind !== 'entry' && !card.entry && (
                 <div
                   className="pointer-events-none absolute -left-[7.5px] h-3.5 w-3.5 -translate-y-1/2 rounded-full border-2 border-card bg-seal"
                   style={{ top: EDGE_ANCHOR_Y }}
@@ -1672,9 +1755,13 @@ export const StructureCanvas = memo(function StructureCanvas({
           <div
             key={kind}
             data-palette-kind={kind}
-            className="cursor-grab rounded-lg border border-line/70 bg-paper/70 px-2 py-1.5 text-[12px] text-ink hover:border-seal/40 hover:bg-seal/[0.06]"
+            className="flex cursor-grab items-center gap-1.5 rounded-lg border border-line/70 bg-paper/70 px-2 py-1.5 text-[12px] text-ink hover:border-seal/40 hover:bg-seal/[0.06]"
           >
-            {t(GRAPH_KIND_LABEL[kind])}
+            {/* 色签用卡片徽章的同一套配色：列表里什么颜色，画布上就是什么颜色 */}
+            <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded ${KIND_BADGE[kind]}`}>
+              <KindIcon kind={kind} />
+            </span>
+            <span className="min-w-0 flex-1 truncate">{t(GRAPH_KIND_LABEL[kind])}</span>
           </div>
         ))}
       </div>

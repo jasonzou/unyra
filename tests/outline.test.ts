@@ -122,11 +122,10 @@ describe('moveNode：迁移节点到另一个节点之下', () => {
 })
 
 describe('大纲：写入、对上号与落盘往返', () => {
-  it('createNodeUnder 建出的节点自带一份空大纲（创建时两份文件同时成形）', () => {
+  it('createNodeUnder 建出的节点不再自动附大纲（大纲是显式的计划：kind outline 创建或 editContent 写入）', () => {
     const r = createNodeUnder(fixture(), 'n2', { title: '洛必达法则' })
     const created = r.store.nodes.find((n) => n.title === '洛必达法则')
-    expect(created?.outline).toBeDefined()
-    expect(created?.outline?.children).toEqual([])
+    expect(created?.outline).toBeUndefined()
   })
 
   it('writeOutline 整份写入，key 由标题生成；同 key 条目只留一份', () => {

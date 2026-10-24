@@ -3,7 +3,7 @@
  * （祖先 / 兄弟 / 知识深度）。笔记、考试、对话、阅读账都在各自的文件里。
  */
 import type { DocKind, KnowledgeNode, LearnStore } from '../types'
-import { emptyDocs, emptyOutline } from '../types'
+import { emptyDocs } from '../types'
 import { detachedPoolOf } from '../detached'
 import { withVisit } from '../learning'
 import { withoutTmpNodes } from '../../lib/tmpStore'
@@ -79,11 +79,11 @@ export function addNode(
     origin: input.origin ?? 'user',
     goalId: input.goalId,
     /*
-     * 大纲与教学文档在创建这一刻**同时**成形（见 OutlineDoc）：
-     * 教学文档落 `{节点}.md`、大纲落 `{节点}.outline.json`，都是空的，
-     * 等导师（或用户）往里写。老数据没有这一项也不补——那份大纲是「还没有」，不是「空」。
+     * **创建时不再附带大纲**（2026-10-24 用户定的）：大纲是显式的计划，只在两种时候
+     * 出现——node.create kind 'outline'（配对成形）与大纲节点的 editContent。
+     * 这里挂一份空大纲的话，点目标项建的文档、agent 建的文档会全都拖着一张
+     * 「还没有大纲」的子级大纲卡。
      */
-    outline: { ...emptyOutline(), updatedAt: now },
     createdAt: now,
     updatedAt: now,
   }
