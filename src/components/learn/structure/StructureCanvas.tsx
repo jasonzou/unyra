@@ -1515,24 +1515,25 @@ export const StructureCanvas = memo(function StructureCanvas({
                 /*
                   试卷的考试记录：一行一次作答（与大纲目标项同一套行高与圆点节奏——
                   高度由派生层的 examCardHeight 算，这里只管照着画）。
+                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素
+                  （见 onPointerDown 开头的 closest）的 click 会被吞掉。
                 */
                 <div className="flex flex-col pb-2">
                   {card.attempts!.map((row) => (
-                    <div
+                    <button
                       key={row.n}
-                      role="button"
-                      tabIndex={0}
+                      type="button"
                       title={t('打开这一次考试的记录（卷子 + 作答 + 判分 + 错题讲解）')}
                       onClick={() => {
                         const exam = store.exams.find((e) => e.id === card.uuid)
                         if (exam) exams.onOpenRecord(exam.nodeId, exam.id, row.attemptId)
                       }}
-                      className="flex cursor-pointer items-center gap-1.5 px-3 text-[11px] text-ink-soft hover:bg-seal/[0.08]"
+                      className="flex w-full cursor-pointer items-center gap-1.5 px-3 text-left text-[11px] text-ink-soft hover:bg-seal/[0.08]"
                       style={{ height: SLOT_ROW }}
                     >
                       <span className="shrink-0 text-ink-faint">第 {row.n} 次</span>
                       <span className="min-w-0 flex-1 truncate">{row.label}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               ) : (card.kind === 'exam' || card.kind === 'superdoc') && card.blank && leafOwnerNodeId ? (
