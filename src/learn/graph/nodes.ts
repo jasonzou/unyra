@@ -4,6 +4,7 @@
  */
 import type { DocKind, KnowledgeNode, LearnStore } from '../types'
 import { emptyDocs, emptyOutline } from '../types'
+import { detachedPoolOf } from '../detached'
 import { withVisit } from '../learning'
 import { withoutTmpNodes } from '../../lib/tmpStore'
 import { allStoredTabs, closeIds, dropTabs, withOwners } from '../groups'
@@ -267,12 +268,13 @@ export function moveNode(
 }
 
 /**
- * 删除单个节点：只删它自己——相连的边摘掉、它名下的试卷/页签/临时变量一并清掉；
+ * 删除单个节点：只删它自己——相连的边摘掉、它名下的临时变量/页签一并清掉；
  * 若它是某个目标的根，则整个目标一并删除（根就是目标的骨架）。
  *
  * **下游不连坐**（用户定的原则：节点都是独立的，关系可以解除）：树边摘掉之后，
  * 下游文档变成「没有上游的游离文档」，还在画布上，随时可以重新连上或单独删除。
- * 挂在它身上的笔记与超级文档存在它的记录里，随它一起走（那是它们唯一的家）。
+ * 它名下的挂件也**不删**：笔记与超级文档挪进游离池（内容原样、id 不变，随时可以
+ * 绑到别的文档），试卷原地悬空（宿主 id 指向的节点已不在，绑定自然解除）。
  *
  * **会话不动**：上下文属于目标，删掉一个节点不代表「这个目标聊过的事」就不算数了——
  * 那正是节点级隔离改成目标级之后该有的样子。
@@ -283,9 +285,17 @@ export function deleteNode(store: LearnStore, id: string): LearnStore {
   const node = nodeById(store, id)
   if (!node) return store
   const parents = parentIds(store, id)
-  const doomed = new Set([id])
   const doomedTabs = tabIdsOfNode(allStoredTabs(store.docArea), id)
   const nodes = store.nodes.filter((n) => n.id !== id)
+  // 挂件解除绑定、就地独立：笔记与超级文档进游离池（宿主的 goal），试卷留在 exams 里悬空
+  const pool = detachedPoolOf(store, node.goalId)
+  const nextDetached: LearnStore['detached'] = {
+    ...(store.detached ?? {}),
+    [node.goalId]: {
+      notes: [...pool.notes, ...(node.notes ?? [])],
+      superdocs: [...pool.superdocs, ...(node.superdocs ?? [])],
+    },
+  }
   return {
     ...store,
     nodes,
@@ -293,9 +303,9 @@ export function deleteNode(store: LearnStore, id: string): LearnStore {
     // 一个节点只属于一个目标，所以只动那一本账
     ...onNodeReadingPatch(store, node, (rec) => pruneReading(rec, new Set(nodes.map((n) => n.id)))),
     edges: store.edges.filter((e) => e.from !== id && e.to !== id),
-    exams: store.exams.filter((e) => e.nodeId !== id),
-    // 节点没了，它那份临时变量（可能是几十万字符的中间数据）也不该留着
-    tmp: withoutTmpNodes(store.tmp, doomed),
+    // 试卷不删：宿主没了绑定自然解除（nodeId 悬空），用户随时可以把它绑到别的文档或单独删掉
+    tmp: withoutTmpNodes(store.tmp, new Set([id])),
+    detached: nextDetached,
     docArea: withOwners(closeIds(store.docArea, doomedTabs), dropTabs(store.docArea.tabOwners, doomedTabs)),
     // 节点没了，它那几份没保存的正文也没有落点了（同页签：留着只会占着键）
     drafts: dropDrafts(store.drafts, doomedTabs),

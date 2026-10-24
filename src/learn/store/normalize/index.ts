@@ -3,10 +3,13 @@
 import type {
   Conversation,
   DependencyEdge,
+  DetachedPool,
   KnowledgeNode,
   LearningGoal,
   LearnStore,
   MethodEntry,
+  NoteFile,
+  SuperDocFile,
   MethodStore,
   WorkflowBook,
 } from '../../types'
@@ -128,9 +131,24 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
     const exams: Exam[] = []
     if (Array.isArray(d.exams)) {
       for (const raw of d.exams) {
-        const e = normalizeExam(raw, ids)
+        const e = normalizeExam(raw)
         if (e) exams.push(e)
       }
+    }
+
+    // 游离挂件池：目标已经没了的整桶丢掉；实体只留形状对的（见 learn/detached）
+    const detached: Record<string, DetachedPool> = {}
+    const rawDetached = (d.detached && typeof d.detached === 'object' ? d.detached : {}) as Record<string, unknown>
+    for (const [poolGoalId, rawPool] of Object.entries(rawDetached)) {
+      if (!goalIds.has(poolGoalId) || !rawPool || typeof rawPool !== 'object') continue
+      const p = rawPool as Record<string, unknown>
+      const notes = (Array.isArray(p.notes) ? p.notes : []).filter(
+        (n): n is NoteFile => !!n && typeof n === 'object' && typeof (n as NoteFile).id === 'string' && typeof (n as NoteFile).name === 'string' && typeof (n as NoteFile).content === 'string',
+      )
+      const superdocs = (Array.isArray(p.superdocs) ? p.superdocs : []).filter(
+        (dd): dd is SuperDocFile => !!dd && typeof dd === 'object' && typeof (dd as SuperDocFile).id === 'string' && typeof (dd as SuperDocFile).name === 'string' && typeof (dd as SuperDocFile).html === 'string',
+      )
+      if (notes.length || superdocs.length) detached[poolGoalId] = { notes, superdocs }
     }
 
     // 资源清单按目标归属：目标已经没了的那些条目留不住（文件本体是另一回事）
@@ -263,6 +281,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       goals,
       conversations,
       exams,
+      ...(Object.keys(detached).length ? { detached } : {}),
       // 临时变量只保留还挂在现有节点上的那些——节点没了，它的暂存数据也没有意义
       tmp: pruneTmpToNodes(normalizeTmpStore(d.tmp), ids),
       resources,

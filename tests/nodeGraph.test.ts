@@ -179,8 +179,14 @@ describe('连接协议：双边协商，唯一的可手工组合是「大纲 →
     expect(r2).toMatchObject({ error: expect.stringContaining('笔记') })
     const r3 = a.connect(svc.get(entryUuid('r'))!, 'up')
     expect(r3).toMatchObject({ error: expect.stringContaining('入口') })
+    // 挂件绑定现在是合法连接：文档 ↔ 挂件拖线 = 绑定 / 换绑（内容不动）
     const r4 = a.connect(note, 'down')
-    expect(r4).toMatchObject({ error: expect.stringContaining('api.node.create') })
+    expect(r4).toMatchObject({ ok: true })
+    expect(h.store.nodes[0].notes).toEqual([])
+    expect(h.store.nodes[1].notes.map((n) => n.name)).toEqual(['错题本'])
+    // 已经在这份文档名下的再连一次 = 拒绝（重复连接）
+    const r5 = a.connect(svc.get('note1')!, 'down')
+    expect(r5).toMatchObject({ error: expect.stringContaining('已经连着') })
   })
 
   it('成环的挂法被拒（孙辈不能反过来当父辈）', () => {
@@ -347,7 +353,7 @@ describe('NodeService：create / get / list / delete（画布与 agent 同一条
   it('大纲与入口不能 create（一个随文档存在、一个随目标绑定）', () => {
     const h = harness()
     const svc = h.service()
-    expect(svc.create({ kind: 'outline', under: 'r' })).toMatchObject({ error: expect.stringContaining('随文档') })
+    expect(svc.create({ kind: 'outline', under: 'r' })).toMatchObject({ error: expect.stringContaining('已经有一份大纲') })
     expect(svc.create({ kind: 'entry', under: 'r' })).toMatchObject({ error: expect.stringContaining('目标') })
   })
 
@@ -382,11 +388,15 @@ describe('NodeService：create / get / list / delete（画布与 agent 同一条
     expect(h.store.nodes.some((n) => n.id === 'a')).toBe(true)
     expect(h.store.edges.some((e) => e.from === 'r' && e.to === 'a')).toBe(true)
 
-    // 删文档只删它自己（这里 a 是叶子）；试卷是它名下的，随它走
+    // 给 a 挂一份笔记，然后删 a：试卷原地悬空（宿主 id 指向已删的 a，绑定解除）、
+    // 笔记进游离池——都是独立实体，等用户拖线再绑或单独删
+    expect(svc.create({ kind: 'note', under: 'a', title: '随手记' })).toMatchObject({ ok: true })
     const r2 = svc.delete('a')
     expect(r2).toMatchObject({ ok: true })
     expect(h.store.nodes.some((n) => n.id === 'a')).toBe(false)
-    expect(h.store.exams).toEqual([])
+    expect(h.store.exams.map((e) => e.id)).toEqual(['exam1'])
+    expect(h.store.exams[0].nodeId).toBe('a')
+    expect(h.store.detached?.g1?.notes.map((n) => n.name) ?? []).toEqual(['随手记'])
     expect(h.store.nodes[0].superdocs).toHaveLength(1)
   })
 

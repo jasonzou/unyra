@@ -7,6 +7,7 @@
  */
 import { loadAgentSettings } from '../../agent/settings'
 import { layoutHintOf } from '../../agent/docFormat'
+import { bindExam, bindNote, bindSuperDoc, detachExam, detachNote, detachSuperDoc } from '../detached'
 import { examsOfNode, nodeById, parentIds, titleTaken, updateDoc, updateNode } from '../graph'
 import { clearOutline } from '../outline'
 import { notesOf } from '../notes'
@@ -157,7 +158,7 @@ export class DocGNode extends GNode {
         root
           ? '上游是入口（entry:，由目标绑定自动生成，不能手工连）。'
           : '上游是大纲（o: 前缀）：把这份文档挂到某份大纲下，先取那份大纲的对象再 connect(我, "down")。',
-        '下游（大纲 / 笔记 / 试卷 / 超级文档）全部自动连着：api.node.create({ kind, under: 我的 uuid }) 创建即挂上。与自己的大纲之间可以 disconnect（= 删除那份大纲，计划清空）；挂件的归属线摘不掉，要解除就删挂件那张卡（只删它自己）。',
+        '下游（大纲 / 笔记 / 试卷 / 超级文档）都可以连线：api.node.create({ kind, under: 我的 uuid }) 创建即挂；拖线 / connect(挂件对象, "down") 绑定游离的挂件或换绑别人的，disconnect 解绑（内容原样）。与自己的大纲之间 disconnect = 删除那份大纲。',
       ].join('\n'),
     }
   }
@@ -170,16 +171,42 @@ export class DocGNode extends GNode {
     return true
   }
 
-  onDownstream(_node: GNode): ConnectFilter {
-    return (
-      '挂件（大纲 / 笔记 / 试卷 / 超级文档）与文档的连线由归属自动生成：' +
-      'api.node.create({ kind, under: "' + this.uuid + '" }) 创建那一刻就挂上了，不需要手工连'
-    )
+  onDownstream(node: GNode): ConnectFilter {
+    if (node.kind === 'note' || node.kind === 'superdoc' || node.kind === 'exam') return true
+    if (node.kind === 'outline') return '大纲与文档一一对应（o: 就是这份文档的 id），由创建 / 删除大纲管理，不能手工连'
+    return '这种节点不能挂到文档之下（能挂的：笔记 / 试卷 / 超级文档 / 下级文档走大纲）'
+  }
+
+  /**
+   * 绑定（上游一方落库）：把一份挂件挂到自己名下。实体从游离池或**别的文档**挪过来
+   * 都行——换绑就是这一步，内容与 id 原样，动的只是挂在谁那里。
+   */
+  protected link(down: GNode): NodeResult {
+    const s = this.ctx.store()
+    if (down.kind === 'note') {
+      const r = bindNote(s, down.uuid, this.uuid)
+      if ('error' in r) return { error: r.error }
+      this.ctx.commit(r.store)
+      return { ok: true, note: '已把笔记「' + r.name + '」绑到「' + this.title + '」之下' }
+    }
+    if (down.kind === 'superdoc') {
+      const r = bindSuperDoc(s, down.uuid, this.uuid)
+      if ('error' in r) return { error: r.error }
+      this.ctx.commit(r.store)
+      return { ok: true, note: '已把超级文档「' + r.name + '」绑到「' + this.title + '」之下' }
+    }
+    if (down.kind === 'exam') {
+      const r = bindExam(s, down.uuid, this.uuid)
+      if ('error' in r) return { error: r.error }
+      this.ctx.commit(r.store)
+      return { ok: true, note: '已把试卷《' + down.title + '》绑到「' + this.title + '」之下' }
+    }
+    return { error: '这种节点挂不到文档之下（能绑的：笔记 / 试卷 / 超级文档）' }
   }
 
   /**
    * 摘线（按对象分派）：与自己的大纲之间摘掉 = 删除那份大纲（计划清空，文档本身不动）；
-   * 与挂件之间的线是「存在在哪」的归属，摘不掉——要解除就删挂件那张卡（删卡只删它自己）。
+   * 与挂件之间摘掉 = 解绑（实体进游离池 / 试卷悬空，内容原样，可再绑别人）。
    */
   protected unlink(target: GNode): NodeResult {
     if (target.kind === 'outline' && target.uuid === outlineUuid(this.uuid)) {
@@ -188,6 +215,13 @@ export class DocGNode extends GNode {
       this.ctx.commit(next)
       return { ok: true, note: '已删除「' + this.title + '」的大纲：计划清空，文档与它的下级文档都还在' }
     }
-    return { error: '挂件（笔记 / 试卷 / 超级文档）存在这份文档里面，这条归属线摘不掉——要解除就删挂件那张卡（只删它自己）' }
+    if (target.kind === 'note' || target.kind === 'superdoc' || target.kind === 'exam') {
+      const detach = target.kind === 'note' ? detachNote : target.kind === 'superdoc' ? detachSuperDoc : detachExam
+      const r = detach(this.ctx.store(), target.uuid)
+      if ('error' in r) return { error: r.error }
+      this.ctx.commit(r.store)
+      return { ok: true, note: '已解开「' + target.title + '」与「' + this.title + '」的绑定：它现在是独立节点（内容原样保留），可以拖线绑到别的文档' }
+    }
+    return { error: '这条连线摘不了（能解的：自己那份大纲、名下的挂件）' }
   }
 }

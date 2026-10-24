@@ -111,11 +111,13 @@ function normalizeAttempt(raw: unknown, fallbackStartedAt: number): ExamAttempt 
  *
  * 时限是这次新加的：老卷子没有 minutes，按题量补一个（见 fallbackMinutes）。
  */
-export function normalizeExam(raw: unknown, validNodeIds: Set<string>): Exam | null {
+export function normalizeExam(raw: unknown): Exam | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   const nodeId = typeof r.nodeId === 'string' ? r.nodeId : ''
-  if (!nodeId || !validNodeIds.has(nodeId)) return null
+  // nodeId 为空 = 坏数据，丢；指向不存在的节点 = **游离试卷**（剪了线 / 宿主已删），
+  // 要保留——用户定的模型里它是独立实体，随时可以绑到别的文档（见 learn/detached）
+  if (!nodeId) return null
   const questions = normalizeQuestions(r.questions)
   if (!questions) return null
   const now = Date.now()

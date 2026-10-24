@@ -1,20 +1,19 @@
 /**
- * 超级文档节点：一整份可交互 HTML（讲义、演示、小工具）。叶子，上游恒为归属文档。
+ * 超级文档节点：一整份可交互 HTML（讲义、演示、小工具）。叶子。
  *
  * uuid 是 SuperDocFile.id（持久 id；名字是显示与页签身份，不随 uuid 变）。
+ * 实体要么在宿主文档的记录里（绑定），要么在游离池里（剪了线 / 还没绑过）——
+ * 两种状态内容读写完全一样，绑定的只是那条关系线。
  * write 语义：整份覆盖、空内容拒绝、超长拒绝。
  */
-import { nodeById } from '../graph'
+import { detachSuperDoc } from '../detached'
 import { SUPERDOC_MAX_CHARS, writeSuperDoc } from '../superdocs'
 import { superDocsOf, type KnowledgeNode, type SuperDocFile } from '../types'
-import { GNode, type NodeCtx, type NodeHelp, type NodeRelation, type NodeResult } from './base'
+import { GNode, type ConnectFilter, type NodeCtx, type NodeHelp, type NodeRelation, type NodeResult } from './base'
 
 export class SuperdocGNode extends GNode {
-  private readonly ownerDocId: string
-
-  constructor(ctx: NodeCtx, uuid: string, ownerDocId: string) {
+  constructor(ctx: NodeCtx, uuid: string) {
     super(ctx, uuid)
-    this.ownerDocId = ownerDocId
   }
 
   get kind(): 'superdoc' {
@@ -25,11 +24,18 @@ export class SuperdocGNode extends GNode {
     return '超级文档'
   }
 
-  private locate(): { node: KnowledgeNode; doc: SuperDocFile } | null {
-    const node = nodeById(this.ctx.store(), this.ownerDocId)
-    if (!node) return null
-    const doc = superDocsOf(node).find((d) => d.id === this.uuid)
-    return doc ? { node, doc } : null
+  /** 实体在哪：绑定的回宿主，游离的回 null 宿主 */
+  private locate(): { doc: SuperDocFile; node: KnowledgeNode | null; goalId: string } | null {
+    const s = this.ctx.store()
+    for (const node of s.nodes) {
+      const doc = superDocsOf(node).find((d) => d.id === this.uuid)
+      if (doc) return { doc, node, goalId: node.goalId }
+    }
+    for (const [goalId, pool] of Object.entries(s.detached ?? {})) {
+      const doc = pool.superdocs.find((d) => d.id === this.uuid)
+      if (doc) return { doc, node: null, goalId }
+    }
+    return null
   }
 
   get title(): string {
@@ -41,7 +47,8 @@ export class SuperdocGNode extends GNode {
   }
 
   get relations(): NodeRelation[] {
-    return this.exists() ? [{ id: this.ownerDocId, type: 'up' }] : []
+    const found = this.locate()
+    return found?.node ? [{ id: found.node.id, type: 'up' }] : []
   }
 
   get content(): unknown {
@@ -61,18 +68,37 @@ export class SuperdocGNode extends GNode {
       return { error: '超级文档不支持改名（名字是页签与身份的一半）；要新名字就 create 一份新的，把内容搬过去' }
     }
     if (typeof o.html !== 'string') return { error: 'html 必给：一份完整的 HTML（按钮、样式、脚本都在里面）' }
-    if (!o.html.trim()) return { error: '内容为空：editContent 需要一份完整的 HTML' }
-    if (o.html.length > SUPERDOC_MAX_CHARS) {
-      return { error: '超级文档最长 ' + SUPERDOC_MAX_CHARS + ' 字符（收到 ' + o.html.length + '）；拆成几份或把重逻辑挪进 method 函数' }
+    const html = o.html
+    if (!html.trim()) return { error: '内容为空：editContent 需要一份完整的 HTML' }
+    if (html.length > SUPERDOC_MAX_CHARS) {
+      return { error: '超级文档最长 ' + SUPERDOC_MAX_CHARS + ' 字符（收到 ' + html.length + '）；拆成几份或把重逻辑挪进 method 函数' }
     }
-    const nextStore = writeSuperDoc(this.ctx.store(), this.ownerDocId, found.doc.name, o.html)
-    if (!nextStore) return { error: '写入失败：归属的文档节点已经不在了' }
-    this.ctx.commit(nextStore)
+    if (found.node) {
+      const nextStore = writeSuperDoc(this.ctx.store(), found.node.id, found.doc.name, html)
+      if (!nextStore) return { error: '写入失败：归属的文档节点已经不在了' }
+      this.ctx.commit(nextStore)
+    } else {
+      // 游离态：直接改池子里那份实体
+      const s = this.ctx.store()
+      const pool = s.detached?.[found.goalId]
+      if (!pool) return { error: '这份超级文档已经不在了（可能刚被删除）' }
+      this.ctx.commit({
+        ...s,
+        detached: {
+          ...s.detached,
+          [found.goalId]: {
+            ...pool,
+            superdocs: pool.superdocs.map((d) => (d.id === this.uuid ? { ...d, html, updatedAt: Date.now() } : d)),
+          },
+        },
+      })
+    }
+    const hostId = found.node?.id ?? ''
     return {
       ok: true,
       note:
-        '已覆盖更新「' + found.doc.name + '」（' + o.html.length + ' 字符）。打开给用户：api.ui.superdoc("' +
-        this.ownerDocId + '", "' + found.doc.name + '")',
+        '已覆盖更新「' + found.doc.name + '」（' + html.length + ' 字符）。' +
+        (hostId ? '打开给用户：api.ui.superdoc("' + hostId + '", "' + found.doc.name + '")' : '它目前是游离的：绑到某份文档后才能作为页签打开'),
     }
   }
 
@@ -80,7 +106,8 @@ export class SuperdocGNode extends GNode {
     const found = this.locate()
     return {
       description:
-        '超级文档节点——「' + (found?.doc.name ?? '？') + '」，挂在文档「' + (found?.node.title ?? '？') + '」下。' +
+        '超级文档节点——「' + (found?.doc.name ?? '？') + '」' +
+        (found?.node ? '，挂在文档「' + found.node.title + '」下。' : '（游离：还没绑到哪份文档上）。') +
         (found ? (found.doc.html.trim() ? '现有 ' + found.doc.html.length + ' 字符。' : '还是空的（一份壳）。') : ''),
       edit: [
         'await n.content 读源码 → 改 → await n.editContent({ html }) 整份覆盖（自包含单页：结构、<style>、<script> 都在这一份里）。',
@@ -89,7 +116,23 @@ export class SuperdocGNode extends GNode {
         '内置跳转协议：静态资源 moji:static/{uuid}、超级文档互跳 moji:super/{name}、节点跳转 moji:node/{nodeId}。',
         '上限 ' + SUPERDOC_MAX_CHARS + ' 字符；写完用 api.ui.superdoc 打开给用户看。',
       ].join('\n'),
-      connection: '上游恒为归属文档（创建那一刻定下，不能改挂）；超级文档是叶子，没有下游。',
+      connection: [
+        '上游是文档：拖线 / connect(文档对象, "down") 绑到某份文档（或换绑到另一份），disconnect 摘掉 = 变成游离的独立超级文档（内容原样保留）。',
+        '超级文档是叶子，没有下游。',
+      ].join('\n'),
     }
+  }
+
+  onUpstream(node: GNode): ConnectFilter {
+    if (node.kind !== 'doc') return '超级文档只能挂在文档之下'
+    return true
+  }
+
+  /** 摘线 = 解绑：实体挪进游离池，内容原样保留，随时可以绑到别的文档 */
+  protected unlink(): NodeResult {
+    const r = detachSuperDoc(this.ctx.store(), this.uuid)
+    if ('error' in r) return { error: r.error }
+    this.ctx.commit(r.store)
+    return { ok: true, note: '已解开「' + this.title + '」的绑定：它现在是独立的超级文档（内容原样保留），可以拖线绑到别的文档' }
   }
 }

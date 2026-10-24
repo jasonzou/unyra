@@ -6,6 +6,7 @@ import type { Conversation } from '../../agent/types'
 import { migrateConversation } from '../compact'
 import type { Exam } from '../exam'
 import type {
+  DetachedPool,
   EssayCommit,
   EssayEntry,
   LearnStore,
@@ -56,6 +57,7 @@ function readGoalLedgers(
     methods: Record<string, MethodEntry[]>
     workflowsByGoal: Record<string, WorkflowEntry[]>
     structureByGoal: Record<string, StructureMap>
+    detachedByGoal: Record<string, DetachedPool>
     resources: Record<string, StaticResource[]>
   },
 ): void {
@@ -95,6 +97,19 @@ function readGoalLedgers(
 
   const structureFile = parseJson<StructureMap>(files.get(`${goalDir}/structure.json`))
   if (structureFile) out.structureByGoal[goalId] = structureFile
+
+  // 游离挂件池（剪了线 / 没绑过的笔记与超级文档；见 learn/detached）
+  const detachedFile = parseJson<DetachedPool>(files.get(`${goalDir}/detached.json`))
+  if (detachedFile && (Array.isArray(detachedFile.notes) || Array.isArray(detachedFile.superdocs))) {
+    out.detachedByGoal[goalId] = {
+      notes: (Array.isArray(detachedFile.notes) ? detachedFile.notes : []).filter(
+        (n): n is NoteFile => !!n && typeof n === 'object' && typeof (n as NoteFile).id === 'string' && typeof (n as NoteFile).name === 'string',
+      ),
+      superdocs: (Array.isArray(detachedFile.superdocs) ? detachedFile.superdocs : []).filter(
+        (d): d is SuperDocFile => !!d && typeof d === 'object' && typeof (d as SuperDocFile).id === 'string' && typeof (d as SuperDocFile).name === 'string',
+      ),
+    }
+  }
 }
 
 /** 用户级（state.json）那一半：与布局无关，v2/v3 共用 */
@@ -156,6 +171,7 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
     methods: {} as Record<string, MethodEntry[]>,
     workflowsByGoal: {} as Record<string, WorkflowEntry[]>,
     structureByGoal: {} as Record<string, StructureMap>,
+    detachedByGoal: {} as Record<string, DetachedPool>,
     resources: {} as Record<string, StaticResource[]>,
   }
 
@@ -249,6 +265,7 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
     essays: ledgers.essaysByGoal,
     essayCommits: ledgers.essayCommitsByGoal,
     structure: ledgers.structureByGoal,
+    detached: ledgers.detachedByGoal,
     essayDock: s.essayDock ?? null,
     focus: s.focus ?? s.pomodoro ?? null,
     schedule: s.schedule ?? null,
@@ -295,6 +312,7 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
     methods: {} as Record<string, MethodEntry[]>,
     workflowsByGoal: {} as Record<string, WorkflowEntry[]>,
     structureByGoal: {} as Record<string, StructureMap>,
+    detachedByGoal: {} as Record<string, DetachedPool>,
     resources: {} as Record<string, StaticResource[]>,
   }
 
@@ -472,6 +490,7 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
     essays: ledgers.essaysByGoal,
     essayCommits: ledgers.essayCommitsByGoal,
     structure: ledgers.structureByGoal,
+    detached: ledgers.detachedByGoal,
     essayDock: s.essayDock ?? null,
     focus: s.focus ?? s.pomodoro ?? null,
     schedule: s.schedule ?? null,

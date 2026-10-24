@@ -176,6 +176,11 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
       if (structure && Object.keys(structure.positions).length) {
         files.set(`${path}/structure.json`, jsonText(structure))
       }
+      /** 游离挂件池（剪了线 / 没绑过的笔记与超级文档）：一个都没有就不写 */
+      const goalDetached = store.detached?.[goal.id]
+      if (goalDetached && (goalDetached.notes.length || goalDetached.superdocs.length)) {
+        files.set(`${path}/detached.json`, jsonText({ version: 1, notes: goalDetached.notes, superdocs: goalDetached.superdocs }))
+      }
     }
 
     /**

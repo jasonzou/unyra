@@ -135,6 +135,29 @@ export async function toolTests() {
       !h.store().edges.some((e) => e.from === midUuid),
     '删「中游」只删它自己：「下游」断线成游离、不删除', rDelMid.content.slice(0, 240),
   )
+
+  // 独立实体与换绑（用户定的）：不给 under = 游离；剪线 = 解绑不删内容；connect = 绑回
+  const rFree = await h.run("((api)=>{ return await api.node.create({ kind: 'note', title: '散记' }) })")
+  const freeUuid = rFree.ok ? (jsonOf(rFree) as { uuid?: string }).uuid : undefined
+  ok(
+    !!freeUuid && !(h.store().nodes.some((n) => (n.notes ?? []).some((x) => x.id === freeUuid))) &&
+      !!h.store().detached?.g1?.notes.some((n) => n.id === freeUuid),
+    '不给 under 建的是游离笔记（独立实体，在池子里不在任何文档名下）', rFree.content.slice(0, 200),
+  )
+  const rWrite = await h.run("((api)=>{ return await api.node.invoke(" + JSON.stringify(freeUuid) + ", 'editContent', [{ text: '剪线也不删我' }]) })")
+  ok(rWrite.ok, '游离笔记照样能写（内容跟实体走，跟绑定无关）', rWrite.content.slice(0, 160))
+  const rBindBack = await h.run("((api)=>{ return await api.node.invoke(" + JSON.stringify(docUuid) + ", 'connect', [" + JSON.stringify(freeUuid) + ", 'down']) })")
+  ok(
+    rBindBack.ok && (h.store().nodes.find((n) => n.id === childId)?.notes ?? []).some((n) => n.id === freeUuid) &&
+      !(h.store().detached?.g1?.notes ?? []).some((n) => n.id === freeUuid),
+    'connect 绑回文档之下（从池子里挪进宿主，id 不变）', rBindBack.content.slice(0, 200),
+  )
+  const rUnbind = await h.run("((api)=>{ return await api.node.invoke(" + JSON.stringify(docUuid) + ", 'disconnect', [" + JSON.stringify(freeUuid) + "]) })")
+  const unbound = rUnbind.ok && (h.store().detached?.g1?.notes ?? []).find((n) => n.id === freeUuid)
+  ok(
+    !!unbound && unbound.content === '剪线也不删我' && !(h.store().nodes.find((n) => n.id === childId)?.notes ?? []).some((n) => n.id === freeUuid),
+    'disconnect 剪线 = 解绑：实体进池子、内容原样（什么都不删）', rUnbind.content.slice(0, 200),
+  )
   const rOldDoc = await h.run('((api)=>{ return await api.doc.read("") })')
   ok(!rOldDoc.ok && rOldDoc.content.includes('api.node.get'), '旧 api 名给出新写法（doc.read → 节点对象）', rOldDoc.content.slice(0, 200))
 

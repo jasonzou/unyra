@@ -178,6 +178,36 @@ describe('deriveCanvas：坐标以存过的为准，没存的自动铺排（确�
     const store = makeStore()
     expect(deriveCanvas(store, 'g1', emptyStructure()).cards).toEqual(deriveCanvas(store, 'g1', undefined).cards)
   })
+
+  it('游离挂件（池子里的笔记/超级文档、宿主悬空的试卷）也在画布上，没有连线', () => {
+    const store = makeStore()
+    const note = { id: 'free-note', name: '散记', content: '独立内容', createdAt: 1, updatedAt: 1 }
+    const sdoc = { id: 'free-sdoc', name: '独立件', html: '', createdAt: 1, updatedAt: 1 }
+    const danglingExam = { id: 'free-exam', nodeId: 'gone', goalId: 'g1', title: '孤卷', kind: 'quiz' as const, level: 'easy' as const, minutes: 0, questions: [], attempts: [], createdAt: 1 }
+    const withPool = {
+      ...store,
+      detached: { g1: { notes: [note], superdocs: [sdoc] } },
+      exams: [...store.exams, danglingExam],
+    }
+    const view = deriveCanvas(withPool, 'g1', undefined)
+    const kinds = new Map(view.cards.map((c) => [c.uuid, c.kind]))
+    expect(kinds.get('free-note')).toBe('note')
+    expect(kinds.get('free-sdoc')).toBe('superdoc')
+    expect(kinds.get('free-exam')).toBe('exam')
+    expect(view.edges.some((e) => e.to === 'free-note' || e.to === 'free-sdoc' || e.to === 'free-exam')).toBe(false)
+  })
+
+  it('大纲卡只跟大纲实体走：空大纲也算在（画布上新建的那份），删了大纲卡就没了', () => {
+    const store = makeStore()
+    const emptyOutline = { ...store, nodes: store.nodes.map((n) => (n.id === 'a' ? { ...n, outline: { intro: '', children: [], updatedAt: 1 } } : n)) }
+    expect(deriveCanvas(emptyOutline, 'g1', undefined).cards.some((c) => c.uuid === outlineUuid('a'))).toBe(true)
+    const cleared = { ...emptyOutline, nodes: emptyOutline.nodes.map((n) => (n.id === 'a' ? { ...n, outline: undefined } : n)) }
+    expect(deriveCanvas(cleared, 'g1', undefined).cards.some((c) => c.uuid === outlineUuid('a'))).toBe(false)
+    // a 没有大纲卡了：以 a 为父的树边直接画在 a 与子文档之间（连线跟着事实走）
+    const b = { ...store.nodes[1], id: 'b', title: '洛必达', key: 'luobida' }
+    const chained = { ...cleared, nodes: [...cleared.nodes, b], edges: [...cleared.edges, { from: 'a', to: 'b', createdAt: 1 }] }
+    expect(deriveCanvas(chained, 'g1', undefined).edges.some((e) => e.from === 'a' && e.to === 'b')).toBe(true)
+  })
 })
 
 describe('连线几何（与画布共用一份口径）', () => {

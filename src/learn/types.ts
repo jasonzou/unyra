@@ -230,6 +230,16 @@ export function superDocsOf(node: { superdocs?: SuperDocFile[] }): SuperDocFile[
   return node.superdocs ?? []
 }
 
+/**
+ * 一个目标的游离挂件池（见 LearnStore.detached）。
+ * 实体在这里与「绑在某份文档的 parts 里」二选一：剪线 = 挪进池子（内容原样），
+ * 绑定 = 挪出池子挂到宿主。id 全程不变——页签、坐标、agent 句柄都靠它稳住。
+ */
+export interface DetachedPool {
+  notes: NoteFile[]
+  superdocs: SuperDocFile[]
+}
+
 /* ---------- 大纲（outline）：每个目标一份，交互页消费 ---------- */
 
 /**
@@ -693,6 +703,13 @@ export interface LearnStore {
   conversations: Conversation[]
   /** 考试记录（每份只属于一个节点，可回溯查看只读） */
   exams: Exam[]
+  /**
+   * 游离挂件池：剪了线、还没绑过（或宿主已不在）的笔记与超级文档，按目标归档。
+   * **可选字段**：旧数据没有它，按空池兜底。游离的试卷不走这里——它就在 exams 里，
+   * 宿主 id 悬空（指向已不在的节点）即是游离；那是它唯一的账本，别处再存一份会对不上。
+   * 落盘在各目标目录的 detached.json（这个目标一个游离件都没有就不写文件）。
+   */
+  detached?: Record<string, DetachedPool>
   /** 临时变量：按节点分组，带过期时间（见 lib/tmpStore） */
   tmp: TmpStore
   /**

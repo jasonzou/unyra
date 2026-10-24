@@ -46,6 +46,7 @@ import {
   type EdgeStyle,
   type StructureMap,
 } from '../../../learn/structure'
+import { nodeById } from '../../../learn/graph'
 import { t } from '../../../i18n'
 import {
   CARD_PAD_B,
@@ -86,13 +87,17 @@ export interface StructureCanvasProps {
   docs: NodeDocActions
   /** 考试那一侧的动作：点试卷标题开考试窗口 */
   exams: ExamActions
-  /** 拖挂件落地（统一通道）：在 under 这份文档下建真实空实体 */
-  onCreateNode?: (kind: 'note' | 'exam' | 'superdoc', under: string) => { uuid: string; title: string } | { error: string }
-  /** 删除节点（统一通道，级联规则在服务层） */
+  /** 节点落地（统一通道）：under 给了 = 创建即绑；null + at = 独立实体落在空白处 */
+  onCreateNode?: (
+    kind: GNodeKind,
+    under: string | null,
+    at?: { x: number; y: number },
+  ) => { uuid: string; title: string } | { error: string }
+  /** 删除节点（统一通道：删谁只删谁） */
   onDeleteNode?: (uuid: string) => ChannelResult
-  /** 连线（唯一可手工建立的组合：大纲 → 文档；双边协商在服务层） */
+  /** 连线（双边协商在服务层：大纲↔文档挂层、文档↔挂件绑定） */
   onConnect?: (fromUuid: string, toUuid: string) => ChannelResult
-  /** 断开一条手工连线（大纲 → 文档） */
+  /** 断开一条连线（= 解绑 / 拆边；两端实体都不动） */
   onDisconnect?: (fromUuid: string, toUuid: string) => ChannelResult
   /** 点大纲目标项：挂一份带标题的空文档（统一通道建实体），返回新文档 uuid */
   onCreateChildDoc?: (ownerNodeId: string, title: string) => string | null
@@ -115,7 +120,7 @@ export interface StructureCanvasProps {
  * 卡从落位那刻起就由 store 派生。入口、文档与大纲不在列表里——入口由目标绑定
  * 派生，子文档点大纲目标项，前置知识大纲走文档卡右键菜单。
  */
-const PALETTE: GNodeKind[] = ['note', 'exam', 'superdoc']
+const PALETTE: GNodeKind[] = ['doc', 'outline', 'note', 'exam', 'superdoc']
 
 /** 全景缩略图的窗口大小（屏幕像素） */
 const MINI_W = 248
@@ -635,6 +640,11 @@ export const StructureCanvas = memo(function StructureCanvas({
         return
       }
       const loc = locateUuid(store, card.uuid)
+      // 游离实体（还没绑到任何文档）：内容都在，但没有页签落点——绑到文档后就能打开
+      if (loc && (loc.kind === 'note' || loc.kind === 'superdoc') && !loc.docId) {
+        onToast?.(t('这份{0}还没绑到文档上：拖线连到某张文档卡（或把它拖到文档卡上）之后就能打开', card.kind === 'note' ? t('笔记') : t('超级文档')))
+        return
+      }
       if (card.kind === 'note' && loc?.kind === 'note') {
         const note = store.nodes.find((n) => n.id === loc.docId)?.notes.find((n) => n.id === loc.noteId)
         if (note) docs.onOpenNote(loc.docId, note.name)
@@ -647,6 +657,10 @@ export const StructureCanvas = memo(function StructureCanvas({
       }
       if (card.kind === 'exam') {
         const exam = store.exams.find((e) => e.id === card.uuid)
+        if (exam && !nodeById(store, exam.nodeId)) {
+          onToast?.(t('这份试卷还没绑到文档上：拖线连到某张文档卡之后就能开考'))
+          return
+        }
         if (exam) exams.onStart(exam.nodeId, exam.id)
         return
       }
@@ -930,18 +944,25 @@ export const StructureCanvas = memo(function StructureCanvas({
         }
         const target = hitTest(cards, world.x, world.y, height)
         if (target && target.uuid !== g.from) {
-          // 从大纲（或它的目标项圆点）拉到文档上：唯一可手工建立的连接
-          const outline = g.fromKind === 'outline' ? g.from : target.uuid
-          const doc = g.fromKind === 'outline' ? target.uuid : g.from
-          const outlineCard = cards.find((c) => c.uuid === outline)
-          const docCard = cards.find((c) => c.uuid === doc)
-          if (outlineCard?.kind === 'outline' && docCard?.kind === 'doc') {
-            if (!tryConnect(outline, doc)) {
-              // 不再另给提示：拒绝原因（服务层的双边协商给出的人话）已由 report 弹出
-            }
-          } else {
-            onToast?.(t('手工连线只有一种：大纲 → 文档。挂件与文档的连线由归属自动生成'))
+          /*
+           * 连线看的是「谁是谁」而不是拖的方向：大纲 ↔ 文档 = 挂进那一层（唯一的长树的手法）；
+           * 文档 ↔ 挂件 = 绑定 / 换绑（实体从池子或旧宿主挪过来，内容不动）。
+           * 拒绝原因（双边协商的人话）由 report 弹出，这里不再另说。
+           */
+          const fromCard = cards.find((c) => c.uuid === g.from)
+          const toCard = target
+          const kinds = [fromCard?.kind, toCard.kind]
+          const isPair = (a: GNodeKind, b: GNodeKind) => kinds.includes(a) && kinds.includes(b)
+          if (isPair('outline', 'doc')) {
+            const outline = fromCard?.kind === 'outline' ? g.from : target.uuid
+            const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
+            tryConnect(outline, doc)
+          } else if (isPair('doc', 'note') || isPair('doc', 'exam') || isPair('doc', 'superdoc')) {
+            const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
+            const widget = fromCard?.kind === 'doc' ? target.uuid : g.from
+            tryConnect(doc, widget)
           }
+          // 其余组合不响应（没有可建立的关系）——沉默即可，不值得一条吐司
         }
         setLinkFrom(null)
         setLinkSlot(null)
@@ -990,20 +1011,40 @@ export const StructureCanvas = memo(function StructureCanvas({
         }
 
         /*
-         * 挂件落地（统一通道）：拖到文档卡上就建真实空实体——卡由 store 派生补出，
-         * 位置由派生自动铺排（宿主右侧），画布这边不再写任何卡片状态。
+         * 节点落地（统一通道）：拖到卡上 = 创建即绑（挂件挂到那份文档、文档挂进那一层）；
+         * 拖到**空白处** = 创建独立实体，落点就是它的坐标——节点不必有连接，随时拖线再绑。
          */
-        if (g.kind === 'note' || g.kind === 'exam' || g.kind === 'superdoc') {
+        if (PALETTE.includes(g.kind)) {
           const world2 = toWorld(e.clientX, e.clientY)
           const target = hitTest(cards, world2.x, world2.y, height)
-          if (!onCreateNode || target?.kind !== 'doc') {
-            onToast?.(t('挂件要挂在文档节点下面：把它拖到某张文档卡上'))
-            return
+          if (!onCreateNode) return
+          let under: string | null = null
+          if (target) {
+            if (g.kind === 'doc') {
+              // 文档拖到别的卡上：目标是文档 = 挂到它名下；目标是大纲 = 挂进那一层
+              under = target.kind === 'outline' || target.kind === 'doc' ? target.uuid : null
+            } else if (g.kind === 'outline') {
+              // 大纲拖到文档上 = 给它补一份大纲
+              under = target.kind === 'doc' ? target.uuid : null
+            } else {
+              // 挂件：拖到文档卡 = 绑到它；拖到大纲卡 = 绑到那张大纲的宿主文档
+              under = target.kind === 'doc' ? target.uuid : target.kind === 'outline' ? docIdOfOutlineUuid(target.uuid) : null
+            }
+            if (!under) {
+              onToast?.(t('这种组合连不成：挂件拖到文档卡上、文档拖到大纲或文档卡上，其余拖到空白处'))
+              return
+            }
           }
-          const r = onCreateNode(g.kind, target.uuid)
+          const r = onCreateNode(g.kind, under, under ? undefined : world2)
           if ('error' in r) {
             onToast?.(r.error)
             return
+          }
+          if (!under) {
+            // 独立实体：落点就是它的坐标（大纲对 = 文档落在落点、大纲卡自动排在旁边）
+            const anchor = g.kind === 'outline' ? docIdOfOutlineUuid(r.uuid) : r.uuid
+            if (anchor) writePos(anchor, world2.x, world2.y)
+            if (g.kind === 'outline' && anchor) writePos(r.uuid, world2.x + CARD_W + 48, world2.y)
           }
           setSelectedId(r.uuid)
           onToast?.(
@@ -1011,7 +1052,11 @@ export const StructureCanvas = memo(function StructureCanvas({
               ? t('已新建笔记「{0}」，点标题就能打开', r.title)
               : g.kind === 'exam'
                 ? t('已放一份空试卷：点卡片上的「生成试卷」让 AI 出题')
-                : t('已放一份空超级文档「{0}」：点「生成超级文档」让 AI 来写', r.title),
+                : g.kind === 'superdoc'
+                  ? t('已放一份空超级文档「{0}」：点「生成超级文档」让 AI 来写', r.title)
+                  : g.kind === 'outline'
+                    ? t('已建一份文档和它的空大纲：大纲卡上直接写目标项')
+                    : t('已建文档「{0}」：双击卡片打开写正文', r.title),
           )
         }
       }
@@ -1075,16 +1120,10 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
       if (selectedEdge) {
         e.preventDefault()
-        const from = cards.find((c) => c.uuid === selectedEdge.from)
-        const to = cards.find((c) => c.uuid === selectedEdge.to)
-        const pair = [from?.kind, to?.kind]
-        if (onDisconnect && ((pair[0] === 'outline' && pair[1] === 'doc') || (pair[0] === 'doc' && pair[1] === 'outline'))) {
-          // 大纲 ↔ 文档之间的线都可摘：大纲 → 子文档 = 拆那条树边（对方成游离）；
-          // 文档 ↔ 它自己的大纲 = 删除那份大纲（计划清空）。两端节点都不动。
-          report(onDisconnect(selectedEdge.from, selectedEdge.to))
-        } else {
-          onToast?.(t('这条线是挂件的归属（挂件存在文档里）——要解除就删挂件那张卡，删卡只删它自己'))
-        }
+        // 每条线都可以摘（用户定的：关系只是连线，剪线不带走设备）——
+        // 摘大纲→子文档 = 拆那条树边（对方成游离）；摘文档↔它的大纲 = 删除那份大纲；
+        // 摘文档↔挂件 = 解绑（实体进游离池，内容原样）。唯一摘不了的是入口的绑定线（那是目标本身）。
+        if (onDisconnect) report(onDisconnect(selectedEdge.from, selectedEdge.to))
         setSelectedEdge(null)
         return
       }
@@ -1503,7 +1542,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                 出线接口（右）只长在有出线能力的卡上：doc / entry / outline——大纲的出线
                 走目标项圆点，挂件没有下游。
               */}
-              {(card.kind === 'doc' || card.kind === 'entry' || card.kind === 'outline') && (
+              {card.kind !== 'entry' && (
                 <div
                   data-link-handle={card.uuid}
                   title={t('拖出去连到另一个节点')}
@@ -1600,7 +1639,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         ref={paletteRef}
         className="absolute top-4 left-4 z-20 flex w-[112px] flex-col gap-1 rounded-xl border border-line bg-card/85 p-2 backdrop-blur"
       >
-        <div className="px-1 pb-1 text-[10px] font-semibold text-ink-faint">{t('拖到文档卡上')}</div>
+        <div className="px-1 pb-1 text-[10px] font-semibold text-ink-faint">{t('拖到画布或文档卡上')}</div>
         {PALETTE.map((kind) => (
           <div
             key={kind}

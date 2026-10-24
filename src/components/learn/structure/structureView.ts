@@ -136,15 +136,13 @@ function plainText(md: string): string {
 /* ---------- 派生 ---------- */
 
 /**
- * 这份文档的大纲卡要不要上画布：根文档无条件要；其余看「计划」在不在——
- * 有目标项或有导语才算一份大纲。树连接不依赖这张卡（没有卡时连线直接画在
- * 文档与子文档之间），所以删掉大纲（清空计划）不会带走任何连接。
+ * 这份文档的大纲卡要不要上画布：**大纲实体存在就在**（根文档恒在——它的大纲
+ * 是目标给的）。卡是「计划」这一层的脸：删除大纲（清空计划）卡就消失，但树连接
+ * 不依赖这张卡（没有卡时连线直接画在文档与子文档之间）。
  */
 function outlineVisible(store: LearnStore, docId: string, isRoot: boolean): boolean {
   if (isRoot) return true
-  const node = nodeById(store, docId)
-  if (!node) return false
-  return (node.outline?.children.length ?? 0) > 0 || (node.outline?.intro ?? '').trim().length > 0
+  return !!nodeById(store, docId)?.outline
 }
 
 /**
@@ -341,6 +339,55 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
       edges.push({ from: node.id, to: sdoc.id })
       doc.next.push(p)
     }
+  }
+
+  // 游离挂件（剪了线 / 没绑过的）：独立实体，一样上画布——位置按存过的来，没存的自动找空位
+  const pool = store.detached?.[goalId]
+  for (const note of pool?.notes ?? []) {
+    add({
+      card: {
+        uuid: note.id,
+        kind: 'note',
+        title: note.name,
+        subtitle: note.content.trim() ? `${note.content.length} 字 · 游离` : '游离 · 还是空的',
+      },
+      depth: 2,
+      anchorY: 0,
+      next: [],
+      parent: null,
+    })
+  }
+  for (const sdoc of pool?.superdocs ?? []) {
+    add({
+      card: {
+        uuid: sdoc.id,
+        kind: 'superdoc',
+        title: sdoc.name,
+        subtitle: sdoc.html.trim() ? `${sdoc.html.length} 字符 · 游离` : '游离 · 还是空的',
+        ...(sdoc.html.trim() ? {} : { blank: true }),
+      },
+      depth: 2,
+      anchorY: 0,
+      next: [],
+      parent: null,
+    })
+  }
+  for (const exam of store.exams) {
+    if (exam.goalId !== goalId) continue
+    if (nodeById(store, exam.nodeId)) continue // 绑着的已经在宿主名下画过了
+    add({
+      card: {
+        uuid: exam.id,
+        kind: 'exam',
+        title: exam.title,
+        subtitle: exam.questions.length ? `${exam.questions.length} 题 · 游离` : '游离 · 还没有题',
+        ...(exam.questions.length ? {} : { blank: true }),
+      },
+      depth: 2,
+      anchorY: 0,
+      next: [],
+      parent: null,
+    })
   }
 
   /* 2. 高度（内容算出来的） */

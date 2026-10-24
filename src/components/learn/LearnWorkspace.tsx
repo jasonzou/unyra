@@ -163,7 +163,7 @@ import FloatWindow from '../FloatWindow'
 import { usePresence } from '../../lib/presence'
 import ExamCopyView from './ExamCopyView'
 import { OutlinePane } from './workspace/OutlinePane'
-import { NodeService } from '../../learn/nodeKinds'
+import { NodeService, type GNodeKind } from '../../learn/nodeKinds'
 import { pruneImages } from '../../learn/images'
 import { dropDrafts } from '../../learn/drafts'
 import { queueOf, shouldEnqueue } from '../../learn/agentQueue'
@@ -3707,7 +3707,7 @@ export default function LearnWorkspace({
   )
 
   const canvasCreateNode = useCallback(
-    (kind: 'note' | 'exam' | 'superdoc', under: string) => makeNodeService().create({ kind, under }),
+    (kind: GNodeKind, under: string | null) => makeNodeService().create({ kind, ...(under ? { under } : {}) }),
     [makeNodeService],
   )
 

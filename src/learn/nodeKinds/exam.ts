@@ -7,9 +7,10 @@
  * 压成一句模型能改对的话），时限下限同样由 resolveExamMinutes 兜底。
  */
 import { nodeById, upsertExam } from '../graph'
+import { detachExam } from '../detached'
 import { normalizeKind, normalizeLevel, parseQuestions, questionsMix, resolveExamMinutes, examTotalPoints } from '../exam'
 import type { Exam } from '../exam'
-import { GNode, type NodeCtx, type NodeHelp, type NodeRelation, type NodeResult } from './base'
+import { GNode, type ConnectFilter, type NodeCtx, type NodeHelp, type NodeRelation, type NodeResult } from './base'
 
 export class ExamGNode extends GNode {
   constructor(ctx: NodeCtx, uuid: string) {
@@ -43,7 +44,8 @@ export class ExamGNode extends GNode {
 
   get relations(): NodeRelation[] {
     const e = this.record
-    return e ? [{ id: e.nodeId, type: 'up' }] : []
+    // 宿主在才算是连着；宿主已不在（游离）就是独立节点，没有关系
+    return e && nodeById(this.ctx.store(), e.nodeId) ? [{ id: e.nodeId, type: 'up' }] : []
   }
 
   get content(): unknown {
@@ -107,7 +109,23 @@ export class ExamGNode extends GNode {
         'questions 每题：{ id?, type, stem, options?, answer?, rubric?, image?, points? }——type = "single" | "multiple" | "truefalse" | "fill" | "short"；单选 / 多选 / 对错题必须给 options（对错题给 [{id:"true"},{id:"false"}]）；answer 是选项 id 数组（填空给答案串，简答通常留空待 rubric 评）；stem 支持 Markdown 与 LaTeX；image 收**完整 SVG 源码**（可选）。',
         '出题时 attempts 保持为空（不由你伪造）；判分与错题讲解走 api.exam.*（grade / explain），那是另一条业务通道。',
       ].join('\n'),
-      connection: '上游恒为归属文档（创建那一刻定下，不能改挂）；试卷是叶子，没有下游。',
+      connection: [
+        '上游是归属文档：拖线 / connect(文档对象, "down") 换绑到别的文档（卷面与历次作答都不动，动的只是挂在谁那里）；disconnect 摘掉 = 变成游离的独立试卷。',
+        '试卷是叶子，没有下游。',
+      ].join('\n'),
     }
+  }
+
+  onUpstream(node: GNode): ConnectFilter {
+    if (node.kind !== 'doc') return '试卷只能挂在文档之下'
+    return true
+  }
+
+  /** 摘线 = 解绑：宿主 id 悬空，试卷变成游离的独立实体（卷面与作答原样保留） */
+  protected unlink(): NodeResult {
+    const r = detachExam(this.ctx.store(), this.uuid)
+    if ('error' in r) return { error: r.error }
+    this.ctx.commit(r.store)
+    return { ok: true, note: '已解开《' + this.title + '》的绑定：它现在是独立的试卷（内容原样保留），可以拖线绑到别的文档' }
   }
 }

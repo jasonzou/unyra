@@ -9,7 +9,6 @@ import { describe, expect, it } from 'vitest'
 
 import { normalizeExam } from '../src/learn/store'
 
-const NODES = new Set(['n1'])
 const AT = 1_700_000_000_000
 
 const questions = [
@@ -42,9 +41,7 @@ describe('旧格式迁移', () => {
         passed: false,
         submittedAt: AT + 1000,
         gradedAt: AT + 2000,
-      }),
-      NODES,
-    )!
+      }))!
     expect(exam).toBeTruthy()
     expect(exam.title).toBe('极限小测')
     expect(exam.attempts).toHaveLength(1)
@@ -60,9 +57,7 @@ describe('旧格式迁移', () => {
 
   it('交过卷还没判的 → submitted；答案留着（那是要用来的判分的）', () => {
     const exam = normalizeExam(
-      legacy({ status: 'submitted', answers: [{ questionId: 'q1', value: ['true'] }], submittedAt: AT + 500 }),
-      NODES,
-    )!
+      legacy({ status: 'submitted', answers: [{ questionId: 'q1', value: ['true'] }], submittedAt: AT + 500 }))!
     expect(exam.attempts).toHaveLength(1)
     expect(exam.attempts[0].status).toBe('submitted')
     expect(exam.attempts[0].answers).toHaveLength(1)
@@ -70,23 +65,21 @@ describe('旧格式迁移', () => {
 
   it('在应用内答过、但从没交卷的老草稿 → abandoned（判 0 分），**绝不能是 ongoing**', () => {
     const exam = normalizeExam(
-      legacy({ status: 'draft', answers: [{ questionId: 'q1', value: ['true'] }] }),
-      NODES,
-    )!
+      legacy({ status: 'draft', answers: [{ questionId: 'q1', value: ['true'] }] }))!
     expect(exam.attempts).toHaveLength(1)
     // 认成 ongoing 的话，启动时 ongoingAttempt() 会以为有一场在考，主窗口就盖着黑遮罩出不来了
     expect(exam.attempts[0].status).toBe('abandoned')
   })
 
   it('一道没答的老草稿 → 就是没考过（不凭空造一条记录）', () => {
-    const exam = normalizeExam(legacy(), NODES)!
+    const exam = normalizeExam(legacy())!
     expect(exam.attempts).toEqual([])
   })
 
   it('老卷子没有时限：按题量与类型补一个（小测不限时）', () => {
-    const test = normalizeExam(legacy(), NODES)!
+    const test = normalizeExam(legacy())!
     expect(test.minutes).toBeGreaterThanOrEqual(questions.length * 2)
-    const quiz = normalizeExam(legacy({ kind: 'quiz' }), NODES)!
+    const quiz = normalizeExam(legacy({ kind: 'quiz' }))!
     expect(quiz.minutes).toBe(0)
   })
 
@@ -110,9 +103,7 @@ describe('旧格式迁移', () => {
           },
           { id: 'a1', startedAt: AT + 1000, status: 'abandoned', answers: [], inputs: [], dwell: {}, blurs: [], forceSubmit: false },
         ],
-      },
-      NODES,
-    )!
+      })!
     expect(exam.minutes).toBe(40)
     expect(exam.attempts.map((a) => a.id)).toEqual(['a1', 'a2'])
     const a2 = exam.attempts[1]
@@ -124,8 +115,11 @@ describe('旧格式迁移', () => {
     expect(a2.explanation).toBe('错在把无穷小当成 0。')
   })
 
-  it('节点没了的卷子直接丢掉（不留孤儿）', () => {
-    expect(normalizeExam(legacy({ nodeId: 'gone' }), NODES)).toBeNull()
-    expect(normalizeExam({ hello: 'world' }, NODES)).toBeNull()
+  it('宿主没了的卷子保留成游离实体（剪线不删内容）；坏数据才丢', () => {
+    const orphan = normalizeExam(legacy({ nodeId: 'gone' }))
+    expect(orphan).not.toBeNull()
+    expect(orphan!.nodeId).toBe('gone')
+    expect(normalizeExam({ hello: 'world' })).toBeNull()
+    expect(normalizeExam(legacy({ nodeId: '' }))).toBeNull()
   })
 })
