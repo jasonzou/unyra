@@ -1,223 +1,188 @@
 /**
- * 节点对象通道：`api.node(地址)` 取「节点对象」，对象上的成员方法按类型多态分发。
+ * 节点对象通道（v2，全图化重构）：`api.node` 收缩为 **create / get / list / delete**
+ * 四条传输，外加一条 `node.invoke` 代调用——读写内容、连线、自述全部是节点对象的成员。
  *
  * ## 分层
  *
- * - 行为在类型里（learn/nodeKinds 的 NodeHandle 子类：doc / note / outline / superdoc）；
- * - 这里只做三件事：**解析地址**（字符串沿用 path 语法，对象显式给 node+part）、
- *   **出清单**（node.get → manifest：身份 + 该类型的方法表，来自登记表声明）、
- *   **代调用**（node.invoke → 实例化节点对象、按声明校验方法名、调它）；
- * - 传输就这两条 api。沙箱两侧各有一层门面把 manifest 包成真的 JS 对象
- *   （真沙箱在 sandboxRuntime.js，进程内直调在 buildApi 末尾调 attachNodeFacade），
- *   模型看到与写到的就是 `const n = await api.node('极限'); await n.write(…)`。
+ * - 行为在类型里（learn/nodeKinds 的 GNode 子类，多态）；这里只做**出清单**与**代调用**；
+ * - 传输就这五条。沙箱两侧各有一层门面把 manifest 包成真的 JS 对象
+ *   （真沙箱在 sandboxRuntime.js，进程内直调在 buildApi 末尾的 attachNodeFacade），
+ *   模型看到与写到的就是：
  *
- * manifest 的 target 按**节点 id**（#id）回带：编排中途改了名也不失效。
+ *       const n = await api.node.get(uuid)
+ *       await n.help()            // 节点自述：内容格式、连接规则（随上游动态变化）
+ *       const c = await n.content // 读现状
+ *       await n.editContent(c)    // 整份写回
+ *       await a.connect(b, 'down')// 双边协商连接
+ *
+ * - connect / disconnect 的参数是**另一个节点对象**，穿不过结构化克隆：
+ *   门面在发送前把它折成 uuid，宿主这一侧再由 service 还原成对象。
  */
-import {
-  NODE_HANDLES,
-  kindSpec,
-  methodDocOf,
-  type GraphKind,
-  type HandleContext,
-  type HandleKind,
-  type NodeHandle,
-  type NodeMethodDoc,
-} from '../../learn/nodeKinds'
-import { NodeHandle as NodeHandleBase } from '../../learn/nodeKinds/handle'
-import { asRecord } from './refs'
-import type { SandboxOptions } from './types'
+import { NODE_MEMBERS_ORDER, type GNode, type GNodeKind, type NodeService } from '../../learn/nodeKinds'
+import { asText } from './refs'
 import { wrapApi } from './wrap'
 
-/** 一份内容的位置：node.get / node.invoke 与旧 content.* 共用的解析结果 */
-export interface ContentTarget {
-  nodeId: string
-  /** teaching / note / outline / superdoc */
-  part: string
-  /** 笔记或超级文档的名字 */
-  name?: string
-  /** 知识节点的路径标签（receipts 与 manifest 里的地址基准） */
-  baseLabel: string
-}
+/** 节点对象的成员（全类型同构；多态在行为与 help 文案，不在方法表） */
+export const NODE_MEMBERS = NODE_MEMBERS_ORDER
 
-/**
- * 认地址（原 api.ts 的 partTarget 原样搬来）：字符串沿用 path 语法
- * （'极限/笔记/错题本'），对象显式给 node + part。api.node() 省略 = 当前节点的正文。
- */
-export function contentTarget(
-  opts: Pick<SandboxOptions, 'resolveDoc' | 'resolveNode'>,
-  arg: unknown,
-): { ok: true; t: ContentTarget } | { ok: false; error: string } {
-  if (arg === undefined || typeof arg === 'string') {
-    const r = opts.resolveDoc(arg ?? '')
-    if (!r.ok) return { ok: false, error: r.message }
-    if (r.ref.kind === 'note') {
-      return {
-        ok: true,
-        t: { nodeId: r.ref.id, baseLabel: r.ref.label, part: 'note', ...(r.ref.note ? { name: r.ref.note } : {}) },
-      }
-    }
-    return { ok: true, t: { nodeId: r.ref.id, baseLabel: r.ref.label, part: 'teaching' } }
-  }
-  const o = asRecord(arg)
-  const path = typeof o.node === 'string' ? o.node : typeof o.path === 'string' ? o.path : ''
-  const r = opts.resolveNode(path)
-  if (!r.ok) return { ok: false, error: r.message }
-  const raw = typeof o.part === 'string' && o.part.trim() ? o.part.trim() : 'teaching'
-  const cut = raw.indexOf(':')
-  const part = cut < 0 ? raw : raw.slice(0, cut)
-  const fromSuffix = cut < 0 ? undefined : raw.slice(cut + 1).trim() || undefined
-  const name = fromSuffix ?? (typeof o.name === 'string' && o.name.trim() ? o.name.trim() : undefined)
-  return { ok: true, t: { nodeId: r.ref.id, baseLabel: r.ref.label, part, ...(name ? { name } : {}) } }
-}
-
-const KIND_OF_PART: Record<string, HandleKind> = {
-  teaching: 'doc',
-  note: 'note',
-  outline: 'outline',
-  superdoc: 'superdoc',
-}
-
-/** 实例化节点对象：part → 类型 → 行为类（大纲 / 超级文档先查能力注入） */
-export function handleFor(ctx: HandleContext, t: ContentTarget): NodeHandle | { error: string } {
-  const kind = KIND_OF_PART[t.part]
-  if (t.part === 'exam') {
-    return { error: '试卷用 exam.*（出卷 exam.create / 读卷 exam.read / 判分 exam.grade）；content.* 与节点对象不管试卷' }
-  }
-  if (!kind) {
-    return { error: `不认识的 part：「${t.part}」。可用：正文（省略）/ note:<名字> / outline / superdoc:<名字>` }
-  }
-  if (kind === 'outline' && !ctx.outline) return { error: '这一轮没有大纲能力（宿主未注入 outline）' }
-  if (kind === 'superdoc') {
-    if (!ctx.superdocs) return { error: '这一轮没有超级文档能力（宿主未注入 superdocs）' }
-    if (!t.name) return { error: '超级文档要带名字：part 写 "superdoc:讲义"（或 api.node(路径).superdoc("讲义")）' }
-  }
-  const ctor = NODE_HANDLES[kind]
-  return new ctor(ctx, t.nodeId, t.baseLabel, t.name)
-}
-
-/** 节点对象的清单（node.get 的回执；manifest 自身也是聚合方法回给门面的标记形状） */
+/** manifest：node.get 的回执——身份 + 关系快照（方法表是固定的五件套，不必随单传输） */
 export interface NodeManifest {
   ok: true
-  /** 这是另一个节点对象（沙箱门面据此再包一层，见各 returnsNode 的方法声明） */
+  /** 标记形状：沙箱门面据此再包一层真对象 */
   object: true
-  kind: HandleKind
-  id: string
-  label: string
-  part: string
-  name?: string
-  /** 之后 node.invoke 原样带回的地址（按 #id 寻址，改名不失效） */
-  target: { node: string; part: string; name?: string }
-  methods: NodeMethodDoc[]
+  uuid: string
+  kind: GNodeKind
+  title: string
+  relations: Array<{ id: string; type: 'up' | 'down'; kind: GNodeKind; title: string }>
 }
 
 export function isManifest(v: unknown): v is NodeManifest {
-  return !!v && typeof v === 'object' && (v as { object?: unknown }).object === true && Array.isArray((v as { methods?: unknown }).methods)
+  return !!v && typeof v === 'object' && (v as { object?: unknown }).object === true && typeof (v as { uuid?: unknown }).uuid === 'string'
 }
 
-function manifestOf(t: ContentTarget, h: NodeHandle): NodeManifest {
-  const methods = kindSpec(h.kind as GraphKind).methods ?? []
-  return {
-    ok: true,
-    object: true,
-    kind: h.kind as HandleKind,
-    id: t.nodeId,
-    label: h.label,
-    part: t.part,
-    ...(t.name ? { name: t.name } : {}),
-    target: { node: '#' + t.nodeId, part: t.part, ...(t.name ? { name: t.name } : {}) },
-    methods: [...methods],
-  }
+/** 宿主注入的节点通道：一个可空的 NodeService 柄 + 可选的业务守卫 */
+export interface NodeOps {
+  /** 当前可用的节点服务（没有目标 / 未注入时为 null，api.node 整组收「没有」回执） */
+  service: () => NodeService | null
+  /**
+   * 业务守卫（可省）：挂在 create / editContent 之前的「纯模型之外」约束
+   * （例如出题阶段闸门——有考试等着判分时不许再出新卷）。回一句拒绝原因或 null 放行。
+   */
+  guard?: (action: 'create' | 'edit', kind: GNodeKind, payload: unknown) => string | null
+  /**
+   * 编辑成功后的回调（可省）：出卷后的视觉自检这类「写完还要跟一步」的宿主动作挂这里。
+   */
+  afterEdit?: (uuid: string, kind: GNodeKind) => void
 }
+
+function manifestOf(service: NodeService, node: GNode): NodeManifest {
+  const relations = node.relations.map((r) => {
+    const other = service.get(r.id)
+    return { id: r.id, type: r.type, kind: other?.kind ?? 'doc', title: other?.title ?? r.id }
+  })
+  return { ok: true, object: true, uuid: node.uuid, kind: node.kind, title: node.title, relations }
+}
+
+const NO_SERVICE = '这一轮没有节点能力（宿主未注入 NodeService）'
 
 /**
- * 注册 node.get / node.invoke 并挂上门面。ctx 的存储原语按调用现取（不持有快照），
- * 与 api.ts 其余各组同一条纪律。
+ * 注册 api.node 四条传输 + invoke 代调用，并挂进程内门面（测试探针 / 超级文档桥那条
+ * 直调通道）。真沙箱的门面在 sandboxRuntime.js，两边行为必须一致。
  */
-export function registerNodeObjectApi(
-  api: Record<string, unknown>,
-  opts: Pick<SandboxOptions, 'resolveDoc' | 'resolveNode' | 'docOps' | 'outline' | 'superdocs'>,
-  log: Parameters<typeof wrapApi>[3],
-  handleCtx: () => HandleContext,
-): void {
+export function registerNodeApi(api: Record<string, unknown>, ops: NodeOps | undefined, log: Parameters<typeof wrapApi>[3]): void {
+  if (!ops) return
+
+  const svc = (): NodeService | null => ops.service()
+
   wrapApi(api, 'node.get', (args) => {
-    const r = contentTarget(opts, args[0])
-    if (!r.ok) return { error: r.error }
-    const h = handleFor(handleCtx(), r.t)
-    if ('error' in h) return { error: h.error }
-    return manifestOf(r.t, h)
+    const service = svc()
+    if (!service) return { error: NO_SERVICE }
+    const uuid = asText(args[0]).trim()
+    if (!uuid) return { error: 'node.get 要给节点的 uuid（api.node.list() 里查）' }
+    const node = service.get(uuid)
+    if (!node) return { error: '没有 uuid 为「' + uuid + '」的节点；先 api.node.list() 查清楚' }
+    return manifestOf(service, node)
+  }, log)
+
+  wrapApi(api, 'node.create', (args) => {
+    const service = svc()
+    if (!service) return { error: NO_SERVICE }
+    const input = args[0] && typeof args[0] === 'object' ? (args[0] as Record<string, unknown>) : { kind: asText(args[0]) }
+    const reason = ops.guard?.('create', input.kind as GNodeKind, input)
+    if (reason) return { error: reason }
+    return service.create(input)
+  }, log)
+
+  wrapApi(api, 'node.list', () => {
+    const service = svc()
+    if (!service) return { error: NO_SERVICE }
+    return service.list()
+  }, log)
+
+  wrapApi(api, 'node.delete', (args) => {
+    const service = svc()
+    if (!service) return { error: NO_SERVICE }
+    return service.delete(asText(args[0]).trim())
   }, log)
 
   wrapApi(api, 'node.invoke', async (args) => {
-    const [targetArg, methodRaw, rest] = args
-    const r = contentTarget(opts, targetArg)
-    if (!r.ok) return { error: r.error }
-    const h = handleFor(handleCtx(), r.t)
-    if ('error' in h) return { error: h.error }
-    const method = typeof methodRaw === 'string' ? methodRaw.trim() : ''
-    const doc = methodDocOf(h.kind as GraphKind, method)
-    if (!doc || method === 'help') {
-      const names = (kindSpec(h.kind as GraphKind).methods ?? []).map((m) => m.name).join(' / ')
+    const service = svc()
+    if (!service) return { error: NO_SERVICE }
+    const uuid = asText(args[0]).trim()
+    const member = asText(args[1]).trim()
+    const rest = Array.isArray(args[2]) ? args[2] : []
+    const node = service.get(uuid)
+    if (!node) return { error: '没有 uuid 为「' + uuid + '」的节点（可能刚被删除）；先 api.node.list() 查清楚' }
+    if (!NODE_MEMBERS.includes(member as (typeof NODE_MEMBERS)[number])) {
       return {
-        error: `「${h.label}」这种节点没有 ${method || '(空)'} 这个方法。它可用：${names || '（这个类型没有开放方法）'}——对象上 n.help() 也能看。`,
+        error:
+          '节点对象没有 ' + (member || '(空)') + ' 这个成员。可用：' + NODE_MEMBERS.join(' / ') +
+          '——先 await n.help() 看这个节点自己怎么说。',
       }
     }
-    const fn = (h as unknown as Record<string, unknown>)[method]
-    if (typeof fn !== 'function') return { error: `「${h.label}」的 ${method} 没有实现（登记了但行为类缺方法），这是宿主的 bug` }
-    // 聚合方法（note / outline / superdoc）回的是另一个节点对象 → 转成 manifest，由门面再包。
-    // 必须以成员访问的形式调（h.method(...)）：把方法摘下来裸调会丢 this，读到 undefined.ctx
-    const value = await (h as unknown as Record<string, (...a: unknown[]) => unknown>)[method](
-      ...(Array.isArray(rest) ? rest : []),
-    )
-    if (value instanceof NodeHandleBase) {
-      const sub: ContentTarget = {
-        nodeId: value.id,
-        baseLabel: '',
-        part: value.kind === 'doc' ? 'teaching' : value.kind,
-        ...(value.contentName ? { name: value.contentName } : {}),
-      }
-      return manifestOf(sub, value)
+    if (member === 'connect' || member === 'disconnect') {
+      // 门面已把「另一个节点对象」折成了 uuid：这里还原成对象再交给双边协议
+      const targetId = asText(rest[0]).trim()
+      const target = targetId ? service.get(targetId) : undefined
+      if (!target) return { error: 'connect / disconnect 的第一个参数要是另一个节点对象（api.node.get(uuid) 取到再传）' }
+      const r = member === 'connect' ? node.connect(target, rest[1]) : node.disconnect(target)
+      return r
     }
-    return value
+    if (member === 'editContent') {
+      const reason = ops.guard?.('edit', node.kind, rest[0])
+      if (reason) return { error: reason }
+      const r = node.editContent(rest[0])
+      if ('ok' in r && r.ok) ops.afterEdit?.(node.uuid, node.kind)
+      return r
+    }
+    if (member === 'help') return node.help()
+    // content 是 getter
+    return (node as unknown as { content: unknown }).content
   }, log)
 }
 
-/** 节点对象上的 help() 正文：manifest 的方法表排版（同步返回，不花宿主往返） */
-export function renderObjectHelp(m: NodeManifest): string {
-  const lines = ['「' + m.label + '」（' + kindSpec(m.kind as GraphKind).label + '）的成员方法：']
-  for (const d of m.methods) {
-    lines.push('- ' + d.signature + ' — ' + d.summary + (d.example ? '\n  示例：' + d.example : ''))
-  }
-  lines.push('', '地址：api.node(\'' + m.label + '\')；换一份内容从文档节点出发（n.note / n.outline / n.superdoc）。')
-  return lines.join('\n')
-}
-
 /**
- * 进程内门面（测试探针 / 超级文档桥那条直调通道）：把 manifest 包成真对象，
- * 方法调用走 node.invoke（保持记账与失败清单）。真沙箱的门面在 sandboxRuntime.js，
- * 两边行为必须一致。
+ * 进程内门面（测试探针 / 超级文档桥的直调通道）：把 manifest 包成真对象。
+ * content 是异步 getter（await n.content 每次都取最新）；connect / disconnect 的
+ * 节点对象参数在发送前折成 uuid。真沙箱的门面在 sandboxRuntime.js，行为必须一致。
  */
 export function attachNodeFacade(api: Record<string, unknown>): void {
   const ns = api.node as
-    | { get: (t: unknown) => Promise<unknown>; invoke: (t: unknown, m: string, a: unknown[]) => Promise<unknown>; __help?: () => string }
+    | { get: (t: unknown) => Promise<unknown>; invoke: (t: unknown, m: string, a: unknown[]) => Promise<unknown> }
     | undefined
-  if (!ns || typeof ns.get !== 'function') return
-  const wrapManifest = (m: NodeManifest): Record<string, unknown> => {
-    const obj: Record<string, unknown> = { kind: m.kind, id: m.id, label: m.label }
-    for (const d of m.methods) {
-      obj[d.name] = (...callArgs: unknown[]) =>
-        Promise.resolve(ns.invoke(m.target, d.name, callArgs)).then((v) => (isManifest(v) ? wrapManifest(v) : v))
+  if (!ns || typeof ns.get !== 'function' || typeof ns.invoke !== 'function') return
+
+  const toWire = (args: unknown[]): unknown[] =>
+    args.map((a) =>
+      a && typeof a === 'object' && typeof (a as { uuid?: unknown }).uuid === 'string' && (a as { __node?: unknown }).__node === true
+        ? (a as { uuid: string }).uuid
+        : a,
+    )
+
+  const wrap = (m: NodeManifest): Record<string, unknown> => {
+    const obj: Record<string, unknown> = {
+      uuid: m.uuid,
+      kind: m.kind,
+      title: m.title,
+      relations: m.relations,
+      __node: true,
     }
-    obj.help = () => renderObjectHelp(m)
+    Object.defineProperty(obj, 'content', {
+      get: () => ns.invoke(m.uuid, 'content', []),
+      enumerable: true,
+    })
+    for (const name of ['editContent', 'help', 'connect', 'disconnect'] as const) {
+      obj[name] = (...callArgs: unknown[]) =>
+        Promise.resolve(ns.invoke(m.uuid, name, toWire(callArgs))).then((v) => (isManifest(v) ? wrap(v) : v))
+    }
     return obj
   }
-  const factory = async (target?: unknown, part?: unknown): Promise<unknown> => {
-    const arg =
-      target && typeof target === 'object'
-        ? target
-        : { node: target ?? '', ...(part !== undefined ? { part: String(part) } : {}) }
-    const m = await ns.get(arg)
-    return isManifest(m) ? wrapManifest(m) : m
+
+  // 先把宿主侧原始 get 摘下来再替换：闭包里晚绑定 ns.get 会递归调到自己
+  const rawGet = ns.get.bind(ns)
+  const get = (uuid: unknown): Promise<unknown> => {
+    const m = rawGet(uuid)
+    return Promise.resolve(m).then((v) => (isManifest(v) ? wrap(v) : v))
   }
-  Object.assign(factory, ns)
-  api.node = factory
+  Object.assign(api.node as object, { get })
 }

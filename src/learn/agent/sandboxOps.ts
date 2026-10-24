@@ -8,6 +8,7 @@
 
 import type { AskAnswers, AskFormPayload, UiPointRequest, UiScrollRequest } from '../../agent/tools'
 import { createAgentOps, type AgentOps } from '../agentOps'
+import { examsOfNode } from '../graph'
 import type { LearnStore } from '../types'
 import { loadImageByRel } from '../static'
 import { readUserText, removeUserPath, userPath, writeUserText } from '../../lib/storage'
@@ -63,6 +64,8 @@ export function learnSandboxOps(deps: {
   goalId: () => string
   /** wf.invoke 的落点（见 AgentOpsDeps.invokeWorkflow）：不注入时 wf.invoke 明说这里触发不了 */
   invokeWorkflow?: (ref: string, opts: { params?: Record<string, string | number> }) => unknown
+  /** 节点编辑成功后的宿主动作（出卷后的视觉自检等），由界面层注入 */
+  afterNodeEdit?: (uuid: string, kind: string) => void
 }): AgentOps {
   return createAgentOps({
     getLatest: deps.getLatest,
@@ -70,6 +73,33 @@ export function learnSandboxOps(deps: {
     nodeId: deps.nodeId,
     goalId: deps.goalId,
     ...(deps.invokeWorkflow ? { invokeWorkflow: deps.invokeWorkflow } : {}),
+    ...(deps.afterNodeEdit ? { afterNodeEdit: deps.afterNodeEdit } : {}),
+    /*
+     * 出题阶段闸门（节点通道的业务守卫）：当前节点有一次考试等着收尾（待判分、或
+     * 判完还缺错题讲解）时，不许再出新卷——先把那一场收完。判分与讲解走 exam.*，
+     * 不受这道闸影响。
+     */
+    nodeGuard: (action, kind, payload) => {
+      if (kind !== 'exam') return null
+      if (action === 'edit') {
+        const questions = (payload as { questions?: unknown } | undefined)?.questions
+        // 空写入（壳的初始化）不拦：拦的是「又出一份新卷」
+        if (!Array.isArray(questions) || questions.length === 0) return null
+      }
+      const nodeId = deps.nodeId()
+      if (!nodeId) return null
+      for (const exam of examsOfNode(deps.getLatest(), nodeId)) {
+        for (const attempt of exam.attempts) {
+          if (attempt.status === 'submitted') {
+            return '现在不能出题：这个知识点有一次考试正等着判分。先 api.exam.read() 看那一次，api.exam.grade(...) 判分、api.exam.explain(...) 写讲解，再想出新的。'
+          }
+          if (attempt.status === 'graded' && !attempt.explanation) {
+            return '现在不能出题：上一次考试判完分还缺错题讲解。先 api.exam.read() 看那一次，api.exam.explain(...) 补上讲解，再想出新的。'
+          }
+        }
+      }
+      return null
+    },
     /**
      * 资源库的磁盘能力。图片走 loadImageByRel：与聊天气泡共用同一份缓存，
      * 同一张图既挂在消息里、又被文档引用时只读一次盘。

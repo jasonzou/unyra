@@ -140,7 +140,7 @@ export function tryNodeLinkFromEvent(event: { target: EventTarget | null }): boo
  * 一个节点带两份平级文档（教学文档与笔记文档），只靠 `moji:node/<id>` 说不清要跳到
  * 哪一份。省略 nodeId 就是「当前所在节点的这份文档」——这是最常用的一档：
  * 教学文档里写 `[整理到我的笔记](moji:doc/note)`，点一下就翻到同一节点的笔记文档；
- * 跨节点时用 nodeId：`[看它的笔记](moji:doc/3f2a…/note)`（模型从 api.graph.list 拿到 id）。
+ * 跨节点时用 nodeId：`[看它的笔记](moji:doc/3f2a…/note)`（模型从 api.node.list 拿到 id）。
  *
  * `moji:node/<id>` 保留不动，等价于「该节点的教学文档」，老文档里的链接照旧有效。
  */
@@ -310,7 +310,7 @@ export function tryMarkdownPathFromEvent(event: { target: EventTarget | null }):
  * 一份超级文档要指给用户看「本节点的另一份实验/工具」，靠 ui.superdoc（那是 agent 的
  * api）不行——点击发生在文档里。省略 nodeId 即「当前这份超级文档所在的节点」，
  * 这是常用档：实验说明里写 `[对照组实验](moji:super/对照%E7%BB%84)`，点一下就翻过去；
- * 跨节点时写 nodeId：`[那边的演示](moji:super/3f2a…/演示)`（id 从 api.graph.list 拿）。
+ * 跨节点时写 nodeId：`[那边的演示](moji:super/3f2a…/演示)`（id 从 api.node.list 拿）。
  * 文档名会 encodeURIComponent（名字里的空格、斜杠都会破坏 markdown 链接）。
  * 渲染在超级文档的沙箱 iframe 里时，点击由 BRIDGE 拦截后转回宿主处理（同一套解析）。
  */

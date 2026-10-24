@@ -105,7 +105,7 @@ export function writeNote(store: LearnStore, nodeId: string, name: string, conte
 /**
  * 往一份笔记里追加正文；没有这份笔记就新建一份。
  *
- * 界面上「把这段整理进笔记」与 Agent 的 api.doc.append(…, '笔记') 都走它：
+ * 界面上「把这段整理进笔记」与 Agent 写笔记（note 节点的 editContent）都走它：
  * 节点上还没有笔记时，正确的反应是当场建一份，而不是回一句「没有这份笔记」。
  */
 export function appendNote(

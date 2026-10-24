@@ -5,14 +5,7 @@ import { parentIds, prereqIds } from '../src/learn/graph/edges'
 import { shellExamOf } from '../src/learn/graph/exams'
 import type { Exam } from '../src/learn/exam'
 import type { KnowledgeNode, LearnStore } from '../src/learn/types'
-import {
-  GRAPH_EDGE_RULES,
-  GRAPH_KINDS,
-  GRAPH_KIND_LABEL,
-  KIND_RANK,
-  NODE_KINDS,
-  isGraphKind,
-} from '../src/learn/nodeKinds'
+import { GRAPH_KINDS, GRAPH_KIND_LABEL, KIND_RANK, isGraphKind } from '../src/learn/nodeKinds'
 
 function makeNode(id: string, title = id): KnowledgeNode {
   return {
@@ -120,36 +113,26 @@ describe('P0：图索引', () => {
 })
 
 /**
- * 类型登记表：一种类型一个文件，`nodeKinds/index.ts` 汇总。
- * 这里钉住「派生出来的那几张表确实来自登记项」，以及 2026-10-21 定的连线拓扑没被改动。
+ * 类型登记表：一种类型一个类文件，`nodeKinds/index.ts` 汇总。
+ * 连线规则不再是中央矩阵——能不能连由各类型的 onUpstream / onDownstream 双边协商
+ *（见 tests/nodeGraph 的「连接协议」），这里只钉清单与展示表。
  */
 describe('P0：类型登记表', () => {
-  it('GRAPH_KINDS 就是登记表的键', () => {
-    expect(GRAPH_KINDS).toEqual(Object.keys(NODE_KINDS))
+  it('GRAPH_KINDS 就是六种节点（全图化重构后的宇宙）', () => {
     expect(GRAPH_KINDS).toEqual(['entry', 'outline', 'doc', 'note', 'exam', 'superdoc'])
   })
 
-  it('显示名 / 同列权重 / 连线规则都从登记项派生', () => {
-    for (const kind of GRAPH_KINDS) {
-      expect(GRAPH_KIND_LABEL[kind]).toBe(NODE_KINDS[kind].label)
-      expect(KIND_RANK[kind]).toBe(NODE_KINDS[kind].rank)
-      expect(GRAPH_EDGE_RULES[kind]).toEqual(NODE_KINDS[kind].targets)
-    }
-  })
-
-  it('连线拓扑与 2026-10-21 定的一致（大纲只连文档，叶子不往下连）', () => {
-    expect(GRAPH_EDGE_RULES.outline).toEqual(['doc'])
-    expect(GRAPH_EDGE_RULES.doc).toEqual(['outline', 'note', 'exam', 'superdoc'])
-    expect(GRAPH_EDGE_RULES.note).toEqual([])
-    expect(GRAPH_EDGE_RULES.exam).toEqual([])
-    expect(GRAPH_EDGE_RULES.superdoc).toEqual([])
-  })
-
-  it('同列次序：大纲在上、文档居中、叶子在下', () => {
+  it('同列次序：入口最左、大纲在上、文档居中、叶子在下', () => {
+    expect(KIND_RANK.entry).toBeLessThan(KIND_RANK.outline)
     expect(KIND_RANK.outline).toBeLessThan(KIND_RANK.doc)
     expect(KIND_RANK.doc).toBeLessThan(KIND_RANK.note)
     expect(KIND_RANK.note).toBe(KIND_RANK.exam)
     expect(KIND_RANK.exam).toBe(KIND_RANK.superdoc)
+  })
+
+  it('显示名表齐六种（卡片徽标与设置目录共用这一份）', () => {
+    expect(Object.keys(GRAPH_KIND_LABEL)).toEqual([...GRAPH_KINDS])
+    expect(GRAPH_KIND_LABEL.doc).toBe('文档')
   })
 
   it('isGraphKind 只认登记过的类型（没登记的读盘时被丢掉）', () => {

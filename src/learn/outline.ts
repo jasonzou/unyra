@@ -43,7 +43,7 @@ export function normalizeOutline(raw: unknown): OutlineDoc | null {
 }
 
 /**
- * 整份写入某个节点的大纲（Agent 的 api.outline.write 与将来的界面入口都走这里）。
+ * 整份写入某个节点的大纲（大纲节点的 editContent 与将来的界面入口都走这里）。
  *
  * key 在这里从标题生成——大纲条目与真实节点的对上号靠的就是它
  * （同一目标内 key 唯一，见 normalizeKey），模型不用也不能自己编。

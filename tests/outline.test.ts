@@ -62,7 +62,7 @@ function fixture(): LearnStore {
     version: 2,
     nodes: [
       makeNode({ id: 'n1', title: '微积分', outline: undefined }),
-      makeNode({ id: 'n2', title: '极限', notes: [{ name: '笔记', content: '我记的笔记', createdAt: NOW, updatedAt: NOW }] }),
+      makeNode({ id: 'n2', title: '极限', notes: [{ id: 'n-' + crypto.randomUUID(), name: '笔记', content: '我记的笔记', createdAt: NOW, updatedAt: NOW }] }),
       makeNode({ id: 'n3', title: '夹逼定理' }),
     ],
     edges: [

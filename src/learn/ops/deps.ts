@@ -16,6 +16,13 @@ export interface AgentOpsDeps {
   nodeId: () => string | null
   /** 这一轮所属的目标（会话与 path 的基准） */
   goalId: () => string
+  /**
+   * 节点通道的业务守卫（可省）：create / editContent 之前问一句（回拒绝原因或 null 放行）。
+   * 当前唯一的守卫是出题阶段闸门——有考试等着判分时不许再出新卷（见 workspace 的接线）。
+   */
+  nodeGuard?: (action: 'create' | 'edit', kind: string, payload: unknown) => string | null
+  /** 节点编辑成功后的回调（可省）：出卷后的视觉自检这类宿主动作挂这里 */
+  afterNodeEdit?: (uuid: string, kind: string) => void
   /** 当前节点的临时变量视图；不注入就没有 tmp 这一组 */
   tmp?: () => { nodeId?: string; entries: Record<string, TmpEntry>; onChange: (next: Record<string, TmpEntry>) => void }
   /** 出题 / 读卷 / 阅卷；不注入就没有 exam 这一组 */

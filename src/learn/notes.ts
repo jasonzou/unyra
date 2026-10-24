@@ -52,7 +52,7 @@ export function addNoteTo(
 ): { node: KnowledgeNode; name: string } {
   const list = notesOf(node)
   const name = uniqueNoteName(list, raw ?? '')
-  const note: NoteFile = { name, content: '', createdAt: at, updatedAt: at }
+  const note: NoteFile = { id: crypto.randomUUID(), name, content: '', createdAt: at, updatedAt: at }
   return { node: { ...node, notes: [...list, note], updatedAt: at }, name }
 }
 

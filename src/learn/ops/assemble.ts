@@ -5,34 +5,18 @@
  * 「每个 api 怎么落到 store 上」的接线留在这里；模块总说明仍留在 barrel 顶部。
  */
 
-import type { AgentToolResult } from '../../agent/types'
 import type { DocRef, NodeRef, ResolvedDocRef, ResolvedNodeRef, SandboxDocKind } from '../../agent/tools'
 import { loadAgentSettings } from '../../agent/settings'
+import { layoutHintOf } from '../../agent/docFormat'
 import type { AgentOps, AgentOpsDeps } from './deps'
-import { MASTERY_LABEL, SELF_REPORT_LABEL, docOf, superDocsOf, type KnowledgeNode, type MasteryStatus, type NoteFile } from '../types'
-import { NOTE_DEFAULT_NAME, findNote, notesOf } from '../notes'
-import {
-  addAnnotation,
-  appendNote,
-  createNodeUnder,
-  createNote,
-  deleteNode,
-  moveNode,
-  nodeById,
-  parentIds,
-  prereqIds,
-  titleTaken,
-  updateDoc,
-  updateNode,
-  writeNote,
-} from '../graph'
-import { nodePathOf, docsInfoOf, docPathOf, resolveDoc, resolveNode, type PathScope } from '../paths'
-import { writeOutline } from '../outline'
+import { docOf, type KnowledgeNode, type NoteFile } from '../types'
+import { findNote, notesOf } from '../notes'
+import { createNote, nodeById, updateDoc, writeNote } from '../graph'
+import { nodePathOf, docPathOf, resolveDoc, resolveNode, type PathScope } from '../paths'
 import { nodeLayout } from '../layout'
 import { NODE_FILE_SUFFIX } from '../files/nodeFile'
-import { clipText } from './text'
+import { NodeService } from '../nodeKinds'
 import { createLearningOps } from './learning'
-import { createSuperDocOps } from './superdoc'
 import { createMethodOps } from './method'
 import { createCodeOps } from './code'
 import { createWorkflowOps } from './workflow'
@@ -44,35 +28,9 @@ import { createChipOps } from './chip'
 import { createScheduleOps } from '../schedule'
 
 /**
- * 排版提醒：整篇写入教学文档、而正文里一处排版痕迹都没有时，在回执里点一句。
- *
- * 为什么值得写在回执里：文档的质量**看不见**。模型交出一篇没有版式的纯 HTML，
- * 拿到的回执同样是「教学文档已整体写入（1695 字）」——它没有任何信号说明自己做砸了什么。
- * 提示词里的规范会被长对话冲淡，而回执是每一轮都摆在眼前的东西。
- *
- * **格式策略参与判定**（见 agent/docFormat）：纯 Markdown 那一档整体不提——它的正文
- * 本来就不该有 class，提醒只会把模型往反方向推；混合与纯 HTML 下，HTML 的 class 与
- * Markdown 的结构痕迹（引用 / 表格 / 图表围栏）都算「有排版」，一样都没有才算草稿。
- *
- * 三条边界，都是「别唠叨」：只认教学文档（笔记是学习者自己写的地方）；
- * 只认整篇写入（追加一段散文、改一处措辞本来就不该带排版）；太短的不算（先占个位很正常）。
+ * 排版提醒（layoutHintOf，见 agent/docFormat）：挂在整篇写入教学文档的回执上——
+ * 节点宇宙里走 docOps.write 的镜像同步，也走节点的 editContent（两处共用同一判定）。
  */
-const LAYOUT_HINT =
-  '\n（提醒：这份正文里一处排版痕迹都没有。教学文档要有结构——Markdown 的引用 / 表格 / 图表围栏，' +
-  '或按「文档排版与图表」补上提示框 / 两栏 / 步骤 / 图表（以当前「文档格式」策略为准），' +
-  '再覆盖写入一次。）'
-
-/** Markdown 侧的结构痕迹：行首引用块、表格行、plot 围栏（与 HTML 的 class 一起算「有排版」） */
-const MD_STRUCTURE = /(?:^>|^\s*\|.*\||^```plot)/m
-
-function layoutHintOf(kind: SandboxDocKind, content: string): string {
-  if (kind !== 'teaching') return ''
-  if (content.length < 400) return ''
-  if (loadAgentSettings().docFormat === 'markdown') return ''
-  if (/class\s*=/.test(content)) return ''
-  if (MD_STRUCTURE.test(content)) return ''
-  return LAYOUT_HINT
-}
 export function createAgentOps(deps: AgentOpsDeps): AgentOps {
   const store0 = () => deps.getLatest()
   const scope = (): PathScope => ({ goalId: deps.goalId(), currentNodeId: deps.nodeId() })
@@ -80,7 +38,7 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
    * 一份笔记的定位：给了名字按名字找（大小写不敏感），没给名字取第一份。
    *
    * 一个节点可以有多份笔记（见 learn/notes），所以「笔记」这个词本身是不够的——
-   * 不带名字时用第一份，是为了兼容老写法（api.doc.read('笔记')）：那时节点只有一份，
+   * 不带名字时用第一份，是为了兼容更早的单一笔记时代，
    * 现在它仍然指向「最前面那份」，模型的旧习惯不至于当场失灵。
    */
   const findNoteOf = (node: KnowledgeNode, name?: string): NoteFile | undefined => {
@@ -155,468 +113,19 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     return r.ok ? { ok: true, ref: toDocRef(r.value.node, r.value.kind, r.value.note) } : { ok: false, message: r.message }
   }
 
-  /** 目标里的节点总览：一次编排常常要「先看看有哪些节点」再决定动谁 */
-  const nodeInventory = (): unknown => {
-    const s = store0()
-    const goal = s.goals.find((g) => g.id === deps.goalId())
-    const nodes = s.nodes.filter((n) => n.goalId === deps.goalId())
-    return {
-      goal: goal ? { id: goal.id, question: clipText(goal.question, 200) } : null,
-      current: nodeById(s, deps.nodeId() ?? '')?.title ?? null,
-      count: nodes.length,
-      nodes: nodes.map((n) => {
-        const info = docsInfoOf(n)
-        return {
-          path: nodePathOf(s, deps.goalId(), n.id),
-          id: n.id,
-          title: n.title,
-          status: n.status,
-          isGoal: s.goals.some((g) => g.rootNodeId === n.id),
-          description: clipText(n.description, 120),
-          charsSummary: info.map((d) => d.label + ' ' + d.chars).join('，'),
-          chars: info.reduce((acc, d) => acc + d.chars, 0),
-          // 规划路径要看的是「他会不会」，所以清单里带上掌握度与自评（见 design 的第二节）
-          mastery: typeof n.learning?.mastery === 'number' ? n.learning.mastery : null,
-          self: n.learning?.self ? SELF_REPORT_LABEL[n.learning.self] : null,
-          mistakes: n.learning?.mistakes?.length ?? 0,
-          children: prereqIds(s, n.id)
-            .map((id) => nodeById(s, id)?.title)
-            .filter((t): t is string => !!t),
-          prereqs: prereqIds(s, n.id)
-            .map((id) => nodeById(s, id)?.title)
-            .filter((t): t is string => !!t),
-        }
-      }),
-    }
+  /** 单个节点在数据根下的磁盘落点（files.* 空路径兜底用；一个节点一个文件，见 files/build） */
+  const nodeDiskPath = (nodeId: string): string | null => {
+    const layout = nodeLayout(store0()).get(nodeId)
+    if (!layout) return null
+    return 'docs/' + layout.dir.join('/') + '/' + layout.base + NODE_FILE_SUFFIX
   }
 
-  /** 单个节点的详情：标题、描述、状态、各文档字数、上下级 */
-  const nodeDetail = (nodeId: string): unknown => {
-    const s = store0()
-    const n = nodeById(s, nodeId)
-    if (!n) return { error: '这个节点已经不存在了（可能刚被删除）' }
-    const layout = nodeLayout(s).get(n.id)
-    // 一个节点一个文件之后，正文 / 大纲 / 笔记 / 试卷 / 超级文档都在这一份里
-    const docPath = layout
-      ? 'docs/' + layout.dir.join('/') + '/' + layout.base + NODE_FILE_SUFFIX
-      : undefined
-    return {
-      path: nodePathOf(s, deps.goalId(), n.id),
-      docPath,
-      id: n.id,
-      title: n.title,
-      description: n.description,
-      status: n.status,
-      isGoal: s.goals.some((g) => g.rootNodeId === n.id),
-      docs: docsInfoOf(n).map((d) => ({ 文档: d.label, 字数: d.chars, 空: d.empty })),
-      superdocs: superDocsOf(n).map((d) => ({ 名称: d.name, 字数: d.html.length, 空: !d.html.trim() })),
-      learning: n.learning ?? null,
-      parents: parentIds(s, n.id)
-        .map((id) => nodeById(s, id)?.title)
-        .filter((t): t is string => !!t),
-      children: prereqIds(s, n.id)
-        .map((id) => nodeById(s, id)?.title)
-        .filter((t): t is string => !!t),
-      prereqs: prereqIds(s, n.id)
-        .map((id) => nodeById(s, id)?.title)
-        .filter((t): t is string => !!t),
-    }
-  }
-
-  /**
-   * 节点的标准物理路径索引：给出该节点在磁盘上的真实落点。
-   *
-   * **一个节点一个文件之后这里只剩三样**：节点文件（正文 / 大纲 / 笔记 / 试卷 /
-   * 超级文档全在里面）、它的临时变量、它的工作区目录。以前那套
-   * `doc / notesDir / outline / meta / superdocsDir / examsDir` 指向的文件已经不存在了，
-   * 留着只会让模型去读一个不存在的路径。
+  /*
+   * 节点宇宙（api.node）：行为在 learn/nodeKinds 的类型子类里，这里只把 NodeService
+   * 接上 store 通道；出题阶段闸门与出卷后的视觉自检由界面层经 deps 注入（纯模型之外的事）。
    */
-  const nodePaths = (nodeId: string): unknown => {
-    const s = store0()
-    const n = nodeById(s, nodeId)
-    if (!n) return { ok: false, error: '这个节点已经不存在了' }
-    const layout = nodeLayout(s).get(n.id)
-    const dir = layout ? 'docs/' + layout.dir.join('/') : 'docs/' + n.title
-    const base = layout ? layout.base : n.title
-    return {
-      ok: true,
-      id: n.id,
-      title: n.title,
-      path: nodePathOf(s, deps.goalId(), n.id),
-      dir,
-      file: `${dir}/${base}${NODE_FILE_SUFFIX}`,
-      tmp: `${dir}/tmp.json`,
-      workspaceDir: `${dir}/workspace`,
-    }
-  }
-
-  const createNode = (
-    parentId: string,
-    input: { title: string; description?: string; status?: MasteryStatus; [k: string]: unknown },
-  ): AgentToolResult => {
-    const s = store0()
-    const parent = nodeById(s, parentId)
-    if (!parent) return { ok: false, content: '父节点不存在' }
-
-    // 校验未知属性，拒绝静默吞未知键 (B4 / 假成功)
-    const allowedKeys = new Set(['parent', 'title', 'description', 'status'])
-    for (const key of Object.keys(input)) {
-      if (!allowedKeys.has(key)) {
-        return {
-          ok: false,
-          content: `不支持的属性「${key}」。node.create 仅支持: parent, title, description, status（learning / mastered）`,
-        }
-      }
-    }
-
-    const rawTitle = String(input.title ?? '').trim()
-    if (!rawTitle) return { ok: false, content: '标题不能为空' }
-    if (rawTitle.includes('/') || rawTitle.includes('\\')) {
-      return { ok: false, content: '节点标题不能包含斜杠（/ 或 \\），这会破坏路径寻址。' }
-    }
-
-    if (input.status !== undefined) {
-      if (typeof input.status !== 'string' || !['learning', 'mastered'].includes(input.status)) {
-        return { ok: false, content: '状态必须是 learning / mastered 之一' }
-      }
-    }
-
-    const r = createNodeUnder(s, parentId, {
-      title: rawTitle,
-      description: typeof input.description === 'string' ? input.description : undefined,
-    })
-    const label = nodePathOf(r.store, deps.goalId(), r.node.id)
-
-    // 目标内已有同名节点时拒绝创建，防止写文件时覆盖串节点 (B4)
-    if (!r.created) {
-      return {
-        ok: false,
-        content:
-          '本目标里已经有叫「' + r.node.title + '」（路径 ' + label + '）的节点了。同名节点会导致后续写文件冲突，请换一个唯一的标题。',
-      }
-    }
-
-    let finalStore = r.store
-    if (input.status) {
-      finalStore = updateNode(finalStore, r.node.id, { status: input.status as MasteryStatus })
-    }
-    deps.set(finalStore)
-
-    return {
-      ok: true,
-      content:
-        '已创建节点「' + r.node.title + '」（路径 ' + label + '，id #' + r.node.id +
-        '）。教学文档与大纲两份文件已同时就位（都还是空的），接着写：api.doc.write(\'' + label + '\', 讲义内容)（省略 path 就是这份教学文档）；大纲用 api.outline.write(\'' + label + '\', { intro, children })；修改描述用 api.graph.update(\'#' + r.node.id + '\', { description })。用前先 api.doc.__help() 查用法。',
-    }
-  }
-
-  /**
-   * 递归/批量构建大纲树结构（为规划式与完整式目标创建提供高能支撑）。
-   */
-  const createTree = (
-    explicitParentId: string | undefined,
-    input: { tree?: unknown; [k: string]: unknown },
-  ): AgentToolResult => {
-    const rawTree = Array.isArray(input.tree) ? input.tree : Array.isArray(input) ? input : []
-    if (!rawTree.length) {
-      return { ok: false, content: 'tree 数组为空，请传入树状结构节点定义' }
-    }
-    const s = store0()
-    const fallbackParentId = explicitParentId || deps.nodeId() || s.goals.find((g) => g.id === deps.goalId())?.rootNodeId || ''
-    if (!fallbackParentId || !nodeById(s, fallbackParentId)) {
-      return { ok: false, content: '未找到有效的父节点（parent 参数或当前目标根节点无效）' }
-    }
-
-    let currentStore = s
-    let createdCount = 0
-    let docCount = 0
-    let outlineCount = 0
-    const createdTitles: string[] = []
-
-    const processItem = (parentId: string, item: unknown): boolean => {
-      if (!item || typeof item !== 'object') return false
-      const nodeInput = item as Record<string, unknown>
-      const rawTitle = String(nodeInput.title ?? '').trim()
-      if (!rawTitle || rawTitle.includes('/') || rawTitle.includes('\\')) return false
-
-      let targetNodeId: string
-      const existing = currentStore.nodes.find((n) => n.goalId === deps.goalId() && n.title === rawTitle)
-      if (existing) {
-        targetNodeId = existing.id
-        if (typeof nodeInput.description === 'string' && nodeInput.description.trim()) {
-          currentStore = updateNode(currentStore, targetNodeId, { description: nodeInput.description.trim() })
-        }
-      } else {
-        const r = createNodeUnder(currentStore, parentId, {
-          title: rawTitle,
-          description: typeof nodeInput.description === 'string' ? nodeInput.description.trim() : undefined,
-        })
-        currentStore = r.store
-        targetNodeId = r.node.id
-        createdCount++
-        createdTitles.push(rawTitle)
-      }
-
-      if (nodeInput.status === 'learning' || nodeInput.status === 'mastered') {
-        currentStore = updateNode(currentStore, targetNodeId, { status: nodeInput.status as MasteryStatus })
-      }
-
-      if (typeof nodeInput.content === 'string' && nodeInput.content.trim()) {
-        currentStore = updateDoc(currentStore, targetNodeId, nodeInput.content.trim())
-        docCount++
-      }
-
-      if (nodeInput.outline && typeof nodeInput.outline === 'object') {
-        const out = nodeInput.outline as { intro?: string; children?: Array<{ title: string; summary?: string }> }
-        const rOut = writeOutline(currentStore, targetNodeId, out, Date.now())
-        if (rOut.ok) {
-          currentStore = rOut.store
-          outlineCount++
-        }
-      }
-
-      if (Array.isArray(nodeInput.children) && nodeInput.children.length > 0) {
-        for (const child of nodeInput.children) {
-          processItem(targetNodeId, child)
-        }
-      }
-      return true
-    }
-
-    for (const item of rawTree) {
-      processItem(fallbackParentId, item)
-    }
-
-    deps.set(currentStore)
-    return {
-      ok: true,
-      content:
-        `大纲树构建完成：成功创建 ${createdCount} 个新节点（${createdTitles.slice(0, 8).join('、')}${createdTitles.length > 8 ? '等' : ''}），` +
-        `写入 ${outlineCount} 份大纲，完成 ${docCount} 篇教学讲义生成。全部已同步至大纲树与知识库。`,
-    }
-  }
-
-  /** 迁移节点到另一个节点之下（层级变了，大纲与侧栏跟着新父线走） */
-  const moveNodeRef = (nodeId: string, newParentId: string): AgentToolResult => {
-    const s = store0()
-    const node = nodeById(s, nodeId)
-    if (!node) return { ok: false, content: '这个节点已经不存在了（可能刚被删除）' }
-    const parent = nodeById(s, newParentId)
-    if (!parent) return { ok: false, content: '新父节点已经不存在了（可能刚被删除）' }
-    const r = moveNode(s, nodeId, newParentId)
-    if (r.moved) deps.set(r.store)
-    if (!r.moved) return { ok: false, content: r.message }
-    return {
-      ok: true,
-      content:
-        '已把「' + node.title + '」移到「' + parent.title + '」之下。它现在的路径是「' +
-        nodePathOf(r.store, deps.goalId(), nodeId) + '」。',
-    }
-  }
-
-  const updateNodeRef = (
-    nodeId: string,
-    patch: { title?: string; description?: string; status?: MasteryStatus },
-  ): AgentToolResult => {
-    const s = store0()
-    const node = nodeById(s, nodeId)
-    if (!node) return { ok: false, content: '这个节点已经不存在了（可能刚被删除）' }
-    if (patch.title !== undefined) {
-      const title = patch.title.trim()
-      if (!title) return { ok: false, content: '标题不能为空' }
-      if (title.includes('/') || title.includes('\\')) {
-        return { ok: false, content: '节点标题不能包含斜杠（/ 或 \\），这会破坏路径寻址。' }
-      }
-      // 同目标内标题必须唯一：路径寻址全靠它，重名之后 path 就指不明白是谁了
-      const clash = titleTaken(s, node.goalId, title, nodeId)
-      if (clash) {
-        return {
-          ok: false,
-          content:
-            '本目标里已经有叫「' + clash.title + '」的节点了。同名节点会让路径指不明白，' +
-            '请换一个标题，或先给那个节点改名。',
-        }
-      }
-    }
-    const next = updateNode(s, nodeId, patch)
-    deps.set(next)
-    const label = nodePathOf(next, deps.goalId(), nodeId)
-    const done: string[] = []
-    if (patch.title !== undefined) done.push('标题改为「' + patch.title.trim() + '」')
-    if (patch.description !== undefined) done.push('描述已更新（' + patch.description.length + ' 字）')
-    if (patch.status !== undefined) done.push('状态改为「' + MASTERY_LABEL[patch.status] + '」')
-    return { ok: true, content: done.join('；') + '。它现在的路径是「' + label + '」。' }
-  }
-
-  const removeNode = (nodeId: string, opts?: { cascade?: boolean; dryRun?: boolean }): AgentToolResult => {
-    const s = store0()
-    const node = nodeById(s, nodeId)
-    if (!node) return { ok: false, content: '这个节点已经不存在了' }
-    /*
-     * 根节点不能从这里删：deleteNode 对根节点的语义是「删掉整个目标」，
-     * 一句 api.graph.delete() 就把用户整个学习目标连同对话一起抹掉，代价太大。
-     */
-    if (s.goals.some((g) => g.rootNodeId === nodeId)) {
-      return {
-        ok: false,
-        content: '「' + node.title + '」是学习目标本身，不能这样删。要删目标请让用户在界面上删。',
-      }
-    }
-
-    const kidIds = prereqIds(s, nodeId)
-    const kids = kidIds.map((id) => nodeById(s, id)?.title ?? id)
-    const parents = parentIds(s, nodeId)
-    const goal = s.goals.find((g) => g.id === node.goalId)
-    const fallbackParentId = parents[0] ?? goal?.rootNodeId ?? ''
-    const fallbackParent = fallbackParentId ? nodeById(s, fallbackParentId) : undefined
-
-    if (opts?.dryRun) {
-      return {
-        ok: true,
-        content:
-          `[dry-run] 将删除节点「${node.title}」` +
-          (opts.cascade
-            ? `，并级联删除下级节点: ${kids.join('、') || '无'}`
-            : `；其 ${kids.length} 个下级节点将自动上浮挂载至「${fallbackParent?.title ?? '根节点'}」`),
-      }
-    }
-
-    if (opts?.cascade) {
-      deps.set(deleteNode(s, nodeId))
-      return {
-        ok: true,
-        content:
-          `已级联删除节点「${node.title}」` +
-          (kids.length ? `及其连带的 ${kids.length} 个下级节点（${kids.join('、')}）` : '') +
-          '。',
-      }
-    }
-
-    // 默认行为：保护数据不丢失！子节点自动上浮挂载至父节点
-    let nextStore = s
-    if (fallbackParentId) {
-      for (const kidId of kidIds) {
-        const hasEdge = nextStore.edges.some((e) => e.from === fallbackParentId && e.to === kidId)
-        if (!hasEdge) {
-          nextStore = {
-            ...nextStore,
-            edges: [...nextStore.edges, { from: fallbackParentId, to: kidId, createdAt: Date.now() }],
-          }
-        }
-      }
-    }
-    // 移除 nodeId 本身及与之直接相连的边
-    nextStore = {
-      ...nextStore,
-      nodes: nextStore.nodes.filter((n) => n.id !== nodeId),
-      edges: nextStore.edges.filter((e) => e.from !== nodeId && e.to !== nodeId),
-      exams: nextStore.exams.filter((e) => e.nodeId !== nodeId),
-    }
-    deps.set(nextStore)
-
-    return {
-      ok: true,
-      content:
-        `已删除节点「${node.title}」` +
-        (kids.length
-          ? `。其原有的 ${kids.length} 个下级节点（${kids.join('、')}）已自动上浮挂载至「${fallbackParent?.title ?? '根节点'}」，知识内容未丢失。`
-          : '。'),
-    }
-  }
-
-  /**
-   * 按字符区间替换某份文档（不传区间即整篇重写）。
-   * 与旧版的 update_note_range 行为一致：expected 不符就拒绝，绝不猜位置。
-   */
-  const replaceDocRange = (
-    nodeId: string,
-    kind: SandboxDocKind,
-    note: string | undefined,
-    req: { start?: number; end?: number; content: string; expected?: string },
-  ): AgentToolResult => {
-    /*
-     * 指名了一份还不存在的笔记时：整篇重写（没给区间）按「新建并写入」处理，
-     * 与 doc.write 一致；带区间的替换则只能报错——一份空笔记里没有任何区间可替换，
-     * 回执要说清「它还不存在」，模型才知道该改用 write。
-     */
-    const node = nodeById(store0(), nodeId)
-    const missing = kind === 'note' && !!note && !!node && !findNote(notesOf(node), note)
-    if (missing && (req.start !== undefined || req.end !== undefined)) {
-      return {
-        ok: false,
-        content:
-          '这个节点下还没有名为「' + note + '」的笔记，区间替换无从谈起。' +
-          '整篇写入请用 api.doc.write("笔记/' + note + '", 内容)。',
-      }
-    }
-    const full = docText(nodeId, kind, note)
-    const label = docLabel(kind, note)
-    const total = full.length
-    const whole = req.start === undefined && req.end === undefined
-    const start = whole ? 0 : (req.start ?? 0)
-    const rawEnd = whole || req.end === undefined ? total : req.end
-    if (start < 0 || rawEnd < start) {
-      return { ok: false, content: '区间不合法：需满足 0 ≤ start ≤ end，收到 start=' + start + ' end=' + rawEnd }
-    }
-    if (start > total) {
-      return { ok: false, content: '起点 ' + start + ' 超出' + label + '长度（共 ' + total + ' 字）' }
-    }
-    const end = Math.min(rawEnd, total)
-    const current = full.slice(start, end)
-    if (typeof req.expected === 'string' && req.expected !== current) {
-      return {
-        ok: false,
-        content:
-          '位置校验失败：区间 [' + start + ', ' + end + ') 当前是「' + current.slice(0, 80) + '」' +
-          '，与 expected 不符。可能已被改动，请重新 readRange 定位后再改。',
-      }
-    }
-    if (whole && !req.content.trim()) return { ok: false, content: '内容为空，未做修改' }
-    const written = writeDocText(nodeId, kind, note, full.slice(0, start) + req.content + full.slice(end))
-    if (!written.ok) {
-      return { ok: false, content: '写入失败：节点已经不在了，请重新 api.graph.list() 看一眼' }
-    }
-    const delta = req.content.length - (end - start)
-    if (whole) {
-      return {
-        ok: true,
-        content: docLabel(kind, written.note ?? note) + '已整体更新（' + req.content.length + ' 字）',
-      }
-    }
-    return {
-      ok: true,
-      content:
-        '已替换' + label + '的区间 [' + start + ', ' + end + ')（原 ' + (end - start) + ' 字 → 新 ' +
-        req.content.length + ' 字）。它现共 ' + (total + delta) + ' 字；其后位置的偏移需相应' +
-        (delta >= 0 ? '增加 ' + delta : '减少 ' + -delta) + '。',
-    }
-  }
-
-  /**
-   * 追加到某份文档末尾（空行分隔，与旧行为一致）。
-   *
-   * 笔记不存在时**新建一份再写**（见 graph 的 appendNote）：模型说「记到笔记里」，
-   * 而节点上还没有笔记时，正确的反应是记下来，而不是回一句「没有这份笔记」让它再试一轮。
-   */
-  const appendDoc = (
-    nodeId: string,
-    kind: SandboxDocKind,
-    note: string | undefined,
-    content: string,
-  ): AgentToolResult => {
-    if (!content.trim()) return { ok: false, content: '内容为空，未做修改' }
-    if (kind === 'teaching') {
-      const cur = docText(nodeId, kind)
-      deps.set(updateDoc(store0(), nodeId, cur ? cur + '\n\n' + content : content))
-      return { ok: true, content: '已追加到教学文档末尾（' + content.length + ' 字）' }
-    }
-    const r = appendNote(store0(), nodeId, note ?? NOTE_DEFAULT_NAME, content)
-    if (!r.name) return { ok: false, content: '写入失败：这个节点已经不在了' }
-    // 别忘了把新 store 交回去：漏了这一句，回执说「已追加」而内容根本没落进 store，
-    // 是那种「界面看着对、下一轮读回来却发现没写」的错（探针当场抓到过）
-    deps.set(r.store)
-    return { ok: true, content: '已追加到' + docLabel(kind, r.name) + '末尾（' + content.length + ' 字）' }
-  }
+  const nodeService = () =>
+    new NodeService({ getLatest: deps.getLatest, set: deps.set, goalId: deps.goalId })
 
   return {
     nodeId: deps.nodeId,
@@ -632,93 +141,21 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
           ok: true,
           content:
             docLabel(kind, r.note ?? note) + '已整体写入（' + content.length + ' 字）' +
-            layoutHintOf(kind, content),
-        }
-      },
-      replace: replaceDocRange,
-      append: appendDoc,
-      /*
-       * 注解（正文旁边那一条虚线词条）：**挂在节点上**，不属于某一份文档——
-       * 这个节点的教学文档与它每一份笔记都共用同一批注解（见 learn/types 的 Annotation）。
-       * 因此 path 只用来找节点，落在哪一份文档上不影响结果。
-       *
-       * term 与 occurrence 都照用户划词那一刻记下的来：同一个词在正文里出现好几回时，
-       * 序号决定标记落在哪一处（见 graph 的 addAnnotation）。
-       */
-      annotate: (nodeId, input) => {
-        const term = input.term.trim()
-        if (!term) {
-          return { ok: false, content: '词条为空：api.graph.annotate({ term, body }) 里的 term 是正文里那一小段文字' }
-        }
-        if (!input.body.trim()) {
-          return { ok: false, content: '注解正文为空：body 写两三句 Markdown，说清它在这篇文档里是什么意思' }
-        }
-        const s = store0()
-        if (!s.nodes.some((n) => n.id === nodeId)) return { ok: false, content: '写入失败：这个节点已经不在了' }
-        const existed = nodeById(s, nodeId)?.annotations.some((a) => a.term === term) ?? false
-        deps.set(addAnnotation(s, nodeId, term, input.body, 'understand', undefined, input.occurrence))
-        return {
-          ok: true,
-          content:
-            (existed ? '已更新' : '已添加') +
-            '「' + term + '」的注解（' + input.body.trim().length + ' 字，已划在正文上）',
+            layoutHintOf(kind, content, loadAgentSettings().docFormat),
         }
       },
     },
-    nodeOps: {
-      list: nodeInventory,
-      read: nodeDetail,
-      create: createNode,
-      createTree,
-      update: updateNodeRef,
-      remove: removeNode,
-      move: moveNodeRef,
-      paths: nodePaths,
-      annotate: (nodeId, input) => {
-        const term = input.term.trim()
-        if (!term) return { ok: false, content: '词条为空' }
-        if (!input.body.trim()) return { ok: false, content: '注解正文为空' }
-        const s = store0()
-        if (!s.nodes.some((n) => n.id === nodeId)) return { ok: false, content: '写入失败：节点不存在' }
-        const existed = nodeById(s, nodeId)?.annotations.some((a) => a.term === term) ?? false
-        deps.set(addAnnotation(s, nodeId, term, input.body, 'understand', undefined, input.occurrence))
-        return {
-          ok: true,
-          content: (existed ? '已更新' : '已添加') + '「' + term + '」的注解（' + input.body.trim().length + ' 字）',
-        }
-      },
+    nodes: {
+      service: nodeService,
+      ...(deps.nodeGuard ? { guard: deps.nodeGuard } : {}),
+      ...(deps.afterNodeEdit ? { afterEdit: deps.afterNodeEdit } : {}),
     },
-    /**
-     * 目标大纲（见 learn/outline）：结构化的计划，read 整份回、write 整份覆盖。
-     * 没有写过的大纲 read 回 null——那不是错误，模型据此知道要先写一份。
-     */
-    outline: {
-      read: (nodeId) => {
-        const n = nodeById(store0(), nodeId)
-        return n ? (n.outline ?? null) : { error: '这个节点已经不存在了（可能刚被删除）' }
-      },
-      write: (nodeId, input) => {
-        const r = writeOutline(store0(), nodeId, input, Date.now())
-        if (!r.ok) return { ok: false, content: r.error }
-        // 别忘了把新 store 交回去（与 appendDoc 同一条教训）：只算不交，回执说「已写入」
-        // 而内容根本没落进 store——探针的「写入后立刻读回」当场抓到过这一类错。
-        deps.set(r.store)
-        const node = nodeById(r.store, nodeId)
-        return {
-          ok: true,
-          content:
-            '大纲已写入「' + (node?.title ?? '') + '」：导语 ' + r.outline.intro.length +
-            ' 字，子目标 ' + r.outline.children.length + ' 个（只此一层，' +
-            '孙辈的大纲由那些子目标自己的 outline 负责）。大纲页会显示每个子目标的学习情况。',
-        }
-      },
-    },
+    docPath: nodeDiskPath,
+
     // 学习状态不需要外部能力（不像 res 要磁盘、exam 要试卷），因此总是可用
     state: createLearningOps(deps),
-    // 目标级持久化函数、超级文档、工作流：都是纯 store 逻辑，总是可用
-    // （见 learn/methods、learn/superdocs、learn/workflows）
+    // 目标级持久化函数与工作流：纯 store 逻辑，总是可用（见 learn/methods、learn/workflows）
     methods: createMethodOps(deps),
-    superdocs: createSuperDocOps(deps),
     workflows: createWorkflowOps(deps),
     // 代码块伪编译的交付口：纯渲染层逻辑（产物表 + 待编译登记），总是可用
     code: createCodeOps(),

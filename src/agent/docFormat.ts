@@ -171,3 +171,35 @@ export function docFormatMessage(
 export function docFormatAllowsModule(key: string, format: DocFormatId): boolean {
   return !(format === 'markdown' && key === 'doc-html')
 }
+
+/**
+ * 整篇写入教学文档的排版提醒：正文里一处排版痕迹都没有时，在回执里点一句。
+ *
+ * 为什么值得写在回执里：文档的质量**看不见**。模型交出一篇没有版式的纯文本，
+ * 拿到的回执同样只是「正文 N 字」——它没有任何信号说明自己做砸了什么。
+ * 提示词里的规范会被长对话冲淡，而回执是每一轮都摆在眼前的东西。
+ *
+ * **格式策略参与判定**：纯 Markdown 那一档整体不提——它的正文本来就不该有
+ * class，提醒只会把模型往反方向推；混合与纯 HTML 下，HTML 的 class 与 Markdown
+ * 的结构痕迹（引用 / 表格 / 图表围栏）都算「有排版」，一样都没有才算草稿。
+ *
+ * 三条边界，都是「别唠叨」：只认教学文档（笔记是学习者自己写的地方）；
+ * 只认整篇写入（追加一段散文、改一处措辞本来就不该带排版）；太短的不算（先占个位很正常）。
+ * format 由调用方传入（loadAgentSettings().docFormat）——本文件不能反过来依赖 settings。
+ */
+
+/** Markdown 侧的结构痕迹：行首引用块、表格行、plot 围栏（与 HTML 的 class 一起算「有排版」） */
+const MD_STRUCTURE = /(?:^>|^\s*\|.*\||^```plot)/m
+
+export function layoutHintOf(kind: 'teaching' | 'note', content: string, format: DocFormatId): string {
+  if (kind !== 'teaching') return ''
+  if (content.length < 400) return ''
+  if (format === 'markdown') return ''
+  if (/class\s*=/.test(content)) return ''
+  if (MD_STRUCTURE.test(content)) return ''
+  return (
+    '\n（提醒：这份正文里一处排版痕迹都没有。教学文档要有结构——Markdown 的引用 / 表格 / 图表围栏，' +
+    '或按「文档排版与图表」补上提示框 / 两栏 / 步骤 / 图表（以当前「文档格式」策略为准），' +
+    '再整份写回一次。）'
+  )
+}

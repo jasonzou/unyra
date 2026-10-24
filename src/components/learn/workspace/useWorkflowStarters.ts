@@ -93,11 +93,11 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       return
     }
     setCreating(false)
-    // 交付边界随指令钉一遍：这是往目标节点上「填一份试卷」的轮次，不是建树（画布上的
-    // 空试卷卡由派生在实体长出来时顶替收编，agent 这一侧不再建任何节点）
+    // 交付边界随指令钉一遍：这是「往目标文档下面出一份卷」的轮次，不是建树。
+    // 画布上有空壳时 api.node.create 会原位复用（同 id 吸收），没有就现建——两条路都是它。
     agent.runWorkflow('exam', {
       nodeId: target.id,
-      hint: '【本轮交付边界】交付物只有这一份试卷：落在目标节点身上；不要创建任何新节点，也不要动教学文档与大纲——那是「开讲」与「生成大纲」流程的事。',
+      hint: '【本轮交付边界】目标文档 uuid: ' + target.id + '。交付物只有它下面这一份试卷：api.node.create({ kind: "exam", under: 该uuid }) 建卷（已有空壳会被原位复用）后 editContent 落题；不要创建任何别的节点，也不要动教学文档与大纲——那是「开讲」与「生成大纲」流程的事。',
     })
   }
 
@@ -158,13 +158,16 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onOpenSettings()
       return
     }
-    // 画布拖出的壳（实体先行）：写进这份壳、不另起名字——卡的位置就是用户放卡的位置
-    const shellHint = shellName
-      ? `节点上已放了一份空超级文档「${shellName}」——本轮就写它：api.node().superdoc("${shellName}").write(完整HTML)，不要另起新名字。`
+    // 画布拖出的壳（实体先行）：写进这份壳、不另建——卡的位置就是用户放卡的位置
+    const shellUuid = shellName
+      ? (nodeById(getLatest(), target.id)?.superdocs ?? []).find((d) => d.name === shellName)?.id
+      : undefined
+    const shellHint = shellUuid
+      ? `节点上已放了一份空超级文档（uuid ${shellUuid}）——本轮就写它：const lab = await api.node.get("${shellUuid}")；await lab.editContent({ html })，不要另建一份。`
       : ''
     agent.runWorkflow('superlab', {
       nodeId: target.id,
-      hint: '【本轮交付边界】交付物只有这一份超级文档：写在目标节点身上（api.node().superdoc(名字)）；不要创建任何新节点，也不要动教学文档与大纲。' + shellHint,
+      hint: '【本轮交付边界】目标文档 uuid: ' + target.id + '。交付物只有这一份超级文档（under 该 uuid）；不要创建任何别的节点，也不要动教学文档与大纲。' + shellHint,
     })
     onToast(t('已启动超级实验室，导师马上会问你想做什么'))
   }

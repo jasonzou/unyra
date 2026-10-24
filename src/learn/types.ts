@@ -181,16 +181,16 @@ export function emptyDocs(): NodeDocs {
 /**
  * 一份笔记：**一个独立文件**。
  *
- * name 既是列表里显示的名字，也是磁盘上的文件名（`{节点}.notes/{name}.md`）——
- * 两者必须一致：用户在界面上改的就是文件名本身，否则「改名」会变成一句空话。
- * 因此它的取值一律过 sanitizeSegment（见 learn/notes 的 uniqueNoteName），
- * 非法字符在**创建/改名那一刻**就被换掉，而不是等到落盘时才悄悄变形。
- *
- * 没有 id：同一节点内名字唯一（uniqueNoteName 保证），(节点 id, 名字) 就是它的身份。
- * 存 id 反而会带来「名字是身份的副本、改一处忘一处」的问题；页签引用的也是名字，
- * 改名时由 renameNote 一起把页签改过去（见 learn/notes）。
+ * id 是它的持久 uuid（节点宇宙里笔记节点的身份，见 learn/nodeKinds）——改名不改 id，
+ * 页签、画布坐标、agent 句柄都靠它稳住。name 既是列表里显示的名字，也是磁盘上的
+ * 文件名（`{节点}.notes/{name}.md`）——两者必须一致：用户在界面上改的就是文件名本身，
+ * 否则「改名」会变成一句空话。因此它的取值一律过 sanitizeSegment（见 learn/notes 的
+ * uniqueNoteName），非法字符在**创建/改名那一刻**就被换掉，而不是等到落盘时才悄悄变形。
  */
 export interface NoteFile {
+  /** 持久 uuid（创建时分配，改名不变）；老数据在读盘那一刻补上
+   *   （见 files/nodeFile 的 contentOfParts / files/parse 的 readNotes） */
+  id: string
   /** 笔记名 = 文件名（不含扩展名） */
   name: string
   /** Markdown 正文 */
@@ -206,16 +206,19 @@ export function isDocKind(v: unknown): v is DocKind {
 /**
  * 一份超级文档：Agent 生成的**可交互 HTML 文档**，绑定在一个节点上。
  *
- * 与笔记（NoteFile）同构——一个节点可以有好几份，名字就是身份——但它是完整的
+ * 与笔记（NoteFile）同构——一个节点可以有好几份——但它是完整的
  * HTML 而不是 Markdown：里面可以带 <style> 与 <script>。渲染走沙箱化的 iframe
  * （见 components/learn/SuperDocView），脚本**永远不会**跑在应用页面本身里；
  * 脚本里唯一对外的口子是 api.method.call(...)（见 learn/methods），
  * 它把调用转发回宿主执行目标级持久化的函数。
  *
+ * id 是持久 uuid（节点宇宙里超级文档节点的身份，改名不变）；名字是显示与页签身份。
  * 只存在 state.json 里、不做磁盘镜像（笔记那种 {节点}.notes/*.md 的待遇）：
  * 它是给渲染器消费的交互件，不是要在文件管理器里直接打开的素材。
  */
 export interface SuperDocFile {
+  /** 持久 uuid（创建时分配）；老数据在读盘那一刻补上（见 files/nodeFile） */
+  id: string
   name: string
   html: string
   createdAt: number
@@ -281,7 +284,7 @@ export function outlineOf(node: { outline?: OutlineDoc }): OutlineDoc | null {
  * code 是一段**匿名 async 函数源码**（与 execute 的 body 同一种写法），
  * 第一个参数是 api（沙箱的整套 api），其余参数是调用方传的实参：
  *
- *     ((api, path, needle) => { ... return api.doc.find(path, needle) })
+ *     ((api, path, needle) => { ... return (await (await api.node.get(uuid)).content).teaching.includes(needle) })
  *
  * name 就是身份（同目标内唯一，create 同名覆盖）。它存在的意义是「复用」：
  * 超级文档的按钮调 api.method.call('函数名', 实参)，宿主编译执行并把结果送回去——
@@ -388,7 +391,7 @@ export interface KnowledgeNode {
   superdocs?: SuperDocFile[]
   /**
    * 这个目标的大纲（见 OutlineDoc）。创建节点时与教学文档**同时**生成（一份空的大纲文件），
-   * 内容由导师经 api.outline.write 写入；老数据没有这一项，交互页按「还没有大纲」处理。
+   * 内容由导师经大纲节点的 editContent 写入；老数据没有这一项，交互页按「还没有大纲」处理。
    */
   outline?: OutlineDoc
   /** 「了解」注解；渲染期套在正文对应词上，不改动 content */

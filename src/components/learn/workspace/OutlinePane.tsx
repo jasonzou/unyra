@@ -12,7 +12,7 @@ import { memo } from 'react'
 import type { KnowledgeNode, LearnStore } from '../../../learn/types'
 import type { StructureMap } from '../../../learn/structure'
 import type { ExamActions, NodeDocActions } from '../explorer/types'
-import OutlineView from '../OutlineView'
+import OutlineView, { type CanvasChannelProps } from '../OutlineView'
 
 export interface OutlinePaneProps {
   active: boolean
@@ -22,17 +22,11 @@ export interface OutlinePaneProps {
   onChangeStructure: (goalId: string, next: StructureMap) => void
   docs: NodeDocActions
   exams: ExamActions
-  onCreateNote?: (nodeId: string) => string | null
-  onCreateExam?: (nodeId: string) => string | null
-  onCreateSuperDoc?: (nodeId: string) => string | null
-  onRenameNote?: (nodeId: string, from: string, to: string) => void
-  onAddOutlineEntry?: (nodeId: string, title: string) => void
-  onCreateChildDoc?: (ownerNodeId: string, title: string) => string | null
-  onGenerateDoc?: (nodeId: string) => void
-  onGenerateOutline?: (ownerNodeId: string) => void
   onToast?: (msg: string) => void
   focusTarget?: { nodeId: string; nonce: number } | null
   onFocusHandled?: () => void
+  /** 统一通道：节点的建 / 删 / 连 / 改名（与 agent 的 api.node 同一条路） */
+  channel: CanvasChannelProps
 }
 
 function sameOutlinePane(prev: OutlinePaneProps, next: OutlinePaneProps): boolean {
@@ -48,6 +42,7 @@ function sameOutlinePane(prev: OutlinePaneProps, next: OutlinePaneProps): boolea
   // 激活状态下：仅当外部关注节点、结构图或节点数据有变时才重渲染
   if (prev.focusTarget !== next.focusTarget) return false
   if (prev.node !== next.node) return false
+  if (prev.channel !== next.channel) return false
   if (prev.store.structure !== next.store.structure) return false
   if (prev.store.nodes !== next.store.nodes || prev.store.exams !== next.store.exams) return false
   return true
@@ -61,17 +56,10 @@ export const OutlinePane = memo(function OutlinePane({
   onChangeStructure,
   docs,
   exams,
-  onCreateNote,
-  onCreateExam,
-  onCreateSuperDoc,
-  onRenameNote,
-  onAddOutlineEntry,
-  onCreateChildDoc,
-  onGenerateDoc,
-  onGenerateOutline,
   onToast,
   focusTarget,
   onFocusHandled,
+  channel,
 }: OutlinePaneProps) {
   return (
     <div
@@ -85,17 +73,10 @@ export const OutlinePane = memo(function OutlinePane({
         onChangeStructure={onChangeStructure}
         docs={docs}
         exams={exams}
-        onCreateNote={onCreateNote}
-          onCreateExam={onCreateExam}
-          onCreateSuperDoc={onCreateSuperDoc}
-        onRenameNote={onRenameNote}
-        onAddOutlineEntry={onAddOutlineEntry}
-        onCreateChildDoc={onCreateChildDoc}
-        onGenerateDoc={onGenerateDoc}
-        onGenerateOutline={onGenerateOutline}
         onToast={onToast}
         focusTarget={focusTarget}
         onFocusHandled={onFocusHandled}
+        channel={channel}
       />
     </div>
   )

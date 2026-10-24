@@ -129,3 +129,12 @@ export function addEdge(store: LearnStore, from: string, to: string): { store: L
   return { store: { ...store, edges: [...store.edges, edge] }, added: true }
 }
 
+/**
+ * 摘掉一条依赖边 from → to（大纲节点 disconnect 的落点：拆掉一条父线）。
+ * 摘掉的文档变成「没有上游的游离文档」——不再连带删除任何东西（删节点才是删除，摘线只是解开）。
+ */
+export function removeEdge(store: LearnStore, from: string, to: string): LearnStore {
+  return { ...store, edges: store.edges.filter((e) => !(e.from === from && e.to === to)) }
+}
+
+

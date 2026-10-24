@@ -16,7 +16,7 @@ import type { AgentPart, Conversation, ConversationMessage } from './types'
 export interface TraceItem {
   /** 条目类型决定染色与措辞 */
   kind: 'instruction' | 'prompt' | 'context' | 'text' | 'thinking' | 'tool' | 'notice' | 'module'
-  /** 条目名（如「工作流指令」「节点上下文」「工具调用 api.doc.write」） */
+  /** 条目名（如「工作流指令」「节点上下文」「工具调用 files.write」） */
   title: string
   /** 原文全文 */
   text: string

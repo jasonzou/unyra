@@ -37,6 +37,11 @@ export interface NodePart {
   kind: PartKind
   /** 笔记名 / 超级文档名 / 试卷 id；teaching 与 outline 没有名字（每节点一份） */
   name?: string
+  /**
+   * 笔记 / 超级文档的持久 uuid（= 节点宇宙里它们的节点身份）。读回时缺了就现场补一个——
+   * 补上的 id 随下一次落盘持久，之后一直稳定。
+   */
+  id?: string
   format: 'markdown' | 'json' | 'html'
   body: unknown
   createdAt?: number
@@ -82,6 +87,7 @@ export function partsOfNode(node: KnowledgeNode, exams: readonly Exam[]): NodePa
   for (const note of node.notes ?? []) {
     parts.push({
       kind: 'note',
+      id: note.id,
       name: note.name,
       format: 'markdown',
       body: note.content,
@@ -92,6 +98,7 @@ export function partsOfNode(node: KnowledgeNode, exams: readonly Exam[]): NodePa
   for (const sdoc of node.superdocs ?? []) {
     parts.push({
       kind: 'superdoc',
+      id: sdoc.id,
       name: sdoc.name,
       format: 'html',
       body: sdoc.html,
@@ -147,6 +154,7 @@ export function contentOfParts(parts: readonly NodePart[], base: { createdAt: nu
         if (!name || seenNotes.has(name.toLowerCase())) break
         seenNotes.add(name.toLowerCase())
         notes.push({
+          id: typeof part.id === 'string' && part.id ? part.id : crypto.randomUUID(),
           name,
           content: typeof part.body === 'string' ? part.body : '',
           createdAt: at(part.createdAt) || base.createdAt,
@@ -159,6 +167,7 @@ export function contentOfParts(parts: readonly NodePart[], base: { createdAt: nu
         if (!name || seenDocs.has(name.toLowerCase())) break
         seenDocs.add(name.toLowerCase())
         superdocs.push({
+          id: typeof part.id === 'string' && part.id ? part.id : crypto.randomUUID(),
           name,
           html: typeof part.body === 'string' ? part.body : '',
           createdAt: at(part.createdAt) || base.createdAt,

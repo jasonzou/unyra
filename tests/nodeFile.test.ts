@@ -36,7 +36,7 @@ function legacyTree(): Record<string, string> {
       description: '整门课',
       dependencies: [{ to: 'n2', createdAt: 1 }],
       notes: [{ name: '错题', createdAt: 2, updatedAt: 3 }],
-      superdocs: [{ name: '讲义', html: '<html>讲义</html>', createdAt: 4, updatedAt: 5 }],
+      superdocs: [{ id: crypto.randomUUID(), name: '讲义', html: '<html>讲义</html>', createdAt: 4, updatedAt: 5 }],
       exams: [
         {
           id: 'e1',
@@ -148,7 +148,7 @@ describe('节点文件：一个节点一个 .node.json', () => {
     const n2 = after!.nodes.find((n) => n.id === 'n2')!
     expect(n1.title).toBe('高数')
     expect(n1.docs.teaching).toBe('# 高数正文')
-    expect(n1.notes).toEqual([{ name: '错题', content: '错题正文', createdAt: 2, updatedAt: 3 }])
+    expect(n1.notes).toEqual([expect.objectContaining({ name: '错题', content: '错题正文', createdAt: 2, updatedAt: 3 })])
     expect(n1.superdocs?.[0]).toMatchObject({ name: '讲义', html: '<html>讲义</html>' })
     expect(n1.outline?.intro).toBe('导语')
     expect(n1.outline?.children[0].key).toBe('导数')
@@ -170,7 +170,7 @@ describe('节点文件：一个节点一个 .node.json', () => {
     const withEmpty = {
       ...before,
       nodes: before.nodes.map((n) =>
-        n.id === 'n2' ? { ...n, notes: [{ name: '还没写', content: '', createdAt: 9, updatedAt: 9 }] } : n,
+        n.id === 'n2' ? { ...n, notes: [{ id: crypto.randomUUID(), name: '还没写', content: '', createdAt: 9, updatedAt: 9 }] } : n,
       ),
     }
     const after = parseDocs(buildDocs(withEmpty), {})!

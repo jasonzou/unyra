@@ -244,15 +244,24 @@ function isCallableBody(text: string): boolean {
 /** compileBody 的结果：失败时的 content 就是直接回给模型的那句话 */
 export type CompileBodyResult = { ok: true; body: string } | { ok: false; content: string }
 
-/**
- * 交给沙箱之前的编译检查。
- *
- * 为什么要单独做一次：normalizeBody 只是「尽力把形状摆正」，摆不正时它会原样退回，
- * 于是沙箱在它自己的 new Function 上抛出一句「await is only valid in async functions」，
- * 行号指向沙箱的包装代码——模型看不出该改哪里（真实运行里它连遇两次，两次都只能放弃）。
- * 这里把真实的语法错误、连同最可能的原因，直接说给模型听。
+/*
+ * TypeScript 支持（2026-10-24）：编排代码可以直接写 TS——类型标注、接口、泛型、as、enum
+ * 都行。转译在**宿主这一侧、进沙箱之前**完成（sucrase 只做语法剥离，不做类型检查）：
+ * 执行仍发生在 Worker 沙箱里，沙箱边界一寸不让；类型错误在运行时才暴露，
+ * 由各 api 的回执（缺字段 / 字段类型不对的人话）兜底。
  */
-export function compileBody(raw: string): CompileBodyResult {
+import { transform as sucraseTransform } from 'sucrase'
+
+function stripTypes(src: string): string | null {
+  try {
+    return sucraseTransform(src, { transforms: ['typescript'] }).code
+  } catch {
+    return null
+  }
+}
+
+/** 纯 JS 路径的编译检查（原 compileBody 的全部逻辑） */
+function compileJsBody(raw: string): CompileBodyResult {
   const text = raw.trim()
   if (!text) return { ok: false, content: 'body 为空：请给出形如 ((api)=>{ ... }) 的代码' }
   const candidates = [normalizeBody(raw), stripOuterParens(stripTrailingCall(raw)), text]
@@ -283,4 +292,22 @@ export function compileBody(raw: string): CompileBodyResult {
       'body 不能用' + (problem ? '（' + problem + '）' : '') + hint +
       '\n请写成形如 ((api)=>{ ... return 结果 }) 的匿名函数：参数就是 api，函数体里可以直接用 await。',
   }
+}
+
+/**
+ * 交给沙箱之前的编译检查（含 TypeScript）。
+ *
+ * 顺序：先按纯 JS 编（多数编排就是 JS，零开销）；编不过再剥掉 TS 语法重试——
+ * 这样 TS 与 JS 共用同一套形状归一化与报错文案，失败信息也从**转译后的代码**里来。
+ */
+export function compileBody(raw: string): CompileBodyResult {
+  const direct = compileJsBody(raw)
+  if (direct.ok) return direct
+  const stripped = stripTypes(raw.trim())
+  if (stripped && stripped !== raw.trim()) {
+    const retried = compileJsBody(stripped)
+    if (retried.ok) return retried
+    return retried
+  }
+  return direct
 }

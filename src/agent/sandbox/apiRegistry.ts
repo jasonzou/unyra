@@ -15,10 +15,7 @@
  * - **旧写法组标 `legacy`**：等价的新组是唯一被宣传的入口（系统提示词组索引与
  *   根 help 只列非 legacy 组）；legacy 组仍登记、仍可调用（老对话的历史里还有它的
  *   调用），直查 `api.<组>.__help()` 也照常——只是不再向模型推荐。
- * - **成员方法的登记在 learn/nodeKinds**：api.node 组的 usage 里那张「各类型方法表」
- *   从类型登记表派生（renderKindMethodsTable），这里不另抄一份清单。
  */
-import { renderKindMethodsTable } from '../../learn/nodeKinds'
 
 export interface ApiDoc {
   /** 组内方法名，如 `read` */
@@ -143,199 +140,40 @@ const p = await api.see({ pdf: 'moji:static/<uuid>', page: [1, 3] })`,
 
   /* ---------- 学习数据 ---------- */
   g(
-    'graph',
-    '节点与拓扑',
-    '知识点树：列表、详情、路径、创建、改名、更新、移动、删除、注解。',
-    `节点是学习数据的骨架。所有 path 都按「本目标内标题唯一」寻址：
-- '' 或 '当前' = 当前节点；
-- '极限' = 本目标里标题为「极限」的节点；
-- '微积分/极限' = 从根逐段走；
-- '#<id>' = 直接给节点 id（api.graph.list() 里有）。
-path 找不到时回执会列候选子节点，照着改一次就对。
-
-**类型与关系（先看这段再建节点）**
-
-一个**学习节点**（KnowledgeNode）是内容的容器，它同时拥有：
-- 一份**教学文档**（api.node(path).write，正文）
-- 一份**大纲**（api.node(path).outline().write，children 是「目标项」）
-- 若干**笔记**（api.node(path).note('名字')）、若干**试卷**（exam）、若干**超级文档**（api.node(path).superdoc('名字')）
-
-画布上看到的卡片是这些内容各自成为的**节点**，五种类型：
-\`doc\` 文档 / \`outline\` 大纲 / \`note\` 笔记 / \`exam\` 试卷 / \`superdoc\` 超级文档。
-每个卡片用 ref 指回上面那份内容——**内容只存一份，图里只存引用**。
-
-它们之间的连接规矩（2026-10 起的拓扑，别按老习惯连）：
-- **文档 → 大纲**：先文档再大纲，大纲是这份文档自己的展开；
-- **大纲 → 文档**：大纲列出的目标项，由一份**子文档**去落地；一个目标项只挂一份子文档；
-- **文档 → 笔记 / 试卷 / 超级文档**：叶子只挂在文档下面；
-- **大纲之间不连**：大纲的父子节点只能是文档（没有「大纲 → 大纲」这条路）。
-
-所以建一个子目标的顺序是：父节点上先有一条目标项（api.node(父).outline().write 的 children），
-再 graph.create({ parent: 父标题, title: 目标项标题 }) 让它落地成子节点——
-子节点自己会带一份文档与一份空大纲。**不要**为了挂上父子关系去建一条大纲→大纲的线。`,
-    [
-      a('list', 'graph.list()', '本目标全部节点', '回 path / id / title / status / 描述摘要 / 字数 / 掌握度。规划路线、找父节点、核对是否存在时先调它。', 'const all = await api.graph.list()'),
-      a('read', 'graph.read(path?)', '单个节点详情', '含描述、状态、各文档字数、上级/下级、学习状态。想知道「这个节点写过什么」先看它，不要整篇读文档。', `const n = await api.graph.read('极限')`),
-      a('title', 'graph.title(path?)', '读节点标题', '只回标题，用于轻量确认；要看描述/状态/字数用 graph.read。', `const t = await api.graph.title('极限')`),
-      a('paths', 'graph.paths(path?)', '节点文件在磁盘上的落点', '回 { id, title, path, dir, file, tmp, workspaceDir }。**一个节点一个文件**：正文/大纲/笔记/试卷/超级文档都在 file 这一份里，所以不要再去找 notesDir / superdocsDir / examsDir（它们已经不存在了）。需要引用真实文件时用它取，不要自己拼目录名。', `const p = await api.graph.paths()`),
-      a('create', 'graph.create({ parent, title, description?, status? })', '新建子节点', 'parent 必填（标题 / 路径 / #id），不接受「当前」这种隐式起点；同名节点会被拒绝。建完教学文档与大纲同时就位。', `await api.graph.create({ parent: '微积分', title: '夹逼定理', description: '用两个边界函数夹住目标函数求极限' })`),
-      a('createTree', 'graph.createTree({ parent?, tree })', '批量/递归建大纲树', 'tree 每项 { title, description?, status?, content?, outline?, children? }。规划式/完整式目标一次建整棵树时用；不要拿它建重复节点。', `await api.graph.createTree({ parent: '微积分', tree: [{ title: '极限', children: [{ title: '夹逼定理' }] }] })`),
-      a('rename', 'graph.rename(path, 新标题)', '改节点标题', '标题就是路径，改名等于换目录；同目标重名会被拒绝。', `await api.graph.rename('极限', '极限与连续')`),
-      a('update', 'graph.update(path?, { title?, description?, status? })', '改节点属性', 'status 只认 learning / mastered。描述写 150~300 字；改标题优先用 rename。', `await api.graph.update('极限', { description: '从数列极限到函数极限的完整入门。', status: 'learning' })`),
-      a('annotate', 'graph.annotate(path?, { term, occurrence?, body })', '写正文划词注解', 'term 是正文里那一小段文字；occurrence 从 0 起，同一个词多次出现时指定第几处。注解挂在节点上。', `await api.graph.annotate('极限', { term: '夹逼定理', body: '用两个边界函数夹住目标函数。' })`),
-      a('move', 'graph.move(path, 新父节点)', '迁移节点', '改父线；根节点、跨目标、成环都会被拒。', `await api.graph.move('夹逼定理', '极限')`),
-      a(
-        'relations',
-        'graph.relations(path?)',
-        '读一个节点的拓扑关系',
-        '回 { id, title, parent, parents, children, prereqs }：parent 是树上的父，children 是下级，' +
-          'prereqs 是「先学谁」。想知道「这个节点挂在哪、下面有什么」就用它，不要靠遍历 graph.list() 自己推。',
-        `const rel = await api.graph.relations('极限')`,
-      ),
-      a('delete', 'graph.delete(path, { cascade?, dryRun? })', '删除节点', '学习目标本身不能删；cascade 连子节点一起删，dryRun 只回影响面。删用户内容前先确认。', `await api.graph.delete('草稿节点')`),
-    ],
-  ),
-  g(
     'node',
-    '节点对象',
-    'api.node(地址) 取一个节点对象，调它的成员方法读写内容——正文 / 大纲 / 笔记 / 超级文档各一套（对象上 .help() 现查）；树的骨架仍在 graph.*。',
-    `内容读写的入口。api.node(地址) 回一个**节点对象**，方法按类型多态：
+    '节点宇宙',
+    'api.node.list() 查全图（带 uuid）→ get(uuid) 取节点对象 → help() 现查写法 → content 读 / editContent 写 / connect 连线。',
+    `节点是学习数据的全部骨架：**文档**（讲义）、**大纲**（计划）、**笔记**、**试卷**、**超级文档**、**入口**——每一种都是节点，uuid 是唯一身份（api.node.list() 的回执里全带）。读写内容、建删节点、连线全部经由节点对象：
 
-${renderKindMethodsTable()}
+    const list = await api.node.list()            // 全图清单（uuid / 标题 / path / 挂件）
+    const n = await api.node.get(list.nodes[0].uuid)
+    const h = await n.help()                      // 这个节点自己的内容格式与连接规则
+    const c = await n.content                     // 当下内容（整份快照）
+    await n.editContent({ ...c, teaching: 新正文 })  // 整份写回（先读后写）
+    const o = await api.node.get('o:' + 文档uuid)   // 大纲；入口是 'entry:' + 根文档uuid
+    await o.connect(子文档对象, 'down')             // 把子文档挂到这一层（唯一可手工建立的连接）
 
-地址与 path 语法一致：api.node('极限')、api.node('极限/笔记/错题本')、api.node('#id')，省略 = 当前节点的正文。
-从文档节点出发能取到其它内容对象：n.note('错题本') / n.outline() / n.superdoc('实验')——它们也是节点对象，各有各的方法。
-每个对象上 n.help() 同步列出它这个类型的方法与示例；调不存在的方法会回执列出可用清单。
-**试卷不在这里**：出卷 / 作答 / 判分是业务动作，用 exam.*。`,
+对象成员**全类型同构**：content / editContent / help / connect / disconnect。规矩：
+- editContent 是**整份替换**：先 await n.content 读现状，改字段，再整份写回——不要凭记忆默写；
+- help() 随节点状态与上游**动态变化**（空卷讲出题格式、空文档讲写作纪律）——动手前必看；
+- 挂件（笔记 / 试卷 / 超级文档）创建即挂：api.node.create({ kind, title, under: 文档uuid })，不能改挂；
+- 连接里只有「大纲 → 文档」是手工的：connect(文档, 'down') 挂上、disconnect 摘下；
+- 编排代码可以直接写 TypeScript。`,
     [
-      a('get', 'node.get(地址)', '取节点对象的清单（身份 + 方法表）', '门面 api.node() 的底层通道。直接用它的一般是「先看看这个节点能干什么」。', `const m = await api.node.get('极限')`),
-      a(
-        'invoke',
-        'node.invoke(地址, 方法名, 参数数组)',
-        '调节点对象的成员方法',
-        '门面自动走它（n.write(...) 最终就是一次 node.invoke）；直接调时参数是数组形状，方法名必须是清单里声明的。',
-        `await api.node.invoke('极限', 'append', ['\\n\\n## 补充'])`,
-      ),
+      a('list', 'node.list()', '目标的全图清单', '回 goal（含入口 uuid）与 nodes：每份文档带 uuid / 标题 / path / 状态 / 上游 / 大纲（目标项数）/ 笔记 / 试卷 / 超级文档（各带 uuid）。导航、找落点、核对存在性全靠它。', 'const list = await api.node.list()'),
+      a('get', 'node.get(uuid)', '取一个节点对象', '回执在门面里被包成真对象（content / editContent / help / connect / disconnect）。uuid 全部来自 list()，不要手拼——大纲与入口的前缀规则 help() 里会讲。', "const n = await api.node.get(list.nodes[0].uuid)"),
+      a('create', 'node.create({ kind, title?, under, ...? })', '建节点（画布与 agent 同一条通道）', 'kind: doc / note / exam / superdoc；under 是宿主文档或其大纲的 uuid。文档建在大纲之下（title 必给，同目标同名复用不另建）；挂件建在文档之下（试卷遇到空壳会复用原位）。', `await api.node.create({ kind: 'note', title: '错题本', under: 文档uuid })`),
+      a('delete', 'node.delete(uuid)', '删节点（级联按类型）', '删文档连带它的子树与挂件；删挂件只删它自己。试卷的删除走 api.exam.delete（要先确认没有待判分的考试）。', `await api.node.delete(笔记uuid)`),
+      a('invoke', 'node.invoke(uuid, 成员名, 参数数组)', '调节点对象的成员', '门面自动走它（n.editContent(...) 最终就是一次 node.invoke）；connect / disconnect 的对象参数会被折成 uuid。直接调时参数是数组形状。', `await api.node.invoke(文档uuid, 'editContent', [{ title: '极限', description: '', teaching: '# 极限', status: 'learning' }])`),
     ],
-    `const n = await api.node('极限')      // 正文（教学文档）
-await n.write('# 极限\\n\\n从数列极限开始……')
-const note = await n.note('错题本')     // 该节点的一份笔记（不存在时 write 新建）
-await note.append('第一题：……')`,
-  ),
-  g(
-    'doc',
-    '教学文档与笔记',
-    '教学文档与笔记的读、分段读、查找、整篇写、区间改、追加、注解。',
-    `**读写内容请用 api.node(地址) 的成员方法**（这一组是旧写法，等价、保留兼容）：
-正文与笔记的读、分段读、查找、整篇写、区间改、追加。
-- 省略 path = 当前节点的教学文档；
-- '极限/笔记' = 该节点的笔记（第一份）；'极限/笔记/错题本' = 指定名字的笔记；
-- 笔记不存在时 write 会自动新建。
-不要用 files.* 读写教学文档或笔记——那条路会被拒绝。`,
-    [
-      a('read', 'doc.read(path?)', '读一份文档全文', '回 { path, doc, chars, content }。整篇很长时改用 readRange / find。', `const d = await api.doc.read('极限')`),
-      a('readRange', 'doc.readRange(path?, start?, end?)', '分段读文档', 'start/end 是字符下标；省略 end 默认 1500 字。长文档先读开头与标题结构。', `const head = await api.doc.readRange('极限', 0, 2000)`),
-      a('find', 'doc.find(path?, 要找的文字, { from?, limit? }?)', '在文档里找文字', '回命中位置与前后 40 字上下文；limit 最多 50。改一处措辞前先用它定位。', `const hits = await api.doc.find('极限', '夹逼')`),
-      a('write', 'doc.write(path?, content)', '整篇写入文档', '不存在就新建（笔记同理）；空内容会被拒绝。整篇覆盖前先读，不要覆盖用户已有内容。', `await api.doc.write('极限', '# 极限\\n\\n从数列极限开始……')`),
-      a('replace', 'doc.replace(path?, { start?, end?, content, expected? })', '按区间改文档', '给 start/end 或 expected（原文字符串，必须先匹配）再替换。改一处用 replace，不要整篇重写。', `await api.doc.replace('极限', { expected: '旧的一句话', content: '新的一句话' })`),
-      a('append', 'doc.append(path?, content)', '追加到文档末尾', '不覆盖已有正文；适合补一段。', `await api.doc.append('极限', '\\n\\n## 补充：夹逼定理的几何直觉')`),
-    ],
-    undefined,
-    { legacy: true, legacyNote: '等价于 api.node(地址) 取节点对象后调成员方法，新代码请用它（先 await api.node.__help()）' },
-  ),
-  g(
-    'content',
-    '内容读写',
-    '一份内容的读 / 写 / 追加 / 查找：正文、大纲、笔记、超级文档共用这一套，按 part 区分。',
-    `**读写内容的推荐写法是节点对象**（api.node(地址).成员方法；这一组与 doc.* / outline.* / sdoc.* 一样是旧写法，等价、保留兼容）。
-
-位置由 \`part\` 表达：
-- 省略 part = 正文（教学文档）；
-- 'note:错题本' = 某个节点的一份笔记；
-- 'outline' = 大纲（对象，不是 Markdown）；
-- 'superdoc:讲义' = 一份超级文档（完整 HTML）。
-
-两种写法都收：
-  content.read('极限/笔记/错题本')                 // 字符串沿用 path 语法
-  content.read({ node: '极限', part: 'outline' })  // 显式 part
-
-**试卷不在这里**：出卷 / 作答 / 判分是业务动作，用 exam.*。`,
-    [
-      a(
-        'read',
-        'content.read(target)',
-        '读一份内容',
-        '回 { path, part, chars, content }。大纲以 JSON 文本返回；超级文档回 HTML。整篇很长时用 content.find 定位，别整篇读进上下文。',
-        `const body = await api.content.read('极限')`,
-      ),
-      a(
-        'find',
-        'content.find(target, 要找的文字, { from?, limit? }?)',
-        '在一份内容里找文字',
-        '回命中位置与前后 40 字上下文；limit 最多 50。改一处措辞前先用它定位。',
-        `const hits = await api.content.find({ node: '极限', part: 'note:错题本' }, '夹逼')`,
-      ),
-      a(
-        'write',
-        'content.write(target, body)',
-        '整份写入一份内容',
-        '正文/笔记是字符串；大纲是对象 { intro, children }（也可以传 JSON 字符串）；超级文档是完整 HTML。整篇覆盖前先读，别覆盖用户写过的东西。',
-        `await api.content.write({ node: '极限', part: 'outline' }, { intro: '先补前置', children: [{ title: '夹逼定理', summary: '两个边界函数' }] })`,
-      ),
-      a(
-        'append',
-        'content.append(target, body)',
-        '追加到末尾',
-        '只有正文与笔记能追加；大纲 / 超级文档请整份 write。',
-        `await api.content.append('极限', '\\n\\n## 补充：夹逼定理的几何直觉')`,
-      ),
-      a(
-        'readRange',
-        'content.readRange(target, start?, end?)',
-        '分段读一份内容',
-        '整篇太长时按字符区间读：默认从 0 读 1500 字。回 { text, start, end, total }，用 end < total 判断还有没有下一段。',
-        `const seg = await api.content.readRange('极限', 0, 2000)`,
-      ),
-      a(
-        'replace',
-        'content.replace(target, { start?, end?, content, expected? })',
-        '按区间改一份内容',
-        '只支持正文与笔记。expected 是「改之前这儿应该是什么」——对不上就不改（防并发覆盖）。整篇重写用 content.write。',
-        `await api.content.replace('极限', { expected: '两个边界函数', content: '两个收敛到同一值的函数' })`,
-      ),
-      a(
-        'list',
-        'content.list(target)',
-        '这个节点有哪些内容',
-        '回 { path, parts: [{ 文档, 字数, 空 }] }：正文、每份笔记、每份超级文档、试卷都在里面。想知道「有没有那份笔记」先看它，别靠猜。',
-        `const parts = await api.content.list('极限')`,
-      ),
-      a(
-        'remove',
-        'content.remove(target)',
-        '删一份内容',
-        '**只删超级文档**（part 写 "superdoc:名字"）。正文清空用 content.write(path, "")；笔记与节点本身走 graph.delete。',
-        `await api.content.remove({ node: '极限', part: 'superdoc:旧讲义' })`,
-      ),
-    ],
-    undefined,
-    { legacy: true, legacyNote: '等价于 api.node(地址) 取节点对象后调成员方法，新代码请用它（先 await api.node.__help()）' },
-  ),
-  g(
-    'outline',
-    '结构化大纲',
-    '每个节点一份大纲：intro + 直接子目标一层 children。',
-    `大纲是结构化的计划，不是 Markdown。write 整份覆盖，只收直接子层级一层：
-「爷爷知道儿子的存在，但不知道孙子的存在」。孙辈由子目标自己的 outline 负责。`,
-    [
-      a('read', 'outline.read(path?)', '读节点大纲', '还没写过时回 null——那不是错误，说明要先写一份。', `const o = await api.outline.read('微积分')`),
-      a('write', 'outline.write(path?, { intro, children })', '整份写大纲', 'children 每项 { title, summary }，key 由标题自动生成，不要自己编；最多 24 条。', `await api.outline.write('微积分', {
-  intro: '先补前置，再进极限与导数。',
-  children: [{ title: '极限', summary: '从数列到函数极限' }, { title: '导数', summary: '从切线到求导法则' }],
-})`),
-    ],
-    undefined,
-    { legacy: true, legacyNote: '等价于 api.node(路径).outline().read() / .write({ intro, children })，新代码请用它' },
+    `const list = await api.node.list()
+const doc = list.nodes.find((n) => n.title === '极限')
+if (doc) {
+  const n = await api.node.get(doc.uuid)
+  await n.help()                       // 先看这个节点自己怎么说
+  const c = await n.content
+  await n.editContent({ ...c, teaching: c.teaching + '\\n\\n## 补充' })
+}`,
   ),
   g(
     'state',
@@ -416,40 +254,17 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
   ),
   g(
     'exam',
-    '试卷与考试',
-    '出卷、读卷、判分、写错题讲解、删卷。',
-    `exam.* 是两阶段流程：
-1. 出题：exam.create({ title?, kind?, level?, minutes?, questions })；
-2. 交卷后：exam.read() 看作答，exam.grade(...) 判分，exam.explain(...) 写讲解。
-读任何时候都能调；写受阶段约束（有卷待收尾时不能再出卷）。用户作答事实（answers/inputs/dwell/blurs）严禁改写。`,
+    '考试（作答侧）',
+    '读卷、判分、写错题讲解、删卷——出题走节点宇宙（api.node.create + editContent）。',
+    `试卷是节点宇宙的一员：出题 = api.node.create({ kind: "exam", under: 文档uuid }) 建卷（或复用画布上的空壳）→ const n = await api.node.get(卷uuid) → await n.help() 看题目格式 → n.editContent({ questions }) 落卷。
+exam.* 只管**作答侧**：交卷后 exam.read() 看作答，exam.grade(...) 判分，exam.explain(...) 写讲解。
+读任何时候都能调；判分与讲解受阶段约束（有卷待收尾时不能删）。用户作答事实（answers/inputs/dwell/blurs）严禁改写。`,
     [
-      a('create', 'exam.create({ title?, kind?, level?, minutes?, questions })', '出一份试卷', 'kind: quiz / test / exam；level: easy / medium / hard / extreme；minutes 小测为 0，其余不低于题数×2。每道题 { type, stem, options?, answer?, rubric, points, image? }。', `await api.exam.create({
-  title: '极限 · 随堂小测',
-  kind: 'quiz',
-  level: 'easy',
-  minutes: 0,
-  questions: [{ type: 'single', stem: '夹逼定理需要几个边界函数？', options: [{ id: 'A', text: '1 个' }, { id: 'B', text: '2 个' }], answer: ['B'], rubric: '两侧各一个', points: 1 }],
-})`),
       a('read', 'exam.read(attemptId?)', '读试卷与作答', '不给 attemptId 读最新一份；回题目、历次 attempts、判分与讲解状态。没有卷子也是一种答案（不是失败）。', `const paper = await api.exam.read()`),
       a('grade', 'exam.grade({ attemptId?, passed?, summary?, results })', '判分并落账', 'results 每项 { questionId, correct, score, maxScore, comment, by }；passed 决定节点是否标记已掌握。只改评价层，不改用户作答事实。', `await api.exam.grade({ passed: true, summary: '基础题全对，放缩方向还需巩固。', results: [{ questionId: 'q1', correct: true, score: 1, maxScore: 1, comment: '正确', by: 'agent' }] })`),
       a('explain', 'exam.explain({ content, attemptId? })', '写错题讲解', '判分之后的第二步，落在同一次考试上；content 是 Markdown 讲解，写完自动打开试卷副本。', `await api.exam.explain({ content: '## 错题解析\\n\\n第 2 题错在……' })`),
       a('delete', 'exam.delete({ id? })', '删一份没考过的卷子', '考过的卷子是学习记录，agent 删不掉；只清理空卷/废稿。', `await api.exam.delete({ id: 'ex_xxx' })`),
     ],
-  ),
-  g(
-    'sdoc',
-    '超级文档',
-    '绑定在节点上的可交互 HTML 文档：列表、读、写、删。',
-    `超级文档是自包含单页 HTML（HTML/CSS/JS/SVG），可以嵌 <moji-markdown> 与主题变量。
-写完用 api.ui.superdoc(path, name) 打开。不要用 files.* 直接写 superdocs/。`,
-    [
-      a('list', 'sdoc.list(path?)', '列这个节点的超级文档清单', '回名称、体量、更新时间；写入之前先看名字在不在，避免覆盖别人的实验。', `const list = await api.sdoc.list('极限')`),
-      a('read', 'sdoc.read(path?, name)', '读超级文档源码', '回 HTML 全文；没有那份就回 error。改局部时先 read 再整份 write。', `const html = await api.sdoc.read('极限', '夹逼实验')`),
-      a('write', 'sdoc.write(path?, name?, html)', '写入超级文档', '同名覆盖；name 不含 .html；html 必须自包含。', `await api.sdoc.write('极限', '夹逼实验', '<!doctype html><html>…</html>')`),
-      a('delete', 'sdoc.delete(path?, name)', '删一份超级文档', '不可逆；删除前先 api.sdoc.list 确认名字，并告知用户删了什么。', `await api.sdoc.delete('极限', '夹逼实验')`),
-    ],
-    undefined,
-    { legacy: true, legacyNote: '等价于 api.node(路径).superdoc("名字") 的 read / write / remove，新代码请用它' },
   ),
   g(
     'res',
@@ -542,7 +357,7 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
     [
       a('list', 'wf.list({ full?, brief? }?)', '列可用工作流', '默认简略（只给 id/name/tier/description/chars）；full:true 带完整指令。', `const flows = await api.wf.list()`),
       a('get', 'wf.get(idOrName)', '看一条工作流的完整定义', '回 instruction、params 与说明；不含 prompt 规程正文（它在触发时注入）。', `const flow = await api.wf.get('开讲')`),
-      a('create', 'wf.create({ name, instruction, description?, prompt?, tier? })', '登记/覆盖工作流', 'instruction 必填；prompt 是可选规程（同上下文只注一次）；tier 省略=目标级，global=跨目标。同名同级覆盖。', `await api.wf.create({ name: '课前摸底', instruction: '第一步：用 api.ask 摸底；第二步：按盲点写 api.doc.write。' })`),
+      a('create', 'wf.create({ name, instruction, description?, prompt?, tier? })', '登记/覆盖工作流', 'instruction 必填；prompt 是可选规程（同上下文只注一次）；tier 省略=目标级，global=跨目标。同名同级覆盖。', `await api.wf.create({ name: '课前摸底', instruction: '第一步：用 api.ask 摸底；第二步：按盲点把讲义写进节点（n.editContent）。' })`),
       a('remove', 'wf.remove(idOrName)', '删除一条登记工作流', '内置工作流删不掉；删除后设置里的工作流列表同步消失，efforts 配置一并清掉。', `await api.wf.remove('课前摸底')`),
       a('invoke', 'wf.invoke(idOrName, { params? })', '触发一条工作流', '不对：它只排队。回执说「已排队」就不要再调、也不要自己做。一次编排最多排一条，链上最多连三条。', `await api.wf.invoke('出卷', { params: { node: '极限' } })`),
     ],
@@ -648,7 +463,7 @@ if (!today.items.some((x) => x.title.includes('复习'))) {
       a('point', 'ui.point(path?, tab?)', '打开并定位文档', '把教学文档/笔记在文档区打开并定位；交付后指引用户看这里。', `await api.ui.point('极限')`),
       a('scroll', 'ui.scroll({ to?, by? })', '滚文档区', 'to: top/bottom；by: 像素。滚的是文档区，不是网页。', `await api.ui.scroll({ to: 'top' })`),
       a('screenshot', 'ui.screenshot()', '截文档区', '截图进资源库并挂到下一跳；只在视觉必须亲眼看时用。', `await api.ui.screenshot()`),
-      a('superdoc', 'ui.superdoc(path?, name)', '打开超级文档页签', '写完 api.sdoc.write 后用它让用户看到。', `await api.ui.superdoc('极限', '夹逼实验')`),
+      a('superdoc', 'ui.superdoc(path?, name)', '打开超级文档页签', '写完节点对象的 editContent({ html }) 后用它让用户看到（path 给文档的 #uuid 或标题）。', `await api.ui.superdoc('#' + 文档uuid, '夹逼实验')`),
       a('dom', 'ui.dom(async (root) => { ... })', '受控 DOM 读写', 'root 提供 exists/count/query/text/attr/html/rect/click 等；只用于文档区。', `await api.ui.dom(async (root) => { return await root.text('h1') })`),
     ],
   ),
@@ -700,11 +515,11 @@ files.* 碰到它们会被拒绝，并提示该用哪一组。`,
       a('read', 'files.read(path, { encoding?, offset?, maxBytes? }?)', '读真实文件', '只读非应用数据；文本支持 offset/maxBytes，二进制用 base64。', `const src = await api.files.read('docs/目标/节点/workspace/main.py')`),
       a('write', 'files.write(path, content, { encoding?, overwrite? }?)', '写真实文件', '父目录自动建；只写非应用数据。交付物优先 api.workspace.write。', `await api.files.write('docs/目标/节点/workspace/notes.txt', 'hello')`),
       a('edit', 'files.edit(path, { replace?, edits?, content?, start?, end? }?)', '改真实文件', '支持字符串替换、多项编辑、区间替换；只改非应用数据。', `await api.files.edit('docs/目标/节点/workspace/main.py', { replace: { target: 'print(1)', replacement: 'print(2)' } })`),
-      a('list', 'files.list(path?)', '列一个目录的清单', '只列非应用数据目录；应用数据（docs/ 下的数据文件）会被拒绝，用 api.graph.list / api.doc.*。', `const items = await api.files.list('docs/目标/节点/workspace')`),
+      a('list', 'files.list(path?)', '列一个目录的清单', '只列非应用数据目录；应用数据（docs/ 下的数据文件）会被拒绝，用 api.node.list()。', `const items = await api.files.list('docs/目标/节点/workspace')`),
       a('stat', 'files.stat(path)', '查文件或目录的属性', '回大小、类型与时间戳；只查非应用数据。', `const st = await api.files.stat('docs/目标/节点/workspace/main.py')`),
       a('mkdir', 'files.mkdir(path)', '创建一个目录', '父级自动递归；只建非应用数据目录（workspace/、static/、skills/、外部）。', `await api.files.mkdir('docs/目标/节点/workspace/output')`),
       a('copy', 'files.copy(from, to, { overwrite? }?)', '复制文件或目录', '两端都必须是非应用数据；目标存在时按 overwrite 决定是否覆盖。', `await api.files.copy('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
-      a('move', 'files.move(from, to)', '移动/重命名', '两端都必须是非应用数据；应用数据改名用 graph.rename / content.write。', `await api.files.move('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
+      a('move', 'files.move(from, to)', '移动/重命名', '两端都必须是非应用数据；应用数据改名走节点对象的 editContent。', `await api.files.move('docs/目标/节点/workspace/a.txt', 'docs/目标/节点/workspace/b.txt')`),
       a('delete', 'files.delete(path)', '删除文件/目录', '只删非应用数据；不可逆，先确认。', `await api.files.delete('docs/目标/节点/workspace/tmp.txt')`),
     ],
   ),
@@ -818,7 +633,7 @@ export function renderGroupHelp(key: string): string {
   const lines = [
     title +
       (group.legacy
-        ? '（旧写法：' + (group.legacyNote ?? '等价于 api.content.*，新代码请用 content.*') + '）'
+        ? '（旧写法：' + (group.legacyNote ?? '旧写法，等价入口见系统提示词的组索引') + '）'
         : ''),
     '',
     group.usage,

@@ -13,18 +13,8 @@ describe('Agent Skill 路径感知与读写权限测试', () => {
     docOps: {
       read: () => '',
       write: () => ({ ok: true, content: '' }),
-      replace: () => ({ ok: true, content: '' }),
-      append: () => ({ ok: true, content: '' }),
-      annotate: () => ({ ok: true, content: '' }),
     },
-    nodeOps: {
-      list: () => [],
-      read: () => ({ ok: false }),
-      create: () => ({ ok: false, content: '' }),
-      update: () => ({ ok: false, content: '' }),
-      remove: () => ({ ok: false, content: '' }),
-      move: () => ({ ok: false, content: '' }),
-    },
+    nodes: { service: () => null },
   }
 
   it('api.skill.paths 支持获取技能根目录与各层级物理绝对路径', async () => {

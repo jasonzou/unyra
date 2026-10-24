@@ -104,7 +104,6 @@ import { addLocalFile } from '../../learn/localfiles'
 import { normalizeWebInput } from '../../learn/webUrl'
 import type { BrowserDeps } from '../../learn/web/browserOps'
 import {
-  upsertExam,
   addConversation,
   conversationById,
   deleteConversation,
@@ -137,8 +136,6 @@ import {
 } from '../../learn/agentTabs'
 import type { AgentTabRef } from '../../learn/types'
 import type { StructureMap } from '../../learn/structure'
-import { createNodeUnder, createNote } from '../../learn/graph'
-import { writeOutline } from '../../learn/outline'
 import type { TabCloseMode } from '../../learn/tabs'
 import { attemptBrief, examAttempted, examTotalPoints } from '../../learn/exam'
 import type { Exam } from '../../learn/exam'
@@ -166,6 +163,7 @@ import FloatWindow from '../FloatWindow'
 import { usePresence } from '../../lib/presence'
 import ExamCopyView from './ExamCopyView'
 import { OutlinePane } from './workspace/OutlinePane'
+import { NodeService } from '../../learn/nodeKinds'
 import { pruneImages } from '../../learn/images'
 import { dropDrafts } from '../../learn/drafts'
 import { queueOf, shouldEnqueue } from '../../learn/agentQueue'
@@ -228,7 +226,7 @@ import { setPluginDocOpener } from '../../lib/pluginDoc'
 import { focusWebAddress } from './web/addressFocus'
 import FindBar from './FindBar'
 import SuperDocView from './SuperDocView'
-import { readSuperDoc, writeSuperDocIn } from '../../learn/superdocs'
+import { readSuperDoc } from '../../learn/superdocs'
 import { superDocsOf } from '../../learn/types'
 import { findMethod, runMethodEntry } from '../../learn/methods'
 import { learnSandboxOps } from '../../learn/useAgent'
@@ -300,6 +298,7 @@ import { useFocusFlow } from './workspace/useFocusFlow'
 import { useScheduleFlow, useScheduleReminder } from './workspace/useScheduleFlow'
 import { useWorkflowStarters } from './workspace/useWorkflowStarters'
 import { examNeedingWork, makeExamDeps } from './workspace/examTools'
+import { hasExamFigures, selfCheckExamFigures } from './workspace/examImageCheck'
 import { t } from '../../i18n'
 
 /**
@@ -1054,6 +1053,15 @@ export default function LearnWorkspace({
   const browserDepsRef = useRef<BrowserDeps | null>(null)
 
   const agent = useAgent({
+    afterNodeEdit: (uuid, kind) => {
+      // 出卷后的视觉自检：带图题渲染成位图交给模型看，坏图自动重画（见 examImageCheck）
+      if (kind !== 'exam') return
+      const s0 = getLatest()
+      const exam = s0.exams.find((e) => e.id === uuid)
+      if (exam && hasExamFigures(exam.questions)) {
+        void selfCheckExamFigures({ getLatest, set, onToast }, exam.id, exam.questions)
+      }
+    },
     store,
     set,
     getLatest,
@@ -2626,7 +2634,7 @@ export default function LearnWorkspace({
        *
        * 这样点「开始学习」当场就有节点、有侧栏条目、有对话开始跑，用户马上看到东西在动；
        * 旧流程要先等一次「生成描述」的模型往返，那几秒里界面是空的。标题随后会被
-       * api.graph.rename 改掉，数据目录名跟着变（改标题＝目录改名，早已支持）。
+       * 改标题（节点 editContent 的 title）改掉，数据目录名跟着变（改标题＝目录改名，早已支持）。
        */
       const rootNode: KnowledgeNode = {
         id: crypto.randomUUID(),
@@ -2800,7 +2808,7 @@ export default function LearnWorkspace({
    *
    * 对应场景：
    * 1. tab 变动：打开新页签、关闭页签、切换激活页签、分屏或焦点变化。
-   * 2. 文件变动：导师改写/追加教学文档（api.doc.write）、笔记修改、超级文档保存、试卷提交或草稿更新。
+   * 2. 文件变动：导师改写教学文档（节点 editContent）、笔记修改、超级文档保存、试卷提交或草稿更新。
    *
    * 守卫与约束：
    * - 首次挂载只记录初始快照，不触发弹出（避免应用启动时违背用户上一次保存的收起偏好）。
@@ -3353,7 +3361,7 @@ export default function LearnWorkspace({
       if (p.type === 'doc' && p.path) {
         const wanted = p.path.replace(/\/(教学|讲义|笔记|大纲|试卷)$/, '')
         const norm = (v: string): string => v.replace(/\\/g, '/').trim().replace(/\/+$/, '')
-        // 先按「节点树路径原样」对一次：api.graph.list 回的就是这种，模型多半直接抄
+        // 先按「节点树路径原样」对一次：api.node.list 回的就是这种，模型多半直接抄
         const exact = s.nodes.find(
           (n) => !!n.goalId && norm(nodePathOf(s, n.goalId, n.id)) === norm(wanted),
         )
@@ -3651,19 +3659,14 @@ export default function LearnWorkspace({
   }, [])
 
   /**
-   * 结构图变了：整张换上去。
-   *
-   * 与其它写操作同一条路子——先在最新快照上算好，再整体替换（图是不可变数据，
-   * 拖动、连线、加节点都返回一份新图）。空图不留在 store 里：`structure.json`
-   * 的空壳没有意义，读盘那一侧也按「空 = 还没铺过」处理。
-   * 但**画布被删空 ≠ 没铺过**：hidden 里还记着墓碑，此时丢掉整张图，
-   * 下一次派生所有被删的卡会集体复活——nodes 和 hidden 都空了才算真的空。
+   * 结构图变了：整张换上去（v2 只剩坐标表）。空表不留在 store 里——
+   * `structure.json` 的空壳没有意义，读盘那一侧按「空 = 还没拖过」处理。
    */
   const updateStructure = useCallback(
     (goalId: string, next: StructureMap) => {
       const s = getLatest()
       const structure = { ...(s.structure ?? {}) }
-      if (next.nodes.length || next.hidden?.length) structure[goalId] = next
+      if (Object.keys(next.positions).length) structure[goalId] = next
       else delete structure[goalId]
       set({ ...s, structure: Object.keys(structure).length ? structure : undefined })
     },
@@ -3676,74 +3679,106 @@ export default function LearnWorkspace({
    * 与侧栏的「新建笔记」不同，这里**不打开页签**——用户要的是先在图上有这张卡，
    * 想写的时候点标题再打开。笔记不需要上下文，所以这一步是纯本地的、同步的。
    */
-  const createStructureNote = useCallback(
-    (nodeId: string): string | null => {
-      const s = getLatest()
-      const r = createNote(s, nodeId)
-      if (!r.name) return null
-      set(r.store)
-      return r.name
-    },
-    [getLatest, set],
-  )
-
   /*
-   * 挂件实体先行（与笔记同一条）：试卷 / 超级文档拖到文档卡上就建真实空实体。
-   * 卡的 id 从实体确定性派生，出题时同 id 吸收（见 workspace/examTools 的 createExam）、
-   * 超级文档按名字覆写——「生成」填充前后卡的坐标与连线始终稳定，画布零对账。
+   * 节点服务（统一通道）：画布的建 / 删 / 连 / 改名与 agent 的 api.node 走的是
+   * **同一个 NodeService**——画布上不再有任何「只存在于图里」的状态。目标的坐标
+   * 由派生自动铺排，删除时顺手把坐标表里那条清掉（别留死键）。
    */
-  const createStructureExam = useCallback(
-    (nodeId: string): string | null => {
+  const makeNodeService = useCallback(
+    () => new NodeService({ getLatest, set, goalId: () => getLatest().activeGoalId ?? '' }),
+    [getLatest, set],
+  )
+
+  const dropPositionOf = useCallback(
+    (uuid: string) => {
       const s = getLatest()
-      const node = nodeById(s, nodeId)
-      if (!node) return null
-      const exam: Exam = {
-        id: crypto.randomUUID(),
-        nodeId,
-        goalId: node.goalId,
-        title: node.title + ' · 待出题',
-        kind: 'quiz',
-        level: 'easy',
-        minutes: 0,
-        questions: [],
-        attempts: [],
-        createdAt: Date.now(),
+      if (!s.structure) return
+      const structure = { ...s.structure }
+      let touched = false
+      for (const [gid, map] of Object.entries(structure)) {
+        if (!(uuid in map.positions)) continue
+        const { [uuid]: _drop, ...rest } = map.positions
+        structure[gid] = { ...map, positions: rest }
+        touched = true
       }
-      set(upsertExam(s, exam))
-      return exam.id
+      if (touched) set({ ...s, structure })
     },
     [getLatest, set],
   )
 
-  const createStructureSuperDoc = useCallback(
-    (nodeId: string): string | null => {
-      const s = getLatest()
-      const node = nodeById(s, nodeId)
-      if (!node) return null
-      const r = writeSuperDocIn(node, '实验', '', Date.now())
-      set({ ...s, nodes: s.nodes.map((n) => (n.id === nodeId ? r.node : n)) })
-      return r.name
+  const canvasCreateNode = useCallback(
+    (kind: 'note' | 'exam' | 'superdoc', under: string) => makeNodeService().create({ kind, under }),
+    [makeNodeService],
+  )
+
+  const canvasDeleteNode = useCallback(
+    (uuid: string) => {
+      const r = makeNodeService().delete(uuid)
+      if ('ok' in r) dropPositionOf(uuid)
+      return r
     },
-    [getLatest, set],
+    [makeNodeService, dropPositionOf],
+  )
+
+  const canvasConnect = useCallback(
+    (fromUuid: string, toUuid: string) => {
+      const svc = makeNodeService()
+      const from = svc.get(fromUuid)
+      const to = svc.get(toUuid)
+      if (!from || !to) return { error: '有一个节点刚刚不在了（可能被删除）' }
+      return from.connect(to, 'down')
+    },
+    [makeNodeService],
+  )
+
+  const canvasDisconnect = useCallback(
+    (fromUuid: string, toUuid: string) => {
+      const svc = makeNodeService()
+      const from = svc.get(fromUuid)
+      const to = svc.get(toUuid)
+      if (!from || !to) return { error: '有一个节点刚刚不在了（可能被删除）' }
+      return from.disconnect(to)
+    },
+    [makeNodeService],
+  )
+
+  const canvasRenameNote = useCallback(
+    (noteUuid: string, to: string) => {
+      const svc = makeNodeService()
+      const node = svc.get(noteUuid)
+      if (!node || node.kind !== 'note') return { error: '这份笔记已经不在了' }
+      const c = node.content as { text?: string }
+      return node.editContent({ title: to, text: typeof c.text === 'string' ? c.text : '' })
+    },
+    [makeNodeService],
+  )
+
+  const canvasAddOutlineEntry = useCallback(
+    (outlineUuid: string, title: string) => {
+      const svc = makeNodeService()
+      const outline = svc.get(outlineUuid)
+      if (!outline || outline.kind !== 'outline') return
+      const current = (outline.content as { intro?: string; children?: Array<{ title: string; summary: string }> } | null) ?? null
+      const r = outline.editContent({
+        intro: current?.intro ?? '',
+        children: [...(current?.children ?? []), { title, summary: '' }],
+      })
+      if ('error' in r) onToast(r.error)
+      else onToast(t('已添加目标项「{0}」', title))
+    },
+    [makeNodeService, onToast],
   )
 
   /**
-   * 结构画布：在某个目标项上挂一份**带标题的空文档**（壳）。
-   *
-   * 只建实体、不写正文——正文要 AI 写、还要用户确认，所以卡片上留一颗「生成文档」。
-   * 返回新节点 id（同名节点已存在时直接复用），画布据此把卡片的 ref 接上。
+   * 在目标项上挂一份带标题的空文档（统一通道）：create 的同目标去重让同一标题
+   * 永远指向同一份实体；只建实体不写正文——正文由「生成文档」交给 AI。
    */
   const createChildDoc = useCallback(
     (ownerNodeId: string, title: string): string | null => {
-      const s = getLatest()
-      const owner = nodeById(s, ownerNodeId)
-      if (!owner) return null
-      // createNodeUnder 一手包了「建实体 + 挂父线」，同名节点直接复用
-      const r = createNodeUnder(s, ownerNodeId, { title, origin: 'user' })
-      if (r.created) set(r.store)
-      return r.node.id
+      const r = makeNodeService().create({ kind: 'doc', title, under: ownerNodeId })
+      return 'uuid' in r ? r.uuid : null
     },
-    [getLatest, set],
+    [makeNodeService],
   )
 
   /** 空文档卡上的「生成文档」：复用正文区那颗按钮同一条路径；hint 为画布侧的意图 */
@@ -3755,32 +3790,20 @@ export default function LearnWorkspace({
     [getLatest],
   )
 
-  /**
-   * 结构画布上给大纲手动加一条目标项。
-   *
-   * 走 writeOutline（整份大纲替换）：它负责 key 归一化与去重，直接在数组上 push
-   * 会漏掉「同名目标项」这一层，图上就会冒出两条 key 相同的接入点。
-   */
-  const addOutlineEntry = useCallback(
-    (nodeId: string, title: string) => {
-      const s = getLatest()
-      const node = nodeById(s, nodeId)
-      if (!node) return
-      const current = node.outline?.children ?? []
-      const r = writeOutline(
-        s,
-        nodeId,
-        { intro: node.outline?.intro ?? '', children: [...current, { title, summary: '' }] },
-        Date.now(),
-      )
-      if (!r.ok) {
-        onToast(r.error)
-        return
-      }
-      set(r.store)
-      onToast(t('已添加目标项「{0}」', title))
-    },
-    [getLatest, set, onToast],
+  /** 画布统一通道（一个稳定对象：OutlinePane 按 referential equality 冻结比较） */
+  const canvasChannel = useMemo(
+    () => ({
+      onCreateNode: canvasCreateNode,
+      onDeleteNode: canvasDeleteNode,
+      onConnect: canvasConnect,
+      onDisconnect: canvasDisconnect,
+      onCreateChildDoc: createChildDoc,
+      onRenameNote: canvasRenameNote,
+      onAddOutlineEntry: canvasAddOutlineEntry,
+      onGenerateDoc: generateDocForNode,
+      onGenerateOutline: (docUuid: string) => startPrereqOutline(docUuid),
+    }),
+    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline],
   )
 
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
@@ -4789,14 +4812,7 @@ export default function LearnWorkspace({
                   onChangeStructure={updateStructure}
                   docs={explorerDocs}
                   exams={explorerExams}
-                  onCreateNote={createStructureNote}
-                  onCreateExam={createStructureExam}
-                  onCreateSuperDoc={createStructureSuperDoc}
-                  onRenameNote={renameNodeNote}
-                  onAddOutlineEntry={addOutlineEntry}
-                  onCreateChildDoc={createChildDoc}
-                  onGenerateDoc={generateDocForNode}
-                  onGenerateOutline={startPrereqOutline}
+                  channel={canvasChannel}
                   onToast={onToast}
                   focusTarget={outlineFocus}
                   onFocusHandled={handleOutlineFocusHandled}

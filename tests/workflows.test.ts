@@ -93,12 +93,12 @@ describe('内置工作流', () => {
     expect(text).toContain('只有一种情况值得问')
     expect(text).toContain('除此之外不要问')
     // 任务型分支明确禁止建树、禁止写大纲，并要求先打开文档
-    expect(text).toContain('不要**调用 api.graph.createTree')
+    expect(text).toContain('不要**用 api.node.create 建任何子节点')
     expect(text).toContain('写根节点的大纲')
     expect(text).toContain('先把文档打开')
     // 学习型分支仍按创建模式走
     expect(text).toContain('选择目标创建模式')
-    expect(text).toContain('api.graph.createTree')
+    expect(text).toContain('api.node.create')
     // 没有漏出来的占位符
     expect(text).not.toContain('{{mode}}')
   })
@@ -196,7 +196,8 @@ describe('内置工作流', () => {
     // 占位符一个都不许剩下：剩下的会被模型当成正文抄进注解里
     expect(text).not.toContain('{{')
     // 交货那条 api 必须点名，否则模型只会把解释贴在对话里、正文上什么都不出现
-    expect(text).toContain('api.graph.annotate')
+    // 交货动作：注解走文档节点 content 的 annotations 字段（editContent 写回）
+    expect(text).toContain('c.annotations')
     // 解释要挂在用户盯着的那段文字旁边，别把视线拽到对话栏（同伪编译）
     expect(text).not.toContain('switchMain')
   })

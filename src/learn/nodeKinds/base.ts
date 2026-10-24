@@ -1,108 +1,158 @@
 /**
- * 节点类型的**登记契约**。
+ * 节点对象的**基类契约**——整个节点宇宙只有一个抽象：`GNode`。
  *
- * ## 为什么要有这一层
+ * ## 架构（2026-10-24 全图化重构定稿）
  *
- * 以前「一种节点类型」的知识散在四个地方：类型清单、显示名、连线规则、同列排序权重，
- * 全写在 `structure.ts` 里；落盘格式在 `files/build.ts`，卡片渲染在画布组件。
- * 于是**加一种挂件要改 9 处、跨 4 层**，漏一处就"能存但看不见"或"画布上有但 agent 不知道"。
- *
- * 现在一种类型 = 一个文件，实现这个契约，在 `index.ts` 注册一行。其余全部派生。
- *
- * ## 加一种新类型要做的事（就这两步）
- *
- * 1. 新建 `nodeKinds/闪卡.ts`，导出一个 `NodeKindSpec`；
- * 2. 在 `nodeKinds/index.ts` 的 `NODE_KINDS` 里加一行。
- *
- * 类型清单、显示名、连线规则、同列排序会**自动**跟着变；漏写字段是编译期错误
- * （`satisfies Record<string, NodeKindSpec>` 会挡住）。
+ * - **单一份事实源**：store（nodes + edges + exams）。节点对象是从 store 水合的**行为外壳**，
+ *   每次读写都现取（`ctx.store()`），不缓存、不成第二真相；一切写操作走 graph/* 纯函数
+ *   落回 store（`ctx.commit`）。
+ * - **uuid 即身份**：文档 = 知识节点 id；大纲 = `o:{文档id}`（与文档一对一）；
+ *   入口 = `entry:{根文档id}`（与目标一对一）；笔记 / 试卷 / 超级文档 = 各自的持久 id。
+ *   uuid 一经分配永不改变（改名不改 id），画布坐标、页签、agent 句柄全都只认它。
+ * - **关系是派生视图**：树边（store.edges）+ 挂件归属（存在谁的 parts 里）+ 入口绑定（目标根）。
+ *   没有第二张关系表，也就没有「两张表对不齐」这一类 bug。
+ * - **连接是双边协商**：`connect(target, type)` 里 type 是 target 的接入身份；先问接入方的
+ *   上游过滤、再问接纳方的下游过滤，两个都点头才落库——规则长在各类型自己身上，
+ *   没有中央连线矩阵。
+ * - **自描述**：`help()` 回 { description, edit, connection } 三段，且**随当前上游变化**——
+ *   提示词不再背每种节点的用法，agent 拿到对象问它本人。
  */
 
-/** 内容的落盘格式（P1 起用于单文件节点里的 parts） */
-export type NodeFormat = 'markdown' | 'json' | 'html'
+import type { LearnStore } from '../types'
+
+/** 全部节点类型（键 = uuid 派生前缀之外的判别字段） */
+export type GNodeKind = 'entry' | 'outline' | 'doc' | 'note' | 'exam' | 'superdoc'
+
+/** 一条关系记录：type 是**对方相对我**的身份（对方是我的上游 / 下游） */
+export interface NodeRelation {
+  id: string
+  type: 'up' | 'down'
+}
+
+/* ---------- uuid 方案（全节点宇宙唯一的身份语法，画布 / 页签 / agent 句柄共用） ---------- */
+
+/** 文档的 uuid 就是知识节点的 id（不带前缀） */
+/** 大纲 uuid：与宿主文档一对一，`o:{文档id}`——大纲从不单独改名，这一形态天然稳定 */
+export const outlineUuid = (docId: string): string => 'o:' + docId
+/** 从大纲 uuid 取宿主文档 id */
+export const docIdOfOutlineUuid = (uuid: string): string | null =>
+  uuid.startsWith('o:') && uuid.length > 2 ? uuid.slice(2) : null
+/** 入口 uuid：与目标的根文档一对一，`entry:{根文档id}` */
+export const entryUuid = (rootDocId: string): string => 'entry:' + rootDocId
+/** 从入口 uuid 取根文档 id */
+export const docIdOfEntryUuid = (uuid: string): string | null =>
+  uuid.startsWith('entry:') && uuid.length > 6 ? uuid.slice(6) : null
+
+/** help() 的回执：三段自述，文案依赖节点当下的状态与上游 */
+export interface NodeHelp {
+  /** 这个节点是什么 */
+  description: string
+  /** 内容怎么编辑（schema / 格式 / 纪律） */
+  edit: string
+  /** 连接规则（谁能连我、我能连谁） */
+  connection: string
+}
+
+/** 写操作回执：失败必须带一句模型能据此改对的原因（回执即人话） */
+export type NodeResult = { ok: true; note?: string } | { error: string }
+
+/** 连接过滤的回执：true = 收下；string = 拒绝原因 */
+export type ConnectFilter = true | string
+
+/** 服务上下文：宿主注入的「读最新 store / 写回 store / 当前目标」三件套 */
+export interface NodeCtx {
+  store: () => LearnStore
+  commit: (next: LearnStore) => void
+  goalId: () => string
+}
 
 /**
- * 节点对象成员方法的登记项：agent 拿到 `api.node(path)` 返回的对象后能调什么，
- * 全部以这份声明为唯一来源——沙箱门面的方法表、`n.help()` 的正文、
- * 调用校验（没声明的方法一律拒绝并列出可用清单）都从它派生。
+ * 节点基类。六种类型各自继承它；对外成员**完全同构**：
+ * `content`（读）、`editContent(下一份)`（整份写）、`help()`（自述）、
+ * `connect / disconnect`（连接）——多态体现在行为与文案，不体现在方法表。
+ * 沙箱一侧的门面把这几个成员包成真对象（见 agent/sandbox/nodeObject）。
  */
-export interface NodeMethodDoc {
-  /** 方法名（节点对象上就叫这个） */
-  name: string
-  /** 给人看也给模型抄的签名 */
-  signature: string
-  /** 一句话作用 */
-  summary: string
-  /** 完整用法（可选；一般一句 summary 够用，差异点才写这里） */
-  usage?: string
-  /** 主示例（可选） */
-  example?: string
-  /** 返回值是另一个节点对象（如 note()/outline()）：沙箱门面据此把回执再包成节点对象 */
-  returnsNode?: boolean
-}
+export abstract class GNode {
+  protected readonly ctx: NodeCtx
+  readonly uuid: string
 
-/** 正文与笔记共用的那套文本读写方法：同一份声明两个类型复用，说明按 subject 措辞 */
-export function textMethods(subject: string): NodeMethodDoc[] {
-  return [
-    { name: 'read', signature: 'read()', summary: '读整份' + subject + '（回 { path, chars, content }）', example: 'const body = await n.read()' },
-    { name: 'readRange', signature: 'readRange(start?, end?)', summary: '按字符区间分段读（默认从 0 读 1500 字）', example: 'const head = await n.readRange(0, 2000)' },
-    { name: 'find', signature: 'find(要找的文字, { from?, limit? }?)', summary: '在' + subject + '里找文字（回命中位置与上下文）', example: "const hits = await n.find('夹逼')" },
-    {
-      name: 'write',
-      signature: 'write(内容)',
-      summary: '整份写入' + subject,
-      usage: '整篇覆盖前先读，不要覆盖用户已有内容。',
-      example: "await n.write('# 极限\\n\\n从数列极限开始……')",
-    },
-    { name: 'append', signature: 'append(内容)', summary: '追加到末尾（不覆盖已有正文）', example: "await n.append('\\n\\n## 补充：几何直觉')" },
-    {
-      name: 'replace',
-      signature: 'replace({ start?, end?, content, expected? })',
-      summary: '按区间改一处',
-      usage: 'expected 是「改之前这儿应该是什么」——对不上就不改（防并发覆盖）。',
-      example: "await n.replace({ expected: '旧的一句话', content: '新的一句话' })",
-    },
-  ]
-}
+  constructor(ctx: NodeCtx, uuid: string) {
+    this.ctx = ctx
+    this.uuid = uuid
+  }
 
-export interface NodeKindSpec {
-  /** 落盘的判别值，也是登记表的键 */
-  type: string
-  /** 中文名：卡片标题、api 说明、设置页目录共用这一份 */
-  label: string
+  abstract get kind(): GNodeKind
+  /** 展示名（卡片标题 / 回执称呼） */
+  abstract get title(): string
+  /** 派生关系（上游 + 下游），见文件头的「关系是派生视图」 */
+  abstract get relations(): NodeRelation[]
+  /** 当下内容的快照（长文本原样给出，模型自己分段处理） */
+  abstract get content(): unknown
+  /** 整份替换内容；各类型自己校验（schema / 上限 / 覆盖警告） */
+  abstract editContent(next: unknown): NodeResult
+  /** 动态自述（文案随上游与状态变化） */
+  abstract help(): NodeHelp
+
+  /* ---------- 连接协议（双边协商；落库由上游一方的 link 实现） ---------- */
+
+  /** 默认拒绝：能连谁由各类型自己声明，这里只给兜底措辞 */
+  onUpstream(_node: GNode): ConnectFilter {
+    return '「' + this.title + '」（' + this.kindLabel + '）不接受上游连接'
+  }
+
+  onDownstream(_node: GNode): ConnectFilter {
+    return '「' + this.title + '」（' + this.kindLabel + '）不接受下游连接'
+  }
+
   /**
-   * 同一列里的上下次序：越小越靠上。
-   * 读图方向是「大纲 → 文档 → 叶子」，所以大纲 0、文档 1、叶子 2。
+   * 连接两个节点。`type` 是 **target 的接入身份**：
+   * - `'down'`：target 以下游身份接入 → 先问 target 的上游过滤，再问我的下游过滤；
+   * - `'up'`：target 以上游身份接入 → 先问 target 的下游过滤，再问我的上游过滤。
+   * 两个过滤都通过才落库（由上游一方的 link 写 store）；任何一步拒绝都不留半边状态。
    */
-  rank: number
-  /**
-   * 这个类型能连到哪些类型（有向：`from` 把上下文交给 `to`）。
-   *
-   * 原来这张表集中写在 `structure.ts` 的 `GRAPH_EDGE_RULES`，离类型本身很远——
-   * 改一条连线规则得先想起它在哪个文件。现在规则跟着类型走。
-   */
-  targets: readonly string[]
-  /** 内容默认存成什么 */
-  format: NodeFormat
-  /** 每个节点最多一份（正文、大纲）；不填 = 可以有任意多份（笔记、试卷、超级文档） */
-  singleton?: boolean
-  /**
-   * 锚点卡：**没有入边是常态**——文档是子树的挂点（大纲、笔记都挂它下面），
-   * 入口是整张图的起点。派生对账的「挂不上的新卡片不出现」不剪它们（见 structureSeed）。
-   */
-  anchor?: boolean
-  /**
-   * 上画布时这张卡的声明；不声明 = 这个类型不上画布。
-   *
-   * 一个数据节点可以有好几张卡（正文一张、大纲一张、每份笔记各一张），
-   * 卡片身份是 `{节点uuid}:{kind}[:{name}]`，坐标存在节点文件的 `layout` 里。
-   */
-  facet?: { label: string }
-  /**
-   * 这个类型作为**节点对象**（api.node）开放给 agent 的成员方法清单。
-   * help 索引、节点对象的方法表与调用校验都从这份声明派生（见 NodeMethodDoc）；
-   * 不声明 = 这个类型不是内容载体（入口、试卷），api.node 取不到它的写法。
-   * 声明了就必须有同名的行为类方法（nodeKinds/index 的 NODE_HANDLES 对账）。
-   */
-  methods?: readonly NodeMethodDoc[]
+  connect(target: unknown, type: unknown): NodeResult {
+    if (!(target instanceof GNode)) {
+      return { error: 'connect 的第一个参数要是一个节点对象：const t = await api.node.get(uuid) 取到再连' }
+    }
+    if (target.uuid === this.uuid) return { error: '节点不能和自己连接' }
+    if (this.relations.some((r) => r.id === target.uuid)) {
+      return { error: '「' + this.title + '」和「' + target.title + '」已经连着了' }
+    }
+    const t = type === 'up' ? 'up' : type === 'down' ? 'down' : ''
+    if (!t) return { error: 'connect 的第二个参数是接入身份：connect(节点, "down") 表示对方作为我的下游接入（"up" 则为上游）' }
+    const down = t === 'down' ? target : this
+    const up = t === 'down' ? this : target
+    const r1 = down.onUpstream(up)
+    if (r1 !== true) return { error: r1 }
+    const r2 = up.onDownstream(down)
+    if (r2 !== true) return { error: r2 }
+    return up.link(down)
+  }
+
+  /** 摘掉一条连接（双向清除；对「大纲 ↔ 文档」就是拆掉那条树边） */
+  disconnect(target: unknown): NodeResult {
+    if (!(target instanceof GNode)) {
+      return { error: 'disconnect 的参数要是一个节点对象（api.node.get(uuid) 取到再拆）' }
+    }
+    if (!this.relations.some((r) => r.id === target.uuid)) {
+      return { error: '「' + this.title + '」和「' + target.title + '」之间没有连接' }
+    }
+    return this.unlink(target)
+  }
+
+  /** 落库：由**上游一方**实现（当前唯一可手工连接的组合是「大纲 → 文档」，见 outline.ts） */
+  protected link(_down: GNode): NodeResult {
+    return { error: '这两个类型之间不能建立连接（help().connection 里有各自的连接规则）' }
+  }
+
+  /** 摘除落库：同样由上游一方实现 */
+  protected unlink(_target: GNode): NodeResult {
+    return { error: '这一条连接不是手工建立的，摘不掉（help().connection 里有说明）' }
+  }
+
+  /** 类型中文名（拒绝措辞用；各子类给常量） */
+  protected abstract get kindLabel(): string
+
+  /** 这个节点还在 store 里吗（被删后对象句柄会失效） */
+  abstract exists(): boolean
 }

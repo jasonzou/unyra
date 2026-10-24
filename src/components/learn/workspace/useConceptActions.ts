@@ -125,7 +125,7 @@ export function useConceptActions(deps: ConceptActionsDeps) {
    *
    * 交付物由**内置工作流「了解」**跑出来（见 learn/workflows 的 EXPLAIN_INSTRUCTION）：
    * 从前这里是一次性就地调用（generateShortAnnotation → 直接写注解），现在与开讲 /
-   * 出卷同一条路——导师在对话里写解释，再由它自己调 api.graph.annotate 划到正文上。
+   * 出卷同一条路——导师在对话里写解释，再由它自己调 api.node.get 后 editContent 的 annotations 划到正文上。
    * 换过来的好处**在上下文**：导师已经知道这个目标讲过什么、他哪里卡过，
    * 写出来的释义与对话是连贯的；一次性那条路每次都是一段陌生的文档 + 一个陌生的词。
    *
@@ -181,8 +181,8 @@ export function useConceptActions(deps: ConceptActionsDeps) {
   /**
    * 「询问」：菜单里输入疑问后回车触发。位置由 NodeNote 在渲染 DOM 上
    * 映射成源文偏移后一并送来（见 lib/sourceMap），这里只负责组装上下文。
-   * 只给位置、不复述选段内容——Agent 用 api.doc.readRange 按位置自取，
-   * 既省 token 又保证读到的是文档当前的真实内容。
+   * 只给位置、不复述选段内容——Agent 用节点对象自取（省 token，且读到的
+   * 一定是文档当前的真实内容）。
    */
   const askAboutSelection = (
     nodeId: string,
@@ -199,30 +199,32 @@ export function useConceptActions(deps: ConceptActionsDeps) {
     /**
      * 选段来自哪一份文档：**由激活的页签决定**（见宿主里的 docSource），不再看节点上那个
      * 「当前文档」字段——一个节点有多份笔记之后，「当前」只有页签说得清。
-     * 拿不到（本地文件页签等）时按教学文档算，这也是 api.doc 省略 path 时的默认。
+     * 拿不到（本地文件页签等）时按教学文档算。选段落在笔记上时，直接把那份笔记的
+     * 节点 uuid 给模型（笔记是独立的节点对象，不在文档节点的 content 里）。
      */
     const kind: DocKind = docSource?.kind ?? 'teaching'
     const noteName = docSource?.note
     const docText = docSource?.content ?? ''
     const docName = kind === 'note' ? (noteName ? '笔记「' + noteName + '」' : '笔记') : '教学文档'
+    const targetUuid = kind === 'note' && noteName ? node.notes.find((x) => x.name === noteName)?.id : nodeId
     const located = typeof start === 'number' && typeof end === 'number' && end > start
     // quote 存进消息：气泡里作为引文展示，点击可回到文档高亮这段文字
     const quote = located ? { text: text.slice(0, 300), start, end } : { text: text.slice(0, 300) }
     let context: string
-    if (located) {
+    if (located && targetUuid) {
       const line = offsetToLineCol(docText, start).line
-      // 指给模型的是 api.doc 的 path：笔记要带上名字，否则它不知道该改哪一份
-      const path = kind === 'note' ? (noteName ? '笔记/' + noteName : '笔记') : ''
       context =
-        `【选段位置】我在${docName}里选中了一段文字，它在 Markdown 源文中的字符区间是 ` +
+        `【选段位置】我在${docName}里选中了一段文字，它在源文中的字符区间是 ` +
         `[${start}, ${end})（左闭右开，约第 ${line} 行，共 ${end - start} 字）。` +
-        `你可用 api.doc.readRange('${path}', ${start}, ${end}) 精确读取这段原文，不必整篇重读；` +
-        `如需修改，用 api.doc.replace('${path}', { start, end, content, expected }) 按区间替换。` +
+        `用 api.node.get('${targetUuid}') 取节点、await n.content 读全文，按行号与下面的引文定位这一段；` +
+        `如需修改，读改后 n.editContent 整份写回（先 await n.help() 看这份节点的写法）。` +
         `请针对这段内容回答我的疑问。`
     } else {
       context =
-        `【选段位置】我在${docName}里选中了一段渲染后的内容，但没能把它映射回 Markdown 源文` +
-        `（可能跨了代码块等结构）。请先用 api.doc.readRange 读一读${docName}再回答我的疑问。`
+        `【选段位置】我在${docName}里选中了一段渲染后的内容，但没能把它映射回源文` +
+        `（可能跨了代码块等结构）。请先用节点对象读一读${docName}` +
+        (targetUuid ? `（api.node.get('${targetUuid}') 后 await n.content）` : '（api.node.list 找到它，get 后 await n.content）') +
+        `再回答我的疑问。`
     }
     const s = getLatest()
     const convId = resolveDisplayedConversation(s, node.goalId)

@@ -138,12 +138,12 @@ describe('subagent.create', () => {
     ).toContain('ui、ask')
     expect(bucket().defs).toHaveLength(0)
     expect(bucket().sessions).toHaveLength(0)
-    const ok = await manager.api.create({ key: 'worker', name: '工人', system: '一个足够长的系统提示词，写清角色与交付纪律。', tools: ['content', 'tmp'] })
+    const ok = await manager.api.create({ key: 'worker', name: '工人', system: '一个足够长的系统提示词，写清角色与交付纪律。', tools: ['node', 'tmp'] })
     expect(ok.ok).toBe(true)
     expect(bucket().defs).toHaveLength(1)
     // 只登记：会话一个都没有（run 才启动）
     expect(bucket().sessions).toHaveLength(0)
-    expect(bucket().defs[0]!.apiGroups).toEqual(['content', 'tmp'])
+    expect(bucket().defs[0]!.apiGroups).toEqual(['node', 'tmp'])
     // 同 key 再登记即覆盖
     await manager.api.create({ key: 'worker', system: '换一个也足够长的系统提示词，写清新的角色与交付纪律。' })
     expect(bucket().defs).toHaveLength(1)
@@ -464,9 +464,11 @@ describe('api 组白名单对账（groups ↔ apiRegistry）', () => {
     }
   })
 
-  it('子代理可以读写内容与节点拓扑（content / graph 都在名单里）', () => {
-    expect(apiBriefForGroups(['content'])).toContain('content.write')
-    expect(apiBriefForGroups(['graph'])).toContain('graph.list')
+  it('子代理可以读写内容与节点拓扑（node 在名单里；旧 content / graph 组已退役）', () => {
+    expect(apiBriefForGroups(['node'])).toContain('node.get')
+    expect(apiBriefForGroups(['node'])).toContain('node.list')
+    // 退役组不再产出条目说明
+    expect(apiBriefForGroups(['graph'] as never)).not.toContain('graph.list')
   })
 })
 

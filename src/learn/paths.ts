@@ -17,7 +17,7 @@ import { sanitizeSegment } from './segments'
  *     "极限"           本目标里标题为「极限」的节点（教学文档）
  *     "极限/笔记"      同一个节点的笔记文档
  *     "极限/夹逼定理"  从目标根往里走的写法，读起来更像路径
- *     "#3f2a…/笔记"    直接给节点 id（链接与 api.graph.list 里拿到的就是它，最不会认错）
+ *     "#3f2a…/笔记"    直接给节点 id（链接与 api.node.list 里拿到的就是它，最不会认错）
  *
  * 两条让解析确定下来的性质：
  * 1. **同一个目标内标题（归一化后）唯一**——addNode 就按这个去重，因此任意一段标题
@@ -72,7 +72,7 @@ export interface SplitDocPath {
  * 它之前是节点路径，之后是笔记名。只写「笔记」不带名字仍然认，表示第一份。
  *
  * 节点自己叫「笔记」时（真有这种节点）会与这个词撞上：那时请用 #id 指名节点
- * （api.graph.list 里给的就是 id），就像以前一样。
+ * （api.node.list 里给的就是 id），就像以前一样。
  */
 export function splitDocPath(path: string | undefined): SplitDocPath {
   const segments = (path ?? '')
@@ -188,14 +188,14 @@ export function resolveNode(
 
   if (!segments.length) {
     if (current) return { ok: true, value: current }
-    return { ok: false, message: '没有指定节点，此刻也没有打开的节点；先 api.graph.list() 看看有哪些节点' }
+    return { ok: false, message: '没有指定节点，此刻也没有打开的节点；先 api.node.list() 看看有哪些节点' }
   }
 
   if (segments.length === 1) {
     const only = segments[0]
     if (CURRENT_ALIASES.has(only.toLowerCase())) {
       if (current) return { ok: true, value: current }
-      return { ok: false, message: '「当前节点」此刻不存在，请用 api.graph.list() 指名一个节点' }
+      return { ok: false, message: '「当前节点」此刻不存在，请用 api.node.list() 指名一个节点' }
     }
     const found = findNodeByRef(store, scope.goalId, only)
     if (found) return { ok: true, value: found }

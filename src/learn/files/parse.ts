@@ -352,6 +352,7 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
         if (name && !name.includes('/')) {
           sdocSeen.add(name.toLowerCase())
           sdocsFromFiles.push({
+            id: crypto.randomUUID(),
             name,
             html,
             createdAt: meta.createdAt || Date.now(),
@@ -513,6 +514,7 @@ function readNotes(
     if (seen.has(key)) continue
     seen.add(key)
     notes.push({
+      id: typeof (item as unknown as { id?: unknown }).id === 'string' && (item as unknown as { id?: string }).id ? (item as unknown as { id: string }).id : crypto.randomUUID(),
       name,
       content: bodies.get(name) ?? '',
       createdAt: at(item.createdAt) || meta.createdAt,
@@ -524,12 +526,12 @@ function readNotes(
   for (const name of [...bodies.keys()].sort()) {
     if (seen.has(name.toLowerCase())) continue
     seen.add(name.toLowerCase())
-    notes.push({ name, content: bodies.get(name) ?? '', createdAt: meta.createdAt, updatedAt: meta.createdAt })
+    notes.push({ id: crypto.randomUUID(), name, content: bodies.get(name) ?? '', createdAt: meta.createdAt, updatedAt: meta.createdAt })
   }
 
   const legacy = files.get(dir + '/' + base + LEGACY_NOTE_SUFFIX + '.md')
   if (legacy && !seen.has('笔记')) {
-    notes.push({ name: '笔记', content: legacy, createdAt: meta.createdAt, updatedAt: meta.updatedAt })
+    notes.push({ id: crypto.randomUUID(), name: '笔记', content: legacy, createdAt: meta.createdAt, updatedAt: meta.updatedAt })
   }
   return notes
 }

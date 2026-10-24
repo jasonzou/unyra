@@ -41,12 +41,10 @@ describe('注册表形状', () => {
   it('暴露名单包含全部数据面 api（files 退役后它们是唯一入口）', () => {
     const names = exposedApiNames()
     for (const name of [
-      'doc.read', 'doc.write', 'doc.replace', 'doc.append',
-      'graph.read', 'graph.update', 'graph.create', 'graph.paths', 'graph.relations',
-      'outline.read', 'outline.write',
+      'node.list', 'node.get', 'node.create', 'node.delete', 'node.invoke',
       'state.read', 'state.update', 'state.mistake', 'state.check',
-      'exam.create', 'exam.read', 'exam.grade', 'exam.explain',
-      'sdoc.write', 'res.read', 'workspace.write',
+      'exam.read', 'exam.grade', 'exam.explain',
+      'res.read', 'workspace.write',
       'userInfo.get', 'reading.get', 'tmp.set',
       'wf.list', 'wf.get', 'wf.create', 'wf.remove', 'wf.invoke',
       // 记忆：五条全进名单（工作 / 长期两类都靠它读写）
@@ -56,6 +54,16 @@ describe('注册表形状', () => {
     ]) {
       expect(names, name).toContain(name)
     }
+  })
+
+  it('旧内容组整组退役（doc / graph / content / outline / sdoc / exam.create 全部不在）', () => {
+    const names = exposedApiNames()
+    expect(names.some((n) => n.startsWith('doc.'))).toBe(false)
+    expect(names.some((n) => n.startsWith('graph.'))).toBe(false)
+    expect(names.some((n) => n.startsWith('content.'))).toBe(false)
+    expect(names.some((n) => n.startsWith('outline.'))).toBe(false)
+    expect(names.some((n) => n.startsWith('sdoc.'))).toBe(false)
+    expect(names).not.toContain('exam.create')
   })
 
   it('退役的组整组移除：description / mind 都不在了', () => {
@@ -91,11 +99,11 @@ describe('__help() 渲染', () => {
     expect(text).not.toContain('api.sdoc —')
   })
 
-  it('系统提示词的组索引只有组名与一句说明，不泄露具体签名，也不宣传 legacy 组', () => {
+  it('系统提示词的组索引只有组名与一句说明，不泄露具体签名，也不宣传退役组', () => {
     const index = groupIndexForSystemPrompt()
-    expect(index).toContain('api.graph — 节点与拓扑')
-    expect(index).toContain('api.node — 节点对象')
+    expect(index).toContain('api.node — 节点宇宙')
     expect(index).not.toContain('api.doc —')
+    expect(index).not.toContain('api.graph —')
     expect(index).not.toContain('api.content —')
     expect(index).not.toContain('api.outline —')
     expect(index).not.toContain('api.sdoc —')
@@ -103,41 +111,25 @@ describe('__help() 渲染', () => {
     expect(index).not.toContain('graph.read(path)')
   })
 
-  it('legacy 组直查 help 仍可用，并明说「等价于 content.*」', () => {
-    const text = renderGroupHelp('doc')
-    expect(text).toContain('api.doc — 教学文档与笔记')
-    expect(text).toContain('旧写法')
-    expect(text).toContain('doc.read(')
-    expect(text).toContain('doc.write(')
-    expect(text).toContain('api.doc.<api>.__help()')
-  })
-
   it('单条 help 带签名、用法与示例', () => {
-    const text = renderApiHelp('doc.write')
-    expect(text).toContain('doc.write')
+    const text = renderApiHelp('node.get')
+    expect(text).toContain('node.get')
     expect(text).toContain('签名：')
     expect(text).toContain('示例：')
-    expect(text).toContain('await api.doc.write')
+    expect(text).toContain('api.node.get')
   })
 
   it('查不存在的组/条目给可执行的指路，而不是一句空话', () => {
     expect(renderGroupHelp('nope')).toContain('await api.__help()')
-    expect(renderApiHelp('doc.nope')).toContain('await api.doc.__help()')
+    expect(renderApiHelp('node.nope')).toContain('await api.node.__help()')
     expect(renderApiHelp('nope')).toContain('await api.__help()')
   })
 
   it('Worker 注入用的 help 包：root + groups + apis 三层都在', () => {
     const help = buildSandboxHelp()
     expect(help.root).toContain('api 集')
-    expect(Object.keys(help.groups)).toContain('doc')
-    expect(Object.keys(help.apis)).toContain('doc.write')
+    expect(Object.keys(help.groups)).toContain('node')
+    expect(Object.keys(help.apis)).toContain('node.get')
     expect(Object.keys(help.apis).length).toBe(exposedApiNames().length)
-  })
-
-  it('系统提示词的组索引只有组名与一句说明，不泄露具体签名', () => {
-    const index = groupIndexForSystemPrompt()
-    expect(index).toContain('api.graph — 节点与拓扑')
-    expect(index).not.toContain('doc.write(path')
-    expect(index).not.toContain('graph.read(path)')
   })
 })

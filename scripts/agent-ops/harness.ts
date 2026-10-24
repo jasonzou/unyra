@@ -233,7 +233,11 @@ export const harness = (init: LearnStore, current: string) => {
   })
   const tool = createExecuteTool({ ...ops, runSandbox: fakeRunner })
   return {
-    run: (body: string) => tool.run({ description: '测试', body }, { nodeId: current, goalId }),
+    run: async (body: string) => {
+      const r = await tool.run({ description: '测试', body }, { nodeId: current, goalId })
+      if (!r.ok) console.log('PROBE-FAIL >>', body.slice(0, 120), '=>', r.content.slice(0, 240))
+      return r
+    },
     store: () => s,
     /** 假工作区的文件表：探针据此核对「api 说写了」与「盘上真有」 */
     ws: ws.files,

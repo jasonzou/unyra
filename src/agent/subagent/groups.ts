@@ -23,8 +23,6 @@ export const SUBAGENT_ALLOWED_GROUPS = [
   'tmp',
   'res',
   'node',
-  'content',
-  'graph',
   'memory',
   'workspace',
   'reading',

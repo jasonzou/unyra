@@ -60,7 +60,7 @@ function readingDocs(nodeId: string, docs: string[]): ReadingStore {
   return out
 }
 
-const note = (name: string): NoteFile => ({ name, content: '', createdAt: at, updatedAt: at })
+const note = (name: string): NoteFile => ({ id: crypto.randomUUID(), name, content: '', createdAt: at, updatedAt: at })
 
 function node(id: string, goalId = 'g1'): KnowledgeNode {
   return {
@@ -165,7 +165,7 @@ describe('空索引：节点没了，它的阅读记录也一起删', () => {
     const base = storeWith(['n1'], readingDocs('n1', ['teaching', 'sdoc:交互文档']))
     const store: LearnStore = {
       ...base,
-      nodes: [{ ...base.nodes[0], superdocs: [{ name: '交互文档', html: '<p>x</p>', createdAt: at, updatedAt: at }] }],
+      nodes: [{ ...base.nodes[0], superdocs: [{ id: 's-' + crypto.randomUUID(), name: '交互文档', html: '<p>x</p>', createdAt: at, updatedAt: at }] }],
     }
     const after = removeSuperDoc(store, 'n1', '交互文档')
     expect(Object.keys(after.reading?.byGoal.g1?.nodes.n1.docs ?? {})).toEqual(['teaching'])

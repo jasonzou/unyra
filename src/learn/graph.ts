@@ -35,6 +35,7 @@ export {
   parentIds,
   pathToRoot,
   prereqIds,
+  removeEdge,
   unmetPrereqs,
   wouldCreateCycle,
 } from './graph/edges'

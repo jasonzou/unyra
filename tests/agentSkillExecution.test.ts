@@ -74,18 +74,8 @@ describe('Agent Skill 渐进式开示与执行机制测试', () => {
       docOps: {
         read: () => '',
         write: () => ({ ok: true, content: '' }),
-        replace: () => ({ ok: true, content: '' }),
-        append: () => ({ ok: true, content: '' }),
-        annotate: () => ({ ok: true, content: '' }),
-      },
-      nodeOps: {
-        list: () => [],
-        read: () => null,
-        create: () => ({ ok: true, content: '' }),
-        update: () => ({ ok: true, content: '' }),
-        remove: () => ({ ok: true, content: '' }),
-        move: () => ({ ok: true, content: '' }),
-      },
+            },
+      nodes: { service: () => null },
       onPromptModule: (key) => {
         promptModulesCalled.push(key)
       },

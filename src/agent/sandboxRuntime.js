@@ -129,41 +129,29 @@ function makeApi() {
   }
   api.ui = attachGroupHelp(api.ui || {}, 'ui')
   /**
-   * api.node(地址)：节点对象门面。node.get 回 manifest（身份 + 该类型的方法表，
-   * 来自 learn/nodeKinds 的登记声明），这里把 manifest 包成真的 JS 对象——
-   * 方法调用都走 node.invoke 通道（宿主记账、失败进清单），聚合方法
-   * （note / outline / superdoc）回的 manifest 在这里再包一层。与进程内门面
-   * （sandbox/nodeObject 的 attachNodeFacade）行为必须一致。
+   * api.node.get(uuid)：节点对象门面。get 回 manifest（身份 + 关系快照），这里包成真对象：
+   * content 是异步 getter（await n.content 每次取最新）；editContent / help / connect /
+   * disconnect 走 node.invoke 通道（宿主记账、失败进清单）；connect / disconnect 的
+   * 节点对象参数在发送前折成 uuid。与进程内门面（sandbox/nodeObject 的 attachNodeFacade）
+   * 行为必须一致。
    */
-  if (api.node && typeof api.node.get === 'function') {
+  if (api.node && typeof api.node.get === 'function' && typeof api.node.invoke === 'function') {
     const channel = api.node
+    const toWire = (args) =>
+      args.map((a) => (a && typeof a === 'object' && typeof a.uuid === 'string' && a.__node === true ? a.uuid : a))
     const wrapManifest = (m) => {
-      const obj = { kind: m.kind, id: m.id, label: m.label }
-      for (const d of m.methods) {
-        obj[d.name] = (...args) =>
-          channel.invoke(m.target, d.name, args).then((v) =>
-            v && v.object === true && Array.isArray(v.methods) ? wrapManifest(v) : v,
-          )
+      const obj = { uuid: m.uuid, kind: m.kind, title: m.title, relations: m.relations, __node: true }
+      Object.defineProperty(obj, 'content', {
+        get: () => channel.invoke(m.uuid, 'content', []),
+        enumerable: true,
+      })
+      for (const name of ['editContent', 'help', 'connect', 'disconnect']) {
+        obj[name] = (...args) =>
+          channel.invoke(m.uuid, name, toWire(args)).then((v) => (v && v.object === true ? wrapManifest(v) : v))
       }
-      obj.help = () =>
-        '「' + m.label + '」的成员方法：\n' +
-        m.methods
-          .map((d) => '- ' + d.signature + ' — ' + d.summary + (d.example ? '\n  示例：' + d.example : ''))
-          .join('\n')
       return obj
     }
-    const nodeFactory = async (target, part) => {
-      const t =
-        target && typeof target === 'object'
-          ? target
-          : { node: target ?? '', ...(part !== undefined ? { part: String(part) } : {}) }
-      const m = await channel.get(t)
-      return m && m.object === true && Array.isArray(m.methods) ? wrapManifest(m) : m
-    }
-    nodeFactory.get = channel.get
-    nodeFactory.invoke = channel.invoke
-    nodeFactory.__help = channel.__help
-    api.node = nodeFactory
+    api.node.get = (uuid) => Promise.resolve(channel.get(uuid)).then((v) => (v && v.object === true ? wrapManifest(v) : v))
   }
   /**
    * api.ui.dom(fn)：宿主先建一个「会话」，回调拿到的是一层**门面**（facade）——
@@ -211,13 +199,13 @@ function makeApi() {
  * 只会把模型的纠错路径也带偏（api.memory 是正式 api，绝不能出现在这张表里）。
  */
 const DEPRECATED_HINTS = {
-  docs: '没有 api.docs 这一组：内容读写请用 api.node(地址) 取节点对象后调成员方法（先 await api.node.__help()）。',
-  description: 'api.description 已退役：修改节点描述请用 await api.graph.update(path, { description })。',
-  review: '没有 api.review：复习计划用 api.node(path).outline().write({ intro, children }) / api.state.* 表达，不要自己找数据文件。',
+  docs: '没有 api.docs 这一组：读写内容先 api.node.get(uuid) 取节点对象，await n.content 读、n.editContent(...) 写（先 await n.help() 看这个节点怎么说）。',
+  description: 'api.description 已退役：改描述走节点对象 const c = await n.content; c.description = 新描述; await n.editContent(c)。',
+  review: '没有 api.review：复习计划写进大纲节点（api.node.get("o:"+文档uuid) 后 editContent），学习状态用 api.state.*。',
   retrieval: '没有 api.retrieval：联网检索请用 api.web.search。',
-  note: '没有 api.note 这一组：笔记请用 api.node(路径).note("名字")，写就 note.write(内容)。',
+  note: '没有 api.note 这一组：笔记是节点——api.node.list() 查 uuid，api.node.get(uuid) 后 editContent({ text })。',
   stats: 'api.stats 不存在：阅读事实用 api.reading.*，注意力用 api.attention.get。',
-  mind: 'api.mind 不存在：知识结构用 api.graph.*，内容读写用 api.node(地址) 的成员方法。',
+  mind: 'api.mind 不存在：知识结构用 api.node.list() / api.node.get(uuid)，记忆用 api.memory.*。',
   checkin: 'api.checkin 不存在：没有打卡数据这一组。',
   plot: 'api.plot 不存在：图像请写进教学文档（```plot 围栏），静态素材用 api.res.*。',
   methods: 'api.methods 不存在：方法调用请用 api.method.call(name, ...args)。',

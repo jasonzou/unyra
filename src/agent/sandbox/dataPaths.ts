@@ -65,27 +65,28 @@ export function classifyDataPath(raw: string): DataPathVerdict {
     if (/(^|\/)static(\/|$)/.test(rest) || /(^|\/)images(\/|$)/.test(rest)) {
       return { kind: 'static', note: '目标静态资源' }
     }
-    // 余下全部是应用数据。按文件名/目录名给出该用哪一组 api。
+    // 余下全部是应用数据。按文件名/目录名给出该用哪一组 api：
+    // 节点的所有内容（正文 / 大纲 / 笔记 / 试卷 / 超级文档）都归节点宇宙——api.node 拿对象，editContent 写。
     if (/(^|\/)superdocs\/[^/]+\.html$/i.test(rest)) {
-      return { kind: 'app-data', api: 'sdoc', note: '超级文档' }
+      return { kind: 'app-data', api: 'node', note: '超级文档' }
     }
     if (/(^|\/)exams\/[^/]+\.json$/i.test(rest)) {
-      return { kind: 'app-data', api: 'exam', note: '试卷' }
+      return { kind: 'app-data', api: 'node', note: '试卷（作答侧的读卷 / 阅卷在 api.exam）' }
     }
     if (/\.notes\/[^/]+\.md$/i.test(rest)) {
-      return { kind: 'app-data', api: 'doc', note: '笔记' }
+      return { kind: 'app-data', api: 'node', note: '笔记' }
     }
     if (/\.outline\.json$/i.test(rest)) {
-      return { kind: 'app-data', api: 'outline', note: '节点大纲' }
+      return { kind: 'app-data', api: 'node', note: '节点大纲' }
     }
     if (/\.meta\.json$/i.test(rest)) {
-      return { kind: 'app-data', api: 'graph', note: '节点元数据与学习状态（读用 graph.read，写用 graph.update / state.*）' }
+      return { kind: 'app-data', api: 'state', note: '节点元数据与学习状态（读写走 api.state）' }
     }
     if (/\.node\.json$/i.test(rest)) {
       return {
         kind: 'app-data',
-        api: 'doc',
-        note: '节点文件：正文 / 大纲 / 笔记 / 试卷 / 超级文档全在里面（读用 doc.read / outline.read，写用 doc.write / outline.write）',
+        api: 'node',
+        note: '节点文件：正文 / 大纲 / 笔记 / 试卷 / 超级文档全在里面',
       }
     }
     if (/(^|\/)chat\.json$/i.test(rest)) {
@@ -107,14 +108,13 @@ export function classifyDataPath(raw: string): DataPathVerdict {
       return { kind: 'app-data', note: '随笔（由随笔窗口管理）' }
     }
     if (/(^|\/)mind\.json$/i.test(rest)) {
-      return { kind: 'app-data', api: 'state', note: '长期事实（用 doc / state 表达）' }
+      return { kind: 'app-data', api: 'state', note: '长期事实（读写走 api.state）' }
     }
     if (/\.md$/i.test(rest)) {
-      return { kind: 'app-data', api: 'doc', note: '教学文档' }
+      return { kind: 'app-data', api: 'node', note: '教学文档' }
     }
-    // 兜底：docs 下的其余东西都是应用数据。不给 api 提示——`api.node.*` 已经退役
-    // （节点生命周期在 `api.graph.*`，内容读写在各组自己的 api 上）。
-    return { kind: 'app-data', note: '应用数据目录' }
+    // 兜底：docs 下的其余东西都是应用数据，多半是节点自己的家当——指去节点宇宙。
+    return { kind: 'app-data', api: 'node', note: '节点数据' }
   }
 
   // 用户配置/界面状态：不是 agent 的数据面

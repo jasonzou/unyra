@@ -1,630 +1,211 @@
 import { describe, expect, it } from 'vitest'
-import {
-  CARD_H,
-  CARD_W,
-  docGid,
-  entryGid,
-  noteGid,
-  outlineGid,
-  removeNodeFromMap,
-  type StructureNode,
-} from '../src/learn/structure'
-import type { Point } from '../src/components/learn/structure/structureView'
-import {
-  CARD_PAD_B,
-  CARD_FRAME_H,
-  DOC_BODY_H,
-  DOC_LINES,
-  DOC_LINE_H,
-  EDGE_ANCHOR_Y,
-  OUTLINE_HEAD,
-  SLOT_ROW,
-  cardHeight,
-  edgeAt,
-  edgeColorOf,
-  edgeCurve,
-  edgeDotAt,
-  edgeDots,
-  edgePathD,
-  edgePointAt,
-  edgeRoute,
-  hitTest,
-  isTextEntryTarget,
-  outlineCardHeight,
-  outlineSlots,
-  resolveNodeView,
-  slotAnchorY,
-  SLOT_ACCENT,
-  slotKeyOf,
-  splitLeafRef,
-} from '../src/components/learn/structure/structureView'
-import { structureViewOf, structureFromStore } from '../src/learn/structureSeed'
 import { emptyLearnStore } from '../src/learn/store/empty'
-import { emptyOutline, type KnowledgeNode, type LearnStore } from '../src/learn/types'
+import type { LearnStore, NoteFile, SuperDocFile } from '../src/learn/types'
+import type { Exam } from '../src/learn/exam'
+import { entryUuid, outlineUuid } from '../src/learn/nodeKinds'
+import { CARD_H, CARD_W, COL_GAP, emptyStructure, type StructureMap } from '../src/learn/structure'
+import { deriveCanvas, edgeElbow, edgePathD } from '../src/components/learn/structure/structureView'
 
-const NOW = 1700000000000
+/* ---------- 夹具：一个目标（根 + 子文档 + 挂件） ---------- */
 
-function makeNode(partial: Partial<KnowledgeNode> & { id: string; title: string }): KnowledgeNode {
-  return {
-    key: partial.title,
-    description: '',
-    docs: { teaching: '' },
-    notes: [],
-    annotations: [],
-    status: 'learning',
-    origin: 'user',
-    goalId: 'g1',
-    outline: { ...emptyOutline(), updatedAt: NOW },
-    createdAt: NOW,
-    updatedAt: NOW,
-    ...partial,
-  }
-}
-
-function makeStore(nodes: KnowledgeNode[], extra: Partial<LearnStore> = {}): LearnStore {
+function makeStore(): LearnStore {
   const base = emptyLearnStore()
+  const note: NoteFile = { id: 'note1', name: '错题本', content: '第一题', createdAt: 1, updatedAt: 1 }
+  const sdoc: SuperDocFile = { id: 'sdoc1', name: '实验', html: '', createdAt: 1, updatedAt: 1 }
+  const exam: Exam = {
+    id: 'exam1', nodeId: 'a', goalId: 'g1', title: '小测', kind: 'quiz', level: 'easy', minutes: 0,
+    questions: [], attempts: [], createdAt: 1,
+  }
   return {
     ...base,
-    nodes,
-    goals: [{ id: 'g1', rootNodeId: nodes[0]?.id ?? 'n1', question: 'q', createdAt: NOW, updatedAt: NOW }],
-    edges: [],
-    exams: [],
-    ...extra,
+    goals: [{ id: 'g1', rootNodeId: 'r', question: '学微积分', createdAt: 1, updatedAt: 1 }],
+    nodes: [
+      {
+        id: 'r',
+        title: '微积分',
+        key: 'weijifen',
+        description: '',
+        docs: { teaching: '# 微积分' },
+        notes: [note],
+        superdocs: [sdoc],
+        outline: { intro: '', children: [{ key: 'jixian', title: '极限', summary: '' }], updatedAt: 1 },
+        annotations: [],
+        status: 'learning',
+        origin: 'user',
+        goalId: 'g1',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'a',
+        title: '极限',
+        key: 'jixian',
+        description: '',
+        docs: { teaching: '' },
+        notes: [],
+        annotations: [],
+        status: 'learning',
+        origin: 'user',
+        goalId: 'g1',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ],
+    edges: [{ from: 'r', to: 'a', createdAt: 1 }],
+    exams: [exam],
   }
 }
 
-describe('结构画布：叶子的 ref 怎么切', () => {
-  it('按第一个冒号切，名字里再冒号也不影响归属', () => {
-    expect(splitLeafRef('n1:错题')).toEqual({ owner: 'n1', name: '错题' })
-    expect(splitLeafRef('n1:第三章:错题')).toEqual({ owner: 'n1', name: '第三章:错题' })
+describe('deriveCanvas：卡片就是节点、连线全部派生', () => {
+  it('每份实体一张卡：入口、文档、可见大纲、挂件；uuid 直接对上实体', () => {
+    const view = deriveCanvas(makeStore(), 'g1', undefined)
+    const kinds = Object.fromEntries(view.cards.map((c) => [c.uuid, c.kind]))
+    expect(kinds[entryUuid('r')]).toBe('entry')
+    expect(kinds['r']).toBe('doc')
+    expect(kinds[outlineUuid('r')]).toBe('outline')
+    // 子文档 a 没有目标项也没有子级：它的大纲卡不上画布（空壳没有意义）
+    expect(kinds[outlineUuid('a')]).toBeUndefined()
+    expect(kinds['note1']).toBe('note')
+    expect(kinds['sdoc1']).toBe('superdoc')
+    expect(kinds['exam1']).toBe('exam')
+    // 入口 + 根 + 根的大纲 + 子文档 + 笔记 + 超级文档 + 试卷 = 7
+    expect(view.cards).toHaveLength(7)
   })
 
-  it('缺一半的 ref 认不出来（宁可不显示，不要显示错的归属）', () => {
-    expect(splitLeafRef('n1')).toBeNull()
-    expect(splitLeafRef(':错题')).toBeNull()
-    expect(splitLeafRef('n1:')).toBeNull()
-    expect(splitLeafRef('')).toBeNull()
-  })
-})
-
-describe('结构画布：节点显示什么', () => {
-  const root = makeNode({
-    id: 'n1',
-    title: '极限',
-    docs: { teaching: '一二三四五' },
-    notes: [{ name: '错题', content: '', createdAt: NOW, updatedAt: NOW }],
-    outline: { intro: '', children: [{ key: 'a', title: 'A', summary: '' }, { key: 'b', title: 'B', summary: '' }], updatedAt: NOW },
-  })
-  const store = makeStore([root])
-
-  it('大纲节点报子目标数，文档节点报正文长度（同一个节点，两副面孔）', () => {
-    const outline = resolveNodeView(store, { id: 'o', kind: 'outline', ref: 'n1', x: 0, y: 0 })
-    expect(outline.title).toBe('极限')
-    expect(outline.subtitle).toBe('2 个目标项')
-    const doc = resolveNodeView(store, { id: 'd', kind: 'doc', ref: 'n1', x: 0, y: 0 })
-    expect(doc.subtitle).toBe('5 字')
+  it('连线全派生：入口→根、大纲→子文档（树边）、文档→大纲与挂件（归属）', () => {
+    const view = deriveCanvas(makeStore(), 'g1', undefined)
+    const keys = view.edges.map((e) => `${e.from}>${e.to}`)
+    expect(keys).toContain(`${entryUuid('r')}>r`)
+    expect(keys).toContain(`${outlineUuid('r')}>a`)
+    expect(keys).toContain(`r>${outlineUuid('r')}`)
+    expect(keys).toContain('r>note1')
+    expect(keys).toContain('r>sdoc1')
+    expect(keys).toContain('a>exam1')
   })
 
-  it('笔记节点报名字与归属', () => {
-    const view = resolveNodeView(store, { id: 'x', kind: 'note', ref: 'n1:错题', x: 0, y: 0 })
-    expect(view.title).toBe('错题')
-    expect(view.subtitle).toBe('属于「极限」')
-    expect(view.missing).toBe(false)
+  it('子文档的目标项点亮：childId 按 key 对上号', () => {
+    const view = deriveCanvas(makeStore(), 'g1', undefined)
+    const outline = view.cards.find((c) => c.uuid === outlineUuid('r'))!
+    expect(outline.slots).toEqual([{ key: 'jixian', title: '极限', index: 0, childId: 'a' }])
   })
 
-  it('ref 指向已经不存在的东西：标出来，不假装正常', () => {
-    expect(resolveNodeView(store, { id: 'x', kind: 'note', ref: 'n1:没了', x: 0, y: 0 }).missing).toBe(true)
-    expect(resolveNodeView(store, { id: 'y', kind: 'doc', ref: 'ghost', x: 0, y: 0 }).missing).toBe(true)
+  it('空文档卡给「生成」按钮（blank），空试卷 / 空超级文档同款；有正文的给摘要', () => {
+    const view = deriveCanvas(makeStore(), 'g1', undefined)
+    const byUuid = Object.fromEntries(view.cards.map((c) => [c.uuid, c]))
+    expect(byUuid['a'].blank).toBe(true)
+    expect(byUuid['a'].excerpt).toBeUndefined()
+    expect(byUuid['exam1'].blank).toBe(true)
+    expect(byUuid['sdoc1'].blank).toBe(true)
+    expect(byUuid['r'].blank).toBeUndefined()
+    // 摘要是洗过 Markdown 记号的一段纯文字
+    expect(byUuid['r'].excerpt).toBe('微积分')
   })
 
-  it('空节点（没有 ref）显示成「空节点」，且不算坏数据', () => {
-    const view = resolveNodeView(store, { id: 'z', kind: 'doc', x: 0, y: 0 })
-    expect(view.title).toBe('空节点')
-    expect(view.missing).toBe(false)
-  })
-})
-
-describe('结构画布：命中测试', () => {
-  const nodes: StructureNode[] = [
-    { id: 'a', kind: 'outline', x: 0, y: 0 },
-    { id: 'b', kind: 'doc', x: 300, y: 0 },
-  ]
-
-  it('落在卡片矩形内才算命中（按卡片尺寸，不是按坐标点）', () => {
-    expect(hitTest(nodes, 10, 10)?.id).toBe('a')
-    expect(hitTest(nodes, CARD_W - 1, CARD_H - 1)?.id).toBe('a')
-    expect(hitTest(nodes, CARD_W + 1, 10)).toBeNull()
-    expect(hitTest(nodes, 310, 10)?.id).toBe('b')
-  })
-
-  it('重叠时取后画的那个（与渲染顺序一致）', () => {
-    const overlap: StructureNode[] = [
-      { id: 'under', kind: 'outline', x: 0, y: 0 },
-      { id: 'over', kind: 'doc', x: 10, y: 10 },
-    ]
-    expect(hitTest(overlap, 20, 20)?.id).toBe('over')
+  it('没有目标 / 没有节点：空图', () => {
+    expect(deriveCanvas(emptyLearnStore(), 'g1', undefined).cards).toEqual([])
+    const s = makeStore()
+    const noGoal = { ...s, goals: [] }
+    expect(deriveCanvas(noGoal, 'g1', undefined).cards).toEqual([])
   })
 })
 
-describe('从 store 铺图', () => {
-  it('大纲 + 文档 + 笔记各成一个节点，并按类型连好', () => {
-    const root = makeNode({
-      id: 'n1',
-      title: '极限',
-      docs: { teaching: '正文' },
-      notes: [{ name: '错题', content: 'x', createdAt: NOW, updatedAt: NOW }],
-    })
-    const store = makeStore([root])
-    const map = structureFromStore(store, 'g1')
-    const kinds = Object.fromEntries(map.nodes.map((n) => [n.kind, n.ref]))
-    expect(kinds).toMatchObject({ outline: 'n1', doc: 'n1', note: 'n1:错题' })
-    // 入口默认存在：根文档自动挂到入口下面（权威根）
-    expect(map.nodes.some((n) => n.kind === 'entry')).toBe(true)
-    expect(map.edges).toHaveLength(3)
-    // 先文档再大纲：边是「文档 → 大纲」；入口 → 根文档
-    expect(map.edges).toContainEqual({ from: 'd:n1', to: 'o:n1' })
-    expect(map.edges).toContainEqual({ from: 'd:n1', to: 'n:n1:错题' })
-    expect(map.edges).toContainEqual({ from: entryGid('n1'), to: 'd:n1' })
-  })
-
-  it('空目标铺出空图（不抛异常、不造幽灵节点）', () => {
-    const store = makeStore([])
-    expect(structureFromStore(store, 'g1')).toEqual({ version: 1, nodes: [], edges: [] })
-  })
-
-  it('别的目标的节点不进来', () => {
-    const mine = makeNode({ id: 'n1', title: '极限' })
-    const other = makeNode({ id: 'n9', title: '别的', goalId: 'g2' })
-    const map = structureFromStore(makeStore([mine, other]), 'g1')
-    // 入口没有 ref（它是纯图件），其余卡片都指回本目标的实体
-    expect(map.nodes.every((n) => n.kind === 'entry' || n.ref === 'n1')).toBe(true)
-  })
-})
-
-describe('结构画布：折线的拐点与绕行', () => {
-  const nodes: StructureNode[] = [
-    { id: 'a', kind: 'outline', x: 0, y: 0 },
-    { id: 'b', kind: 'doc', x: 300, y: 200 },
-  ]
-  const edges = [{ from: 'a', to: 'b' }]
-
-  /** 轴对齐线段是否穿过矩形内部（贴边不算）——和 router 里的判据同一条 */
-  function crosses(a: Point, b: Point, r: { x: number; y: number; width: number; height: number }): boolean {
-    const minX = Math.min(a.x, b.x)
-    const maxX = Math.max(a.x, b.x)
-    const minY = Math.min(a.y, b.y)
-    const maxY = Math.max(a.y, b.y)
-    return maxX > r.x + 0.5 && minX < r.x + r.width - 0.5 && maxY > r.y + 0.5 && minY < r.y + r.height - 0.5
-  }
-
-  function rectOfNode(n: StructureNode) {
-    return { x: n.x, y: n.y, width: CARD_W, height: CARD_H }
-  }
-
-  function expectNoCrossing(points: Point[], obstacles: StructureNode[]) {
-    for (let i = 1; i < points.length; i++) {
-      for (const n of obstacles) expect(crosses(points[i - 1], points[i], rectOfNode(n))).toBe(false)
+describe('deriveCanvas：坐标以存过的为准，没存的自动铺排（确定性）', () => {
+  it('存过的坐标与便条被尊重', () => {
+    const saved: StructureMap = {
+      version: 2,
+      positions: {
+        r: { x: 1000, y: 500, note: '根的便条' },
+        note1: { x: 42, y: 24 },
+      },
     }
-  }
+    const view = deriveCanvas(makeStore(), 'g1', saved)
+    const r = view.cards.find((c) => c.uuid === 'r')!
+    const note = view.cards.find((c) => c.uuid === 'note1')!
+    expect(r).toMatchObject({ x: 1000, y: 500, note: '根的便条' })
+    expect(note).toMatchObject({ x: 42, y: 24 })
+  })
 
-  function expectOrthogonal(points: Point[]) {
-    for (let i = 1; i < points.length; i++) {
-      const a = points[i - 1]
-      const b = points[i]
-      expect(Math.abs(a.x - b.x) < 0.5 || Math.abs(a.y - b.y) < 0.5).toBe(true)
+  it('没存过的卡自动铺排：入口最左、根在其右、挂件再右；同一份输入派生两次结果一致', () => {
+    const store = makeStore()
+    const first = deriveCanvas(store, 'g1', undefined)
+    const second = deriveCanvas(store, 'g1', undefined)
+    expect(first.cards).toEqual(second.cards)
+
+    const byUuid = Object.fromEntries(first.cards.map((c) => [c.uuid, c]))
+    const entry = byUuid[entryUuid('r')]
+    const root = byUuid['r']
+    const note = byUuid['note1']
+    expect(entry.x).toBeLessThan(root.x)
+    expect(root.x).toBeLessThan(note.x)
+    // 自动铺排的卡都拿到有限坐标
+    for (const c of first.cards) {
+      expect(Number.isFinite(c.x)).toBe(true)
+      expect(Number.isFinite(c.y)).toBe(true)
     }
-  }
-
-  it('没有卡片挡路时还是老画法：右出 → 竖直 → 右进', () => {
-    const points = edgeRoute(nodes[0], nodes[1], nodes)
-    const midX = (CARD_W + 300) / 2
-    expect(edgePathD(points)).toBe(
-      `M${CARD_W} ${EDGE_ANCHOR_Y} L${midX} ${EDGE_ANCHOR_Y} L${midX} ${200 + EDGE_ANCHOR_Y} L300 ${200 + EDGE_ANCHOR_Y}`,
-    )
   })
 
-  it('按累计长度取点：两颗小圆点都落在折线上，且一前一后', () => {
-    const points = edgeRoute(nodes[0], nodes[1], nodes)
-    const a = edgePointAt(points, 0.22)
-    const b = edgePointAt(points, 0.78)
-    // 折线总长 = 横 46 + 竖 200 + 横 46，0.22 处已经拐进竖直段了——
-    // 所以这里只验「在线上」和「前后关系」，不假设它停在哪一段
-    expect(a.y).toBeGreaterThan(EDGE_ANCHOR_Y)
-    expect(b.y).toBeGreaterThan(a.y)
-    expect(edgeAt(nodes, edges, a.x, a.y, 8)).toEqual({ from: 'a', to: 'b' })
-    expect(edgeAt(nodes, edges, b.x, b.y, 8)).toEqual({ from: 'a', to: 'b' })
-  })
-
-  it('挡在路上的卡片要绕开，且路线还是横平竖直', () => {
-    // 正好压在「拐点竖线」上的一张卡
-    const blocker: StructureNode = { id: 'c', kind: 'note', x: 230, y: 80 }
-    const withBlocker = [...nodes, blocker]
-    const points = edgeRoute(nodes[0], nodes[1], withBlocker)
-    expect(points.length).toBeGreaterThan(2)
-    expectOrthogonal(points)
-    expectNoCrossing(points, withBlocker)
-    // 起点终点没变：还是从 a 的右沿出、进 b 的左沿
-    expect(points[0]).toEqual({ x: CARD_W, y: EDGE_ANCHOR_Y })
-    expect(points[points.length - 1]).toEqual({ x: 300, y: 200 + EDGE_ANCHOR_Y })
-  })
-
-  it('往回连（目标在左边）时绕开目标卡片，不从它身上穿过去', () => {
-    const points = edgeRoute(nodes[1], nodes[0], nodes)
-    expectOrthogonal(points)
-    expectNoCrossing(points, nodes)
-    // 先往右走出源卡片的右沿（否则竖线会落在源卡片里）
-    expect(Math.max(...points.map((p) => p.x))).toBeGreaterThan(300 + CARD_W)
-  })
-
-  it('接入位置固定：绕行也不换边（同列 / 目标在左边都还是从左沿进）', () => {
-    const below: StructureNode = { id: 'c', kind: 'doc', x: 0, y: 300 }
-    const sameCol = [...nodes, below]
-    const down = edgeRoute(nodes[0], below, sameCol)
-    expect(down[0]).toEqual({ x: CARD_W, y: EDGE_ANCHOR_Y })
-    expect(down[down.length - 1]).toEqual({ x: 0, y: 300 + EDGE_ANCHOR_Y })
-    expectOrthogonal(down)
-    expectNoCrossing(down, sameCol)
-
-    const back = edgeRoute(nodes[1], nodes[0], nodes)
-    expect(back[0]).toEqual({ x: 300 + CARD_W, y: 200 + EDGE_ANCHOR_Y })
-    expect(back[back.length - 1]).toEqual({ x: 0, y: EDGE_ANCHOR_Y })
-  })
-
-  it('画线和点选认同一份点列（绕行之后也点得到）', () => {
-    const blocker: StructureNode = { id: 'c', kind: 'note', x: 230, y: 80 }
-    const withBlocker = [...nodes, blocker]
-    const points = edgeRoute(nodes[0], nodes[1], withBlocker)
-    const routeOf = () => points
-    const mid = edgePointAt(points, 0.5)
-    expect(edgeAt(withBlocker, edges, mid.x, mid.y, 4, undefined, 'straight', undefined, routeOf)).toEqual({
-      from: 'a',
-      to: 'b',
-    })
-    // 老的直连位置已经没有线了
-    const oldMid = edgePointAt(edgeRoute(nodes[0], nodes[1], nodes), 0.5)
-    expect(edgeAt(withBlocker, edges, oldMid.x, oldMid.y, 4)).toBeNull()
-  })
-})
-
-describe('结构画布：连线的点选', () => {
-  const nodes: StructureNode[] = [
-    { id: 'a', kind: 'outline', x: 0, y: 0 },
-    { id: 'b', kind: 'doc', x: 300, y: 0 },
-  ]
-  const edges = [{ from: 'a', to: 'b' }]
-
-  it('点在线上算命中，离得远就不算', () => {
-    // 两张卡同一行：连线退化成一条 y = EDGE_ANCHOR_Y 的水平线
-    expect(edgeAt(nodes, edges, 200, EDGE_ANCHOR_Y)).toEqual({ from: 'a', to: 'b' })
-    expect(edgeAt(nodes, edges, 200, EDGE_ANCHOR_Y + 40)).toBeNull()
-  })
-
-  it('端点附近也算（从卡片边缘往外一点就开始算线）', () => {
-    expect(edgeAt(nodes, edges, CARD_W + 2, EDGE_ANCHOR_Y)).toEqual({ from: 'a', to: 'b' })
-  })
-
-  it('两端节点不在表里的边直接跳过（不炸）', () => {
-    expect(edgeAt(nodes, [{ from: 'a', to: 'ghost' }], 200, EDGE_ANCHOR_Y)).toBeNull()
-  })
-
-  it('画线与点选用同一份点列（不会出现看得到点不到）', () => {
-    // 锚点是「离卡片顶部固定距离」，不随卡片高度居中
-    const points = edgeRoute(nodes[0], nodes[1], nodes)
-    expect(points[0]).toEqual({ x: CARD_W, y: EDGE_ANCHOR_Y })
-    expect(points[points.length - 1]).toEqual({ x: 300, y: EDGE_ANCHOR_Y })
-    // 同一行时折线退化成一条横线
-    expect(edgePathD(points)).toBe(`M${CARD_W} ${EDGE_ANCHOR_Y} L300 ${EDGE_ANCHOR_Y}`)
-    // 曲线另取四个贝塞尔控制点（两卡只隔 92px，bend 取了下限 48）
-    const curve = edgeCurve(nodes[0], nodes[1])
-    expect(edgePathD(curve, 'curved')).toBe(
-      `M${CARD_W} ${EDGE_ANCHOR_Y} C${CARD_W + 48} ${EDGE_ANCHOR_Y}, ${300 - 48} ${EDGE_ANCHOR_Y}, 300 ${EDGE_ANCHOR_Y}`,
-    )
-  })
-})
-
-describe('结构画布：大纲的目标项（接入点）', () => {
-  const parent = makeNode({
-    id: 'p1',
-    title: '极限',
-    outline: {
-      intro: '',
-      children: [
-        { key: 'a', title: '导数', summary: '' },
-        { key: 'b', title: '中值定理', summary: '' },
-      ],
-      updatedAt: NOW,
-    },
-  })
-  const store = makeStore([parent])
-
-  const parentNode: StructureNode = { id: 'o:p1', kind: 'outline', ref: 'p1', x: 0, y: 0 }
-  // 接入点挂的是**文档**（大纲的父子节点只能是文档）
-  const childNode: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', slot: 'a', x: 400, y: 0 }
-  const graph = [parentNode, childNode]
-  /** 大纲 → 子文档 的那条连线：占用的凭证 */
-  const graphEdges = [{ from: 'o:p1', to: 'd:p2' }]
-
-  it('每个目标项一行（颜色统一：不再按序号发彩虹色）', () => {
-    const slots = outlineSlots(store, parentNode, graph, graphEdges)
-    expect(slots.map((s) => s.title)).toEqual(['导数', '中值定理'])
-  })
-
-  it('下游有子文档占了这个接入点 → 亮起（childId 有值），其余是空的', () => {
-    const slots = outlineSlots(store, parentNode, graph, graphEdges)
-    expect(slots[0].childId).toBe('d:p2')
-    expect(slots[1].childId).toBeNull()
-  })
-
-  it('空节点不认领目标项：没有显式 slot 就一直灰着', () => {
-    // 拖出来一张还没确定做什么的文档卡，标题恰好叫「导数」
-    const unassigned: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', x: 0, y: 0 }
-    const store2 = makeStore([parent, makeNode({ id: 'p2', title: '导数', key: 'a' })])
-    expect(slotKeyOf(unassigned)).toBeNull()
-    expect(outlineSlots(store2, parentNode, [parentNode, unassigned], [])[0].childId).toBeNull()
-  })
-
-  it('占用的凭证是连线：slot 对得上但线断了，接入点照样是空的', () => {
-    // 数据层面的残留（slot 还在）不能让大纲的圆点继续亮着——
-    // 否则删线之后双方还互相指着（2026-10-22 修的 bug）
-    const slots = outlineSlots(store, parentNode, graph, [])
-    expect(slots[0].childId).toBeNull()
-  })
-
-  it('显式记了 slot 才算占住（迁移与连线都会写这一项）', () => {
-    const assigned: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', slot: 'a', x: 0, y: 0 }
-    expect(slotKeyOf(assigned)).toBe('a')
-  })
-
-  it('大纲卡片按目标项条数长高（含「＋ 添加目标项」那一行，否则它会掉出卡片）', () => {
-    // 2 条目标项 + 1 行「＋ 添加目标项」+ 底部内边距 + 上下边框
-    expect(cardHeight(store, parentNode)).toBe(
-      CARD_FRAME_H + OUTLINE_HEAD + 3 * SLOT_ROW + CARD_PAD_B,
-    )
-    // 其它类型恒为固定高度
-    expect(cardHeight(store, { kind: 'doc', ref: 'p1' })).toBe(CARD_H)
-    // 没有目标项的大纲也不缩到比默认更矮
-    const bare = makeStore([makeNode({ id: 'p9', title: '空' })])
-    expect(cardHeight(bare, { kind: 'outline', ref: 'p9' })).toBe(CARD_H)
-  })
-
-  it('卡片高度刚好装下内容：边框 + 标题行 + 内容 + 底部内边距', () => {
-    expect(outlineCardHeight(0)).toBe(CARD_H)
-    expect(outlineCardHeight(1)).toBe(CARD_FRAME_H + OUTLINE_HEAD + 2 * SLOT_ROW + CARD_PAD_B)
-    // 有正文的文档卡是「两行摘要」，行高与行数都是常量算出来的
-    expect(DOC_BODY_H).toBe(CARD_FRAME_H + OUTLINE_HEAD + DOC_LINES * DOC_LINE_H + CARD_PAD_B)
-  })
-
-  it('大纲 → 子文档 的连线用目标项统一色；别的连线没有颜色', () => {
-    expect(edgeColorOf(store, graph, { from: 'o:p1', to: 'd:p2' })).toBe(SLOT_ACCENT)
-    // 这份文档自己的大纲（没有占接入点）不染色
-    const ownDoc: StructureNode = { id: 'd:p1', kind: 'doc', ref: 'p1', x: 400, y: 200 }
-    expect(edgeColorOf(store, [parentNode, ownDoc], { from: 'o:p1', to: 'd:p1' })).toBeNull()
-  })
-})
-
-describe('结构画布：连线两端的小圆点', () => {
-  const nodes: StructureNode[] = [
-    { id: 'a', kind: 'outline', x: 0, y: 0 },
-    { id: 'b', kind: 'doc', x: 300, y: 0 },
-  ]
-  const edges = [{ from: 'a', to: 'b' }]
-
-  it('两颗点分别靠近两端，且落在线上', () => {
-    const dots = edgeDots(edgeRoute(nodes[0], nodes[1], nodes))
-    expect(dots.from.x).toBeGreaterThan(CARD_W)
-    expect(dots.from.x).toBeLessThan(dots.to.x)
-    expect(dots.to.x).toBeLessThan(300)
-    expect(edgeAt(nodes, edges, dots.from.x, dots.from.y, 2)).toEqual({ from: 'a', to: 'b' })
-  })
-
-  it('点中圆点报出是哪一端（点它跳到另一端）', () => {
-    const dots = edgeDots(edgeRoute(nodes[0], nodes[1], nodes))
-    expect(edgeDotAt(nodes, edges, dots.from.x, dots.from.y)).toEqual({ edge: edges[0], side: 'from' })
-    expect(edgeDotAt(nodes, edges, dots.to.x, dots.to.y)).toEqual({ edge: edges[0], side: 'to' })
-    expect(edgeDotAt(nodes, edges, 150, 400)).toBeNull()
-  })
-})
-
-describe('结构画布：对账（实体长了，图跟着补）', () => {
-  const owner = makeNode({
-    id: 'n1',
-    title: '极限',
-    docs: { teaching: '正文' },
-    notes: [{ name: '错题', content: 'x', createdAt: NOW, updatedAt: NOW }],
-  })
-  const store = makeStore([owner])
-
-  it('agent 写出的教学文档会补出文档节点，并接到大纲前面', () => {
-    // 图上只有大纲节点（就像「文档刚生成完」的那一刻）
-    const map = { version: 1 as const, nodes: [{ id: 'o:n1', kind: 'outline' as const, ref: 'n1', x: 0, y: 0 }], edges: [] }
-    const next = structureViewOf(store, 'g1', map)
-    expect(next).not.toBe(map)
-    expect(next.nodes.some((n) => n.id === 'd:n1')).toBe(true)
-    // 先文档再大纲
-    expect(next.edges).toContainEqual({ from: 'd:n1', to: 'o:n1' })
-  })
-
-  it('没有变化时算出来的图与存的一模一样（不会漂）', () => {
-    const map = structureFromStore(store, 'g1')
-    const next = structureViewOf(store, 'g1', map)
-    expect(next.nodes.map((n) => `${n.id}@${n.x},${n.y}`).sort()).toEqual(
-      map.nodes.map((n) => `${n.id}@${n.x},${n.y}`).sort(),
-    )
-    expect(next.edges.map((e) => `${e.from}>${e.to}`).sort()).toEqual(
-      map.edges.map((e) => `${e.from}>${e.to}`).sort(),
-    )
-  })
-
-  it('笔记实体补成叶子节点，挂在文档下面', () => {
-    const map = { version: 1 as const, nodes: [{ id: 'o:n1', kind: 'outline' as const, ref: 'n1', x: 0, y: 0 }], edges: [] }
-    const next = structureViewOf(store, 'g1', map)
-    expect(next.nodes.some((n) => n.id === 'n:n1:错题')).toBe(true)
-    expect(next.edges).toContainEqual({ from: 'd:n1', to: 'n:n1:错题' })
-  })
-
-  it('被用户主动移除的（hidden）不再补回来', () => {
-    const map = {
-      version: 1 as const,
-      nodes: [{ id: 'o:n1', kind: 'outline' as const, ref: 'n1', x: 0, y: 0 }],
-      edges: [],
-      hidden: ['d:n1'],
+  it('自动铺排不重叠：任意两张卡不交叠', () => {
+    const view = deriveCanvas(makeStore(), 'g1', undefined)
+    for (const a of view.cards) {
+      for (const b of view.cards) {
+        if (a === b) continue
+        const overlap =
+          a.x < b.x + CARD_W && b.x < a.x + CARD_W && a.y < b.y + view.heightOf(b) && b.y < a.y + view.heightOf(a)
+        expect(overlap).toBe(false)
+      }
     }
-    const next = structureViewOf(store, 'g1', map)
-    expect(next.nodes.some((n) => n.id === 'd:n1')).toBe(false)
-    // 文档没补，叶子也就无处可挂
-    expect(next.nodes.some((n) => n.id === 'n:n1:错题')).toBe(false)
   })
 
-  it('删掉的边不会被对账补回来（边是拓扑，不是包含）', () => {
-    const full = structureFromStore(store, 'g1')
-    // 模拟用户把「文档 → 大纲」这条删了
-    const cut = { ...full, edges: full.edges.filter((e) => !(e.from === 'd:n1' && e.to === 'o:n1')) }
-    const next = structureViewOf(store, 'g1', cut)
-    expect(next.edges.some((e) => e.from === 'd:n1' && e.to === 'o:n1')).toBe(false)
+  it('入口没存过坐标时贴到根文档左边（读图方向「从入口往右」）', () => {
+    const saved: StructureMap = { version: 2, positions: { r: { x: 900, y: 100 } } }
+    const view = deriveCanvas(makeStore(), 'g1', saved)
+    const entry = view.cards.find((c) => c.uuid === entryUuid('r'))!
+    const root = view.cards.find((c) => c.uuid === 'r')!
+    expect(entry.x).toBeLessThan(root.x)
   })
 
-  it('只有总目标自动有大纲卡：子节点没有目标项就没有大纲', () => {
-    const root = makeNode({ id: 'n1', title: '根' })
-    const child = makeNode({ id: 'n2', title: '子', key: 'a' })
-    const store2 = makeStore([root, child], { edges: [{ from: 'n1', to: 'n2', createdAt: NOW }] })
-    const map = structureFromStore(store2, 'g1')
-    expect(map.nodes.some((n) => n.id === 'o:n1')).toBe(true)
-    expect(map.nodes.some((n) => n.id === 'o:n2')).toBe(false)
-    // 子文档接在父大纲下面
-    expect(map.edges).toContainEqual({ from: 'o:n1', to: 'd:n2' })
+  it('游离文档（摘了线）也在画布上：按深度补铺，不凭空消失', () => {
+    const store = makeStore()
+    const detached = { ...store, edges: [] }
+    const view = deriveCanvas(detached, 'g1', undefined)
+    const ids = view.cards.map((c) => c.uuid)
+    expect(ids).toContain('a')
+    // 树边没了：大纲→子文档那条连线也就没了（连线永远跟着事实走）
+    expect(view.edges.some((e) => e.to === 'a')).toBe(false)
   })
 
-  it('别的目标不掺和', () => {
-    const other = makeNode({ id: 'n9', title: '别的', goalId: 'g2', docs: { teaching: '正文' } })
-    const map = { version: 1 as const, nodes: [], edges: [] }
-    const next = structureViewOf(makeStore([owner, other]), 'g1', map)
-    expect(next.nodes.some((n) => n.ref === 'n9')).toBe(false)
+  it('空表兜底：saved 为空对象等价于没存过', () => {
+    const store = makeStore()
+    expect(deriveCanvas(store, 'g1', emptyStructure()).cards).toEqual(deriveCanvas(store, 'g1', undefined).cards)
   })
 })
 
-describe('结构画布：连线对准目标项', () => {
-  const outline: StructureNode = { id: 'o:p1', kind: 'outline', ref: 'p1', x: 0, y: 0 }
-  const doc: StructureNode = { id: 'd:p2', kind: 'doc', ref: 'p2', slot: 'b', x: 400, y: 100 }
-
-  it('目标项行的中心 y 按行号算', () => {
-    expect(slotAnchorY(0)).toBe(OUTLINE_HEAD + SLOT_ROW / 2)
-    expect(slotAnchorY(3) - slotAnchorY(2)).toBe(SLOT_ROW)
+describe('连线几何（与画布共用一份口径）', () => {
+  it('同高度的直线不绕弯：两点直接连', () => {
+    const points = edgeElbow({ x: 0, y: 0 }, { x: 100, y: 0 })
+    expect(points).toEqual([
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+    ])
   })
 
-  it('大纲那一端落在目标项上，文档那一端仍在标题行', () => {
-    const curve = edgeCurve(outline, doc, undefined, { from: slotAnchorY(2) })
-    expect(curve[0].y).toBe(slotAnchorY(2))
-    expect(curve[3].y).toBe(100 + EDGE_ANCHOR_Y)
-  })
-
-  it('不给锚点就是老样子（两端都在标题行）', () => {
-    const curve = edgeCurve(outline, doc)
-    expect(curve[0].y).toBe(EDGE_ANCHOR_Y)
-  })
-})
-
-describe('结构画布：删除的墓碑必须活着传下去', () => {
-  const owner = makeNode({
-    id: 'n1',
-    title: '极限',
-    docs: { teaching: '正文' },
-    notes: [{ name: '错题', content: 'x', createdAt: NOW, updatedAt: NOW }],
-  })
-  const store = makeStore([owner])
-  /** 组件 removeNode 的写回 = 领域层的 removeNodeFromMap（墓碑、边一起收口） */
-  const removeNodeFrom = (map: ReturnType<typeof structureFromStore>, id: string) => removeNodeFromMap(map, id)
-
-  it('连环删除：删 A 之后再删 B，A 不许复活（墓碑必须跟着派生图走）', () => {
-    const afterA = removeNodeFrom(structureFromStore(store, 'g1'), docGid('n1'))
-    // 组件在下一次操作前看到的图是**派生结果**——墓碑必须还在里面，
-    // 否则第二次删除以它为底合并，A 的墓碑就被冲掉了（「删一个复活一个」的根源）
-    const view = structureViewOf(store, 'g1', afterA)
-    expect(view.hidden).toContain(docGid('n1'))
-    const afterB = removeNodeFrom(view, noteGid('n1', '错题'))
-    const final = structureViewOf(store, 'g1', afterB)
-    expect(final.nodes.some((n) => n.id === docGid('n1'))).toBe(false)
-    expect(final.nodes.some((n) => n.id === noteGid('n1', '错题'))).toBe(false)
-  })
-
-  it('拖动一张卡（任意改动都以派生图为底合并）也不丢墓碑', () => {
-    const afterA = removeNodeFrom(structureFromStore(store, 'g1'), docGid('n1'))
-    const view = structureViewOf(store, 'g1', afterA)
-    // 组件 commit 的合并产物：{ ...map, ...next } —— hidden 从 map 里透传
-    const moved = {
-      ...view,
-      nodes: view.nodes.map((n) => (n.id === outlineGid('n1') ? { ...n, x: 999, y: 888 } : n)),
-    }
-    const next = structureViewOf(store, 'g1', moved)
-    expect(next.nodes.some((n) => n.id === docGid('n1'))).toBe(false)
-    expect(next.nodes.find((n) => n.id === outlineGid('n1'))).toMatchObject({ x: 999, y: 888 })
-  })
-
-  it('笔记改名后（id 跟着新名字走）还是同一张卡：不重复、坐标不丢', () => {
-    const first = structureFromStore(store, 'g1')
-    const oldId = noteGid('n1', '错题')
-    const card = first.nodes.find((n) => n.id === oldId)
-    expect(card).toBeTruthy()
-    // 实体侧改名（onRenameNote 的产物）：notes 里换成新名字
-    const renamedStore = {
-      ...store,
-      nodes: store.nodes.map((n) =>
-        n.id === 'n1' ? { ...n, notes: [{ name: '复盘', content: 'x', createdAt: NOW, updatedAt: NOW }] } : n,
+  it('折线的 path 按点列拼，曲线按贝塞尔拼', () => {
+    expect(edgePathD([{ x: 0, y: 0 }, { x: 10, y: 10 }])).toBe('M0 0 L10 10')
+    expect(
+      edgePathD(
+        [
+          { x: 0, y: 0 },
+          { x: 10, y: 0 },
+          { x: 0, y: 10 },
+          { x: 10, y: 10 },
+        ],
+        'curved',
       ),
-    }
-    // 组件 saveRename 的产物：id、ref、边一起改
-    const newId = noteGid('n1', '复盘')
-    const saved = {
-      ...first,
-      nodes: first.nodes.map((n) => (n.id === oldId ? { ...n, id: newId, ref: 'n1:复盘' } : n)),
-      edges: first.edges.map((e) => ({ from: e.from === oldId ? newId : e.from, to: e.to === oldId ? newId : e.to })),
-    }
-    const next = structureViewOf(renamedStore, 'g1', saved)
-    const cards = next.nodes.filter((n) => n.kind === 'note' && n.ref === 'n1:复盘')
-    expect(cards).toHaveLength(1)
-    expect(cards[0]).toMatchObject({ id: newId, x: card!.x, y: card!.y })
-  })
-})
-
-describe('结构画布：键盘事件的输入位判定', () => {
-  it('输入框 / 多行框 / 可编辑区算输入位，其它与空值不算', () => {
-    expect(isTextEntryTarget(null)).toBe(false)
-    expect(isTextEntryTarget({} as unknown as HTMLElement)).toBe(false)
-    expect(isTextEntryTarget({ tagName: 'DIV' } as unknown as HTMLElement)).toBe(false)
-    expect(isTextEntryTarget({ tagName: 'INPUT' } as unknown as HTMLElement)).toBe(true)
-    expect(isTextEntryTarget({ tagName: 'TEXTAREA' } as unknown as HTMLElement)).toBe(true)
-    expect(isTextEntryTarget({ tagName: 'DIV', isContentEditable: true } as unknown as HTMLElement)).toBe(true)
-  })
-})
-
-describe('文档卡：摘要与生成按钮、目标项圆点', () => {
-  const withBody = makeNode({ id: 'n1', title: '极限', docs: { teaching: '# 标题\n\n第一段正文\n\n第二段正文' } })
-  const empty = makeNode({ id: 'n2', title: '导数', docs: { teaching: '' } })
-  const store = makeStore([withBody, empty])
-
-  it('有正文：给两行摘要，卡片长高；没有正文：只给 blank 标记', () => {
-    const a = resolveNodeView(store, { id: 'd:n1', kind: 'doc', ref: 'n1', x: 0, y: 0 })
-    expect(a.blank).toBe(false)
-    expect(a.excerpt).toContain('第一段正文')
-    // 摘要去掉标题井号，不然第一行永远是「# 标题」
-    expect(a.excerpt).not.toContain('#')
-    // 摘要要压成**一段**：正文里的换行会把两行的摘要切成半句话
-    expect(a.excerpt).not.toContain('\n')
-    expect(cardHeight(store, { kind: 'doc', ref: 'n1' })).toBe(DOC_BODY_H)
-
-    const b = resolveNodeView(store, { id: 'd:n2', kind: 'doc', ref: 'n2', x: 0, y: 0 })
-    expect(b.blank).toBe(true)
-    expect(b.excerpt).toBeUndefined()
-    expect(cardHeight(store, { kind: 'doc', ref: 'n2' })).toBe(CARD_H)
+    ).toBe('M0 0 C10 0, 0 10, 10 10')
   })
 
-  it('摘要洗掉 Markdown 记号（列表符号、粗体、链接、表格竖线）', () => {
-    const noisy = makeNode({
-      id: 'n3',
-      title: '哈希',
-      docs: { teaching: '## 要点\n\n- **装填因子** 要小\n- 见 [维基](https://x.y)\n\n| a | b |\n| --- | --- |\n| 1 | 2 |' },
-    })
-    const view = resolveNodeView(makeStore([noisy]), { id: 'd:n3', kind: 'doc', ref: 'n3', x: 0, y: 0 })
-    expect(view.excerpt).toBe('要点 装填因子 要小 见 维基 a b 1 2')
+  it('列距常量还在（自动铺排的列宽 = 卡片宽 + 连线留白）', () => {
+    expect(COL_GAP).toBe(CARD_W + 112)
+    expect(CARD_H).toBeGreaterThan(0)
   })
-
 })

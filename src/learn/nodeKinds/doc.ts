@@ -1,73 +1,178 @@
 /**
- * 文档：教学正文，同时是**把子树接上去的连接件**。
+ * 文档节点：知识树的一页讲义，也是挂件的宿主。
  *
- * 它能连四种东西：自己的大纲（先文档再大纲）、笔记、试卷、超级文档。
- * 这一条 `targets` 就是原来 `GRAPH_EDGE_RULES.doc` 的全部内容。
- *
- * 节点对象（api.node(path)）默认取到的就是它（教学面）：一套文本读写，
- * 外加三个聚合取法——note / outline / superdoc 都从文档节点出发。
+ * 它的 uuid 就是知识节点的 id。上游是大纲（`o:` 前缀；根文档的上游是入口 `entry:`），
+ * 下游（自己的大纲 / 笔记 / 试卷 / 超级文档）全部由**归属关系**派生——挂件用
+ * `api.node.create({ kind, under })` 创建那一刻就挂好了，不需要也不允许手工连线。
  */
-import { textMethods, type NodeKindSpec } from './base'
-import { TextHandle, type HandleContext } from './handle'
-import { NoteHandle } from './note'
-import { OutlineHandle } from './outline'
-import { SuperdocHandle } from './superdoc'
+import { loadAgentSettings } from '../../agent/settings'
+import { layoutHintOf } from '../../agent/docFormat'
+import { examsOfNode, nodeById, parentIds, titleTaken, updateDoc, updateNode } from '../graph'
+import { notesOf } from '../notes'
+import { superDocsOf, type KnowledgeNode } from '../types'
+import { entryUuid, outlineUuid, GNode, type ConnectFilter, type NodeCtx, type NodeHelp, type NodeRelation, type NodeResult } from './base'
 
-export const docKind: NodeKindSpec = {
-  type: 'doc',
-  label: '文档',
-  rank: 1,
-  targets: ['outline', 'note', 'exam', 'superdoc'],
-  format: 'markdown',
-  singleton: true,
-  anchor: true,
-  facet: { label: '文档' },
-  methods: [
-    ...textMethods('教学文档'),
-    {
-      name: 'note',
-      signature: 'note(名字?)',
-      summary: '取一份笔记的节点对象（省略名字 = 第一份；写一份不存在的笔记时 write 会新建）',
-      returnsNode: true,
-      example: "const note = await n.note('错题本'); await note.write('第一道错题')",
-    },
-    {
-      name: 'outline',
-      signature: 'outline()',
-      summary: '取大纲节点对象（write 收 { intro, children }，整份覆盖、只写直接子层级一层）',
-      returnsNode: true,
-      example: "const o = await n.outline(); await o.write({ intro: '先补前置', children: [{ title: '夹逼定理', summary: '两个边界函数' }] })",
-    },
-    {
-      name: 'superdoc',
-      signature: 'superdoc(名字)',
-      summary: '取一份超级文档的节点对象（write 收完整自包含 HTML，同名覆盖）',
-      returnsNode: true,
-      example: "const lab = await n.superdoc('夹逼实验'); await lab.write('<!doctype html>…')",
-    },
-  ],
-}
-
-/** 文档节点（知识节点的教学面）：文本读写 + 聚合取该节点的其它内容对象 */
-export class DocHandle extends TextHandle {
-  constructor(ctx: HandleContext, nodeId: string, baseLabel: string) {
-    super(ctx, nodeId, baseLabel, 'teaching', undefined)
+export class DocGNode extends GNode {
+  constructor(ctx: NodeCtx, uuid: string) {
+    super(ctx, uuid)
   }
-  get kind(): string {
+
+  get kind(): 'doc' {
     return 'doc'
   }
-  /** 一份笔记；名字省略 = 第一份（与 path 寻址的「极限/笔记」同一语义） */
-  async note(name?: string): Promise<NoteHandle> {
-    return new NoteHandle(this.ctx, this.nodeId, this.baseLabel, typeof name === 'string' && name.trim() ? name.trim() : undefined)
+
+  protected get kindLabel(): string {
+    return '文档'
   }
-  async outline(): Promise<OutlineHandle | { error: string }> {
-    if (!this.ctx.outline) return { error: '这一轮没有大纲能力（宿主未注入 outline）' }
-    return new OutlineHandle(this.ctx, this.nodeId, this.baseLabel)
+
+  private get record(): KnowledgeNode | undefined {
+    return nodeById(this.ctx.store(), this.uuid)
   }
-  async superdoc(name: string): Promise<SuperdocHandle | { error: string }> {
-    if (!this.ctx.superdocs) return { error: '这一轮没有超级文档能力（宿主未注入 superdocs）' }
-    const trimmed = typeof name === 'string' ? name.trim() : ''
-    if (!trimmed) return { error: '超级文档要带名字：superdoc("实验名")' }
-    return new SuperdocHandle(this.ctx, this.nodeId, this.baseLabel, trimmed)
+
+  get title(): string {
+    return this.record?.title ?? this.uuid
+  }
+
+  exists(): boolean {
+    return !!this.record
+  }
+
+  private get isRoot(): boolean {
+    return this.ctx.store().goals.some((g) => g.rootNodeId === this.uuid)
+  }
+
+  get relations(): NodeRelation[] {
+    const s = this.ctx.store()
+    const node = this.record
+    if (!node) return []
+    const out: NodeRelation[] = []
+    if (this.isRoot) {
+      out.push({ id: entryUuid(this.uuid), type: 'up' })
+    } else {
+      for (const p of parentIds(s, this.uuid)) out.push({ id: outlineUuid(p), type: 'up' })
+    }
+    if (node.outline) out.push({ id: outlineUuid(this.uuid), type: 'down' })
+    for (const n of notesOf(node)) out.push({ id: n.id, type: 'down' })
+    for (const d of superDocsOf(node)) out.push({ id: d.id, type: 'down' })
+    for (const e of examsOfNode(s, this.uuid)) out.push({ id: e.id, type: 'down' })
+    return out
+  }
+
+  get content(): unknown {
+    const node = this.record
+    if (!node) return { error: '这个节点已经不在了（可能刚被删除）' }
+    return {
+      title: node.title,
+      description: node.description,
+      teaching: node.docs?.teaching ?? '',
+      status: node.status,
+      annotations: node.annotations ?? [],
+    }
+  }
+
+  editContent(next: unknown): NodeResult {
+    const node = this.record
+    if (!node) return { error: '这个节点已经不在了（可能刚被删除）' }
+    if (!next || typeof next !== 'object' || Array.isArray(next)) {
+      return { error: '文档内容是 { title, description, teaching, status?, annotations? } 对象（先 await n.content 读现状再整份写回）' }
+    }
+    const o = next as Record<string, unknown>
+    const title = typeof o.title === 'string' ? o.title.trim() : ''
+    if (!title) return { error: 'title 必给且不能为空' }
+    if (typeof o.description !== 'string') {
+      return { error: 'description 必给（没有就给空串 ""）——整份替换，缺了这一项等于把描述清掉' }
+    }
+    if (typeof o.teaching !== 'string') {
+      return { error: 'teaching 必给（教学正文；没有就给空串 ""）——整份替换，缺了这一项等于把正文清掉' }
+    }
+    let status: 'learning' | 'mastered' | undefined
+    if (o.status !== undefined) {
+      if (o.status !== 'learning' && o.status !== 'mastered') {
+        return { error: 'status 只能是 "learning" / "mastered"（不给就保持不变）' }
+      }
+      status = o.status
+    }
+    // 注解（了解 / 批注）：可选——不给就保持原样；给了必须是数组，逐条认 { term, body }
+    let annotations: Array<Record<string, unknown>> | undefined
+    if (o.annotations !== undefined) {
+      if (!Array.isArray(o.annotations)) return { error: 'annotations 要是数组（每项 { term, body, occurrence? }）' }
+      annotations = []
+      for (const item of o.annotations) {
+        if (!item || typeof item !== 'object') return { error: 'annotations 的每一项都要是 { term, body } 对象' }
+        const a = item as Record<string, unknown>
+        const term = typeof a.term === 'string' ? a.term.trim() : ''
+        const body = typeof a.body === 'string' ? a.body : ''
+        if (!term || !body) return { error: 'annotations 里有一项缺 term 或 body' }
+        annotations.push({
+          term,
+          body,
+          ...(a.kind === 'understand' || a.kind === 'note' ? { kind: a.kind } : {}),
+          ...(typeof a.occurrence === 'number' && Number.isFinite(a.occurrence) ? { occurrence: a.occurrence } : {}),
+        })
+      }
+    }
+    const s = this.ctx.store()
+    if (title !== node.title) {
+      const clash = titleTaken(s, node.goalId, title, node.id)
+      if (clash) return { error: '本目标里已经有「' + clash.title + '」这个标题——同名会让按标题寻址失效，换一个' }
+    }
+    let nextStore = updateNode(s, node.id, {
+      title,
+      description: o.description,
+      ...(status !== undefined ? { status } : {}),
+      ...(annotations !== undefined ? { annotations: annotations as never } : {}),
+    })
+    nextStore = updateDoc(nextStore, node.id, o.teaching)
+    this.ctx.commit(nextStore)
+    const bits: string[] = ['正文 ' + o.teaching.length + ' 字']
+    if (title !== node.title) bits.push('已从「' + node.title + '」改名')
+    if (status !== undefined && status !== node.status) bits.push('状态 → ' + status)
+    if (annotations !== undefined && annotations.length !== (node.annotations?.length ?? 0)) {
+      bits.push('注解 ' + annotations.length + ' 条')
+    }
+    return {
+      ok: true,
+      note: '已写入「' + title + '」：' + bits.join('，') +
+        layoutHintOf('teaching', o.teaching, loadAgentSettings().docFormat),
+    }
+  }
+
+  help(): NodeHelp {
+    const node = this.record
+    const teaching = node?.docs?.teaching ?? ''
+    const root = this.isRoot
+    return {
+      description:
+        '文档节点——知识树的讲义页，也是挂件的宿主。' +
+        (node ? (teaching.trim() ? '正文 ' + teaching.length + ' 字。' : '正文还没写。') : '') +
+        (root ? '这是目标的根文档（入口连着它）。' : ''),
+      edit: [
+        '动线：const c = await n.content 读现状 → 改 → await n.editContent({ ...c, teaching: 新正文 })。整份替换，先读后写，不要凭记忆默写。',
+        '教学文档写法：循序渐进（直觉 / 例子 → 定义与推导），数学用 LaTeX；至少两三处结构性元素（排版配方在「文档排版与图表」提示词模块里）；用了网络资料，文末写「## 📚 参考资料与权威来源」。',
+        '字段：description 是 150~300 字的概念简述；status 是掌握状态（考试通过才置 "mastered"）；annotations 是正文旁的注解词条（每项 { term, body, occurrence? }，不给就保持原样）。',
+        '边界：不在这里拆下一层大纲（那是大纲节点的事）；学习者的笔记在 note 节点上，不混进正文。',
+      ].join('\n'),
+      connection: [
+        root
+          ? '上游是入口（entry:，由目标绑定自动生成，不能手工连）。'
+          : '上游是大纲（o: 前缀）：把这份文档挂到某份大纲下，先取那份大纲的对象再 connect(我, "down")。',
+        '下游（大纲 / 笔记 / 试卷 / 超级文档）全部自动连着：api.node.create({ kind, under: 我的 uuid }) 创建即挂上，不能手工连线，也不能改挂别人。',
+      ].join('\n'),
+    }
+  }
+
+  onUpstream(node: GNode): ConnectFilter {
+    if (node.kind === 'entry') return '入口与根文档的连线由目标绑定自动生成，不能手工连'
+    if (node.kind !== 'outline') {
+      return '文档的上游只能是大纲（o: 前缀的对象）——要挂在哪份大纲下，就取那份大纲再由它发起 connect'
+    }
+    return true
+  }
+
+  onDownstream(_node: GNode): ConnectFilter {
+    return (
+      '挂件（大纲 / 笔记 / 试卷 / 超级文档）与文档的连线由归属自动生成：' +
+      'api.node.create({ kind, under: "' + this.uuid + '" }) 创建那一刻就挂上了，不需要手工连'
+    )
   }
 }

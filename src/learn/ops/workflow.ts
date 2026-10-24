@@ -140,7 +140,7 @@ export function createWorkflowOps(deps: AgentOpsDeps): WorkflowOps {
             error:
               '这个目标的大纲已经创建好了（根大纲 ' + root.outline.children.length + ' 条目标项，共 ' +
               s.nodes.filter((n) => n.goalId === goal()).length + ' 个节点）。「' + hit.name +
-              '」只在目标首次创建时规划一次，不要重复规划。要调整结构：用 api.outline.write 重写对应节点的大纲，拿不准就先向学习者确认。',
+              '」只在目标首次创建时规划一次，不要重复规划。要调整结构：用大纲节点整份重写对应节点的大纲（api.node.get("o:"+节点id) 后 editContent），拿不准就先向学习者确认。',
           }
         }
       }

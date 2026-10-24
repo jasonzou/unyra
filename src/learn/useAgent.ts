@@ -114,6 +114,11 @@ export function useAgent(opts: {
   examDeps?: (nodeId: string) => ExamToolDeps | undefined
   /** ui.* 与截图需要的能力（见 AgentUiDeps） */
   ui?: AgentUiDeps
+  /**
+   * 节点编辑成功后的宿主动作（出卷后的视觉自检等）：由界面层注入，
+   * learnSandboxOps 会把它接到节点通道的 afterEdit 上。
+   */
+  afterNodeEdit?: (uuid: string, kind: string) => void
   /** browser.* 的宿主依赖工厂（web 页签动作与活信息，见 learn/web/browserOps）；不注入就没有这一组 */
   browserDeps?: () => BrowserDeps | undefined
 }) {
@@ -123,10 +128,14 @@ export function useAgent(opts: {
    * 直接解构会永远拿到首轮那份旧回调（页签换过之后，point 就指到别的文档上去了）。
    */
   const uiRef = useRef(opts.ui)
+  const afterNodeEditRef = useRef(opts.afterNodeEdit)
+  useEffect(() => {
+    uiRef.current = opts.ui
+    afterNodeEditRef.current = opts.afterNodeEdit
+  })
   /** browser.* 的宿主依赖（web 页签动作与活信息）：同 uiRef 的理由，每渲染刷新 */
   const browserFnRef = useRef(opts.browserDeps)
   useEffect(() => {
-    uiRef.current = opts.ui
     browserFnRef.current = opts.browserDeps
   })
   const [streaming, setStreaming] = useState<Record<string, { conversationId: string; messageId: string; parts: AgentPart[] }>>(
@@ -418,8 +427,8 @@ export function useAgent(opts: {
        * 第一条指令前面垫上一大块，把指令本身覆盖掉。现在：
        * - 沙箱的「当前节点」语义照旧（省略 path 的 doc.write / outline.write 落在
        *   target.nodeId 上，宿主解析，模型不必知道路径）；
-       * - 模型需要目标 / 节点 / 规划状态时**自己去查**：api.graph.list()（回执带 current
-       *   与全部节点）、api.graph.read()、api.state.read()；
+       * - 模型需要目标 / 节点 / 规划状态时**自己去查**：api.node.list()（回执带 current
+       *   与全部节点）、节点对象 content、api.state.read()；
        * - 调用方真正要交给模型的**当次参数**（画布的目标项定位、选段位置）仍走 context
        *   参数——那是指令的一部分，不是会变的背景。
        */
@@ -585,6 +594,7 @@ export function useAgent(opts: {
         // 这一轮冲着来的节点是沙箱里的「当前节点」——不是界面上此刻选中的那个
         nodeId: () => target.nodeId,
         goalId: () => target.goalId,
+        ...(afterNodeEditRef.current ? { afterNodeEdit: afterNodeEditRef.current } : {}),
         /**
          * wf.invoke 的落点（见 WorkflowOps.invoke）：**只排队，不当场跑**。
          * 这一轮还在跑，工作流的指令要作为一条新的 user 消息进上下文，只能等收口（见下面 finally）。
@@ -858,7 +868,7 @@ export function useAgent(opts: {
           /**
            * 系统提示词用**对话里固化的那份**（见上面的固化逻辑）：只描述目标、不含当前
            * 节点，切节点一字不变（前缀缓存不被整段作废）；节点背景不再随消息注入，
-           * 模型需要时自己 api.graph.list / api.graph.read 现查。固化之后，这段对话
+           * 模型需要时自己 api.node.list / 节点对象 content 现查。固化之后，这段对话
            * 生命周期内的 system 段逐字节稳定——设置中途改动也不会把进行中的对话前缀打断。
            */
           system: teacherSystem,
@@ -1292,7 +1302,7 @@ export function useAgent(opts: {
             resolveNode: () => ({ ok: false, message: '自由聊天不挂在知识节点上' }),
             resolveDoc: () => ({ ok: false, message: '自由聊天不挂载教学文档上' }),
             docOps: unreachableOps<SandboxOptions['docOps']>('文档'),
-            nodeOps: unreachableOps<SandboxOptions['nodeOps']>('节点'),
+            nodes: { service: () => null },
             web: {
               fetch: fetchForAgent,
               search: searchForAgent,
