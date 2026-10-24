@@ -452,8 +452,10 @@ export async function examTests() {
   ok(compileBody('((api)=>{ return 1 })();').ok, '结尾的分号与自调用括号被摘掉')
   ok(compileBody('((api)=>{ return 1 })(api)').ok, '(api) 自调用也摘掉——留着它沙箱会给模型函数传 undefined')
   ok(normalizeBody('async (api) => { return 1 }') === 'async (api) => { return 1 }', '已经写了 async 的原样不动')
+  // 语句体兜底（2026-10-24）：直接写一段语句不再被形状拒绝——包一层匿名 async 箭头照跑
   const stmt = compileBody('const x = 1; return x')
-  ok(!stmt.ok && stmt.content.includes('匿名函数'), '语句片段在宿主就被挡住，并说清该写成什么样', stmt.content)
+  ok(stmt.ok && stmt.body.startsWith('(async (api) => {'), '语句片段包一层匿名箭头照跑（return 由模型自己写）', stmt.ok ? stmt.body : 'no')
+  ok(!compileBody('const r = (').ok, '真语法错照旧在宿主挡住')
   const inner = compileBody('((api)=>{ const f = () => { return await api.node.list() }; return f })')
   ok(!inner.ok && inner.content.includes('await') && inner.content.includes('非 async'), '内层非 async 函数里的 await 被点出来（旧实现只在沙箱里报一句无指向的语法错）', inner.content)
 

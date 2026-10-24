@@ -91,7 +91,7 @@ export default function ContextDebugger({ onClose }: Props) {
             ) : null}
             {report.kind === 'append' ? (
               <p className="mt-1 text-[10.5px] leading-relaxed text-ink-faint">
-                {t('载荷逐字节对得上，客户端无可修；反复出现就换模型或直连端点对照。')}
+                {t('这也解释了「为什么总是每轮的首个 loop」：轮与轮之间隔着空闲（缓存过了保质期）或中间跑了别的会话（同配方的会话共享工具+系统提示词这段前缀，共享头常刷常新，各自的独有后段被挤出缓存）——所以每次都只跌一块，剩下的正好是共享的头。')}
               </p>
             ) : null}
           </div>

@@ -11,6 +11,7 @@ import { buildApi, clip, imagesOf } from './api'
 import { renderApiHelp, renderGroupHelp, renderRootHelp } from './apiRegistry'
 import { safeJson } from './askForm'
 import { compileBody } from './body'
+import { foldNodes } from './fold'
 import { asText } from './refs'
 import { DEFAULT_SANDBOX_TIMEOUT_MS, MAX_LOGGED_CALLS } from './limits'
 import type { ExecuteTool, SandboxCall, SandboxOptions } from './types'
@@ -269,12 +270,16 @@ export function createExecuteTool(opts: SandboxOptions): ExecuteTool {
         }
       }
       lastFailure = ''
+      // 节点对象（__node 门面）进回执前折成纯数据快照（见 sandbox/fold；真沙箱在同
+      // 一位置有一份自包含副本）。进程内直调没有克隆这道关，但 getter 与函数进
+      // safeJson 也只会变成 {}，照样得折。
+      const folded = reply.value === undefined ? undefined : foldNodes(reply.value)
       const result =
-        reply.value === undefined
+        folded === undefined
           ? '（这段代码没有 return 任何值）'
-          : typeof reply.value === 'string'
-            ? reply.value
-            : safeJson(reply.value)
+          : typeof folded === 'string'
+            ? folded
+            : safeJson(folded)
       /**
        * 有一次 api 调用没有生效（例如 expected 与现状不符），整次编排就算失败：
        * 光把 { ok: false } 交给模型是不够的——它可能没检查返回值就接着往下走，

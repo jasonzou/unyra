@@ -264,7 +264,14 @@ function stripTypes(src: string): string | null {
 function compileJsBody(raw: string): CompileBodyResult {
   const text = raw.trim()
   if (!text) return { ok: false, content: 'body 为空：请给出形如 ((api)=>{ ... }) 的代码' }
-  const candidates = [normalizeBody(raw), stripOuterParens(stripTrailingCall(raw)), text]
+  /*
+   * 语句体兜底：模型有时会直接写一段语句（const r = … 开头、自己 return），而上面
+   * 的候选形状全要求「求值成函数」。包一层匿名 async 箭头它就是合法函数体——return
+   * 由模型自己写；没写就得到「没有 return 任何值」的回执，而不是一条形状拒绝。
+   * 排在显式函数形状之后：函数体照旧走原有归一化，只有它们全失败才轮到这层。
+   */
+  const wrapped = '(async (api) => {' + String.fromCharCode(10) + text + String.fromCharCode(10) + '})'
+  const candidates = [normalizeBody(raw), stripOuterParens(stripTrailingCall(raw)), wrapped, text]
   let problem = ''
   for (const body of candidates) {
     if (!body) continue

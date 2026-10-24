@@ -238,14 +238,36 @@ async function run(body, timeoutMs) {
     clearTimeout(runTimer)
     runTimer = null
     /*
-     * 结果要能过结构化克隆。模型有时会 return 一个函数或带函数的对象，
-     * 那会让 postMessage 直接抛 DataCloneError——报错信息还错位到别处，极难自查。
-     * 这里先把不可克隆的部分换成一句可读的说明。
+     * 结果要能过结构化克隆。两类东西天然过不去，分两步处理：
+     * 1. **节点对象（__node 门面）**：content 是 getter（吐 Promise）、方法都是函数，
+     *    克隆必炸。返回值里遇到就折成一份纯数据快照（uuid/kind/title/relations）——
+     *    回执照样可读，模型要再用这个节点就按 uuid 重新 get。
+     * 2. 其余不可克隆的（函数、裸 Promise）：换成一句可读的说明。
      */
+    const foldNodes = (v, seen) => {
+      if (!v || typeof v !== 'object') return v
+      // __node 判定放在 seen 之前：节点对象折成快照就返回（终结点），不进路径也不该挡后面再次出现
+      if (v.__node === true) {
+        return { __node: true, uuid: v.uuid, kind: v.kind, title: v.title, relations: v.relations }
+      }
+      if (seen.has(v)) return '［循环引用］'
+      seen.add(v)
+      // seen 记的是「当前路径」而不是「见过的全部」：同一对象出现两次是重复，不是循环
+      if (Array.isArray(v)) {
+        const out = v.map((x) => foldNodes(x, seen))
+        seen.delete(v)
+        return out
+      }
+      const out = {}
+      for (const k of Object.keys(v)) out[k] = foldNodes(v[k], seen)
+      seen.delete(v)
+      return out
+    }
     let value
     try {
-      structuredClone(raw)
-      value = raw
+      const folded = foldNodes(raw, new Set())
+      structuredClone(folded)
+      value = folded
     } catch {
       value = typeof raw === 'function' ? '[函数] ' + String(raw).slice(0, 200) : String(raw)
     }

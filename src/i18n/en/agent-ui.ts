@@ -56,7 +56,7 @@ const dict: Record<string, string> = {
   '断点': 'break',
   '断点不在消息上（见结论）。': 'The break is not on any message (see the verdict above).',
   '搬家是设计内的（超预算从最旧一头裁掉），服务商缓存因此真丢——这不是分叉。': 'The shift is by design (over-budget trimming drops the oldest messages first) — the provider cache genuinely loses that prefix. Not a fork.',
-  '载荷逐字节对得上，客户端无可修；反复出现就换模型或直连端点对照。': 'The payloads match byte for byte; nothing to fix on our side. If it keeps happening, compare against another model or a direct endpoint.',
+  '这也解释了「为什么总是每轮的首个 loop」：轮与轮之间隔着空闲（缓存过了保质期）或中间跑了别的会话（同配方的会话共享工具+系统提示词这段前缀，共享头常刷常新，各自的独有后段被挤出缓存）——所以每次都只跌一块，剩下的正好是共享的头。': 'This is exactly why it is always the first loop of a turn: turns are separated by idle time (past the cache TTL) or by other conversations running in between (same-config conversations share the tools + system-prompt prefix, so the shared head stays fresh while the unique tail of each gets evicted) — hence a partial drop each turn, with exactly the shared head remaining.',
   '上一次的同一位置：': 'Same position in the previous request:',
   '系统 {0} 字 · {1} 条消息': 'System {0} chars · {1} messages',
   '比较 #{0} → #{1}：': 'Compare #{0} → #{1}: ',
