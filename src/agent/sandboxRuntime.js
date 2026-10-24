@@ -137,6 +137,10 @@ function makeApi() {
    */
   if (api.node && typeof api.node.get === 'function' && typeof api.node.invoke === 'function') {
     const channel = api.node
+    // 先把宿主侧原始 get 摘下来再替换：channel 就是 api.node 本体，替换之后
+    // channel.get 解析到的是包装器自己——每次 node.get 都无限递归（栈溢出）。
+    // 与进程内门面（sandbox/nodeObject 的 attachNodeFacade）同一个坑，同一份教训。
+    const rawGet = channel.get.bind(channel)
     const toWire = (args) =>
       args.map((a) => (a && typeof a === 'object' && typeof a.uuid === 'string' && a.__node === true ? a.uuid : a))
     const wrapManifest = (m) => {
@@ -151,7 +155,7 @@ function makeApi() {
       }
       return obj
     }
-    api.node.get = (uuid) => Promise.resolve(channel.get(uuid)).then((v) => (v && v.object === true ? wrapManifest(v) : v))
+    api.node.get = (uuid) => Promise.resolve(rawGet(uuid)).then((v) => (v && v.object === true ? wrapManifest(v) : v))
   }
   /**
    * api.ui.dom(fn)：宿主先建一个「会话」，回调拿到的是一层**门面**（facade）——
