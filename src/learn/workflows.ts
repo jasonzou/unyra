@@ -71,12 +71,7 @@ export interface WorkflowRow extends WorkflowEntry {
  * 同上下文不重复——提示词与指令的分工见 personaMessage 与 promptModuleMessage 的说明）。
  * 指令里不再重复步骤，只给这轮特有的参数与边界。
  */
-const TEACH_NODE_INSTRUCTION = [
-  '本轮任务是**填充一个空文档节点**：节点实体与标题已由系统就位（来自用户的大纲目标项或选中的词条），它就是本轮的写入目标。',
-  '先 api.node.list() 看清节点与目标的现状，再 const n = await api.node.get(当前节点uuid)、await n.help() 看这个节点自己的写法，然后照「教学文档生成」那份声明的流程执行：列前置知识 → api.ask 摸底 → 按盲点写文档 → 记学习状态 → 收尾打开文档。',
-  '本轮边界（硬性）：这是一次内容生成，不是建树——api.node.create 一个都不要调（哪怕指令附带了大纲目标项的定位：**那条目标项的实体就是当前节点**，把正文写进来就完成了落地）；也不要拆下一层大纲（"o:"+uuid 的大纲节点不要动），那会在画布上多出一排空节点——要拆层，用户会另点「生成大纲」。',
-  '若随本指令附带了【本轮参数】等上下文（如这份文档落地哪条大纲目标项、或【本轮是空文档填充】的钉死边界），以它为准。',
-].join('\n')
+const TEACH_NODE_INSTRUCTION = ['## 使用「开讲」工作流。', '- 目标节点: {{target}}'].join('\n')
 
 /**
  * 「学习大纲」：新目标的**第一轮**——先判断这次是「长期学习」还是「一次性任务」，
@@ -93,64 +88,7 @@ const TEACH_NODE_INSTRUCTION = [
  *
  * 学习型的交付物仍是大纲页（路线住在大纲文件里，教学文档只写总述）。
  */
-const GOAL_OUTLINE_INSTRUCTION = [
-  '这是用户刚新建的目标。用户的原话与参考资料在会话首条消息中，当前根节点的标题还是用户原话的临时形态。',
-  '若用户在首条消息或当前指令中附带了参考资料、文件、项目路径或大纲图片，必须仔细研读这些内容，优先依据它们来规划。',
-  '',
-  '【第零步｜先判断这是哪一类目标（最重要，别跳过）】',
-  '两类目标的差别只有一条——**要不要一棵知识树**：',
-  '- **学习型**：用户想系统掌握一个领域（「从零学微积分」「系统学 Rust」「备考」）。交付物是**大纲树 + 逐节点讲义**，节点由浅入深、彼此有依赖。',
-  '- **任务型**：用户只想让导师陪着把**一件具体的事**做完——读一个代码项目、精读一篇论文、弄懂一份报错或文档、临时答疑。这类目标没有长期路线，硬造大纲树只会塞满用户永远不会点开的空节点；交付物是**根节点文档**，要深入时用户会自己点名某个方向，那时再建**那一个**子节点。',
-  '',
-  '按下面的顺序判，命中即定，**不要凭感觉**：',
-  '1. **先看有没有具体制品**：一个项目目录、一篇论文、一份报错日志、一段代码、一份外部文档。有 → **任务型**（用户要的是把这份东西读懂，不是学一门课）。',
-  '2. **再看有没有长期意图**：「系统学 / 掌握 / 从零学 / 学习路线 / 分阶段 / 备考 / 课程」。有 → **学习型**。',
-  '3. **都没有**（例如只有一句「帮我看看这个」「我想搞懂 X」）→ 按**任务型**处理：先把这件事在一份根节点文档里讲清楚。用户真要长期学，下一句会说，到时再补大纲完全来得及。',
-  '4. **只有一种情况值得问**：同一句话里同时要「长期系统地学」和「只读我给的这一份材料」，两种走法的交付物差别很大。这时才用 api.ask 问一次（题目「这次想怎么用这个目标？」，选项：A 长期学习，拆成知识树 / B 一次性任务，只读这份材料）。**除此之外不要问**——反复确认比偶尔走错更烦人，而且走错了也好补救：任务型随时能补大纲，学习型多出来的空节点用户自己能删。',
-  '',
-  '【任务型｜只建根节点与根节点文档，绝不建大纲树】',
-  '动手前先 api.node.list() 拿根节点 uuid，const root = await api.node.get(根uuid)、await root.help()。',
-  '1. **先把文档打开**：api.ui.point() 打开根节点文档——用户要看着它长出来，而不是盯着一个空大纲页等。',
-  '2. 改标题：const c = await root.content; c.title = 主题名（读项目用项目名，读论文用论文标题短名）; await root.editContent(c)。',
-  '3. description 写 100~200 字，说清这次要解决什么、材料是什么、边界在哪。',
-  '4. 把根节点文档写成**这次任务的交付物**（editContent 的 teaching）：',
-  '   - 读项目：先给项目定位与目录结构导读，再讲核心模块的职责与调用关系、关键数据结构、上手路径；引用**真实**文件路径与代码位置，不要泛泛而谈。',
-  '   - 读论文：按「问题 → 方法 → 实验 → 结论 → 局限」精读，讲清作者为什么这么做、与已有工作差在哪；关键公式与术语要解释。',
-  '   - 答疑 / 读文档：先给结论与依据，再补必要的背景。',
-  '   一律基于**真实读到的内容**（await 节点.content / api.web.search / api.web.fetch），禁止凭印象编造；用到网络资料时按既有规范在末尾写「## 📚 参考资料与权威来源」，并用网页 chip 声明来源。',
-  '5. **不要**用 api.node.create 建任何子节点，**不要**写根节点的大纲（"o:"+根uuid 的 editContent 不要调）——大纲保持空白即可（界面显示「还没有大纲」是正常状态，不是你漏做了什么）。',
-  '6. 收尾用一两句话告诉用户「读了什么、从哪开始看、接下来可以让我深入哪一块」。之后用户点名要深入某个模块或某一节时，再 api.node.create({ kind: "doc", title, under: 根uuid }) 建**那一个**子节点，不要提前铺开。',
-  '',
-  '【学习型｜按创建模式执行（强制先 api.ask 确认模式）】',
-  '在动笔生成大纲与文档前，**必须首先调用 api.ask 询问创建模式**：',
-  '表单题目：选择目标创建模式（单选）',
-  '- 选项 A: 探索式（默认模式：生成根节点文档和初步大纲，后续节点由用户逐步确认生成。边探索边构建）',
-  '- 选项 B: 规划式（先规划，再执行：生成根节点文档，并通过多源深度网络调研生成完整大纲树）',
-  '- 选项 C: 完整式（一次性全套交付：生成完整大纲树，并一次性生成所有节点的完整教学文档）',
-  '',
-  '【学习型的多轮确认纪律（规划式二次确认，完整式三次确认）】',
-  '规划式和完整式由于生成时间较长，因此必须通过 api.ask 进行多轮确认：',
-  '1. 探索式：用户选择探索式后，无需额外确认，立即开始执行。',
-  '2. 规划式（必须二次确认）：',
-  '   - 第二次确认：调用 api.ask 表单（标题「确认规划完整大纲树」，说明规划式将通过网络搜索深入调研行业规范与课程大纲，耗时稍长），选项提供「确认开始规划完整大纲树」与「返回修改为探索式」。用户确认后方可执行。',
-  '3. 完整式（必须三次确认）：',
-  '   - 第二次确认：调用 api.ask 表单（标题「耗时与生成规模评估」，说明完整式将一次性规划完整大纲树并生成所有节点的完整详尽讲义，消耗较多轮次与时间），选项提供「了解耗时，继续确认」与「返回修改为探索式」。',
-  '   - 第三次确认：调用 api.ask 表单（标题「最终确认启动全量生成」，提示保持网络通畅与会话连接，询问是否立即启动），选项提供「确认立即启动全量生成」与「取消并改为探索式」。三次确认完成后方可启动。',
-  '',
-  '【学习型第二步｜目标基础命名与描述更新】',
-  '1. const root = await api.node.get(根uuid)；const c = await root.content。c.title = 准确的主题名（长成数据目录名，去掉问句成分）；c.description = 150~300 字目标描述（边界、核心技能、学习要求）；await root.editContent(c) 一次写回。',
-  '2. 再取一次 content，把 c.teaching 写成总述（概述知识体系与起步建议）后 editContent 写回。若参考了网络资料，**末尾必须包含「## 📚 参考资料与权威来源」，且必须使用网页类 chip（#[{"type":"web","url":"...","title":"..."}]）声明，严禁普通 Markdown 超链接 [文字](url)**。注意 chip 宽度有限，title 请精炼（15~25 汉字以内）。',
-  '',
-  '【学习型第三步｜按所选模式执行大纲树与文档生成】',
-  '- **若为探索式**：',
-  '  const o = await api.node.get("o:"+根uuid)；await o.editContent({ intro, children }) 写根节点大纲：intro 一两段说明阶段划分，children 列出直接子层级（只写一层），每项 { title, summary }。后续节点由用户在界面中逐步确认生成。',
-  '- **若为规划式**：',
-  '  必须积极调用 api.web.search 检索行业规范与权威学术大纲，**逐个 api.node.create({ kind: "doc", title, description, under: 父uuid }) 生成完整大纲树**（在各层展开：每份文档建完可继续以它为 under 建下层；各层大纲用 "o:"+uuid 的 editContent 填），先规划完整棵知识树。',
-  '- **若为完整式**：',
-  '  必须积极调用 api.web.search 检索技术细节与实战范式，**逐个 api.node.create 一次性生成完整大纲树，并为所有节点的 teaching 写入详尽、高质量的教学讲义（每篇讲义末尾以网页类 chip 声明权威来源）**，一次性交付全套体系。',
-  '',
-  '学习型全部完成后调用 api.ui.point() 打开根节点教学文档并在大纲页中呈现完整学习路线；任务型按上面第 6 条收尾。',
-].join('\n')
+const GOAL_OUTLINE_INSTRUCTION = ['## 使用「学习大纲」工作流。'].join('\n')
 
 /**
  * 「生成大纲」：给任意一个节点规划或重写它这一层的大纲（手动触发——大纲页上的
@@ -160,11 +98,7 @@ const GOAL_OUTLINE_INSTRUCTION = [
  * 指令只写「做什么」：写法与规矩在「大纲编写」提示词模块里（随本工作流注入、
  * 同上下文只注一次）。
  */
-const OUTLINE_INSTRUCTION = [
-  '本轮任务：为**当前节点**规划或重写它这一层的大纲——const o = await api.node.get("o:"+当前节点uuid)；await o.help() 后 o.editContent({ intro, children }) 整份覆盖。',
-  '照「大纲编写」那份声明的流程执行：先 await o.content 与 api.node.list() 看现状、await 节点.content 取 c.teaching.slice(0, 2000) 扫教学文档开头 → 多源检索权威分类目录并读原文再拆层 → 拆出直接子层级（一般 3~8 个）→ o.editContent 落盘 → api.ui.point 打开大纲页。',
-  '本轮边界：已有下级节点的计划要与它们对齐；只写直接子层级一层为止，本轮不建节点。',
-].join('\n')
+const OUTLINE_INSTRUCTION = ['## 使用「生成大纲」工作流。', '- 目标节点: {{target}}'].join('\n')
 
 /**
  * 「前置知识大纲」：文档卡右键菜单的「生成前置知识大纲」触发
@@ -174,13 +108,7 @@ const OUTLINE_INSTRUCTION = [
  * 这条给**还没拆过的文档**定「学它之前要先会什么」。写法的通用规矩在「大纲编写」
  * 提示词模块里（随本工作流注入），指令只写本轮特有的任务与边界。
  */
-const PREREQ_OUTLINE_INSTRUCTION = [
-  '本轮任务：为**当前节点**生成一份**前置知识大纲**——学会这个节点，先要会哪些东西。',
-  '照「大纲编写」那份声明的流程执行（先看现状、多源检索读原文再拆层、const o = await api.node.get("o:"+当前节点uuid) 后 o.editContent(…) 落盘、写完打开大纲页），差异只有两处：',
-  '- 提炼的是**前置知识**而不是往后学的阶段：不会它们就学不动这个节点，一般 3~6 条；已有的下级节点不算前置——它们是往后学的。',
-  '- children 每项的 summary 写清「这条前置要会到什么程度」，**够用就行**，不要展开成完整课程。',
-  '本轮边界：只负责计划——目标项长成文档是「生成文档」流程在画布上做的事，本轮产出里没有新节点；写完在对话里用两三句说清定了哪几条前置、为什么。',
-].join('\n')
+const PREREQ_OUTLINE_INSTRUCTION = ['## 使用「前置知识大纲」工作流。', '- 目标节点: {{target}}'].join('\n')
 
 /**
  * 「出卷」：类型与难度由 Agent 问用户，出题后直接保存试卷文件。
@@ -188,37 +116,17 @@ const PREREQ_OUTLINE_INSTRUCTION = [
  * 题目 JSON 契约、两阶段读写与篡改禁令都在「试卷与考试」提示词模块里（随本工作流
  * 注入、同上下文只注一次）；指令只写本轮的决策内容：考什么、问什么、怎么定时限。
  */
-const EXAM_INSTRUCTION = [
-  '本轮任务：为**当前知识点**出一份试卷。**类型与难度由你问用户**，不要替他决定，也不要在问之前就出题。题目 JSON 契约见试卷节点的 help()（await api.node.get(卷uuid).help()），作答侧的读卷 / 判分 / 讲解走 api.exam.*。',
-  '第一步｜摸清可考范围：先 const n = await api.node.get(当前文档uuid)；const c = await n.content 读教学文档（c.teaching.slice 分段看），笔记在挂件清单里（api.node.list() 的 notes），上级与同层节点的已有内容也在 list() 里。**可考范围 = 这些已有内容 + 你的学科常识**——出卷只消费内容，不生产内容：补讲、写文档、调整树都是「生成文档」那条流程的事，与出卷轮无关。当前节点的文档还空着时正好两选一：把卷子出成**导学卷**（考查「要学这个主题得先懂什么、核心概念怎么理解」，题目围绕节点标题与上级文档来）；或用 api.ask 问学习者「这份文档还没生成，先出导学卷还是等文档生成后再出？」。两条路都是合理流程，唯独「先建节点补内容再出卷」不是。',
-  '第二步｜问一次：用 api.ask 出一张表单，两道题——① 试卷类型（单选：随堂小测 / 小考 / 大考，选项里写清各自的题量规模）；② 难度（单选：简易 / 中等 / 难 / 极难）。最多再加一道「有没有特别想考的章节」。**不要多问**：响铃已由系统在你这一轮开始前做好，不必再调 tiktok。',
-  '第三步｜定时限：除随堂小测（不限时，minutes: 0）外，按题量与难度认真估一个 minutes（分钟）。下限是题目数 × 2——要写过程、要计算的题多留时间；宁可宽一点，也别让用户做不完。',
-  '第四步｜检索查证与落卷：**积极使用网络搜索（api.web.search）**检索该知识点的权威考试真题、标准题型、规范公式与参考题解，并**用 api.web.fetch 读 1~2 份真题原文**确认题型结构与评分口径再命题，严禁单凭模型自身主观意志编造生硬题目或错误答案。然后：const r = await api.node.create({ kind: "exam", under: 当前文档uuid })（画布上有空壳会原位复用）→ const exam = await api.node.get(r.uuid) → await exam.help() 对一眼题目格式 → await exam.editContent({ title, kind, level, minutes, questions }) 一次落卷。数学公式一律 LaTeX 写进 stem / options；需要图形的题给 image 字段（完整 SVG 源码）。',
-  '出完就在对话里告诉用户试卷已生成并列出试卷名称与题量，请用户开始作答。',
-].join('\n')
+const EXAM_INSTRUCTION = ['## 使用「出卷」工作流。', '- 目标节点: {{target}}'].join('\n')
 
 /**
  * 「阅卷」：交卷后自动触发，判分并写错题讲解。
  */
-const GRADE_INSTRUCTION = [
-  '学习者刚交卷。这是一套完整的阅卷流程，**一次 execute 里连着做完**，不要分两轮。**本轮只做阅卷这件事**：读卷、判分、写讲解、记错法——教学文档、笔记与知识树都不动（改状态只动文档节点 content 的 status 字段）：',
-  '第零步｜先查再用：await api.exam.__help() 把 grade / explain 的参数查清楚，再动手。',
-  '第一步｜读试卷与作答：api.exam.read() 读当前节点的试卷与历次 attempts（给了 attemptId 就读那一次）。取出最新一次作答。**注意严格边界**：用户的 answers、inputs、dwell、blurs 是真实客观作答事实，**严禁修改篡改任何字符或数据项**！',
-  '第二步｜判分：对照参考答案逐题评判客观题，依据 rubric 评判填空题与简答题，然后**一条 api.exam.grade({ attemptId, passed, summary, results }) 落账**——results 是 [{ questionId, correct, score, maxScore, comment, by: "agent" }]，passed 决定节点是否标记已掌握，summary 写综合评价。不要手写任何数据文件。',
-  '第三步｜写错题讲解：用 api.exam.explain({ content, attemptId }) 写详尽的步骤推导解析（Markdown），它落在同一次考试上并自动打开试卷副本。',
-  "第四步｜修正掌握度：const n = await api.node.get(当前文档uuid)；const c = await n.content; c.status = passed ? 'mastered' : 'learning'; await n.editContent(c) 更新掌握状态，并把高频薄弱错法用 api.state.mistake(当前文档uuid, { pattern, cause }) 记进错误记忆。",
-].join('\n')
+const GRADE_INSTRUCTION = ['## 使用「阅卷」工作流。', '- 目标节点: {{target}}', '- 作答记录: {{attemptId}}'].join('\n')
 
 /**
  * 「超级实验室」：问清用户要什么实验/功能，然后生成一份可交互的超级文档。
  */
-const SUPERLAB_INSTRUCTION = [
-  '现在启动「超级实验室」：在当前节点做一份**超级文档**——可交互的实验或小工具，用户在页签里点、文档干活并显示结果。**本轮的交付物就这一份实验**；知识树、教学文档都不动——那是别的流程的职责。',
-  '第一步｜问需求：用 api.ask 问用户想做什么实验 / 需要什么功能（一道简答题，给两三个贴合当前节点主题的示例选项帮他起意）。留空等于「你来定」：挑当前节点里最能帮助理解的一个知识点自拟实验，不必再问。',
-  '第二步｜先想后写：确定这个实验演示什么规律或验证什么结论、用户怎么交互（按什么、改什么、看什么结果）、界面按什么顺序排。',
-  '第三步｜落盘：const r = await api.node.create({ kind: "superdoc", title: 实验名, under: 当前文档uuid })；const lab = await api.node.get(r.uuid)；await lab.help() 看格式规范（主题变量、moji-markdown、大小上限都在里面），然后 await lab.editContent({ html }) 写入一份完整可运行的自包含 HTML（名字不含 .html 后缀）。若包含复杂的计算函数，可通过 api.method.create 保存并通过 window.api.method.call 调用。',
-  "第四步｜用 api.ui.superdoc('#'+当前文档uuid, '实验名') 打开该超级文档页签，再用一两句话告诉用户这个实验能玩什么。",
-].join('\n')
+const SUPERLAB_INSTRUCTION = ['## 使用「超级实验室」工作流。', '- 目标节点: {{target}}', '- 超级文档: {{shell}}'].join('\n')
 
 /**
  * 「压缩上下文」：把这段对话折成一份交接摘要（见 learn/compact）。
@@ -229,50 +137,14 @@ const SUPERLAB_INSTRUCTION = [
  *
  * 因此这份指令的重点全在两件事上：**未做完的事要高保真**，以及**别做别的**。
  */
-const COMPACT_INSTRUCTION = [
-  '把这段对话压缩成一份**交接摘要**：本轮结束后，这之前的消息全部失活，此后只有你写的这份摘要（以及之后的新消息）继续进上下文。原始消息不会再发给你，所以摘要里没写的东西就是真的没了。按顺序做：',
-  '第一步｜先列「还没做完的事」（tasks，**这是最容易丢、也最要命的部分**）：这几轮里用户要的但还没交付的、正做到一半的、你答应过还没做的，逐条写清楚——涉及哪个节点、哪一份文档、哪个文件名、卡在哪一步、下一步该做什么。要写得能让「换一个人接手」照着继续干，不要写「继续完善文档」这种空话。做完了的事不要列进来。',
-  '第二步｜再写正文摘要（summary，Markdown）：## 学习目标与背景 / ## 已经讲清的内容（结论、定义、例子）/ ## 学习者的状态（自评、错在哪、还卡在哪）/ ## 约定与术语（符号写法、文件名、命名口径）。用户说过的话里凡是表达「我想要什么」的，保留原意——那是这个目标的方向。',
-  '第三步｜api.compact({ summary, tasks }) 提交。**只调这一次**：不要顺手改文档、不要建节点、不要出题，也不要重复调用。',
-  '第四步｜回一句话告诉用户已经压好了（比如「前面的对话已折成摘要，未完成的事我都记着」），**不要复述摘要内容**。',
-  '硬性要求：只写这段对话里真实出现过的东西——不要推测、不要补常识、不要编造；概念名、公式、文件名要写全；summary 控制在 1200 字以内。',
-].join('\n')
+const COMPACT_INSTRUCTION = ['## 使用「压缩上下文」工作流。'].join('\n')
 
 /**
  * 「了解」：用户在正文里划了一个词、点了「了解」。
  */
-const EXPLAIN_INSTRUCTION = [
-  '用户在文档里选中了「{{term}}」，点了「了解」——他想要一句能挂在这段文字旁边的解释。严格按顺序做：',
-  "第一步｜先看它在讲什么：const n = await api.node.get(当前文档uuid)；const c = await n.content；取 c.teaching.slice(0, 2000) 读**这一段所在的上下文**。解释要贴着这篇文档讲——它在这里是什么意思、为什么这么说，而不是给一段百科式的通解。",
-  "第二步｜写注解：给 c.annotations 追加一条 { term: '{{term}}', occurrence: {{occurrence}}, body: '注解内容' }（其余条目原样保留），await n.editContent(c) 写回——注解就划在正文对应位置；同时可用 api.node.create({ kind: 'note', title: '词条解释', under: 当前文档uuid }) 把解释记进一份笔记。",
-  '第三步｜回话：一句话就够（例如「已把 {{term}} 的注解标在正文上」）。不要把那段解释再在对话中抄一遍。',
-  '',
-  '词条：{{term}}',
-  '出现次数（从 0 起）：{{occurrence}}',
-  '用户选中的原文：',
-  '{{snippet}}',
-].join('\n')
+const EXPLAIN_INSTRUCTION = ['## 使用「了解」工作流。', '- 目标节点: {{target}}', '- 词条: {{term}}', '- 出现序号: {{occurrence}}', '- 选中原文: {{snippet}}'].join('\n')
 
-const CODE_COMPILE_INSTRUCTION = [
-  '用户点了文档里那段代码块上的「编译」。请把这段代码**伪编译**成一段能在本应用里直接跑起来的 JavaScript。严格按顺序做：',
-  '第零步｜先判它有没有输出（**这一步不通过就直接结束，不要往下做**）：扫一眼这段代码——如果它从头到尾只有定义（类型、接口、函数、类、常量），没有任何会被执行的语句、也不会打印任何东西，那它转译出来照样什么都不产出。这时**立刻停止编译**：调 api.code.silent({ key, reason })（reason 一句话说清为什么，如「只有类型与函数定义，没有被调用的语句」），然后在对话里用一句话告诉用户，**不要再写 js、也不要再调 code.save**。注意分寸：只要有哪怕一句会被执行的语句（一次调用、一个 print、一段循环、一次赋值后使用），就往下走，别把能跑的代码判成无输出。',
-  '第一步｜看代码与它的上下文：下面那段代码很可能是个**残缺片段**（上面少一个函数定义、少两个变量、少一行 import）。await api.node.get(所属文档uuid) 后取 content.teaching 读**这篇文档**，从上下文里把缺的东西补齐——这段代码就是从这篇文档里摘出来的。',
-  '第二步｜能补就补，补不上就假设：文档里也找不到的，按代码里的用法**模拟一份合理的假上下文**（假数据、假函数都行），让整段代码能跑出可见结果。**绝不要**因为片段不完整就回一句「无法编译」。',
-  '第三步｜写 JavaScript。运行环境必须按这个来：一个 Web Worker——没有 window / document / DOM，没有 require / import / export，装不了 npm 包；可以用 console.log、await、Promise、setTimeout、Math / JSON / Date / 正则、TextEncoder / TextDecoder、crypto、URL；顶层可以直接写 await（宿主会把整段代码包在 async 函数里执行）；fetch 能用，但每次运行都要用户点一次同意。要让用户看见结果就必须 console.log（对象会被结构化显示）。',
-  '第四步｜交货：调 **api.code.save({ key, js, note })**：',
-  '　- key：用下面给的那串，**原样抄**，别改也别自己编（宿主靠它认领是哪一块代码）；',
-  '　- js：转译好的**完整、自包含**的那段代码（不要写成函数包一层，直接就是可执行的语句；需要 return 就 return）；',
-  '　- note：一两句中文说明——你补了哪些假设、做了什么改动。用户会看到它。',
-  '　- **这一次必须调**：不调的话，那个代码块上的「运行」永远不会亮起来。代码原文不用你回抄，宿主按 key 自己认得是哪一段。',
-  '第五步｜回话：在对话里用两三句说清「改了什么、假设了什么」。不要整段复述代码（产物已经在上面那次调用里交给宿主了），也不要重复贴围栏——用户正盯着他点的那块代码，回执就画在那儿（转圈 → 「运行」亮起），你这段话他自己会来看。',
-  '',
-  '语言标记：{{language}}',
-  'key：{{key}}',
-  '代码：',
-  '```',
-  '{{code}}',
-  '```',
-].join('\n')
+const CODE_COMPILE_INSTRUCTION = ['## 使用「伪编译」工作流。', '- 代码块: {{key}}', '- 语言: {{language}}', '- 目标节点: {{target}}', '', '待编译代码（原文）：', '```{{language}}', '{{code}}', '```'].join('\n')
 
 /**
  * 「浏览器操作」：替用户驱动内置浏览器完成任务。之所以特化成工作流：网页是
@@ -280,47 +152,7 @@ const CODE_COMPILE_INSTRUCTION = [
  * 这里把「看 = 截图、动手 = 模拟鼠标键盘」钉成唯一的路子，并把连招塞进同一次
  * execute（连招才是浏览效率的主要来源），推理档位给 low（识别与决策都轻）。
  */
-const BROWSER_USE_INSTRUCTION = [
-  '你要替用户操作**内置浏览器**（文档区那种地球图标页签）完成任务。这一轮只用 api.browser.* 与 api.wait：',
-  '**看 = snapshot（元素清单）/ read（整页 markdown）/ capture（截图，最后手段），',
-  '动手 = browser.dom（对 ref 做受控 DOM 操作）**——没有执行任意页面 JS 的通道，',
-  '也不要用 api.fetch 外部抓取凑合（那是另一个抓取器，看不到登录态）。',
-  '',
-  '流程：',
-  '1. **开工第一步必先 api.browser.tabs() 清点存活页签，这一步不可跳过**：目标网址已经',
-  '   开着就直接 api.browser.activate 到它，绝不重复 api.browser.open 同一个网址——',
-  '   页签越开越多，后面收拾它们全是额外动作。没有合适的才 open（纯关键词会当搜索词）。',
-  '   后续操作按 tabId 指名；省略 tabId 指焦点格正看着的那个。',
-  '2. **看**：先 api.browser.snapshot(tabId?) 拿「带 ref 的可交互元素清单」，认结构、找要点的元素全靠它；',
-  '   要整页文字就 api.browser.read(tabId?)（转 markdown：短的回全文、长的落盘回大纲，登录态页面也能读）。**截图（capture）是最后手段**，',
-  '   只有布局与视觉必须亲眼看时才用；页面还在加载时先 api.wait(800)。',
-  '3. **动手**：api.browser.dom(tabId?, ref, op, arg?)——对 snapshot 清单里的 ref 做受控操作：',
-  '   "click" 点它 / "fill" 填文字（触发 input/change，React 输入框也认）/ "focus" 聚焦 /',
-  '   "submit" 提交所在表单 / "text" 取元素文字 / "attr" 取属性（如 "href"）。',
-  '   表单的连招：fill → submit；个别站点不认程序化点击时，用 point 高亮请用户手点。',
-  '4. **指给用户看**：api.browser.point(tabId?, { ref } 或选择器)——页面滚到该元素并高亮一阵。',
-  '',
-  '编排纪律（少一轮是一轮，这是这个工作流的生命线）：',
-  '- **一段 execute 写完一条完整的链**：snapshot → 按清单判断 → dom 的 fill/submit 连招 → read 收尾，',
-  '  不要每个动作单独一轮。',
-  '- 拿不准就用 **if/else + try/catch 把备选一次写全**：ref 过期就在 catch 里重新 snapshot 再试、',
-  '  选择器失败换 { ref }、dom 点不动就 point 高亮请用户手点——失败被接住继续走，程序不中断，',
-  '  也省掉「试一次、看报错、再试」的额外轮次。',
-  '- **capture 只用在 snapshot/read 拿不到信息的时候**（看布局、验证视觉结果）。',
-  '',
-  '卡住了就问，别内耗：',
-  '- 某一步你无法独立完成（验证码、登录、系统权限弹窗、页面就是不给面子）——**api.ask 把情况',
-  '  说清楚，等用户来操作**；表单回来后接着干。',
-  '- 表单一分钟没人理会会自动超时收回（回执里 timedOut: true）：那时你自行判断——换个路子继续，',
-  '  或把手头的成果交付掉、说清卡在哪，等用户回来看。',
-  '- **不会就是不会，绝不内耗**：同一个目标连续两次尝试失败，或你判断这条路走不通，就停下交付——',
-  '  把已完成的、卡在哪、需要用户做什么说清楚。反复重试耗的是用户的 token。',
-  '- 临近交付：这一轮开了很多页签的话，用 api.browser.close 把中间搜索页、试错页签挑没用的关掉，',
-  '  留下用户可能还要看的；用户自己开的页签别动。',
-  '',
-  '安全纪律：这是用户的**真实登录会话**。提交订单、支付、删除、发送消息这类不可逆动作，',
-  '必须先用 api.ask 跟用户确认再动手；用户没让关的页签不要 api.browser.close。',
-].join('\n')
+const BROWSER_USE_INSTRUCTION = ['## 使用「浏览器操作」工作流。', '- 目标节点: {{target}}'].join('\n')
 
 /**
  * 内置条目的定义形：没有时间戳（它们不是「登记」出来的），runnable 可以不给（默认能跑）。
@@ -338,27 +170,7 @@ type BuiltinDef = Omit<WorkflowRow, 'tier' | 'runnable' | 'createdAt' | 'updated
  * 提交方（EssayDock 的提交按钮）已经把「提交历史 + 全部随笔相对上次的新增 / 修改 / 删除 /
  * 未变化清单」渲染进 {{feed}}——它不面向工作流列表。
  */
-const ESSAY_COMMIT_INSTRUCTION = [
-  '用户提交了**当前的全部随笔**（提交说明：{{message}}）。快照是完整的，但之前的提交已经整理过其中大部分内容：这次只处理与上次相比**新增、修改、删除**的部分，别把未变化的内容重做一遍。',
-  '',
-  '【提交内容与历史】',
-  '{{feed}}',
-  '',
-  '要求：',
-  '1. 先看知识树（api.node.list() 拿全部节点、大纲与挂件清单——每份笔记的 uuid 都在回执里），并读一读【已有整理记录】里提到的那几份笔记，弄清上次整理到哪儿了、内容是什么。',
-  '2. **只处理【本次新增的随笔】【本次修改的随笔】【本次删除的随笔（只剩标题）】**；【本次未变化的随笔】只用来理解上下文，**不要再写一遍**；【已有整理记录】里的内容已经进过笔记。',
-  '3. 修改类随笔只给出了改动处（>>> 新增 / 改动 <<< 之间）：把这段改动**合并进上次对应的笔记**，保留其余段落；确实需要整篇写回时，先 await api.node.get(该笔记uuid) 取 content 读全文，改完再 editContent 写回，不要整篇重写。',
-  '4. 新增内容若与某份已有笔记主题相同，合并进那份笔记的相应位置；该节点还没有合适笔记时才新建「随笔整理」：api.node.create({ kind: "note", title: "随笔整理", under: 该文档uuid }) 后 editContent({ text: 内容 })。',
-  '5. 归不进任何已有节点的：并进最合适上级节点的「随笔整理」笔记；只有内容足够独立、值得单独成节时才 api.node.create({ kind: "doc", title, under: 父文档uuid }) 建子节点，再给它建笔记。',
-  '6. 删除类随笔：只在对应笔记里**清理只来自它的段落**，或把它改写进更合适的位置；不要因为一条随笔被删就删掉整份笔记。',
-  '7. 只保留有长期价值的知识、结论、疑问与例子；合并重复内容，不要逐句照抄，不要编造材料里没有的东西。整理后的笔记要能独立读懂。',
-  '8. 每改完一处，在回复里用一行列出「节点路径 → 笔记名（新建/更新）」。',
-  '9. 最后，为这次提交写一条**提交评论**，放在下面这对标记之间（两行标记必须原样保留，一个字都不能改；标记之间是 Markdown，**第一行是标题**——一句话概括这次整理，之后用两三句正文说明把哪些内容归到了哪些节点、留下了什么疑问）。',
-  '<!-- essay-commit-comment',
-  '## （标题）',
-  '（正文）',
-  '-->',
-].join('\n')
+const ESSAY_COMMIT_INSTRUCTION = ['## 使用「随笔整理」工作流。', '- 提交说明: {{message}}', '- 目标节点: {{target}}', '', '提交内容与历史（完整快照；与上次相比的增量标注在里面）：', '{{feed}}'].join('\n')
 
 /**
  * 「修复函数图像」：文档里一个 ```plot 渲染失败，点错误卡片上的扳手触发。
@@ -367,26 +179,7 @@ const ESSAY_COMMIT_INSTRUCTION = [
  * 区间与 doc.replace 的参数同语义，agent 一次替换就改完——**不需要读文档**，
  * 也不存在「渲染验证」这件事（它没有渲染通道），验收标准就是下面列的几条硬要求。
  */
-const PLOT_FIX_INSTRUCTION = [
-  '文档「{{nodeTitle}}」里有一个函数图像渲染失败了，请直接修复并交付：**一轮完成，不要验证渲染结果**。',
-  '',
-  '报错原因：',
-  '{{reason}}',
-  '',
-  '失败围栏的字符区间：{{range}}（从文档源码开头算，含首尾两行围栏标记）。',
-  '失败围栏原文（原样，含首尾 ``` 标记）：',
-  '```plot',
-  '{{source}}',
-  '```',
-  '',
-  '修复（读 → 拼回 → 整份写）：const n = await api.node.get(该文档uuid)；const c = await n.content；c.teaching = c.teaching.slice(0, {{start}}) + 修好的完整围栏 + c.teaching.slice({{end}})；await n.editContent(c)。',
-  '',
-  '修好的围栏必须满足（这就是验收标准，不用也无法渲染验证）：是完整的 ```plot 围栏（含首尾两行标记）；JSON 能通过 JSON.parse；data 非空且每项有 fn；xAxis / yAxis 只能是对象（区间用 domain 写），不能写成字符串；函数变量固定用 x（参数方程用 t，极坐标用 theta）。',
-  '',
-  '若上面的区间是 [0, 0)（未能自动定位，文档可能刚被改过）：先在 c.teaching 里按上面的原文 indexOf 找到这段围栏，换算出区间再拼回。',
-  '',
-  '改完立即 api.delivery.submit 登记修复。不要读整篇文档，不要尝试渲染验证（你没有渲染通道），不要复述修复过程。',
-].join('\n')
+const PLOT_FIX_INSTRUCTION = ['## 使用「修复函数图像」工作流。', '- 目标节点: {{target}}', '- 文档标题: {{nodeTitle}}', '- 报错原因: {{reason}}', '- 字符区间: {{range}}', '- 起止偏移: {{start}} 到 {{end}}', '', '失败围栏原文（原样，含首尾 ``` 标记）：', '```plot', '{{source}}', '```'].join('\n')
 
 const BUILTIN_DEFS: BuiltinDef[] = [  {
     id: 'teach-node',
@@ -399,6 +192,7 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 靠 doc.* 写入触发只会晚一轮，第一份文档就永远是纯 HTML 草稿（v0.5.8 踩过）。
     // 纯 Markdown 策略下这些会被格式过滤拦掉（见 runTurnUnchecked 的 effectiveModules）
     promptModule: 'teach-method doc-html',
+    params: ['target'],
     prep: 'ask',
     // 核心交付物是教学文档：要深，但 max 的等待不值
     effort: 'high',
@@ -409,8 +203,8 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     description: '先分清长期学习还是一次性任务：学习型规划大纲树与讲义，任务型只写根节点导读文档',
     instruction: GOAL_OUTLINE_INSTRUCTION,
     // 同「开讲」：总述也是讲义，排版配方要先于动笔在场
-    promptModule: 'doc-html',
-    // 标题 / 描述 / 大纲决定后续学习路径，值得想透
+    promptModule: 'goal-outline doc-html',
+    // 标题 / 描述 / 大纲决定后续学习路径，值得想透；规程整篇在「学习大纲」模块里
     effort: 'high',
   },
   {
@@ -420,6 +214,7 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     instruction: OUTLINE_INSTRUCTION,
     // 写法与规矩在「大纲编写」模块里（assistant 声明一次，同上下文不重复）
     promptModule: 'outline-method',
+    params: ['target'],
     // 交付物长在大纲页里（用户多半正盯着它）：只响一声铃、不抢主位
     prep: 'show',
     // 大纲规划要全局权衡层级
@@ -430,8 +225,9 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     name: '前置知识大纲',
     description: '读当前节点的文档，把「先要学会什么」提炼成大纲目标项（文档卡右键菜单触发）',
     instruction: PREREQ_OUTLINE_INSTRUCTION,
-    // 与「生成大纲」共用同一份大纲写法声明
-    promptModule: 'outline-method',
+    // 与「生成大纲」共用同一份大纲写法声明；前置的差异在自己那份模块里
+    promptModule: 'outline-method prereq-outline',
+    params: ['target'],
     // 交付物同在大纲页里：只响一声铃、不抢主位
     prep: 'show',
     // 前置的取舍与顺序同样要全局权衡，与「生成大纲」同档
@@ -443,6 +239,7 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     description: '先问清类型与难度，再出一份带时限的试卷',
     instruction: EXAM_INSTRUCTION,
     promptModule: 'exam',
+    params: ['target'],
     // 它自己会先 ask 一次（类型 / 难度），所以没有占位符、也从列表里可跑
     prep: 'ask',
     // 题干与干扰项质量直接影响学习；卷子的章法主要靠指令模板，high 是质量与等待的平衡点
@@ -454,6 +251,7 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     description: '判分 + 看历史错题写讲解、记错法、修正掌握度（交卷后自动跑）',
     instruction: GRADE_INSTRUCTION,
     promptModule: 'exam',
+    params: ['target'],
     // 必须先有人交卷：从列表里空跑只会得到「没有需要讲解的考试」
     runnable: false,
     // 判分记错账会污染掌握度，讲解要质量；判分对照本身偏机械，max 的边际收益不值多等的
@@ -465,7 +263,8 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     description: '就正文里选中的那段文字写一条两三句的注解，划在正文上（选中文字 →「了解」触发）',
     instruction: EXPLAIN_INSTRUCTION,
     // 词条、序号与选段都由触发方补齐；从工作流列表里空跑没有词条可讲
-    params: ['term', 'occurrence', 'snippet'],
+    params: ['target', 'term', 'occurrence', 'snippet'],
+    promptModule: 'explain',
     runnable: false,
     // 只响一声铃、不切主位：交付物就画在用户盯着的那段文字旁边（同「伪编译」）
     prep: 'show',
@@ -477,7 +276,9 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     name: '超级实验室',
     description: '问清想做什么实验，生成一份可交互的超级文档',
     instruction: SUPERLAB_INSTRUCTION,
-    // 超级文档的格式规范住进了 SuperdocGNode.help()（第三步会现查），不再占一个模块
+    // 问需求与落盘的规程在自己那份模块里；壳 uuid 由触发方带（画布空壳卡）
+    promptModule: 'superlab',
+    params: ['target'],
     prep: 'ask',
     // 生成可交互 HTML/JS：复杂代码合成是 max 收益最大的场景，失败代价最高、也等得起
     effort: 'max',
@@ -487,10 +288,10 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     name: '伪编译',
     description: '把文档里这段代码转译成可运行的 JS，产物交给它运行',
     instruction: CODE_COMPILE_INSTRUCTION,
-    // 产物交付的 api 口径（save / silent）随这条工作流注入一次
+    // 产物交付的 api 口径（save / silent）与转译环境随这条工作流注入一次
     promptModule: 'code',
     // 代码、语言与 key 由代码块菜单补齐；从工作流列表里空跑没有意义
-    params: ['language', 'key', 'code'],
+    params: ['target', 'language', 'key', 'code'],
     runnable: false,
     // 响一声铃就够：用户点的是代码块，回执也在那儿（转圈 → 运行亮起），见 WorkflowRow.prep
     prep: 'show',
@@ -503,7 +304,8 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     description: '文档里一个函数图像渲染失败时，按报错与区间一次改完（点错误卡片触发）',
     instruction: PLOT_FIX_INSTRUCTION,
     // 报错、区间与原文都由触发方算好带来；从列表里空跑没有可修的图
-    params: ['nodeTitle', 'reason', 'path', 'range', 'start', 'end', 'source'],
+    promptModule: 'plot-fix',
+    params: ['target', 'nodeTitle', 'reason', 'range', 'start', 'end', 'source'],
     runnable: false,
     // 响一声铃就够：用户点的是错误卡片，修复结果直接落在文档里
     prep: 'show',
@@ -525,6 +327,9 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     name: '浏览器操作',
     description: '替用户操作内置浏览器：截图看页面、模拟鼠标键盘完成任务',
     instruction: BROWSER_USE_INSTRUCTION,
+    // 操作规程与安全纪律都在「内置浏览器」模块里
+    promptModule: 'browser',
+    params: ['target'],
     // 全程看图干活：识别与决策都轻，low 足够——快才是浏览效率
     effort: 'low',
   },
@@ -534,7 +339,8 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     description: '每次带上全部随笔，按与上次的差异（新增 / 修改 / 删除）统一整理进知识树对应节点的笔记',
     instruction: ESSAY_COMMIT_INSTRUCTION,
     // 历史与本次材料由「随笔」窗口的提交按钮补齐；从工作流列表空跑没有意义
-    params: ['message', 'feed'],
+    promptModule: 'essay-commit',
+    params: ['target', 'message', 'feed'],
     runnable: false,
     // 归类、合并、改写都要判断，值得多想一会儿
     effort: 'high',
@@ -768,7 +574,17 @@ export function setWorkflowEffort(store: LearnStore, id: string, effort: Workflo
  */
 export function renderWorkflowInstruction(text: string, params?: Record<string, string | number>): string {
   if (!params) return text
-  return text.replace(/\{\{(\w+)\}\}/g, (whole, key: string) => (key in params ? String(params[key]) : whole))
+  /*
+   * 可选参数的标准语义是「没给就整行省略」：一行里出现**参数表里没有的**占位符 =
+   * 它等的参数没来，这行就不进指令（参数缺失由提示词模块教模型凭上下文判断，而不是
+   * 揣着一行占位符发愣）。判据按占位符的名字查表，先于填值——参数值里就算真有
+   * 双大括号也不会误伤。
+   */
+  const lines = text.split('\n').filter((line) => {
+    for (const m of line.matchAll(/\{\{(\w+)\}\}/g)) if (!(m[1] in params)) return false
+    return true
+  })
+  return lines.join('\n').replace(/\{\{(\w+)\}\}/g, (whole, key: string) => (key in params ? String(params[key]) : whole))
 }
 
 /**

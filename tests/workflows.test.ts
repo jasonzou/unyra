@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { emptyDocs } from '../src/learn/groups'
+import { promptModuleByKey } from '../src/learn/ai/promptModules'
 import { buildState } from '../src/learn/files'
 import type { LearnStore } from '../src/learn/types'
 import {
@@ -78,29 +79,33 @@ describe('内置工作流', () => {
     expect(BUILTIN_EFFORT['essay-commit']).toBe('high')
   })
 
-  it('学习大纲由导师判断形态：任务型只写根节点文档，学习型才建大纲树', () => {
+  it('学习大纲：指令是标准函数调用，规程整篇在「学习大纲」模块里', () => {
     const row = builtinWorkflowRows().find((r) => r.id === 'goal-outline')
     expect(row).toBeTruthy()
-    // 形态不靠用户勾选，所以没有占位参数要补
+    // 形态不靠用户勾选，也没有占位参数要补（目标上下文就是会话本身）
     expect(row?.params).toBeUndefined()
 
+    // 指令 = 标准函数调用：只有名字，不带规程
     const text = row!.instruction
-    // 判断依据写死在指令里：先看制品、再看长期意图、都没有按任务型
-    expect(text).toContain('先看有没有具体制品')
-    expect(text).toContain('再看有没有长期意图')
-    expect(text).toContain('按**任务型**处理')
+    expect(text).toBe('## 使用「学习大纲」工作流。')
+
+    // 规程在模块里：判断依据写死在那里（先看制品、再看长期意图、都没有按任务型）
+    const mod = promptModuleByKey('goal-outline')
+    expect(mod).toBeTruthy()
+    const spec = mod!.text
+    expect(spec).toContain('先看有没有具体制品')
+    expect(spec).toContain('再看有没有长期意图')
+    expect(spec).toContain('按**任务型**处理')
     // 询问是最后手段：只有一种情况才问
-    expect(text).toContain('只有一种情况值得问')
-    expect(text).toContain('除此之外不要问')
+    expect(spec).toContain('只有一种情况值得问')
+    expect(spec).toContain('除此之外不要问')
     // 任务型分支明确禁止建树、禁止写大纲，并要求先打开文档
-    expect(text).toContain('不要**用 api.node.create 建任何子节点')
-    expect(text).toContain('写根节点的大纲')
-    expect(text).toContain('先把文档打开')
+    expect(spec).toContain('不要**用 api.node.create 建任何子节点')
+    expect(spec).toContain('写根节点的大纲')
+    expect(spec).toContain('先把文档打开')
     // 学习型分支仍按创建模式走
-    expect(text).toContain('选择目标创建模式')
-    expect(text).toContain('api.node.create')
-    // 没有漏出来的占位符
-    expect(text).not.toContain('{{mode}}')
+    expect(spec).toContain('选择目标创建模式')
+    expect(spec).toContain('api.node.create')
   })
 
   it('问询类（开讲/出卷/超级实验室）触发前响铃；阅卷不能从列表直接跑', () => {
@@ -113,19 +118,19 @@ describe('内置工作流', () => {
     // 出卷也进了这一档：类型与难度改由导师问用户（这次重构把界面上的选择拿掉了），
     // 于是它没有占位符、也从列表里可跑
     expect(byId.get('exam')?.prep).toBe('ask')
-    expect(byId.get('exam')?.params).toBeUndefined()
+    expect(byId.get('exam')?.params).toEqual(['target'])
     // 阅卷必须先有人交卷：从列表里空跑只会得到「没有需要讲解的考试」
     expect(byId.get('exam-grade')?.runnable).toBe(false)
     // 伪编译由代码块菜单触发（代码、语言、key 都是它给的），列表里没有可跑的入口；
     // 它的交付物在对话里，所以是 'show'——**响铃但不切主位**
     expect(byId.get('code-compile')?.runnable).toBe(false)
     expect(byId.get('code-compile')?.prep).toBe('show')
-    expect(byId.get('code-compile')?.params).toEqual(['language', 'key', 'code'])
+    expect(byId.get('code-compile')?.params).toEqual(['target', 'language', 'key', 'code'])
     // 修复函数图像由错误卡片触发（报错、区间、原文都由触发方算好），同样不可空跑；
     // 修复结果直接落在文档里，'show' 响一声即可
     expect(byId.get('plot-fix')?.runnable).toBe(false)
     expect(byId.get('plot-fix')?.prep).toBe('show')
-    expect(byId.get('plot-fix')?.params).toEqual(['nodeTitle', 'reason', 'path', 'range', 'start', 'end', 'source'])
+    expect(byId.get('plot-fix')?.params).toEqual(['target', 'nodeTitle', 'reason', 'range', 'start', 'end', 'source'])
   })
 
   it('触发前只做响铃：带 prep 的响，没带的不响；主栏一概不动', () => {
@@ -153,53 +158,62 @@ describe('内置工作流', () => {
     expect(builtinWorkflowRows().some((r) => 'takeMain' in workflowPrep(r.prep))).toBe(false)
   })
 
-  it('伪编译指令：三个占位符都被换掉，代码与围栏都在（这段文本是给模型看的）', () => {
+  it('伪编译指令：标准函数调用 + 代码围栏；规程在「代码块伪编译」模块里', () => {
     const row = builtinWorkflowRows().find((r) => r.id === 'code-compile')
     expect(row).toBeTruthy()
     const text = renderWorkflowInstruction(row?.instruction ?? '', {
+      target: 'n1',
       language: 'python',
       key: 'abc123def456',
       code: 'print(sum(xs))',
     })
-    expect(text).toContain('语言标记：python')
-    expect(text).toContain('key：abc123def456')
+    // 指令 = 标准函数调用（参数行）+ 待编译代码的数据段
+    expect(text).toContain('## 使用「伪编译」工作流。')
+    expect(text).toContain('- 代码块: abc123def456')
+    expect(text).toContain('- 语言: python')
+    expect(text).toContain('- 目标节点: n1')
     expect(text).toContain('print(sum(xs))')
     // 占位符一个都不许剩下：剩下的会被模型当成正文抄进产物里
     expect(text).not.toContain('{{')
     // 代码块围栏要真的在（它是模型分辨「哪一段是待编译的代码」的凭据）
     expect(text).toContain('```')
-    // 交货那条 api 必须点名，否则模型只会把代码贴在对话里
-    expect(text).toContain('api.code.save')
-    // 「没有输出就立刻停下」是这条工作流的第零步，而且点名了停下来的那条 api
-    expect(text).toContain('第零步')
-    expect(text).toContain('api.code.silent')
-    expect(text.indexOf('api.code.silent')).toBeLessThan(text.indexOf('api.code.save'))
-    // 主栏归用户：指令里不该再出现任何「切主位」的说法（那条 api 已经撤了）
+    // 交货与「先判无输出」的规程在模块里，而且停下的那条 api 在交货那条之前
+    const mod = promptModuleByKey('code')
+    expect(mod).toBeTruthy()
+    expect(mod!.text).toContain('api.code.save')
+    expect(mod!.text).toContain('api.code.silent')
+    // 主栏归用户：指令与模块里都不该再出现任何「切主位」的说法（那条 api 已经撤了）
     expect(text).not.toContain('switchMain')
+    expect(mod!.text).not.toContain('switchMain')
   })
 
-  it('了解指令：三个占位符都被换掉，交货那条 api 点名了、而且不打断他', () => {
+  it('了解指令：标准函数调用（四个参数整行列出），规程在「了解」模块里', () => {
     const row = builtinWorkflowRows().find((r) => r.id === 'explain')
     expect(row).toBeTruthy()
-    // 词条、序号、选段都由触发方补齐：缺一样它就会去猜，而猜错的后果是注解标错地方
-    expect(row?.params).toEqual(['term', 'occurrence', 'snippet'])
+    // 目标节点、词条、序号与选段都由触发方补齐：缺一样它就会去猜，而猜错的后果是注解标错地方
+    expect(row?.params).toEqual(['target', 'term', 'occurrence', 'snippet'])
     expect(row?.runnable).toBe(false)
     expect(row?.prep).toBe('show')
     const text = renderWorkflowInstruction(row?.instruction ?? '', {
+      target: 'n1',
       term: '夹逼定理',
       occurrence: 2,
       snippet: '用夹逼定理可以求这个极限',
     })
-    expect(text).toContain('夹逼定理')
-    expect(text).toContain('2')
-    expect(text).toContain('用夹逼定理可以求这个极限')
+    expect(text).toContain('## 使用「了解」工作流。')
+    expect(text).toContain('- 目标节点: n1')
+    expect(text).toContain('- 词条: 夹逼定理')
+    expect(text).toContain('- 出现序号: 2')
+    expect(text).toContain('- 选中原文: 用夹逼定理可以求这个极限')
     // 占位符一个都不许剩下：剩下的会被模型当成正文抄进注解里
     expect(text).not.toContain('{{')
-    // 交货那条 api 必须点名，否则模型只会把解释贴在对话里、正文上什么都不出现
-    // 交货动作：注解走文档节点 content 的 annotations 字段（editContent 写回）
-    expect(text).toContain('c.annotations')
+    // 交货动作在模块里：注解走文档节点 content 的 annotations 字段（editContent 写回）
+    const mod = promptModuleByKey('explain')
+    expect(mod).toBeTruthy()
+    expect(mod!.text).toContain('c.annotations')
     // 解释要挂在用户盯着的那段文字旁边，别把视线拽到对话栏（同伪编译）
     expect(text).not.toContain('switchMain')
+    expect(mod!.text).not.toContain('switchMain')
   })
 })
 
@@ -289,12 +303,16 @@ describe('删除与模板渲染', () => {
     expect(removeWorkflow(s, '不存在的 id')).toBe(s)
   })
 
-  it('renderWorkflowInstruction 换掉占位符；没给的占位符原样留下（不静默吞掉）', () => {
-    expect(renderWorkflowInstruction('讲讲「{{title}}」，{{kind}} 卷', { title: '极限' })).toBe(
-      '讲讲「极限」，{{kind}} 卷',
-    )
+  it('renderWorkflowInstruction 换掉占位符；没给的参数整行省略（可选参数的标准语义）', () => {
+    const NL = String.fromCharCode(10)
+    expect(
+      renderWorkflowInstruction('## 使用「X」工作流。' + NL + '- 标题: {{title}}' + NL + '- 类型: {{kind}}', { title: '极限' }),
+    ).toBe('## 使用「X」工作流。' + NL + '- 标题: 极限')
     expect(renderWorkflowInstruction('没有占位符', undefined)).toBe('没有占位符')
     expect(renderWorkflowInstruction('{{kind}}', { kind: 'quiz' })).toBe('quiz')
+    // 参数值里就算真有双大括号也不会被误当成占位符剔掉（判据是「参数表里没有的」占位符）
+    const braces = 'a' + '{{x}}' + 'b'
+    expect(renderWorkflowInstruction('代码：{{code}}', { code: braces })).toContain('{{x}}')
   })
 })
 
@@ -390,11 +408,11 @@ describe('思考档位（三态配置）', () => {
     expect(teach.promptModule).toBe('teach-method doc-html')
     expect(workflowModules(teach).map((m) => m.key)).toEqual(['teach-method', 'doc-html'])
     const goal = rows.find((r) => r.id === 'goal-outline')!
-    expect(goal.promptModule).toBe('doc-html')
-    expect(workflowModules(goal).map((m) => m.key)).toEqual(['doc-html'])
-    // 其余内置条目照旧：没配 promptModule 也没有 prompt 的就是空（「了解」「修复函数图像」）
+    expect(goal.promptModule).toBe('goal-outline doc-html')
+    expect(workflowModules(goal).map((m) => m.key)).toEqual(['goal-outline', 'doc-html'])
+    // 每条工作流的规程都在自己那份模块里（「了解」的注解写法、修复图像的验收标准）
     const explain = rows.find((r) => r.id === 'explain')!
-    expect(workflowModules(explain)).toEqual([])
+    expect(workflowModules(explain).map((m) => m.key)).toEqual(['explain'])
     // 「生成大纲」「前置知识大纲」带大纲编写规程（outline-method）
     const outline = rows.find((r) => r.id === 'outline')!
     expect(workflowModules(outline).map((m) => m.key)).toEqual(['outline-method'])

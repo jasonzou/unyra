@@ -71,7 +71,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onOpenSettings()
       return
     }
-    agent.runWorkflow('browser-use', { nodeId: nid })
+    agent.runWorkflow('browser-use', { nodeId: nid, params: { target: nid } })
   }, [activeGoal, activeNodeId, agent, getLatest, hasKey, onToast, onOpenSettings, providerName])
 
   /**
@@ -95,10 +95,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     setCreating(false)
     // 交付边界随指令钉一遍：这是「往目标文档下面出一份卷」的轮次，不是建树。
     // 画布上有空壳时 api.node.create 会原位复用（同 id 吸收），没有就现建——两条路都是它。
-    agent.runWorkflow('exam', {
-      nodeId: target.id,
-      hint: '【本轮交付边界】目标文档 uuid: ' + target.id + '。交付物只有它下面这一份试卷：api.node.create({ kind: "exam", under: 该uuid }) 建卷（已有空壳会被原位复用）后 editContent 落题；不要创建任何别的节点，也不要动教学文档与大纲——那是「开讲」与「生成大纲」流程的事。',
-    })
+    agent.runWorkflow('exam', { nodeId: target.id, params: { target: target.id } })
   }
 
   /**
@@ -165,12 +162,9 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     const shellUuid = shellName
       ? superdocs.find((d) => d.name === shellName)?.id
       : (superdocs.find((d) => !d.html.trim())?.id ?? undefined)
-    const shellHint = shellUuid
-      ? `节点上已放了一份空超级文档（uuid ${shellUuid}）——本轮就写它：const lab = await api.node.get("${shellUuid}")；await lab.editContent({ html })，不要另建一份。`
-      : ''
     agent.runWorkflow('superlab', {
       nodeId: target.id,
-      hint: '【本轮交付边界】目标文档 uuid: ' + target.id + '。交付物只有这一份超级文档（under 该 uuid）；不要创建任何别的节点，也不要动教学文档与大纲。' + shellHint,
+      params: { target: target.id, ...(shellUuid ? { shell: shellUuid } : {}) },
     })
     onToast(t('已启动超级实验室，导师马上会问你想做什么'))
   }
@@ -189,7 +183,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onOpenSettings()
       return
     }
-    agent.runWorkflow('outline', { nodeId: target.id })
+    agent.runWorkflow('outline', { nodeId: target.id, params: { target: target.id } })
     onToast(t('已请导师规划「{0}」的大纲，大纲页会随写入更新', target.title))
   }
 
@@ -206,7 +200,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onOpenSettings()
       return
     }
-    agent.runWorkflow('prereq-outline', { nodeId: target.id })
+    agent.runWorkflow('prereq-outline', { nodeId: target.id, params: { target: target.id } })
     onToast(t('已请导师规划「{0}」的前置知识大纲，大纲页会随写入更新', target.title))
   }
 
@@ -239,7 +233,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       }
       const sent = agent.runWorkflow('code-compile', {
         nodeId: target.id,
-        params: { language: req.languageId ?? '未标注', key: req.key, code: req.code },
+        params: { target: target.id, language: req.languageId ?? '未标注', key: req.key, code: req.code },
       })
       if (!sent) {
         // 对话还没就绪（没有会话/目标）：这一轮根本发不出去，菜单不该空转

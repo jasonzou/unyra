@@ -150,6 +150,7 @@ export function useConceptActions(deps: ConceptActionsDeps) {
     agent.runWorkflow('explain', {
       nodeId,
       params: {
+        target: nodeId,
         term,
         occurrence: occurrence ?? 0,
         // 选段给导师一份：省掉它为了看一眼这个词先读整篇的那一步（序号与位置照旧以 term 为准）
