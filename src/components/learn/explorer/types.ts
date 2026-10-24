@@ -71,6 +71,8 @@ export interface ExamActions {
   onGrade: (nodeId: string) => void
   /** 删除一份试卷（两档确认由上层弹） */
   onDelete: (exam: Exam) => void
+  /** 打开一次作答的只读副本页签（卷子 + 作答 + 判分 + 错题讲解） */
+  onOpenRecord: (nodeId: string, examId: string, attemptId: string) => void
   /** 正在考的那一份试卷 id：那一行只显示「回到考试」 */
   liveExamId: string | null
   /** 导师正在判分 / 讲解：那颗按钮显示进度并禁用 */

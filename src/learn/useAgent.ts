@@ -382,6 +382,8 @@ export function useAgent(opts: {
        * 标记的自动跳过，同一上下文绝不重复注入。
        */
       modules?: PromptModule[],
+      /** 工作流启动实参（runWorkflow 的 params）：随隐藏指令落库，分界条展开时展示 */
+      wfParams?: Record<string, string | number>,
     ) => {
       const trimmed = text.trim()
       // 与 runTurn 同一道门：纯图片/纯文件（无字）放行——图片转存与消息组装都在后面
@@ -448,6 +450,8 @@ export function useAgent(opts: {
          * 两者从前混在一条分界条上，几条一起注入时那行字会被挤爆（见 agent/messageKind）。
          */
         ...(hidden && mark ? { mark, inject: 'instruction' as const } : {}),
+        // 工作流的启动实参：界面的分界条展开时画参数行、并高亮指令里对应的文字
+        ...(hidden && mark && wfParams ? { wfParams } : {}),
         // 只带调用方给的当次参数（选段位置 / 画布意图）；节点背景不再自动注入（见上面的说明）
         ...(extraContext ? { context: extraContext } : {}),
         ...(quote ? { quote } : {}),
@@ -1145,6 +1149,8 @@ export function useAgent(opts: {
       effortOverride?: ReasoningEffort,
       /** 工作流触发时随指令注入的提示词模块（见 runTurnUnchecked 同名参数） */
       modules?: PromptModule[],
+      /** 工作流启动实参（见 runTurnUnchecked 同名参数） */
+      wfParams?: Record<string, string | number>,
     ) => {
       /*
        * 空文本 + 带附件（纯图片 / 纯文件）也是合法消息：气泡（MessageBubble 只在
@@ -1165,7 +1171,7 @@ export function useAgent(opts: {
       chain.set(target.conversationId, ticket)
       try {
         if (prev) await prev
-        await runTurnUnchecked(target, text, hidden, context, quote, pending, files, mark, isCompactTurn, effortOverride, modules)
+        await runTurnUnchecked(target, text, hidden, context, quote, pending, files, mark, isCompactTurn, effortOverride, modules, wfParams)
       } finally {
         release()
         if (chain.get(target.conversationId) === ticket) chain.delete(target.conversationId)
@@ -1566,6 +1572,8 @@ export function useAgent(opts: {
         // 触发时随指令注入的提示词模块（内置 promptModule / 登记的 prompt；
         // 同一上下文只注一次，重复触发靠活消息上的标记去重）
         workflowModules(found),
+        // 启动实参随指令落库：分界条展开时画参数行、高亮指令里对应的文字
+        opts?.params,
       )
     },
     [nodeId, conversationId, getLatest, runTurn],

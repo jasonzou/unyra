@@ -158,10 +158,13 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       onOpenSettings()
       return
     }
-    // 画布拖出的壳（实体先行）：写进这份壳、不另建——卡的位置就是用户放卡的位置
+    // 指令从节点派生就要带上节点信息：填内容是**在这份超级文档上填**，不是再建一份。
+    // 壳的来源两条：画布空壳卡指名道姓（shellName）；文档菜单没指名时，目标下已有的
+    // 那份空壳自动顶上（有内容的绝不顶——那是要覆盖交付物的意思）。
+    const superdocs = nodeById(getLatest(), target.id)?.superdocs ?? []
     const shellUuid = shellName
-      ? (nodeById(getLatest(), target.id)?.superdocs ?? []).find((d) => d.name === shellName)?.id
-      : undefined
+      ? superdocs.find((d) => d.name === shellName)?.id
+      : (superdocs.find((d) => !d.html.trim())?.id ?? undefined)
     const shellHint = shellUuid
       ? `节点上已放了一份空超级文档（uuid ${shellUuid}）——本轮就写它：const lab = await api.node.get("${shellUuid}")；await lab.editContent({ html })，不要另建一份。`
       : ''

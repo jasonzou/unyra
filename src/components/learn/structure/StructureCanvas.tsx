@@ -101,8 +101,6 @@ export interface StructureCanvasProps {
   onDisconnect?: (fromUuid: string, toUuid: string) => ChannelResult
   /** 右键「设为入口」：把一份没有上级的文档立为本图的入口（目标的根；全图有且只有一个） */
   onSetEntry?: (docUuid: string) => ChannelResult
-  /** 游离笔记的内容编辑（实体在池子里，编辑走节点对象的 editContent） */
-  onEditFreeNote?: (uuid: string, text: string) => ChannelResult
   /** 点大纲目标项：挂一份带标题的空文档（统一通道建实体），返回新文档 uuid */
   onCreateChildDoc?: (ownerNodeId: string, title: string) => string | null
   /** 改笔记名（宿主走笔记节点的 editContent，页签跟着改） */
@@ -185,7 +183,6 @@ export const StructureCanvas = memo(function StructureCanvas({
   onConnect,
   onDisconnect,
   onSetEntry,
-  onEditFreeNote,
   onCreateChildDoc,
   onRenameNote,
   onAddOutlineEntry,
@@ -221,8 +218,6 @@ export const StructureCanvas = memo(function StructureCanvas({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   /** 选中的连线（点线选中，Delete 断开）。卡片与连线同时只选一个 */
   const [selectedEdge, setSelectedEdge] = useState<CanvasEdge | null>(null)
-  /** 游离笔记的就地编辑：点卡打开，保存走统一通道（editContent），不需要先绑定 */
-  const [freeNote, setFreeNote] = useState<{ uuid: string; name: string; text: string } | null>(null)
   /**
    * 选框多选：拉框圈中的那批卡。与 selectedId 互斥——点任何一张卡就回到单选。
    * 多选目前只服务一件事：Delete 一把删（逐个走统一通道）。
@@ -639,20 +634,15 @@ export const StructureCanvas = memo(function StructureCanvas({
         return
       }
       const loc = locateUuid(store, card.uuid)
-      // 游离笔记：内容编辑不受绑定影响——就地打开编辑面板（绑到文档后才有页签形态）
+      // 游离笔记与绑定的笔记**用起来没有任何区别**：同样开笔记页签（页签的实体解析
+      // 认得出游离的，编辑保存走池子）。其余游离实体（超级文档 / 试卷）的页签形态
+      // 依赖宿主，先给一句指路。
       if (card.kind === 'note' && loc?.kind === 'note' && !loc.docId) {
-        for (const pool of Object.values(store.detached ?? {})) {
-          const note = pool.notes.find((n) => n.id === card.uuid)
-          if (note) {
-            setFreeNote({ uuid: note.id, name: note.name, text: note.content })
-            return
-          }
-        }
+        docs.onOpenNote(card.uuid, card.title)
         return
       }
-      // 其余游离实体（超级文档 / 试卷）：内容都在，但没有页签落点——绑到文档后就能打开
-      if (loc && (loc.kind === 'superdoc' || loc.kind === 'exam' || loc.kind === 'note') && !loc.docId) {
-        onToast?.(t('这份{0}还没绑到文档上：拖线连到某张文档卡（或把它拖到文档卡上）之后就能打开', card.kind === 'note' ? t('笔记') : card.kind === 'exam' ? t('试卷') : t('超级文档')))
+      if (loc && (loc.kind === 'superdoc' || loc.kind === 'exam') && !loc.docId) {
+        onToast?.(t('这份{0}还没绑到文档上：拖线连到某张文档卡（或把它拖到文档卡上）之后就能打开', card.kind === 'exam' ? t('试卷') : t('超级文档')))
         return
       }
       if (card.kind === 'note' && loc?.kind === 'note') {
@@ -1530,7 +1520,14 @@ export const StructureCanvas = memo(function StructureCanvas({
                   {card.attempts!.map((row) => (
                     <div
                       key={row.n}
-                      className="flex items-center gap-1.5 px-3 text-[11px] text-ink-soft"
+                      role="button"
+                      tabIndex={0}
+                      title={t('打开这一次考试的记录（卷子 + 作答 + 判分 + 错题讲解）')}
+                      onClick={() => {
+                        const exam = store.exams.find((e) => e.id === card.uuid)
+                        if (exam) exams.onOpenRecord(exam.nodeId, exam.id, row.attemptId)
+                      }}
+                      className="flex cursor-pointer items-center gap-1.5 px-3 text-[11px] text-ink-soft hover:bg-seal/[0.08]"
                       style={{ height: SLOT_ROW }}
                     >
                       <span className="shrink-0 text-ink-faint">第 {row.n} 次</span>
@@ -1657,54 +1654,6 @@ export const StructureCanvas = memo(function StructureCanvas({
               strokeWidth={1.5}
             />
           </svg>
-        </div>
-      )}
-
-      {/*
-        游离笔记的就地编辑：内容跟实体走，跟绑定无关——不需要先绑到哪份文档
-        就能写。保存走统一通道（节点的 editContent），Ctrl+Enter 顺手。
-      */}
-      {freeNote && (
-        <div className="fixed bottom-6 right-6 z-50 flex h-[380px] w-[460px] flex-col overflow-hidden rounded-xl border border-line bg-card/95 shadow-lg backdrop-blur">
-          <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-            <span className="rounded bg-emerald-500/15 px-1.5 py-[1px] text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
-              {t('笔记')}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">{freeNote.name}</span>
-            <span className="text-[10px] text-ink-faint">{t('游离 · 未绑定')}</span>
-            <button
-              type="button"
-              className="rounded px-1.5 py-0.5 text-[11px] text-ink-soft hover:bg-line/60"
-              onClick={() => setFreeNote(null)}
-            >
-              {t('关闭')}
-            </button>
-          </div>
-          <textarea
-            value={freeNote.text}
-            onChange={(e) => setFreeNote({ ...freeNote, text: e.target.value })}
-            onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                e.preventDefault()
-                if (onEditFreeNote) report(onEditFreeNote(freeNote.uuid, freeNote.text))
-              }
-            }}
-            spellCheck={false}
-            className="min-w-0 flex-1 resize-none bg-transparent p-3 text-[12.5px] leading-relaxed text-ink outline-none"
-            placeholder={t('这份笔记还没有绑到文档上——正文照常写，绑不绑随时由你')}
-          />
-          <div className="flex shrink-0 items-center justify-between border-t border-line px-3 py-2">
-            <span className="text-[10px] text-ink-faint">{t('Ctrl+Enter 保存')}</span>
-            <button
-              type="button"
-              className="bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
-              onClick={() => {
-                if (onEditFreeNote) report(onEditFreeNote(freeNote.uuid, freeNote.text))
-              }}
-            >
-              {t('保存')}
-            </button>
-          </div>
         </div>
       )}
 

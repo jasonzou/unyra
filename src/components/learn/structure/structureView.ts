@@ -66,7 +66,7 @@ function attemptRows(attempts: ExamAttempt[]): ExamAttemptRow[] {
   }
   return attempts.map((a, i) => {
     const score = a.status === 'graded' ? attemptScore(a) : null
-    return { n: i + 1, label: `${LABEL[a.status]}${score !== null ? ' · ' + score + ' 分' : ''}` }
+    return { n: i + 1, label: `${LABEL[a.status]}${score !== null ? ' · ' + score + ' 分' : ''}`, attemptId: a.id }
   })
 }
 
@@ -121,6 +121,8 @@ export interface ExamAttemptRow {
   /** 第几次（从 1 起） */
   n: number
   label: string
+  /** 那次作答的 id：点行打开只读副本页签用 */
+  attemptId: string
 }
 
 /** 一条派生连线（from → to，方向即读图方向） */

@@ -651,6 +651,9 @@ export function HiddenDivider({
   flash: boolean
   msgRefs: React.RefObject<Map<string, HTMLDivElement>>
 }) {
+  /** 展开的是哪一条工作流指令（相邻分界条融成一条，展开按消息各自记） */
+  const [openId, setOpenId] = useState<string | null>(null)
+  const openMsg = msgs.find((m) => m.id === openId) ?? null
   return (
     <div
       ref={(el) => {
@@ -659,28 +662,103 @@ export function HiddenDivider({
           else msgRefs.current.delete(m.id)
         }
       }}
-      className={'mb-3 flex items-start gap-2 rounded px-1 py-0.5 text-[11px] text-ink-faint' +
+      className={'mb-3 flex flex-col gap-1 rounded px-1 py-0.5 text-[11px] text-ink-faint' +
         (faded ? ' opacity-55' : '') +
         (flash ? ' moji-msg-flash' : '')}
     >
-      {/* mt-[7px]：让那截横线落在这一行文字的**垂直中线**上（11px 字、行高约 16px） */}
-      <span aria-hidden="true" className="mt-[7px] h-px min-w-4 flex-1 bg-line" />
-      <span className="flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-1">
-        {msgs.map((m, i) => {
-          const label = t(m.mark ?? '导师动作')
-          return (
-            <span key={m.id} className="flex min-w-0 items-center gap-2">
-              {i > 0 && <span aria-hidden="true" className="h-2.5 w-px shrink-0 bg-line-strong" />}
-              <span className="max-w-[16rem] truncate" title={label}>
-                {label}
+      <div className="flex items-start gap-2">
+        {/* mt-[7px]：让那截横线落在这一行文字的**垂直中线**上（11px 字、行高约 16px） */}
+        <span aria-hidden="true" className="mt-[7px] h-px min-w-4 flex-1 bg-line" />
+        <span className="flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-1">
+          {msgs.map((m, i) => {
+            const label = t(m.mark ?? '导师动作')
+            return (
+              <span key={m.id} className="flex min-w-0 items-center gap-2">
+                {i > 0 && <span aria-hidden="true" className="h-2.5 w-px shrink-0 bg-line-strong" />}
+                <button
+                  type="button"
+                  onClick={() => setOpenId(openId === m.id ? null : m.id)}
+                  title={t('点开看这次工作流的参数与完整指令')}
+                  className={`flex min-w-0 max-w-[16rem] items-center gap-1 truncate transition hover:text-ink-soft ${
+                    openId === m.id ? 'text-ink' : ''
+                  }`}
+                >
+                  {openId === m.id ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
+                  <span className="truncate">{label}</span>
+                </button>
               </span>
-            </span>
-          )
-        })}
-      </span>
-      <span aria-hidden="true" className="mt-[7px] h-px min-w-4 flex-1 bg-line" />
+            )
+          })}
+        </span>
+        <span aria-hidden="true" className="mt-[7px] h-px min-w-4 flex-1 bg-line" />
+      </div>
+      {openMsg && <WorkflowDetail msg={openMsg} />}
     </div>
   )
+}
+
+/**
+ * 展开的「参数行 + 完整指令」：第一行列出这次工作流的启动实参（key = value 的小片），
+ * 第二行是指令全文——指令里与实参对应的文字高亮，参数从哪来、落到了指令的哪句话上
+ * 一眼对上。没有实参的工作流只有指令行。
+ */
+function WorkflowDetail({ msg }: { msg: ConversationMessage }) {
+  const instruction = msg.parts
+    .filter((p): p is Extract<AgentPart, { type: 'text' }> => p.type === 'text')
+    .map((p) => p.text)
+    .join('')
+  const params = Object.entries(msg.wfParams ?? {})
+  const segments = highlightParams(instruction, params)
+  return (
+    <div className="rounded border border-line bg-card/70 px-3 py-2">
+      {params.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="text-ink-faint">{t('参数')}</span>
+          {params.map(([key, value]) => (
+            <span key={key} className="rounded bg-seal/10 px-1.5 py-[1px] text-seal-deep">
+              {key} = {String(value)}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-ink-soft">
+        {segments.map((seg, i) =>
+          seg.hit ? (
+            <mark key={i} className="rounded bg-seal/20 px-0.5 text-seal-deep">
+              {seg.text}
+            </mark>
+          ) : (
+            <span key={i}>{seg.text}</span>
+          ),
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** 把指令里与参数值相同的片段标出来；值太短（一两个字符）不高亮——到处都是误伤 */
+function highlightParams(text: string, params: Array<[string, string | number]>): Array<{ text: string; hit: boolean }> {
+  const values = params
+    .map(([, v]) => String(v))
+    .filter((v) => v.trim().length >= 2)
+    .sort((a, b) => b.length - a.length)
+  if (!values.length) return [{ text, hit: false }]
+  const out: Array<{ text: string; hit: boolean }> = [{ text, hit: false }]
+  for (const v of values) {
+    for (let i = out.length - 1; i >= 0; i--) {
+      const seg = out[i]
+      if (seg.hit) continue
+      const at = seg.text.indexOf(v)
+      if (at < 0) continue
+      const pieces = [
+        { text: seg.text.slice(0, at), hit: false },
+        { text: v, hit: true },
+        { text: seg.text.slice(at + v.length), hit: false },
+      ].filter((x) => x.text)
+      out.splice(i, 1, ...pieces)
+    }
+  }
+  return out
 }
 
 /**

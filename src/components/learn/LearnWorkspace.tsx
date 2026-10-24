@@ -3833,16 +3833,6 @@ export default function LearnWorkspace({
     [getLatest, set],
   )
 
-  /** 游离笔记的就地编辑：实体在池子里，编辑走节点对象的 editContent（内容与绑定无关） */
-  const editFreeNote = useCallback(
-    (uuid: string, text: string) => {
-      const n = makeNodeService().get(uuid)
-      if (!n || n.kind !== 'note') return { error: t('这份笔记已经不在了') }
-      return n.editContent({ text })
-    },
-    [makeNodeService],
-  )
-
   /** 画布统一通道（一个稳定对象：OutlinePane 按 referential equality 冻结比较） */
   const canvasChannel = useMemo(
     () => ({
@@ -3851,14 +3841,13 @@ export default function LearnWorkspace({
       onConnect: canvasConnect,
       onDisconnect: canvasDisconnect,
       onSetEntry: canvasSetEntry,
-      onEditFreeNote: editFreeNote,
       onCreateChildDoc: createChildDoc,
       onRenameNote: canvasRenameNote,
       onAddOutlineEntry: canvasAddOutlineEntry,
       onGenerateDoc: generateDocForNode,
       onGenerateOutline: (docUuid: string) => startPrereqOutline(docUuid),
     }),
-    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, canvasSetEntry, editFreeNote, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline],
+    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, canvasSetEntry, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline],
   )
 
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
@@ -5121,7 +5110,8 @@ export default function LearnWorkspace({
       onNewNote: (nodeId) => createNodeNote(nodeId),
       onNewProject: (nodeId) => newProject(nodeId),
       onNewExam: (nodeId) => newExam(nodeId),
-      onNewSuperDoc: (nodeId) => startSuperLab(nodeId),
+      // 壳名必须带到：画布空壳卡上的「生成」说的是「就写这一份」，丢了它导师会另建一份（两份超级文档的元凶）
+      onNewSuperDoc: (nodeId, shellName) => startSuperLab(nodeId, shellName),
       onOpenNote: (nodeId, name) => openTab({ kind: 'note', nodeId, note: name }),
       onRenameNote: (nodeId, from, to) => renameNodeNote(nodeId, from, to),
       onDeleteNote: (nodeId, name) => setPendingNoteDelete({ nodeId, name }),
@@ -5151,6 +5141,7 @@ export default function LearnWorkspace({
         exam.openExam(examId)
       },
       onGrade: (nodeId) => requestGrading(nodeId),
+      onOpenRecord: (nodeId, examId, attemptId) => openExamCopy(nodeId, examId, attemptId),
       onDelete: (target) => {
         setPendingExamDelete(target)
         setExamDeleteStage(examAttempted(target) ? 'warn' : 'final')
@@ -5158,7 +5149,7 @@ export default function LearnWorkspace({
       liveExamId: exam.live?.examId ?? null,
       grading,
     }),
-    [exam.openExam, exam.reveal, exam.live, selectNode, onToast, requestGrading, grading],
+    [exam.openExam, exam.reveal, exam.live, selectNode, onToast, requestGrading, grading, openExamCopy],
   )
 
   const explorerState = useMemo<NodeStateActions>(

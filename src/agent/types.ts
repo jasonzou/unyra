@@ -157,6 +157,12 @@ export interface ConversationMessage {
    */
   mark?: string
   /**
+   * 工作流启动时的**实参**（runWorkflow 的 params：如伪编译的 language/key/code）。
+   * 界面的工作流分界条展开时据此画「参数行」，并把指令里对应的实参高亮出来。
+   * 只随隐藏指令落库；聊天轮没有它。
+   */
+  wfParams?: Record<string, string | number>
+  /**
    * 隐藏消息的**注入类别**——决定它在对话流里怎么出现（判据见 agent/messageKind）。
    *
    * - `'instruction'`：**工作流指令**。触发一条工作流时整段进入上下文的那条 user 消息
