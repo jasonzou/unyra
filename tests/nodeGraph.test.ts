@@ -525,6 +525,24 @@ describe('固定接口：ports 派生 / portKey 认领 / getPortData 拉取', ()
     expect(svc.get('uuid' in d2 ? d2.uuid : '')!.connect(outline, 'up', 'jixian')).toMatchObject({ ok: true })
   })
 
+  it('带 portKey 重连已连着的对 = 改认领（换口）；不带 portKey 照旧拒绝', () => {
+    const h = harness()
+    const svc = h.service()
+    const r = svc.create({ kind: 'doc', title: '第一份', under: 'r', portKey: 'jixian' })
+    const doc = svc.get('uuid' in r ? r.uuid : '')
+    const outline = svc.get(outlineUuid('r'))
+    expect(doc && outline).toBeTruthy()
+    // 重写大纲：两条目标项（key 由标题生成，中文原样保留）
+    expect(outline!.editContent({ intro: '', children: [{ title: '极限', summary: '' }, { title: '连续', summary: '' }] })).toMatchObject({ ok: true })
+    // 换口：从「极限」改认领「连续」
+    expect(doc!.connect(outline, 'up', '连续')).toMatchObject({ ok: true, note: expect.stringContaining('改认领') })
+    expect(doc!.relations).toContainEqual({ id: outlineUuid('r'), type: 'up', portKey: '连续' })
+    expect(h.store.edges.find((e) => e.from === 'r' && e.to === doc!.uuid)?.portKey).toBe('连续')
+    // 同口重连 = 无变化；不带 portKey 重连 = 照旧拒绝
+    expect(doc!.connect(outline, 'up', '连续')).toMatchObject({ ok: true, note: expect.stringContaining('没有变化') })
+    expect(doc!.connect(outline, 'up')).toMatchObject({ error: expect.stringContaining('已经连着') })
+  })
+
   it('大纲重写后 ports 跟着变；认领的 key 没了就静默缺席（内容不因关系损坏）', () => {
     const h = harness()
     const svc = h.service()

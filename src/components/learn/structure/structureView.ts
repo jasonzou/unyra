@@ -220,13 +220,23 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     const node = nodeById(store, docId)
     if (!node) throw new Error('deriveCanvas: 节点已不存在（' + docId + '）')
     const body = node.docs?.teaching.trim() ?? ''
+    /*
+     * 认领了接口的文档：自己还没起正经标题（创建时落下的占位名「新文档 / 新文档 2」）
+     * 就显示接口的 label——它是什么由它认领的那条目标项说了算（与节点对象的 getPortData
+     * 同一套口径：key 到宿主大纲的目标项里对号）。断线 = 认领消失 = 自动回落占位名。
+     */
+    const claimEdge = store.edges.find((e) => e.to === node.id && e.portKey)
+    const portLabel = claimEdge
+      ? nodeById(store, claimEdge.from)?.outline?.children.find((c) => c.key === claimEdge.portKey)?.title ?? ''
+      : ''
+    const title = (/^新文档( \d+)?$/.test(node.title) && portLabel ? portLabel : node.title)
     const excerpt = body ? plainText(body).slice(0, 120) || body.replace(/\s+/g, ' ').slice(0, 120) : ''
     const isRoot = docId === goal.rootNodeId
     const p: Pending = {
       card: {
         uuid: node.id,
         kind: 'doc',
-        title: node.title,
+        title,
         subtitle: body ? `${body.length} 字` : '还没有正文',
         ...(excerpt ? { excerpt } : {}),
         ...(body ? {} : { blank: true }),

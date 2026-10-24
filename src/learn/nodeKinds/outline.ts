@@ -113,7 +113,21 @@ export class OutlineGNode extends GNode {
   }
 
   protected link(down: GNode, portKey?: string): NodeResult {
-    const r = addEdge(this.ctx.store(), this.docId, down.uuid, portKey)
+    const s = this.ctx.store()
+    const existing = s.edges.find((e) => e.from === this.docId && e.to === down.uuid)
+    if (existing) {
+      // 这条边已经在了：带着 portKey 来 = 改认领（换一条目标项；一对一照旧查占用）
+      if (!portKey) return { error: '「' + down.title + '」已经挂在这层之下了（要改认领哪条目标项，connect 时带上它的 key）' }
+      if (existing.portKey === portKey) return { ok: true, note: '「' + down.title + '」认领的就是这条目标项，没有变化' }
+      const taken = s.edges.find((e) => e.from === this.docId && e.portKey === portKey && e.to !== down.uuid)
+      if (taken) {
+        const other = this.ctx.objectOf(taken.to)
+        return { error: '接口「' + (this.ports.find((p) => p.key === portKey)?.label ?? portKey) + '」已经被「' + (other?.title ?? taken.to) + '」认领了——一个接口只认领一个下游' }
+      }
+      this.ctx.commit({ ...s, edges: s.edges.map((e) => (e === existing ? { ...e, portKey } : e)) })
+      return { ok: true, note: '「' + down.title + '」改认领目标项「' + (this.ports.find((p) => p.key === portKey)?.label ?? portKey) + '」' }
+    }
+    const r = addEdge(s, this.docId, down.uuid, portKey)
     if (!r.added) {
       return { error: r.reason ?? '这条边没能挂上：会成环（「' + down.title + '」已经在「' + this.title + '」的上游里）' }
     }

@@ -159,9 +159,11 @@ export abstract class GNode {
       return { error: 'connect 的第一个参数要是一个节点对象：const t = await api.node.get(uuid) 取到再连' }
     }
     if (target.uuid === this.uuid) return { error: '节点不能和自己连接' }
-    if (this.relations.some((r) => r.id === target.uuid)) {
+    const related = this.relations.some((r) => r.id === target.uuid)
+    if (related && (portKey === undefined || portKey === null || portKey === '')) {
       return { error: '「' + this.title + '」和「' + target.title + '」已经连着了' }
     }
+    // 带着认领重连一对已连着的节点 = **改认领**：继续走双边校验，由上游 link 更新那条边
     const t = type === 'up' ? 'up' : type === 'down' ? 'down' : ''
     if (!t) return { error: 'connect 的第二个参数是接入身份：connect(节点, "down") 表示对方作为我的下游接入（"up" 则为上游）' }
     const down = t === 'down' ? target : this

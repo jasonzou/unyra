@@ -241,3 +241,42 @@ describe('连线几何（与画布共用一份口径）', () => {
     expect(CARD_H).toBeGreaterThan(0)
   })
 })
+
+describe('认领接口的文档卡：没有正经标题就显示接口的 label', () => {
+  it('占位名「新文档」+ 认领 → 卡片标题 = 目标项标题；断线（无认领）回落占位名', () => {
+    const base = makeStore()
+    const r = base.nodes.find((n) => n.id === 'r')!
+    const store: LearnStore = {
+      ...base,
+      nodes: [
+        { ...r, outline: { intro: '', children: [{ key: 'jixian', title: '极限', summary: '' }], updatedAt: 1 } },
+        {
+          id: 'free1',
+          title: '新文档',
+          key: '新文档',
+          description: '',
+          docs: { teaching: '' },
+          notes: [],
+          annotations: [],
+          status: 'learning',
+          origin: 'user',
+          goalId: 'g1',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      edges: [...base.edges, { from: 'r', to: 'free1', createdAt: 1, portKey: 'jixian' }],
+    }
+    const view = deriveCanvas(store, 'g1', undefined)
+    expect(view.cards.find((c) => c.uuid === 'free1')?.title).toBe('极限')
+    // 断线：认领消失，回落占位名
+    const severed: LearnStore = { ...store, edges: store.edges.filter((e) => e.to !== 'free1') }
+    expect(deriveCanvas(severed, 'g1', undefined).cards.find((c) => c.uuid === 'free1')?.title).toBe('新文档')
+    // 有正经标题的文档不回落（标题是自己的）
+    const named: LearnStore = {
+      ...store,
+      nodes: store.nodes.map((n) => (n.id === 'free1' ? { ...n, title: '我的笔记页' } : n)),
+    }
+    expect(deriveCanvas(named, 'g1', undefined).cards.find((c) => c.uuid === 'free1')?.title).toBe('我的笔记页')
+  })
+})

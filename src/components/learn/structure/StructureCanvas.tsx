@@ -1447,14 +1447,16 @@ export const StructureCanvas = memo(function StructureCanvas({
                         {slot.title}
                       </span>
                       {/*
-                        圆点放在**这一行里面**：垂直居中由 flex 自动保证。
-                        水平方向 right: -0.5px 再平移半颗：圆心正好压在 1px 边框的**中线**上。
+                        接口点：**菱形**（旋转 45° 的小方块）——圆形留给普通连线把手，
+                        一眼分得清「这是在认领某个接口」。认领了=实心，空着=空心。
+                        位置规矩不变：放在这一行里面（垂直居中 flex 保证），圆心压在
+                        1px 边框的中线上（right: -0.5px 再平移半颗）。
                       */}
                       <span
                         data-slot-dot={slot.key}
                         data-slot-dot-parent={card.uuid}
-                        title={slot.childId ? t('已挂文档：拖出去可换一份') : t('从圆点拖出去挂一份文档')}
-                        className="absolute top-1/2 -right-[0.5px] h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 cursor-crosshair rounded-full border-2"
+                        title={slot.childId ? t('已挂文档：拖出去可换一份') : t('从接口拖出去挂一份文档（会认领这条目标项）')}
+                        className="absolute top-1/2 -right-[0.5px] h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 rotate-45 cursor-crosshair rounded-[2px] border-2"
                         style={{
                           borderColor: SLOT_ACCENT,
                           background: slot.childId ? SLOT_ACCENT : 'var(--color-card, #fff)',
@@ -1561,13 +1563,14 @@ export const StructureCanvas = memo(function StructureCanvas({
               )}
 
               {/*
-                接口（连线进出的小圆点）：**统一样式**——实心印章色、卡色描边、不透明。
-                圆心压在 1px 边框的**中线**上：绝对定位的参照是 padding box，边框中线在
-                参照缘外 0.5px。高度与连线锚点同一个值。
-                出线接口（右）只长在有出线能力的卡上：doc / entry / outline——大纲的出线
-                走目标项圆点，挂件没有下游。
+                普通连线把手：**圆形**实心印章色、卡色描边、不透明——与目标项的菱形接口点
+                区分开（圆=普通连接不带认领，菱=认领某个接口）。圆心压在 1px 边框的
+                **中线**上：绝对定位的参照是 padding box，边框中线在参照缘外 0.5px。
+                高度与连线锚点同一个值。
+                出线把手（右）只长在 doc 上：大纲的出线全走目标项的菱形口（从口上拖出去
+                才会认领），挂件与入口没有出线。
               */}
-              {card.kind !== 'entry' && (
+              {card.kind === 'doc' && (
                 <div
                   data-link-handle={card.uuid}
                   title={t('拖出去连到另一个节点')}
