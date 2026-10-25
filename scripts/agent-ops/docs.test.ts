@@ -202,6 +202,10 @@ export async function apiNameTests() {
     'node.create': "{ kind: 'note', title: '探针笔记', under: '微积分' }",
     'node.delete': "'探针笔记'",  // 删上一行建出来的那份笔记（找不到也回执，同样证明 api 在）
     'node.invoke': "'微积分', 'help', []",
+    // 写正文前的一页纸与收尾仪式（行为用例在 tests/agentApiLoopSave.test.ts；
+    // finish 不带 content/state/memory/delivery = 各步跳过，只证明注册与守卫路径在）
+    'node.brief': "'微积分'",
+    'node.finish': "'微积分', { open: false }",
     // 持久化函数（创建/列表/删除/调用）
     'method.list': '',
     'method.create': "{ name: '探针函数', code: '((api)=>{ return 1 })' }",
@@ -347,6 +351,8 @@ export async function apiNameTests() {
     'memory.create': "{ type: 'work', title: '探针记忆二', content: '探针：再记一条' }",
     'memory.update': "'probe-memory', { content: '探针：改过的记忆' }",
     'memory.delete': "'probe-memory'",
+    // 一页纸记忆（行为用例在 tests/agentApiLoopSave.test.ts）
+    'memory.context': "{ scope: 'work' }",
     // 日程：同样先种一条 id 固定的（见 seedSchedule），create 之外的几条才有真对象可改
     'schedule.list': '',
     'schedule.create': "{ title: '探针新日程', time: '23:30', remindBefore: 5 }",

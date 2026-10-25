@@ -236,8 +236,10 @@ const pkgVersion = (JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'ut
 
 // 版本号格式是发布约定的一部分（release.mjs 发布前还有同样一道门禁，这里对着当前仓库核一眼）
 ok(
-  /^\d+\.\d+\.\d+$/.test(pkgVersion) || /^\d+\.\d+\.\d+-beta\.\d+$/.test(pkgVersion),
-  'package.json 的版本号符合发布约定（正式版 X.Y.Z / 尝鲜版 X.Y.Z-beta.N）',
+  /^\d+\.\d+\.\d+$/.test(pkgVersion) ||
+    /^\d+\.\d+\.\d+-beta\.\d+$/.test(pkgVersion) ||
+    /^\d+\.\d+\.\d+-alpha(\.\d+)?$/.test(pkgVersion),
+  'package.json 的版本号符合发布约定（正式版 X.Y.Z / 尝鲜版 X.Y.Z-beta.N / 内测版 X.Y.Z-alpha）',
   pkgVersion,
 )
 
