@@ -8,15 +8,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Archive,
-  Brain,
   ChevronRight,
-  FlaskConical,
-  Globe,
   MessagesSquare,
   Paperclip,
   Settings,
   Trash2,
-  Zap,
 } from 'lucide-react'
 import type { Conversation } from '../../../agent/types'
 import { NewChatIcon } from '../../icons'
@@ -28,7 +24,6 @@ export interface PlusMenuArgs {
   conversations: Conversation[]
   conversation: Conversation | null
   running: boolean
-  hasKey: boolean
   compacting: boolean
   /** 自动压缩阈值（0~1），菜单项上如实说明「到多少会自己压」 */
   compactThreshold: number
@@ -48,16 +43,10 @@ export interface PlusMenuArgs {
   onNewConversation: () => void
   onSelectConversation: (id: string) => void
   onDeleteConversation: (id: string) => void
-  /** 更多 → 工作流 → 超级实验室 */
-  onSuperLab: () => void
-  /** 更多 → 工作流 → 浏览器操作：替用户驱动内置浏览器完成任务 */
-  onBrowserUse: () => void
   /** 更多 → 压缩上下文：把前面的对话折成一份摘要 */
   onCompact: () => void
   /** 更多 → 超级导师设置：打开超级导师自己的设置页签（与全局设置不是同一个） */
   onOpenAgentSettings: () => void
-  /** 更多 → 记忆：打开记忆管理页签（长期 + 工作两类，见 learn/memory） */
-  onOpenMinds: () => void
   /** 自由聊天（固定页签）：一级菜单只留 新建对话/对话历史/文件 三件 */
   free?: boolean
   /** 更多 → 文件：走系统对话框挑附件（由 useComposer 提供） */
@@ -65,7 +54,7 @@ export interface PlusMenuArgs {
 }
 
 export interface PlusMenuApi {
-  /** 现在停在哪一级：null = 一级；二级只有「工作流」与「对话历史」两项 */
+  /** 现在停在哪一级：null = 一级；二级只有「对话历史」一项 */
   menuSub: MenuSub
   /** 逻辑上的展开状态（那颗「+」的 aria-expanded 与高亮都看它） */
   menuOpen: boolean
@@ -96,7 +85,6 @@ export function usePlusMenu({
   conversations,
   conversation,
   running,
-  hasKey,
   compacting,
   compactThreshold,
   menuOpen,
@@ -108,15 +96,12 @@ export function usePlusMenu({
   onNewConversation,
   onSelectConversation,
   onDeleteConversation,
-  onSuperLab,
-  onBrowserUse,
   onCompact,
   onOpenAgentSettings,
-  onOpenMinds,
   free,
   onAttach,
 }: PlusMenuArgs): PlusMenuApi {
-  /** 现在停在哪一级：null = 一级；二级只有「工作流」与「对话历史」两项 */
+  /** 现在停在哪一级：null = 一级；二级只有「对话历史」一项 */
   const [menuSub, setMenuSub] = useState<MenuSub>(null)
   /** 正在滑出的那一层，以及滑动方向（与 ModelPicker 的换层是同一套做法） */
   const [menuLeaving, setMenuLeaving] = useState<{ sub: MenuSub; dir: 1 | -1 } | null>(null)
@@ -132,10 +117,11 @@ export function usePlusMenu({
    * 「+」菜单里的项目（一级）。
    *
    * 做成一张表而不是写死一串按钮：加一项就是往数组里加一条——渲染、换层、关闭
-   * 的逻辑都不用动。带 sub 的那两项**不执行动作，往下一层走**（见 goMenu）。
+   * 的逻辑都不用动。带 sub 的那项**不执行动作，往下一层走**（见 goMenu）。
    *
-   * 「上下文」相关的只留「压缩上下文」在一级：它是随时可能顺手点一下的动作；
-   * 而超级实验室 / 浏览器操作都是"发起一轮工作流"，归到「工作流」底下。
+   * tone 一项一色（KIND_BADGE 同族的 15% 底色写法）：颜色是比文字更快的索引。
+   * 「工作流」「记忆」两项已从菜单摘除（工作流从列表与斜杠命令触发；记忆管理
+   * 走头像菜单），入口收敛，菜单只留高频动作。
    */
   const COMPOSER_MENU: MenuItem[] = [
     {
@@ -143,6 +129,7 @@ export function usePlusMenu({
       label: t('新建对话'),
       hint: t('同一个目标，另起一段上下文'),
       icon: <NewChatIcon />,
+      tone: 'bg-seal/15 text-seal-deep',
       run: onNewConversation,
     },
     {
@@ -150,6 +137,7 @@ export function usePlusMenu({
       label: t('对话历史'),
       hint: conversations.length > 1 ? t('{0} 段', conversations.length) : undefined,
       icon: <MessagesSquare size={14} />,
+      tone: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
       sub: 'history',
     },
     {
@@ -157,14 +145,8 @@ export function usePlusMenu({
       label: t('文件'),
       hint: t('把文件发给导师看（也可以直接拖进来）'),
       icon: <Paperclip size={14} />,
+      tone: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
       run: onAttach,
-    },
-    {
-      key: 'workflow',
-      label: t('工作流'),
-      hint: t('超级实验室 / 浏览器操作'),
-      icon: <Zap size={14} />,
-      sub: 'workflow',
     },
     {
       key: 'compact',
@@ -173,55 +155,25 @@ export function usePlusMenu({
         ? t('正在压缩…')
         : t('折成摘要继续聊（自动压缩阈值 {0}%）', Math.round(compactThreshold * 100)),
       icon: <Archive size={14} />,
+      tone: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
       disabled: compacting || running,
       run: onCompact,
-    },
-    {
-      key: 'memory',
-      label: t('记忆'),
-      hint: t('工作记忆（本目标）与长期记忆（跨目标）'),
-      icon: <Brain size={14} />,
-      run: onOpenMinds,
     },
     {
       key: 'settings',
       label: t('超级导师设置'),
       hint: t('压缩阈值等（与全局设置分开）'),
       icon: <Settings size={14} />,
+      tone: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
       run: onOpenAgentSettings,
     },
   ]
 
   /**
    * 自由聊天（固定页签）的一级菜单：只有「新建对话 / 对话历史 / 文件」三件——
-   * 其余的项都是导师域的动作（工作流、压缩、设置、记忆），纯聊天没有它们。
+   * 其余的项都是导师域的动作（压缩、设置），纯聊天没有它们。
    */
   const FREE_MENU: MenuItem[] = COMPOSER_MENU.filter((m) => m.key === 'new-chat' || m.key === 'history' || m.key === 'attach')
-
-  /**
-   * 「工作流」二级菜单：三件"请导师带我做点什么"的事。
-   *
-   * 与文档区那几颗悬浮按钮是同一件事（超级实验室 / 浏览器操作），但这里**不二次确认**：
-   * 那边是鼠标扫过顺手点一下，这里是用户翻菜单主动找出来的——误触概率差着一个量级。
-   */
-  const WORKFLOW_MENU: MenuItem[] = [
-    {
-      key: 'superlab',
-      label: t('超级实验室'),
-      hint: t('说想要什么实验，导师做成可交互的超级文档'),
-      icon: <FlaskConical size={14} />,
-      disabled: running || !hasKey,
-      run: onSuperLab,
-    },
-    {
-      key: 'browser-use',
-      label: t('浏览器操作'),
-      hint: t('说清要在网页上做什么，导师用内置浏览器代办'),
-      icon: <Globe size={14} />,
-      disabled: running || !hasKey,
-      run: onBrowserUse,
-    },
-  ]
 
   /** 一层里的一项：带 sub 的往下一层走（右边一个箭头），其余的点一下就执行 */
   const menuItem = (item: MenuItem) => (
@@ -241,7 +193,7 @@ export function usePlusMenu({
       }}
       className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left transition hover:bg-line/50 disabled:pointer-events-none disabled:opacity-40"
     >
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-paper-deep text-seal transition group-hover:bg-seal/15 group-hover:text-seal-deep">
+      <span className={'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition ' + (item.tone ?? 'bg-paper-deep text-seal')}>
         {item.icon}
       </span>
       <span className="min-w-0 flex-1">
@@ -380,14 +332,12 @@ export function usePlusMenu({
 
   /** 一层的内容。抽成函数是因为过渡期间要同时渲染"新来的"与"正走的"两层 */
   const renderMenuPanel = (sub: MenuSub) => {
-    if (sub === 'workflow') return <div className="space-y-0.5">{WORKFLOW_MENU.map(menuItem)}</div>
     if (sub === 'history') return conversationRows
     const items = free ? FREE_MENU : COMPOSER_MENU
     return (
       <div className="space-y-0.5">
         {items.map((item) => {
-          const isDivider =
-            !free && (item.key === 'attach' || item.key === 'workflow' || item.key === 'settings')
+          const isDivider = !free && (item.key === 'attach' || item.key === 'settings')
           return (
             <div key={item.key}>
               {isDivider && <span aria-hidden="true" className="mx-2 my-1 block h-px bg-line/60" />}

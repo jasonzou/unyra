@@ -3056,7 +3056,6 @@ export default function LearnWorkspace({
     setSelfReport,
     clearMistake,
     startSuperLab,
-    startBrowserUse,
     startOutline,
     startPrereqOutline,
     workflowRows,
@@ -3142,7 +3141,6 @@ export default function LearnWorkspace({
         compacting: false,
         onCompact: nope,
         onSuperLab: nope,
-        onBrowserUse: nope,
         onExam: nope,
         sub: { sessions: [], defs: [], running: false, live: [] },
         viewSubId: null,
@@ -3249,10 +3247,10 @@ export default function LearnWorkspace({
         if (convId) void agent.compactNow(convId)
       },
       // 菜单动作绑到这一枚页签的落点节点（节点归属的解析见 runWorkflow）
+      // onSuperLab 仍在这里：斜杠命令 /superlab 消费它（更多菜单已摘除工作流分组）
       onSuperLab: () => {
         if (nodeId) startSuperLab(nodeId)
       },
-      onBrowserUse: () => startBrowserUse(nodeId ?? undefined),
       onExam: () => newExam(nodeId ?? undefined),
       sub: {
         sessions,
@@ -5422,9 +5420,6 @@ export default function LearnWorkspace({
                           onNotice={onToast}
                           onOpenAgentSettings={() => openTab({ kind: 'agentSettings' })}
                           onOpenSettings={() => openTab({ kind: 'agentSettings' })}
-                          onOpenMinds={() => {
-                            if (props.goalId) openTab({ kind: 'mind', goalId: props.goalId })
-                          }}
                           effort={effort}
                           onSetEffort={setGlobalEffort}
                           compactThreshold={agentSettings.compact.threshold}

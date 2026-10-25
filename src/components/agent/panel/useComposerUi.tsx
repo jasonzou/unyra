@@ -43,16 +43,13 @@ export interface ComposerUiProps {
   conversation: Conversation | null
   onSelectConversation: (id: string) => void
   onDeleteConversation: (id: string) => void
+  /** 斜杠 /superlab：跑内置工作流「超级实验室」（更多菜单不收它，斜杠命令还在） */
   onSuperLab: () => void
-  /** 更多 → 工作流 → 浏览器操作：替用户驱动内置浏览器完成任务 */
-  onBrowserUse: () => void
   onCompact: () => void
   compacting: boolean
   /** 自动压缩阈值（0~1），菜单项上如实说明「到多少会自己压」 */
   compactThreshold: number
   onOpenAgentSettings: () => void
-  /** 更多 → 记忆：打开导师长期记忆的管理页签 */
-  onOpenMinds: () => void
   /** 自由聊天（固定页签）：菜单与状态行的导师域功能全部收起 */
   free?: boolean
   /** 斜杠 /exam：跑内置工作流「出卷」 */
@@ -76,7 +73,6 @@ export function ComposerUi(props: ComposerUiProps): ReactNode {
   const {
     composer,
     running,
-    hasKey,
     compacting,
     compactThreshold,
     conversations,
@@ -84,11 +80,8 @@ export function ComposerUi(props: ComposerUiProps): ReactNode {
     onNewConversation,
     onSelectConversation,
     onDeleteConversation,
-    onSuperLab,
-    onBrowserUse,
     onCompact,
     onOpenAgentSettings,
-    onOpenMinds,
     free,
   } = props
   /** 拖拽悬停：高亮输入框，告诉用户「松手就放这里」 */
@@ -98,7 +91,6 @@ export function ComposerUi(props: ComposerUiProps): ReactNode {
     conversations,
     conversation,
     running,
-    hasKey,
     compacting,
     compactThreshold,
     menuOpen: composer.menuOpen,
@@ -110,11 +102,8 @@ export function ComposerUi(props: ComposerUiProps): ReactNode {
     onNewConversation,
     onSelectConversation,
     onDeleteConversation,
-    onSuperLab,
-    onBrowserUse,
     onCompact,
     onOpenAgentSettings,
-    onOpenMinds,
     free,
     // 附件那两个入口由输入区提供（见 useComposer）
     onAttach: () => void composer.pickAttachment(),

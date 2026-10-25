@@ -15,7 +15,7 @@ import type { AgentPart, MessageImage } from '../../../agent/types'
 import CodePane from '../CodePane'
 import { toolResultView } from '../../../lib/toolView'
 import { BubbleImage, ImageLightbox } from './Images'
-import { MetaLines, paramOf } from './toolArgsView'
+import { CallSummary, MetaLines, SoftLead, paramOf } from './toolArgsView'
 import { toolLabel } from './toolLabel'
 import { useFold } from './useFold'
 import { t } from '../../../i18n'
@@ -27,7 +27,8 @@ export function ToolCard({ part }: { part: Extract<AgentPart, { type: 'tool' }> 
   const failed = part.status === 'error'
   /**
    * 调用级失败：代码跑完了，但其中某几次 api 调用没有生效（见 agent/types 的 soft）。
-   * 它不是「这一步没跑成」——状态仍是完成，只是用黄色点出来，展开能看到没生效的那几条。
+   * 它不是「这一步没跑成」——状态仍是完成，只是用警示色的点与摘要行点出来，
+   * 展开能看到没生效的那几条。
    */
   const soft = !running && !failed && !!part.soft
   const param = useMemo(() => paramOf(part), [part])
@@ -88,19 +89,22 @@ export function ToolCard({ part }: { part: Extract<AgentPart, { type: 'tool' }> 
               {!running && result && (
                 <div className="py-1.5">
                   <div className="mb-1 text-[11.5px] uppercase tracking-wider text-ink-faint">{t('结果')}</div>
-                  {/* 没生效的那几条清单：调用级失败时用黄色框一下，与红着的「失败」区分开 */}
+                  {/* 没生效的那几条：头行染警示色带八角叉，不再框黄底（旁注不抢正文的戏） */}
                   {result.lead &&
                     (soft ? (
-                      <div className="mb-1.5 rounded-md border border-warn/35 bg-warn/10 px-2 py-1.5">
-                        <MetaLines text={result.lead} />
-                      </div>
+                      <SoftLead text={result.lead} />
                     ) : (
                       <MetaLines text={result.lead} className="mb-1.5" />
                     ))}
                   {result.body && (
                     <CodePane text={result.body} lang={result.lang} wrap={result.lang === 'text'} />
                   )}
-                  {result.tail && <MetaLines text={result.tail} className="mt-1.5" />}
+                  {result.tail &&
+                    (result.tail.includes('本次调用：') ? (
+                      <CallSummary text={result.tail} />
+                    ) : (
+                      <MetaLines text={result.tail} className="mt-1.5" />
+                    ))}
                 </div>
               )}
               <button

@@ -203,6 +203,12 @@ export function freeSpotNear(
 
 export const STRUCT_MAX_ZOOM = 1.6
 export const STRUCT_MIN_ZOOM_FLOOR = 0.02
+/**
+ * 缩放下限 = 「恰好装下全图」的 zoom × 这个系数。1 = 旧口径（缩到全图刚好装满就到底）；
+ * 调小它，画布四周就多出成片的空白可拖可看——用户要的「更大范围的可拖拽空间」。
+ * 绝对兜底仍是 STRUCT_MIN_ZOOM_FLOOR（再空的画布也不许缩到什么都看不见）。
+ */
+export const STRUCT_MIN_ZOOM_FACTOR = 0.6
 export const STRUCT_FIT_PADDING = 96
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -218,7 +224,7 @@ export function fitZoom(bounds: Rect, view: { width: number; height: number }, p
 
 export function minZoomOf(bounds: Rect | null, view: { width: number; height: number }): number {
   if (!bounds) return STRUCT_MIN_ZOOM_FLOOR
-  return fitZoom(bounds, view)
+  return Math.max(STRUCT_MIN_ZOOM_FLOOR, fitZoom(bounds, view) * STRUCT_MIN_ZOOM_FACTOR)
 }
 
 export function clampZoom(zoom: number, bounds: Rect | null, view: { width: number; height: number }): number {

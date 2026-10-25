@@ -72,6 +72,46 @@
   padding: 0 0.09em;
   color: var(--color-ink-strong);
 }
+/*
+ * 过程件的展开体（提示词模块 / 注入块 / 工具旁白）：与折叠行同一档的小字与暗色。
+ * 它们是「上下文里补了什么」的旁注，不是给用户读的正文——照搬正文的 13.5px 与
+ * ink 亮色，会把旁边 12px 的过程行衬成一片又大又晃的字（用户报的那个观感）。
+ */
+.moji-agent-md.moji-md-soft {
+  font-size: 11.5px;
+  line-height: 1.62;
+  color: var(--color-ink-soft);
+}
+.moji-md-soft strong,
+.moji-md-soft b {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.moji-md-soft h1,
+.moji-md-soft h2,
+.moji-md-soft h3,
+.moji-md-soft h4 {
+  color: var(--color-ink);
+  font-size: 1em;
+}
+/* 不自带颜色的变体：颜色听外层容器的（工具卡里要染警示色的头行用） */
+.moji-agent-md.moji-md-plain {
+  font-size: 11.5px;
+  line-height: 1.62;
+  color: inherit;
+}
+.moji-md-plain strong,
+.moji-md-plain b {
+  color: inherit;
+  font-weight: 700;
+}
+.moji-md-plain h1,
+.moji-md-plain h2,
+.moji-md-plain h3,
+.moji-md-plain h4 {
+  color: inherit;
+  font-size: 1em;
+}
 .moji-agent-md code {
   font-family: var(--font-mono);
   font-size: 0.88em;

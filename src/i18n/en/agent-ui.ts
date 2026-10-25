@@ -241,6 +241,7 @@ const dict: Record<string, string> = {
 
   /* ---------- AskFormCard（结构化表单） ---------- */
   '导师想先确认几件事': 'The tutor wants to confirm a few things first',
+  '再点一下就提交全部答案': 'Click again to submit all answers',
   '第 {0} / {1} 题': 'Question {0} / {1}',
   '这一题的答案会直接存进你的画像（头像菜单 →「用户」里能改、能清空），导师以后不用再问': 'This answer is saved straight into your profile (view or clear it under the avatar menu → "User"); the tutor will not need to ask again',
   '存进我的资料': 'Save to my profile',

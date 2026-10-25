@@ -76,18 +76,14 @@ interface Props {
   queue: QueuedMessage[]
   onQueueDrop: (id: string) => void
   onQueueSendNow: (id: string) => void
-  /** 更多 → 工作流 → 超级实验室：触发内置工作流「超级实验室」——导师先问想做什么实验，再生成一份可交互的超级文档 */
+  /** 斜杠 /superlab：跑内置工作流「超级实验室」（斜杠命令保留，见 useSlashMenu） */
   onSuperLab: () => void
-  /** 更多 → 工作流 → 浏览器操作：替用户驱动内置浏览器完成任务（看=截图、输入=模拟鼠标键盘） */
-  onBrowserUse: () => void
   /** 更多 → 压缩上下文：把前面的对话折成一份摘要 */
   onCompact: () => void
   /** 正在压缩（菜单项置灰，避免连点两次） */
   compacting: boolean
   /** 更多 → 超级导师设置：打开超级导师自己的设置页签（与全局设置不是同一个） */
   onOpenAgentSettings: () => void
-  /** 更多 → 记忆：打开记忆管理页签（长期 + 工作两类，见 learn/memory） */
-  onOpenMinds: () => void
   /** 斜杠 /exam：跑内置工作流「出卷」（与文档区、资源管理器里的入口是同一个 newExam） */
   onExam: () => void
   /** 全局推理等级（斜杠 /effort 的二级菜单读它、写它） */
@@ -180,11 +176,9 @@ export default function AgentPanel({
   onQueueSendNow,
   onNotice,
   onSuperLab,
-  onBrowserUse,
   onCompact,
   compacting,
   onOpenAgentSettings,
-  onOpenMinds,
   onExam,
   effort,
   onSetEffort,
@@ -591,12 +585,10 @@ export default function AgentPanel({
           onSelectConversation={onSelectConversation}
           onDeleteConversation={onDeleteConversation}
           onSuperLab={onSuperLab}
-          onBrowserUse={onBrowserUse}
           onCompact={onCompact}
           compacting={compacting}
           compactThreshold={compactThreshold}
           onOpenAgentSettings={onOpenAgentSettings}
-          onOpenMinds={onOpenMinds}
           onExam={onExam}
           effort={effort}
           onSetEffort={onSetEffort}

@@ -4,6 +4,7 @@ import {
   CARD_W,
   ROW_GAP,
   STRUCT_MAX_ZOOM,
+  STRUCT_MIN_ZOOM_FACTOR,
   STRUCT_MIN_ZOOM_FLOOR,
   boundsOf,
   clampZoom,
@@ -52,6 +53,9 @@ describe('结构图（v2）：包围盒与缩放（几何口径与 v1 一致）'
     const zTight = minZoomOf(tight, view)
     const zWide = minZoomOf(wide, view)
     expect(zTight).toBeGreaterThan(zWide)
+    // 下限 = 恰好装下的 zoom × 系数：系数小于 1，四周永远留得出空白可拖的区域
+    expect(zTight).toBeCloseTo(fitZoom(tight!, view) * STRUCT_MIN_ZOOM_FACTOR, 6)
+    expect(zWide).toBeCloseTo(fitZoom(wide!, view) * STRUCT_MIN_ZOOM_FACTOR, 6)
     // 刚好装下：宽高都不溢出视口
     expect(tight!.width * zTight).toBeLessThanOrEqual(view.width)
     expect(wide!.width * zWide).toBeLessThanOrEqual(view.width)

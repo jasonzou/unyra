@@ -793,7 +793,7 @@ function PromptModuleBlock({ part }: { part: Extract<AgentPart, { type: 'prompt-
           表格都有），裸 <pre> 只会把源码摆出来——渲染后才是它在上下文里的真实形态。
         */
         <div className="moji-in-soft moji-scroll-thin mt-1.5 max-h-80 overflow-auto rounded border border-line bg-card/70 p-2.5 text-left text-[11.5px] leading-relaxed text-ink-soft">
-          <MarkdownView html={renderNote(part.text)} className="moji-agent-md" />
+          <MarkdownView html={renderNote(part.text)} className="moji-agent-md moji-md-soft" />
         </div>
       )}
     </div>
@@ -829,7 +829,7 @@ function InjectBlock({ item }: { item: InjectItem }) {
       </button>
       {open && (
         <div className="moji-in-soft moji-scroll-thin mt-1.5 max-h-80 overflow-auto rounded border border-line bg-card/70 p-2.5 text-left text-[11.5px] leading-relaxed text-ink-soft">
-          <MarkdownView html={renderNote(item.text)} className="moji-agent-md" />
+          <MarkdownView html={renderNote(item.text)} className="moji-agent-md moji-md-soft" />
         </div>
       )}
     </div>

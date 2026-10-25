@@ -713,6 +713,39 @@ const dict: Record<string, string> = {
   '每次提交都带全部随笔；AI 只整理与上次相比新增、修改、删除的部分':
     'Every commit carries all jottings; the AI only files what is new, modified, or deleted since the last commit',
   '继续写随笔': 'Keep writing',
+  /* ---------- 结构画布：右下角工具组与新手教学（见 structure/StructureCanvas / StructureTour） ---------- */
+  '缩小': 'Zoom out',
+  '放大': 'Zoom in',
+  '切换为直线': 'Switch to straight lines',
+  '切换为曲线': 'Switch to curves',
+  // 「撤回」键已被 agent-ui 分片占用（Withdraw，指消息撤回）；画布的 undo 用独立键
+  '撤回上一步': 'Undo last step',
+  '适应画布': 'Fit canvas',
+  '自动排列': 'Auto arrange',
+  '新手教学': 'Guided tour',
+  '跳过教学': 'Skip tour',
+  '上一步': 'Back',
+  '下一步': 'Next',
+  '这种组合连不成：文档拖到大纲卡上、其余拖到文档卡上，再不然拖到空白处':
+    'That combination does not attach: drag docs onto outline cards, everything else onto doc cards — or drop it on empty canvas',
+  '欢迎来到节点宇宙': 'Welcome to the node universe',
+  '一张图画下这门课的全部节点：文档、大纲、笔记与试卷都在上面摆着。六步走完大约半分钟；想中途退出，随时按 Esc 或点「跳过教学」。':
+    'One canvas holds every node of this course: docs, outlines, notes and exams. The six steps take about half a minute; press Esc or click "Skip tour" to leave at any time.',
+  '从左侧列表放节点': 'Add nodes from the list',
+  '按住一项拖出来：拖到空白处立一份独立节点；拖到卡上则创建即挂——文档拖到大纲卡上，笔记、试卷、超级文档拖到文档卡上。':
+    'Drag an item out: drop it on empty canvas for a standalone node, or drop it on a card to attach on creation — docs onto outline cards; notes, exams and super docs onto doc cards.',
+  '每张卡是一个节点': 'Each card is a node',
+  '点标题直接打开内容，按住卡片拖动摆位，右键有更多操作（设为入口、注释、删除）。摆乱了不怕，右下角一键自动排列。':
+    'Click a title to open the content, drag a card to move it, right-click for more (set as entry, note, delete). Messed it up? Auto-arrange is one click away.',
+  '菱形是接口点': 'Diamonds are ports',
+  '大纲卡右侧的菱形接口：从空接口拖出去挂一份文档，认领那条目标项；已挂的接口可以拖到别处换绑。':
+    'The diamonds on an outline card are ports: drag from an empty port to attach a doc and claim that item; drag a claimed port elsewhere to re-bind it.',
+  '小地图就是导航': 'The mini-map is your navigation',
+  '左上角的缩略图：点哪里，镜头就去哪里，也可以按住拖。图大了全靠它找路。':
+    'The thumbnail at the top left: click to move the camera there, or hold and drag. On a big graph it is how you find your way.',
+  '工具组在这里': 'The tool group',
+  '缩放、切换连线样式、撤回、适应画布、自动排列。想重看本教学，随时点最右边的问号。':
+    'Zoom, edge style, undo, fit canvas, auto arrange. To replay this tour, click the question mark on the right any time.',
 }
 
 export default dict
