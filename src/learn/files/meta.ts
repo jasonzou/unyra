@@ -17,7 +17,7 @@ export interface MetaFile {
   createdAt: number
   updatedAt: number
   annotations: unknown
-  dependencies: Array<{ to: string; createdAt: number; portKey?: string }>
+  dependencies: Array<{ to: string; createdAt: number; portKey?: string; toOutline?: true }>
   exams: unknown
   /**
    * 学习状态（自评 / 掌握度 / 错误记忆 / 检验记录）。

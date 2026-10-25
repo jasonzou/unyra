@@ -176,6 +176,55 @@ describe('deriveCanvas：坐标以存过的为准，没存的自动铺排（确�
     expect(view.edges.some((e) => e.to === 'a')).toBe(false)
   })
 
+  it('自动排列按目标项顺序：认领了接口的子级按行号排（与边的先后无关）', () => {
+    const base = makeStore()
+    const mk = (id: string, key: string) => ({
+      id,
+      title: key,
+      key,
+      description: '',
+      docs: { teaching: '' },
+      notes: [],
+      annotations: [],
+      status: 'learning' as const,
+      origin: 'user' as const,
+      goalId: 'g1',
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const store: LearnStore = {
+      ...base,
+      nodes: [
+        {
+          ...base.nodes[0],
+          outline: {
+            intro: '',
+            children: [
+              { key: 'yi', title: '第一条', summary: '' },
+              { key: 'er', title: '第二条', summary: '' },
+              { key: 'san', title: '第三条', summary: '' },
+            ],
+            updatedAt: 1,
+          },
+        },
+        mk('d1', 'k1'),
+        mk('d2', 'k2'),
+        mk('d3', 'k3'),
+      ],
+      // 边的先后故意倒着建（第三条最先）：铺排顺序仍要按目标项行号走
+      edges: [
+        { from: 'r', to: 'd3', createdAt: 1, portKey: 'san' },
+        { from: 'r', to: 'd2', createdAt: 1, portKey: 'er' },
+        { from: 'r', to: 'd1', createdAt: 1, portKey: 'yi' },
+      ],
+      exams: [],
+    }
+    const view = deriveCanvas(store, 'g1', undefined)
+    const y = (id: string) => view.cards.find((c) => c.uuid === id)!.y
+    expect(y('d1')).toBeLessThan(y('d2'))
+    expect(y('d2')).toBeLessThan(y('d3'))
+  })
+
   it('空表兜底：saved 为空对象等价于没存过', () => {
     const store = makeStore()
     expect(deriveCanvas(store, 'g1', emptyStructure()).cards).toEqual(deriveCanvas(store, 'g1', undefined).cards)

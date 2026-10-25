@@ -31,7 +31,7 @@
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Check, Trash2 } from 'lucide-react'
 import type { LearnStore } from '../../../learn/types'
 import type { ExamActions, NodeDocActions } from '../explorer/types'
 import { locateUuid, outlineUuid, docIdOfOutlineUuid, type GNodeKind } from '../../../learn/nodeKinds'
@@ -110,6 +110,10 @@ export interface StructureCanvasProps {
   onRenameNote?: (noteUuid: string, to: string) => ChannelResult
   /** 给某份大纲手动加一条目标项（宿主走大纲节点的 editContent） */
   onAddOutlineEntry?: (outlineUuid: string, title: string) => void
+  /** 视频卡上选一个视频绑到本目标（统一通道：与 agent 的 editContent({ videoId }) 同一条路）；null = 解绑 */
+  onBindVideo?: (nodeUuid: string, videoId: string | null) => ChannelResult
+  /** 打开绑定的视频（打开它 = 一并打开本目标的页签组，见 LearnWorkspace 的 openTab） */
+  onOpenVideo?: (videoId: string) => void
   /** 给一个空文档卡点「生成文档」：交给 AI 写正文 */
   onGenerateDoc?: (nodeUuid: string, hint?: string) => void
   /** 文档卡右键菜单的「生成前置知识大纲」 */
@@ -121,11 +125,11 @@ export interface StructureCanvasProps {
 }
 
 /**
- * 左侧列表只放**挂件**。实体先行：拖到文档卡上就走统一通道建真实空实体，
+ * 左侧列表：挂件 + 视频节点。实体先行：拖到空白处就走统一通道建真实空实体，
  * 卡从落位那刻起就由 store 派生。入口、文档与大纲不在列表里——入口由目标绑定
  * 派生，子文档点大纲目标项，前置知识大纲走文档卡右键菜单。
  */
-const PALETTE: GNodeKind[] = ['doc', 'outline', 'note', 'exam', 'superdoc']
+const PALETTE: GNodeKind[] = ['doc', 'outline', 'note', 'exam', 'superdoc', 'video']
 
 /** 网格背景的点距（世界坐标 px）：平移/缩放时按相机换算，见画布根的 backgroundImage */
 const GRID_PX = 28
@@ -180,6 +184,17 @@ function KindIcon({ kind }: { kind: GNodeKind }) {
       <svg {...common}>
         <path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z" />
         <path d="M15 21v-4a2 2 0 0 1 2-2h4" />
+      </svg>
+    )
+  }
+  if (kind === 'video') {
+    // monitor-play 的同款笔画：屏幕 + 居中播放三角 + 底座（比例对齐 lucide，不自造异形）
+    return (
+      <svg {...common}>
+        <path d="M10 7.5v9l7-4.5Z" />
+        <rect width="20" height="14" x="2" y="3" rx="2" />
+        <path d="M8 21h8" />
+        <path d="M12 17v4" />
       </svg>
     )
   }
@@ -258,6 +273,7 @@ const MINI_FILL: Record<GNodeKind, string> = {
   note: '#10b981',
   exam: '#f59e0b',
   superdoc: '#8b5cf6',
+  video: '#06b6d4',
 }
 
 type Gesture =
@@ -290,8 +306,8 @@ interface MenuState {
   x: number
   y: number
   uuid: string
-  /** actions = 动作清单；note = 写注释；rename = 改笔记名；slot = 新加一条目标项 */
-  mode: 'actions' | 'note' | 'rename' | 'slot'
+  /** actions = 动作清单；note = 写注释；rename = 改笔记名；slot = 新加一条目标项；videoPick = 给视频卡挑一个视频绑上 */
+  mode: 'actions' | 'note' | 'rename' | 'slot' | 'videoPick'
 }
 
 export const StructureCanvas = memo(function StructureCanvas({
@@ -308,6 +324,8 @@ export const StructureCanvas = memo(function StructureCanvas({
   onCreateChildDoc,
   onRenameNote,
   onAddOutlineEntry,
+  onBindVideo,
+  onOpenVideo,
   onGenerateDoc,
   onGenerateOutline,
   onToast,
@@ -405,14 +423,14 @@ export const StructureCanvas = memo(function StructureCanvas({
   const bounds = useMemo(() => boundsOf(cards, height), [cards, height])
 
   /**
-   * 连线的「大纲那一端」对准子文档对应的那条目标项，而不是卡片顶部那个固定锚点。
-   * 只对 `大纲 → 子文档` 这条算：其余边（入口→根、文档→挂件）没有目标项可言。
+   * 连线的「大纲那一端」对准子级对应的那条目标项，而不是卡片顶部那个固定锚点。
+   * 从大纲卡出发的线都是树边（子级接文档或接大纲）；归属边（文档 → 它的大纲、挂件）没有目标项可言。
    */
   const anchorOf = useCallback(
     (edge: CanvasEdge) => {
       const from = cards.find((c) => c.uuid === edge.from)
       const to = cards.find((c) => c.uuid === edge.to)
-      if (!from || !to || from.kind !== 'outline' || to.kind !== 'doc') return undefined
+      if (!from || !to || from.kind !== 'outline') return undefined
       const slot = from.slots?.find((s) => s.childId === to.uuid)
       if (!slot) return undefined
       // 实测的圆点位置优先（DOM 量出来的才是真位置）；没量到就按行号算
@@ -435,20 +453,31 @@ export const StructureCanvas = memo(function StructureCanvas({
   const byId = useMemo(() => new Map(displayCards.map((c) => [c.uuid, c])), [displayCards])
 
   /**
-   * 从列表拖出一张挂件时，高亮**能当它宿主**的卡。宿主认类型：
-   * 文档只挂在大纲之下；大纲（给宿主文档补一份空大纲）与挂件
-   * （笔记 / 试卷 / 超级文档）都挂到文档卡。连线时同理：
-   * 从大纲拉出的线高亮文档卡，从文档拉出的线高亮大纲卡。
+   * 从列表拖出一张卡时高亮**能当它落点**的卡。落点认类型：
+   * 文档挂在大纲之下；大纲拖出去有两个落点——文档卡（给那份文档补大纲）
+   * 与大纲卡（在它之下再开一层）；挂件（笔记 / 试卷 / 超级文档）都挂到文档卡。
+   * 连线时同理：从大纲拉出的线高亮文档卡与大纲卡，从文档拉出的线高亮大纲卡。
    */
   const candidateIds = useMemo(() => {
     if (paletteKind) {
-      const want = paletteKind === 'doc' ? 'outline' : 'doc'
-      return new Set(cards.filter((c) => c.kind === want).map((c) => c.uuid))
+      const wants: GNodeKind[] =
+        paletteKind === 'doc'
+          ? ['outline']
+          : paletteKind === 'outline'
+            ? ['doc', 'outline']
+            : paletteKind === 'video'
+              ? [] // 视频节点不挂树：只能落在空白处，没有可作为落点的卡
+              : ['doc']
+      return new Set(cards.filter((c) => wants.includes(c.kind)).map((c) => c.uuid))
     }
     const g = gestureRef.current
     if (g?.mode === 'link') {
-      const want = g.fromKind === 'outline' ? 'doc' : g.fromKind === 'doc' ? 'outline' : null
-      return want ? new Set(cards.filter((c) => c.kind === want).map((c) => c.uuid)) : null
+      const wants: GNodeKind[] | null =
+        g.fromKind === 'outline' ? ['doc', 'outline'] : g.fromKind === 'doc' ? ['outline'] : null
+      // 从大纲拉到大纲：自己那张不算落点（连自己没有意义）
+      return wants
+        ? new Set(cards.filter((c) => wants.includes(c.kind) && c.uuid !== g.from).map((c) => c.uuid))
+        : null
     }
     return null
   }, [paletteKind, cards, linkFrom])
@@ -763,7 +792,7 @@ export const StructureCanvas = memo(function StructureCanvas({
     [onDeleteNode, report, onToast],
   )
 
-  /* ---------- 连线（唯一可手工建立：大纲 → 文档） ---------- */
+  /* ---------- 连线（唯一可手工建立：大纲 → 文档 / 大纲） ---------- */
 
   const tryConnect = useCallback(
     (fromUuid: string, toUuid: string, portKey?: string) => {
@@ -787,10 +816,11 @@ export const StructureCanvas = memo(function StructureCanvas({
       /*
        * 点目标项 = 建一份带标题的空文档（统一通道）：create 的同目标去重
        * 会让同一标题永远指向同一份实体；位置由派生自动铺排（父大纲右侧）。
+       * owner 直接给大纲 uuid（o:）——服务认得出附身（挂宿主文档）与游离（挂实体）两种。
        */
-      const ownerDocId = docIdOfOutlineUuid(parentId)
-      if (!ownerDocId || !onCreateChildDoc) return
-      const uuid = onCreateChildDoc(ownerDocId, slot.title, slot.key)
+      const owner = parentId
+      if (!onCreateChildDoc) return
+      const uuid = onCreateChildDoc(owner, slot.title, slot.key)
       if (!uuid) {
         onToast?.(t('没能创建文档，请稍后再试'))
         return
@@ -840,9 +870,15 @@ export const StructureCanvas = memo(function StructureCanvas({
         if (exam) exams.onStart(exam.nodeId, exam.id)
         return
       }
+      if (card.kind === 'video') {
+        const bound = store.videoNodes?.find((v) => v.id === card.uuid)?.videoId ?? null
+        if (bound && onOpenVideo) onOpenVideo(bound)
+        else onToast?.(t('这张视频卡还没有绑视频：点卡上的「选择视频」'))
+        return
+      }
       onToast?.(t('大纲节点就在这张画布上，没有另一份页签'))
     },
-    [docs, exams, onToast, store],
+    [docs, exams, onToast, onOpenVideo, store],
   )
 
   /* ---------- 自动排列（清掉坐标、交给派生铺排；便条保留） ---------- */
@@ -1165,7 +1201,7 @@ export const StructureCanvas = memo(function StructureCanvas({
         const target = hitTest(cards, world.x, world.y, height)
         if (target && target.uuid !== g.from) {
           /*
-           * 连线看的是「谁是谁」而不是拖的方向：大纲 ↔ 文档 = 挂进那一层（唯一的长树的手法）；
+           * 连线看的是「谁是谁」而不是拖的方向：大纲 ↔ 文档 / 大纲 = 挂进那一层（唯一的长树的手法）；
            * 文档 ↔ 挂件 = 绑定 / 换绑（实体从池子或旧宿主挪过来，内容不动）。
            * 拒绝原因（双边协商的人话）由 report 弹出，这里不再另说。
            */
@@ -1178,6 +1214,14 @@ export const StructureCanvas = memo(function StructureCanvas({
             const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
             // 从目标项圆点拖出来的线 = 认领那个口（与点目标项建文档同一口径）；反方向拖没有口可指
             tryConnect(outline, doc, fromCard?.kind === 'outline' ? g.slotKey : undefined)
+          } else if (isPair('outline', 'outline')) {
+            /*
+             * 大纲连大纲 = 落点的大纲之下再开一层（上层当分类、下层当指导）。
+             * 从目标项圆点拖出来的线：圆点的大纲是上级并认领那个口；
+             * 从圆把手拖 = 拖着的这一层挂到落点的大纲之下。
+             */
+            if (g.slotKey && fromCard?.kind === 'outline') tryConnect(g.from, target.uuid, g.slotKey)
+            else tryConnect(target.uuid, g.from)
           } else if (isPair('doc', 'note') || isPair('doc', 'exam') || isPair('doc', 'superdoc')) {
             const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
             const widget = fromCard?.kind === 'doc' ? target.uuid : g.from
@@ -1239,20 +1283,56 @@ export const StructureCanvas = memo(function StructureCanvas({
           const world2 = toWorld(e.clientX, e.clientY)
           const target = hitTest(cards, world2.x, world2.y, height)
           if (!onCreateNode) return
+          // 视频节点不挂树：拖到卡上不给落，只有空白处是它的位置（绑定在卡上选）
+          if (g.kind === 'video') {
+            if (target) {
+              onToast?.(t('视频节点拖到空白处放下：它不挂进大纲树，只把一个视频绑到这个目标'))
+              return
+            }
+            const r = onCreateNode('video', null, world2)
+            if ('error' in r) {
+              onToast?.(r.error)
+              return
+            }
+            writePos(r.uuid, world2.x, world2.y)
+            setSelectedId(r.uuid)
+            onToast?.(t('已建一张视频卡：点「选择视频」挑一个现有视频绑上'))
+            return
+          }
+          /*
+           * 大纲拖到大纲卡上 = 在那张大纲之下开一层**纯大纲**（游离子大纲实体 + 树边，
+           * 没有文档——分类层）。其余组合走通用的创建即挂。
+           */
+          if (g.kind === 'outline' && target?.kind === 'outline') {
+            const r = onCreateNode('outline', target.uuid)
+            if ('error' in r) {
+              onToast?.(r.error)
+              return
+            }
+            writePos(r.uuid, world2.x, world2.y)
+            setSelectedId(r.uuid)
+            onToast?.(t('已在这张大纲之下开了新的一层：目标项写在大纲卡上，往下挂文档或再开一层'))
+            return
+          }
           let under: string | null = null
           if (target) {
             if (g.kind === 'doc') {
               // 文档只能挂进大纲之下（与发光的候选同一口径，见 candidateIds）
               under = target.kind === 'outline' ? target.uuid : null
             } else if (g.kind === 'outline') {
-              // 大纲拖到文档上 = 给它补一份大纲
+              // 大纲拖到文档上 = 给它补一份大纲（附身，node.outline）
               under = target.kind === 'doc' ? target.uuid : null
             } else {
-              // 挂件：拖到文档卡 = 绑到它；拖到大纲卡 = 绑到那张大纲的宿主文档
-              under = target.kind === 'doc' ? target.uuid : target.kind === 'outline' ? docIdOfOutlineUuid(target.uuid) : null
+              // 挂件：拖到文档卡 = 绑到它；拖到大纲卡 = 绑到那张大纲的宿主文档（游离大纲没有宿主，接不住）
+              under =
+                target.kind === 'doc'
+                  ? target.uuid
+                  : target.kind === 'outline' && !target.free
+                    ? docIdOfOutlineUuid(target.uuid)
+                    : null
             }
             if (!under) {
-              onToast?.(t('这种组合连不成：文档拖到大纲卡上、其余拖到文档卡上，再不然拖到空白处'))
+              onToast?.(t('这种组合连不成：文档拖到大纲卡上，大纲拖到文档卡或大纲卡上，挂件拖到文档卡上，再不然拖到空白处'))
               return
             }
           }
@@ -1261,12 +1341,7 @@ export const StructureCanvas = memo(function StructureCanvas({
             onToast?.(r.error)
             return
           }
-          if (!under) {
-            // 独立实体：落点就是它的坐标（大纲对 = 文档落在落点、大纲卡自动排在旁边）
-            const anchor = g.kind === 'outline' ? docIdOfOutlineUuid(r.uuid) : r.uuid
-            if (anchor) writePos(anchor, world2.x, world2.y)
-            if (g.kind === 'outline' && anchor) writePos(r.uuid, world2.x + CARD_W + 48, world2.y)
-          }
+          if (!under) writePos(r.uuid, world2.x, world2.y)
           setSelectedId(r.uuid)
           onToast?.(
             g.kind === 'note'
@@ -1276,7 +1351,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                 : g.kind === 'superdoc'
                   ? t('已放一份空超级文档「{0}」：点「生成超级文档」让 AI 来写', r.title)
                   : g.kind === 'outline'
-                    ? t('已建一份文档和它的空大纲：大纲卡上直接写目标项')
+                    ? t('已建一张独立的大纲卡：目标项写在卡上，往下挂文档或再开一层大纲')
                     : t('已建文档「{0}」：点标题打开写正文', r.title),
           )
         }
@@ -1355,8 +1430,9 @@ export const StructureCanvas = memo(function StructureCanvas({
       if (selectedEdge) {
         e.preventDefault()
         // 每条线都可以摘（用户定的：关系只是连线，剪线不带走设备）——
-        // 摘大纲→子文档 = 拆那条树边（对方成游离）；摘文档↔它的大纲 = 删除那份大纲；
-        // 摘文档↔挂件 = 解绑（实体进游离池，内容原样）。唯一摘不了的是入口的绑定线（那是目标本身）。
+        // 摘树边（大纲 → 子文档 / 子大纲）= 拆那条树边（对方成游离的一层）；
+        // 摘大纲 ↔ 它的内容文档 = 删除那份大纲；摘文档 ↔ 挂件 = 解绑（实体进游离池，内容原样）。
+        // 唯一摘不了的是入口的绑定线（那是目标本身）。
         if (onDisconnect) report(onDisconnect(selectedEdge.from, selectedEdge.to))
         setSelectedEdge(null)
         return
@@ -1540,8 +1616,8 @@ export const StructureCanvas = memo(function StructureCanvas({
               // 世界坐标 → SVG 坐标（这一层是从包围盒左上角铺开的）
               const points = path.map((p) => ({ x: p.x - edgeOrigin.x, y: p.y - edgeOrigin.y }))
               const isSelected = selectedEdge?.from === edge.from && selectedEdge?.to === edge.to
-              // 「大纲 → 子文档」这条（目标项派生的连线）上统一色；其余连线一律中性灰
-              const color = from.kind === 'outline' && to.kind === 'doc' ? SLOT_ACCENT : null
+              // 从大纲卡出发的树边（子级是文档还是大纲都算）统一色；归属边一律中性灰
+              const color = from.kind === 'outline' ? SLOT_ACCENT : null
               const dots = edgeDots(points, edgeStyle)
               const slotKey = from.slots?.find((s) => s.childId === to.uuid)?.key ?? null
               // 悬停目标项 → 对应的那条子文档连线发光
@@ -1638,8 +1714,11 @@ export const StructureCanvas = memo(function StructureCanvas({
           const slots = card.slots ?? []
           const openable = card.kind !== 'outline'
           const lifted = !!draft && (draft.id === card.uuid || (draft.moves !== undefined && card.uuid in draft.moves))
-          const hasUpstream = edges.some((e) => e.to === card.uuid)
-          // 空文档没接上游 = 还没挂进树里，置灰提示（游离文档）；入口是根，天生没有上级
+          /*
+           * 树的上游：线可能落在文档卡上，也可能落在大纲卡上（接大纲的嵌套子级）。
+           * 没接进树的置灰提示（游离）；入口是根，天生没有上级。
+           */
+          const hasUpstream = edges.some((e) => e.to === card.uuid || e.to === outlineUuid(card.uuid))
           const unassigned = card.kind === 'doc' && !card.entry && !hasUpstream
           // 入口就是根文档自己（一张图有且只有一个）：挂「入口」徽章
           const authoritativeRoot = card.entry === true
@@ -1725,7 +1804,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                       <span
                         data-slot-dot={slot.key}
                         data-slot-dot-parent={card.uuid}
-                        title={slot.childId ? t('已挂文档：拖出去可换一份') : t('从接口拖出去挂一份文档（会认领这条目标项）')}
+                        title={slot.childId ? t('已经挂上：拖出去可以换一份') : t('从接口拖出去挂一份文档或子大纲（会认领这条目标项）')}
                         className="absolute top-1/2 -right-[0.5px] h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 rotate-45 cursor-crosshair rounded-[2px] border-2"
                         style={{
                           borderColor: SLOT_ACCENT,
@@ -1746,17 +1825,19 @@ export const StructureCanvas = memo(function StructureCanvas({
                 </div>
               ) : card.kind === 'outline' && slots.length === 0 ? (
                 /*
-                  空大纲：给一颗「生成大纲」——与文档卡右键菜单的「生成前置知识大纲」
-                  是同一个动作（按 o: 前缀找出宿主文档，工作流读那份文档铺目标项）。
+                  空大纲卡的「生成大纲」与文档卡右键菜单是同一个动作（前置知识大纲工作流）：
+                  附身的读宿主文档铺目标项；游离的（挂在大纲下的那一层）读它认领的目标项
+                  与上级上下文，规划这一层怎么拆——不靠手填。
                 */
                 <div className="flex items-center justify-between gap-2 px-3 pb-2">
                   <span className="min-w-0 flex-1 truncate text-[11px] text-ink-soft">{card.subtitle}</span>
                   <button
                     type="button"
-                    title={t('读父级文档，把「先要学会什么」铺成目标项')}
+                    title={card.free ? t('读它认领的目标项与上级上下文，规划这一层怎么拆') : t('读宿主文档，把「先要学会什么」铺成目标项')}
                     className="shrink-0 bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
                     onClick={() => {
-                      const docId = docIdOfOutlineUuid(card.uuid)
+                      // 游离卡直接给 o:uuid（启动器认得出）；附身卡按宿主文档走
+                      const docId = card.free ? card.uuid : docIdOfOutlineUuid(card.uuid)
                       if (docId) onGenerateOutline?.(docId)
                     }}
                   >
@@ -1789,10 +1870,11 @@ export const StructureCanvas = memo(function StructureCanvas({
                     type="button"
                     className="bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
                     onClick={() => {
-                      // 意图：它挂在哪份大纲的哪条目标项下（按 key 对上号的那条）
-                      const upstream = edges.find((e) => e.to === card.uuid)
+                      // 意图：它挂在哪份大纲的哪条目标项下（按 key 对上号的那条）——树边可能落在它的大纲卡上（嵌套接入）
+                      const face = byId.has(outlineUuid(card.uuid)) ? outlineUuid(card.uuid) : card.uuid
+                      const upstream = edges.find((e) => e.to === face)
                       const upstreamCard = upstream ? byId.get(upstream.from) : undefined
-                      const slotTitle = upstreamCard?.slots?.find((s) => s.childId === card.uuid)?.title
+                      const slotTitle = upstreamCard?.slots?.find((s) => s.childId === face)?.title
                       const hint =
                         upstreamCard && slotTitle
                           ? `【本轮是空文档填充】文档节点已就位（uuid ${card.uuid}）：教学文档直接写进它（api.node.get 后 editContent），不要创建任何新节点、不要拆下一层大纲。它的定位：大纲「${upstreamCard.title}」里「${slotTitle}」这条目标项的落地文档——正文围绕这条目标项展开，范围与同纲其他目标项错开。`
@@ -1827,6 +1909,30 @@ export const StructureCanvas = memo(function StructureCanvas({
                       <span className="min-w-0 flex-1 truncate">{row.label}</span>
                     </button>
                   ))}
+                </div>
+              ) : card.kind === 'video' ? (
+                /*
+                  视频卡：副行显示绑定状态；「选择视频 / 换绑」打开下拉（现有视频列表 + 解绑）。
+                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素的 click 会被吞掉。
+                */
+                <div className="flex items-center justify-between gap-2 px-3 pb-2">
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-ink-soft">{card.subtitle}</span>
+                  <button
+                    type="button"
+                    title={t('从现有视频里挑一个绑到这个目标（打开它会一并打开这门课的页签组）')}
+                    className="shrink-0 bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      setMenu({
+                        x: Math.min(r.right, window.innerWidth - 264),
+                        y: Math.min(r.bottom + 6, window.innerHeight - 200),
+                        uuid: card.uuid,
+                        mode: 'videoPick',
+                      })
+                    }}
+                  >
+                    {card.blank ? t('选择视频') : t('换绑')}
+                  </button>
                 </div>
               ) : (card.kind === 'exam' || card.kind === 'superdoc') && card.blank && leafOwnerNodeId ? (
                 /*
@@ -2172,11 +2278,11 @@ export const StructureCanvas = memo(function StructureCanvas({
       {/* 新手教学：全屏遮罩挖洞、逐步指路，随时可退（见 StructureTour） */}
       {tourOpen && <StructureTour onClose={() => setTourOpen(false)} />}
 
-      {/* 节点右键菜单 */}
+      {/* 节点右键菜单 / 视频卡的下拉 */}
       {menu && menuCard && (
         <div
           data-menu
-          className="fixed z-50 w-[168px] rounded-lg border border-line bg-card/95 p-1 text-[12px] text-ink shadow-lg backdrop-blur"
+          className={`fixed z-50 ${menu.mode === 'videoPick' ? 'w-[248px]' : 'w-[168px]'} rounded-lg border border-line bg-card/95 p-1 text-[12px] text-ink shadow-lg backdrop-blur`}
           style={{ left: menu.x, top: menu.y }}
         >
           {menu.mode === 'actions' ? (
@@ -2191,7 +2297,11 @@ export const StructureCanvas = memo(function StructureCanvas({
               >
                 {t('删除')}
               </button>
-              {menuCard.kind === 'doc' && !menuCard.entry && !edges.some((e) => e.to === menuCard.uuid) && onSetEntry && (
+              {menuCard.kind === 'doc' &&
+                !menuCard.entry &&
+                store.goals.find((g) => g.id === goalId)?.rootNodeId !== menuCard.uuid &&
+                !edges.some((e) => e.to === menuCard.uuid || e.to === outlineUuid(menuCard.uuid)) &&
+                onSetEntry && (
                 <button
                   type="button"
                   title={t('这门课从这份文档开始（原入口文档退位，仍在图上）')}
@@ -2239,7 +2349,64 @@ export const StructureCanvas = memo(function StructureCanvas({
                   {t('生成前置知识大纲')}
                 </button>
               )}
+              {menuCard.kind === 'video' && (
+                <button
+                  type="button"
+                  className="flex w-full items-center rounded px-2 py-1.5 text-left hover:bg-line/60"
+                  onClick={() => setMenu({ ...menu, mode: 'videoPick' })}
+                >
+                  {menuCard.blank ? t('选择视频') : t('换一个视频')}
+                </button>
+              )}
             </>
+          ) : menu.mode === 'videoPick' ? (
+            /*
+              视频卡的下拉：现有视频一张一行（当前绑着的打勾），底部给解绑。
+              绑定走统一通道（onBindVideo → 节点的 editContent({ videoId })），
+              与 agent 动手绑是同一条路；拒绝的原因由 report 弹吐司。
+            */
+            <div className="flex max-h-[300px] flex-col overflow-y-auto">
+              <div className="px-2 pb-1 pt-1 text-[10px] text-ink-faint">{t('挑一个视频绑到这个目标')}</div>
+              {(store.videos ?? []).map((v) => {
+                const current = store.videoNodes?.find((n) => n.id === menu.uuid)?.videoId === v.id
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    title={v.input}
+                    className={
+                      'flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left hover:bg-line/60 ' +
+                      (current ? 'bg-seal/[0.08]' : '')
+                    }
+                    onClick={() => {
+                      if (onBindVideo) report(onBindVideo(menu.uuid, v.id))
+                      setMenu(null)
+                    }}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[12px]">{v.title}</span>
+                    {v.pluginName && <span className="shrink-0 text-[10px] text-ink-faint">{v.pluginName}</span>}
+                    {current && <Check size={12} className="shrink-0 text-seal" />}
+                  </button>
+                )
+              })}
+              {!(store.videos ?? []).length && (
+                <div className="px-2 pb-1.5 text-[11px] leading-relaxed text-ink-faint">
+                  {t('还没有可绑的视频：先在侧栏「视频」里新建一个')}
+                </div>
+              )}
+              {!!store.videoNodes?.find((n) => n.id === menu.uuid)?.videoId && (
+                <button
+                  type="button"
+                  className="mt-1 flex w-full items-center rounded border-t border-line/60 px-2 py-1.5 text-left text-ink-soft hover:bg-line/60"
+                  onClick={() => {
+                    if (onBindVideo) report(onBindVideo(menu.uuid, null))
+                    setMenu(null)
+                  }}
+                >
+                  {t('解绑视频')}
+                </button>
+              )}
+            </div>
           ) : (
             <div className="flex flex-col gap-1.5 p-1">
               <div className="text-[10px] text-ink-faint">

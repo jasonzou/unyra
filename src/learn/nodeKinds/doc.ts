@@ -226,10 +226,13 @@ export class DocGNode extends GNode {
     }
     // 父大纲（上游树边）：摘线 = 拆那条树边，我变成没有上级的独立文档（大纲与它的其他下级不动）
     if (target.kind === 'outline') {
-      const upEdge = this.ctx.store().edges.find((e) => e.to === this.uuid && outlineUuid(e.from) === target.uuid)
+      // 父级两种拼法：附身大纲以宿主文档 id 发声（边 from = 文档 id），游离大纲以自己的 uuid 发声
+      const upEdge = this.ctx.store().edges.find(
+        (e) => e.to === this.uuid && (outlineUuid(e.from) === target.uuid || e.from === target.uuid),
+      )
       if (upEdge) {
         this.ctx.commit(removeEdge(this.ctx.store(), upEdge.from, this.uuid))
-        return { ok: true, note: '已把「' + this.title + '」从「' + target.title + '」之下摘出来（它变成没有上级的独立文档，内容原样，认领随线解除）' }
+        return { ok: true, note: '已把「' + this.title + '」从「' + target.title + '」之下摘出来（它变成没有上游的独立文档，内容原样，认领随线解除）' }
       }
     }
     // 下级文档（下游树边，画布枢纽不在时的 doc→doc 那条线）：摘线 = 拆边，对方变游离

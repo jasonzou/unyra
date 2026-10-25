@@ -9,8 +9,9 @@
  * 条目本身没有任何可以再嵌套的地方——形状本身让「写两层」变得不可能，
  * 剩下的（不要在 summary 里替孙辈规划）是指令层的事。
  */
-import type { KnowledgeNode, LearnStore, OutlineDoc, OutlineEntry } from './types'
+import type { KnowledgeNode, LearnStore, OutlineDoc, OutlineEntry, OutlineEntity } from './types'
 import { normalizeKey } from './graph'
+import { outlineUuid } from './nodeKinds/base'
 
 /** 一层大纲最多列多少个子目标：超过这个数说明该再拆一层（由子目标自己的大纲去拆） */
 export const OUTLINE_CHILDREN_MAX = 24
@@ -135,4 +136,146 @@ export function outlineChildNodeOf(
   entry: OutlineEntry,
 ): KnowledgeNode | null {
   return store.nodes.find((n) => n.goalId === node.goalId && n.key === entry.key) ?? null
+}
+
+/* ---------- 游离大纲（独立实体，见 types 的 OutlineEntity） ---------- */
+
+/** 读盘归一：游离大纲池（形状不对的整条丢掉，宁少勿错——与 store 的 normalize 同一条纪律） */
+export function normalizeOutlineEntities(raw: unknown): OutlineEntity[] {
+  if (!Array.isArray(raw)) return []
+  const out: OutlineEntity[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const e = item as Record<string, unknown>
+    const id = typeof e.id === 'string' ? e.id : ''
+    const goalId = typeof e.goalId === 'string' ? e.goalId : ''
+    const title = typeof e.title === 'string' ? e.title.trim() : ''
+    if (!id || !goalId || !title) continue
+    const children: OutlineEntry[] = []
+    for (const c of Array.isArray(e.children) ? e.children : []) {
+      if (!c || typeof c !== 'object') continue
+      const ce = c as Record<string, unknown>
+      const t = typeof ce.title === 'string' ? ce.title.trim() : ''
+      if (!t) continue
+      const key = normalizeKey(t)
+      if (children.some((x) => x.key === key)) continue
+      children.push({ key, title: t, summary: typeof ce.summary === 'string' ? ce.summary : '' })
+    }
+    out.push({
+      id,
+      goalId,
+      title,
+      intro: typeof e.intro === 'string' ? e.intro : '',
+      children,
+      createdAt: typeof e.createdAt === 'number' && Number.isFinite(e.createdAt) ? e.createdAt : 0,
+      updatedAt: typeof e.updatedAt === 'number' && Number.isFinite(e.updatedAt) ? e.updatedAt : 0,
+    })
+  }
+  return out
+}
+
+/**
+ * 统一解析器：一个 `o:` uuid 背后是哪种大纲。
+ * 附身（node.outline，实体 id = 宿主文档 id）还是游离（store.outlines 里的独立实体），
+ * 画布 / 服务 / 派生都只问这一处——两种大纲在图上是同一种节点。
+ */
+export type OutlineOf =
+  | { kind: 'attached'; uuid: string; docId: string; doc: KnowledgeNode; outline: OutlineDoc | null }
+  | { kind: 'free'; uuid: string; entity: OutlineEntity }
+
+export function outlineByMember(store: LearnStore, uuid: string): OutlineOf | null {
+  const raw = uuid.startsWith('o:') ? uuid.slice(2) : uuid
+  if (!raw) return null
+  const doc = store.nodes.find((n) => n.id === raw)
+  // 宿主文档在，这份大纲就「住得下」——哪怕还没写过内容（editContent 从无到有也是它）
+  if (doc) return { kind: 'attached', uuid: outlineUuid(doc.id), docId: doc.id, doc, outline: doc.outline ?? null }
+  const entity = store.outlines?.find((o) => o.id === raw)
+  if (entity) return { kind: 'free', uuid: outlineUuid(entity.id), entity }
+  return null
+}
+
+/**
+ * 这份大纲在树边里说话用的 id（「声部」）：附身大纲以宿主文档 id 发声（落库落在
+ * 节点文件的 dependencies 里，parentIds 不用翻译）；游离大纲只能以自己的 uuid 发声。
+ */
+export function outlineVoice(store: LearnStore, uuid: string): string {
+  const found = outlineByMember(store, uuid)
+  return found?.kind === 'attached' ? found.docId : outlineUuid(uuid.slice(2) || uuid)
+}
+
+/**
+ * 新建一份游离大纲（拖大纲到空白处 / 在另一份大纲之下开层都走这里）。
+ * id 是新的 uuid；与文档 id 同空间，建时校验不撞（撞了换一个，理论上不会发生）。
+ */
+export function createOutlineEntity(
+  store: LearnStore,
+  goalId: string,
+  title: string,
+  at: number,
+): { store: LearnStore; entity: OutlineEntity } {
+  let id = crypto.randomUUID()
+  while (store.nodes.some((n) => n.id === id) || (store.outlines ?? []).some((o) => o.id === id)) {
+    id = crypto.randomUUID()
+  }
+  const entity: OutlineEntity = {
+    id,
+    goalId,
+    title: title || '新大纲',
+    intro: '',
+    children: [],
+    createdAt: at,
+    updatedAt: at,
+  }
+  return { store: { ...store, outlines: [...(store.outlines ?? []), entity] }, entity }
+}
+
+/** 整份改写一份游离大纲（校验与附身大纲同一套：一层为止、最多 24 条、key 由标题生成） */
+export function writeOutlineEntity(
+  store: LearnStore,
+  outlineId: string,
+  input: { intro?: unknown; children?: unknown; title?: unknown },
+  at: number,
+): { ok: true; store: LearnStore; entity: OutlineEntity } | { ok: false; error: string } {
+  const cur = (store.outlines ?? []).find((o) => o.id === outlineId)
+  if (!cur) return { ok: false, error: '这份大纲已经不在了' }
+  const intro = typeof input.intro === 'string' ? input.intro.trim() : ''
+  const rawChildren = Array.isArray(input.children) ? input.children : []
+  if (rawChildren.length > OUTLINE_CHILDREN_MAX) {
+    return {
+      ok: false,
+      error: `children 最多 ${OUTLINE_CHILDREN_MAX} 条（收到 ${rawChildren.length}）。装不下的部分不该塞进这一层——那是子目标自己的大纲的事`,
+    }
+  }
+  const children: OutlineEntry[] = []
+  for (const item of rawChildren) {
+    if (!item || typeof item !== 'object') return { ok: false, error: 'children 的每一项都要是 { title, summary } 对象' }
+    const e = item as Record<string, unknown>
+    const title = typeof e.title === 'string' ? e.title.trim() : ''
+    if (!title) return { ok: false, error: 'children 里有一项没有 title（子目标的标题必给）' }
+    const summary = typeof e.summary === 'string' ? e.summary.trim() : ''
+    const key = normalizeKey(title)
+    if (children.some((c) => c.key === key)) continue
+    children.push({ key, title, summary })
+  }
+  if (!intro && !children.length && typeof input.title !== 'string') {
+    return { ok: false, error: 'intro 与 children 都是空的：要么写导语，要么至少列出子目标（清空不是写入的活）' }
+  }
+  const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : cur.title
+  const entity: OutlineEntity = { ...cur, title, intro, children, updatedAt: at }
+  return {
+    ok: true,
+    store: { ...store, outlines: (store.outlines ?? []).map((o) => (o.id === outlineId ? entity : o)) },
+    entity,
+  }
+}
+
+/** 删除一份游离大纲：实体连同它两端的树边一起摘（子级断线成游离成员，不连带删除） */
+export function deleteOutlineEntity(store: LearnStore, outlineId: string): LearnStore | null {
+  const uuid = outlineUuid(outlineId)
+  if (!(store.outlines ?? []).some((o) => o.id === outlineId)) return null
+  return {
+    ...store,
+    outlines: (store.outlines ?? []).filter((o) => o.id !== outlineId),
+    edges: store.edges.filter((e) => e.from !== uuid && e.to !== uuid),
+  }
 }

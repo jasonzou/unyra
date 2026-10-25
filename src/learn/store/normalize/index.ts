@@ -25,7 +25,9 @@ import { normalizeEssayCommits } from '../../essayCommits'
 import { normalizeFocus } from '../../focus'
 import { normalizeSchedule } from '../../schedule'
 import { normalizeStructureBook } from '../../structure'
-import type { VideoResource } from '../../types'
+import { normalizeOutlineEntities } from '../../outline'
+import type { VideoChapter, VideoRecap, VideoResource } from '../../types'
+import { normalizeVideoNodes, withVideoMirror } from '../../video/nodes'
 import { normalizeMemoryStore } from '../../memory'
 import { normalizeResourceList, retargetStaticRefs, type StaticResource } from '../../static'
 import { normalizeTmpStore, pruneTmpToNodes } from '../../../lib/tmpStore'
@@ -62,18 +64,6 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
     }
     const ids = new Set(nodes.map((n) => n.id))
 
-    const rawEdges: unknown[] = Array.isArray(d.edges) ? d.edges : []
-    const edges: DependencyEdge[] = []
-    for (const rawEdge of rawEdges) {
-      if (!rawEdge || typeof rawEdge !== 'object') continue
-      const r = rawEdge as Record<string, unknown>
-      const from = typeof r.from === 'string' ? r.from : ''
-      const to = typeof r.to === 'string' ? r.to : ''
-      if (!from || !to || from === to || !ids.has(from) || !ids.has(to)) continue
-      const portKey = typeof r.portKey === 'string' && r.portKey ? r.portKey : undefined
-      edges.push({ from, to, createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(), ...(portKey ? { portKey } : {}) })
-    }
-
     const rawGoals: unknown[] = Array.isArray(d.goals) ? d.goals : []
     const goals: LearningGoal[] = []
     for (const rawGoal of rawGoals) {
@@ -91,6 +81,31 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       })
     }
     const goalIds = new Set(goals.map((g) => g.id))
+
+    // 游离大纲先归一：树边的两端可能是 o:{游离实体id}（目标没了的实体在这里就丢掉）
+    const freeOutlines = normalizeOutlineEntities(d.outlines).filter((o) => goalIds.has(o.goalId))
+    const freeIds = new Set(freeOutlines.map((o) => o.id))
+
+    // 视频资源与视频节点先归一（绑定行只认还存在的视频；资源上的引用镜像稍后按表重建）
+    const videos = normalizeVideos(d.videos)
+    const videoIds = new Set(videos.map((v) => v.id))
+    const videoNodes = normalizeVideoNodes(d.videoNodes, goalIds, videoIds)
+
+    const rawEdges: unknown[] = Array.isArray(d.edges) ? d.edges : []
+    const edges: DependencyEdge[] = []
+    for (const rawEdge of rawEdges) {
+      if (!rawEdge || typeof rawEdge !== 'object') continue
+      const r = rawEdge as Record<string, unknown>
+      const from = typeof r.from === 'string' ? r.from : ''
+      // 旧格式的 toOutline 标记迁到拼法上：接大纲卡的边 to = o:{文档id}（分类链）
+      const to = r.toOutline === true && typeof r.to === 'string' && !r.to.startsWith('o:') ? 'o:' + r.to : typeof r.to === 'string' ? r.to : ''
+      // 树成员校验：文档 id 在节点表里；o: 前缀解开后是节点 id（附身大纲）或游离实体 id
+      const memberOk = (m: string): boolean =>
+        !!m && (ids.has(m) || (!!m.startsWith('o:') && (ids.has(m.slice(2)) || freeIds.has(m.slice(2)))))
+      if (!from || !to || from === to || !memberOk(from) || !memberOk(to)) continue
+      const portKey = typeof r.portKey === 'string' && r.portKey ? r.portKey : undefined
+      edges.push({ from, to, createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(), ...(portKey ? { portKey } : {}) })
+    }
 
     // 无归属的节点（旧数据）挂到第一个目标上，避免丢失
     const fallbackGoal = goals[0]?.id ?? ''
@@ -279,6 +294,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       conversations,
       exams,
       ...(Object.keys(detached).length ? { detached } : {}),
+      ...(freeOutlines.length ? { outlines: freeOutlines } : {}),
       // 临时变量只保留还挂在现有节点上的那些——节点没了，它的暂存数据也没有意义
       tmp: pruneTmpToNodes(normalizeTmpStore(d.tmp), ids),
       resources,
@@ -306,7 +322,9 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       // 日程是用户级数据（见 learn/schedule）：不按目标过滤，坏条目逐条丢
       schedule: normalizeSchedule(d.schedule),
       // 视频资源（见 learn/types 的 VideoResource）：用户级、不按目标过滤，坏条目逐条丢
-      ...(normalizeVideos(d.videos).length ? { videos: normalizeVideos(d.videos) } : {}),
+      ...(videos.length ? { videos } : {}),
+      // 视频节点（目标 × 视频的绑定）：目标没了的行丢掉、指向不存在视频的绑定摘掉
+      ...(videoNodes.length ? { videoNodes } : {}),
       /*
        * 结构图（见 learn/structure）：按目标存的节点表与连线。逐张过一遍——
        * 坏坐标、认不出的类型、违规的边都在 normalizeStructure 里丢掉，
@@ -331,7 +349,9 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       agentTabs: agentTabsState.tabs,
       agentActiveTab: agentTabsState.active,
     }
-    return retargetStaticRefs(store)
+    // 视频资源上的 boundTo 镜像按事实源（videoNodes）整表重建：读回来的那份不作数
+    const mirrored = videos.length && videoNodes.length ? withVideoMirror(store) : store
+    return retargetStaticRefs(mirrored)
   } catch (err) {
     // 静默吞掉等于「启动整库读空、下一次保存把好数据覆盖掉」——收藏就是这么丢的。
     // 至少要把这一声喊出来：修数据的线索全在这一条日志里。
@@ -380,6 +400,35 @@ function normalizeProgress(
   return positionMs === null ? undefined : { ...(source ? { source } : {}), positionMs, updatedAt }
 }
 
+/** 视频总结（一个动作生成的 summary + chapters，按选集 source 一份）；坏形状整份丢或按缺失兜底 */
+function normalizeRecaps(raw: unknown): Record<string, VideoRecap> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Record<string, VideoRecap> = {}
+  for (const [source, item] of Object.entries(raw as Record<string, unknown>)) {
+    if (!source.trim() || !item || typeof item !== 'object' || Array.isArray(item)) continue
+    const o = item as Record<string, unknown>
+    const summary = typeof o.summary === 'string' ? o.summary.replace(/\s+/g, ' ').trim().slice(0, 600) : ''
+    const chapters: VideoChapter[] = []
+    if (Array.isArray(o.chapters)) {
+      const seen = new Set<number>()
+      for (const c of o.chapters) {
+        if (!c || typeof c !== 'object') continue
+        const e = c as Record<string, unknown>
+        const startMs =
+          typeof e.startMs === 'number' && Number.isFinite(e.startMs) && e.startMs >= 0 ? Math.round(e.startMs) : null
+        const text = typeof e.summary === 'string' ? e.summary.replace(/\s+/g, ' ').trim().slice(0, 60) : ''
+        if (startMs === null || !text || seen.has(startMs)) continue
+        seen.add(startMs)
+        chapters.push({ startMs, summary: text })
+      }
+      chapters.sort((a, b) => a.startMs - b.startMs)
+    }
+    if (!summary && !chapters.length) continue
+    out[source] = { ...(summary ? { summary } : {}), ...(chapters.length ? { chapters } : {}) }
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 function normalizeVideos(raw: unknown): VideoResource[] {
   if (!Array.isArray(raw)) return []
   const out: VideoResource[] = []
@@ -398,6 +447,7 @@ function normalizeVideos(raw: unknown): VideoResource[] {
         if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') fields[k] = v
       }
     }
+    const recaps = normalizeRecaps(o.recaps)
     out.push({
       id,
       pluginId,
@@ -407,6 +457,7 @@ function normalizeVideos(raw: unknown): VideoResource[] {
       title: typeof o.title === 'string' && o.title.trim() ? o.title.trim() : input.slice(0, 60),
       ...(normalizeSelection(o.selection) ? { selection: normalizeSelection(o.selection) } : {}),
       ...(normalizeProgress(o.progress) ? { progress: normalizeProgress(o.progress) } : {}),
+      ...(recaps ? { recaps } : {}),
       createdAt: typeof o.createdAt === 'number' ? o.createdAt : Date.now(),
       ...(typeof o.updatedAt === 'number' ? { updatedAt: o.updatedAt } : {}),
     })

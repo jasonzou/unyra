@@ -63,7 +63,7 @@ export interface NodeFile {
   updatedAt: number
   annotations: unknown
   /** 依赖边（我是 from，这些是 to）——与旧 meta.json 的口径一致，边仍写在节点自己文件里 */
-  dependencies: Array<{ to: string; createdAt: number; portKey?: string }>
+  dependencies: Array<{ to: string; createdAt: number; portKey?: string; toOutline?: true }>
   parts: NodePart[]
   /** 学习状态：没评估过就不写这一项（理由同旧 meta.json） */
   learning?: unknown

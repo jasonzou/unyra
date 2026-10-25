@@ -6,6 +6,8 @@
  * `locateUuid` 这一份——没有第二张「谁在哪」的表，也就没有对账。
  */
 import {
+  addEdge,
+  addNode,
   createNodeUnder,
   createNote,
   deleteNode,
@@ -20,7 +22,8 @@ import {
 import type { Exam } from '../exam'
 import { detachedPoolOf, findNoteEntity, findSuperDocEntity, withDetached } from '../detached'
 import { nodePathOf } from '../paths'
-import { clearOutline } from '../outline'
+import { clearOutline, createOutlineEntity, deleteOutlineEntity, outlineByMember } from '../outline'
+import { createVideoNode, deleteVideoNode } from '../video/nodes'
 import { NOTE_DEFAULT_NAME, notesOf, uniqueNoteName } from '../notes'
 import { SUPERDOC_DEFAULT_NAME, removeSuperDoc, writeSuperDoc } from '../superdocs'
 import { emptyDocs, superDocsOf, type KnowledgeNode, type LearnStore, type NoteFile, type SuperDocFile } from '../types'
@@ -31,6 +34,7 @@ import { ExamGNode } from './exam'
 import { NoteGNode } from './note'
 import { OutlineGNode } from './outline'
 import { SuperdocGNode } from './superdoc'
+import { VideoGNode } from './video'
 
 export interface NodeServiceDeps {
   getLatest: () => LearnStore
@@ -46,6 +50,8 @@ export type UuidLocation =
   | { kind: 'note'; docId: string; noteId: string }
   | { kind: 'superdoc'; docId: string; sdocId: string }
   | { kind: 'exam'; docId: string; examId: string }
+  /** 视频节点（游离实体）：nodeId 是它自己的实体 id，与视频资源 id 无关 */
+  | { kind: 'video'; nodeId: string }
 
 export function locateUuid(store: LearnStore, uuid: string): UuidLocation | null {
   const entryDoc = docIdOfEntryUuid(uuid)
@@ -54,10 +60,16 @@ export function locateUuid(store: LearnStore, uuid: string): UuidLocation | null
   }
   const outlineDoc = docIdOfOutlineUuid(uuid)
   if (outlineDoc) {
-    return nodeById(store, outlineDoc) ? { kind: 'outline', docId: outlineDoc } : null
+    // 附身大纲（长在文档身上）或游离大纲（store.outlines 里的独立实体），都是同一种节点
+    if (nodeById(store, outlineDoc) || (store.outlines ?? []).some((o) => o.id === outlineDoc)) {
+      return { kind: 'outline', docId: outlineDoc }
+    }
+    return null
   }
   const exam = store.exams.find((e) => e.id === uuid)
   if (exam) return { kind: 'exam', docId: exam.nodeId, examId: exam.id }
+  // 视频节点：游离实体（目标 × 视频的绑定），没有宿主文档
+  if ((store.videoNodes ?? []).some((v) => v.id === uuid)) return { kind: 'video', nodeId: uuid }
   for (const node of store.nodes) {
     if (node.id === uuid) return { kind: 'doc', docId: node.id }
     const note = notesOf(node).find((n) => n.id === uuid)
@@ -161,6 +173,8 @@ export class NodeService {
         return new SuperdocGNode(this.ctx, loc.sdocId)
       case 'exam':
         return new ExamGNode(this.ctx, loc.examId)
+      case 'video':
+        return new VideoGNode(this.ctx, loc.nodeId)
     }
   }
 
@@ -181,34 +195,112 @@ export class NodeService {
       return { error: '入口由目标绑定自动生成（每张图一个），不能创建' }
     }
 
-    const under = typeof input.under === 'string' && input.under.trim() ? hostDocOfUnder(store, input.under) : null
+    if (kind === 'video') {
+      // 视频节点不挂树：它只是「这个目标配这个视频」的引用，under 给了就是误会
+      const underGiven = input.under !== undefined && input.under !== null && String(input.under).trim() !== ''
+      if (underGiven) return { error: '视频节点不挂在大纲或文档之下：不带 under 建（画布上拖到空白处），建好在卡上选一个视频绑上' }
+      const { store: withNode, entity } = createVideoNode(store, goalId, Date.now())
+      this.deps.set(withNode)
+      return {
+        ok: true,
+        uuid: entity.id,
+        title: '视频 · 未绑定',
+        created: true,
+        note: '已建一枚视频节点（还没绑视频）：editContent({ videoId }) 绑一个现有视频，视频清单看 list() 的 videos 段',
+      }
+    }
+
+    /*
+     * under 的两副面孔：`o:` 前缀 = 挂到某份大纲之下（附身或游离，两类大纲都是
+     * 树成员）；其余 = 挂到某份文档之下（挂件的宿主 / 补大纲的宿主）。按前缀分流
+     * 后再各自校验；游离大纲没有宿主文档——挂件挂不上去，文档 / 大纲可以挂
+     * （树边以它的 uuid 发声）。
+     */
+    const underRaw = typeof input.under === 'string' ? input.under.trim() : ''
+    const outlineUnder = underRaw.startsWith('o:') ? outlineByMember(store, underRaw) : null
+    if (underRaw.startsWith('o:') && !outlineUnder) {
+      return { error: 'under 里的大纲（' + underRaw + '）已经不在了：先 api.node.list() 查清楚再建' }
+    }
+    if (outlineUnder?.kind === 'free' && (kind === 'note' || kind === 'superdoc' || kind === 'exam')) {
+      return { error: '游离大纲没有宿主文档，挂件挂不上去：挂件挂在文档之下，under 给文档的 uuid' }
+    }
+    const under = !underRaw || outlineUnder ? null : hostDocOfUnder(store, underRaw)
     if (under && 'error' in under) return { error: under.error }
-    const host = under && 'docId' in under ? nodeById(store, under.docId) : null
+    const host = outlineUnder?.kind === 'attached'
+      ? nodeById(store, outlineUnder.docId)
+      : under && 'docId' in under
+        ? nodeById(store, under.docId)
+        : null
     if (under && !host) return { error: 'under 里给的文档已经不在了' }
 
     if (kind === 'outline') {
-      // 大纲与文档一一对应：under 给了 = 给那份文档补一份空大纲；没给 = 连同宿主文档一起配对成形
+      /*
+       * 大纲的三种落点：under 不给 = **独立大纲**（游离实体，没有文档——拖到空白处的
+       * 那一下，分类树的结构层就从这里长出来）；under 是大纲 = 在那份大纲之下**开一层**
+       * （游离子大纲 + 树边）；under 是文档 = 给那份文档**补一份大纲**（附身，node.outline）。
+       */
+      const outlineTitle = title || '新大纲'
+      if (outlineUnder) {
+        const upTitle = (outlineUnder.kind === 'attached' ? outlineUnder.doc.title : outlineUnder.entity.title) + ' · 大纲'
+        const voice = outlineUnder.kind === 'attached' ? outlineUnder.docId : outlineUnder.uuid
+        const { store: withEntity, entity } = createOutlineEntity(store, goalId, outlineTitle, Date.now())
+        const r = addEdge(withEntity, voice, outlineUuid(entity.id))
+        if (!r.added) return { error: r.reason ?? '这一层挂不上去：会成环（它已经在「' + upTitle + '」的上游里）' }
+        this.deps.set(r.store)
+        return {
+          ok: true,
+          uuid: outlineUuid(entity.id),
+          title: entity.title + ' · 大纲',
+          created: true,
+          note: '已在「' + upTitle + '」之下开了新的一层独立大纲：目标项用 editContent 写，孙辈由它自己负责',
+        }
+      }
       if (host) {
         if (host.outline) return { error: '「' + host.title + '」已经有一份大纲了（o:' + host.id + '），没有另建' }
         const next = ensureOutline(store, host.id)
         this.deps.set(next)
         return { ok: true, uuid: outlineUuid(host.id), title: host.title + ' · 大纲', created: true, note: '已为「' + host.title + '」建了一份空大纲；目标项用 editContent({ intro, children }) 写' }
       }
-      const docTitle = title || '新文档'
-      const node = freeNode(store, goalId, docTitle)
-      const next = ensureOutline({ ...store, nodes: [...store.nodes, node.record] }, node.record.id)
-      this.deps.set(next)
+      const { store: withEntity, entity } = createOutlineEntity(store, goalId, outlineTitle, Date.now())
+      this.deps.set(withEntity)
       return {
         ok: true,
-        uuid: outlineUuid(node.record.id),
-        title: docTitle + ' · 大纲',
+        uuid: outlineUuid(entity.id),
+        title: entity.title + ' · 大纲',
         created: true,
-        note: '已建文档「' + docTitle + '」连同它的空大纲（两者同时成形）；目标项用大纲的 editContent 写，文档正文用文档的 editContent 写',
+        note: '已建独立大纲「' + entity.title + '」（没有宿主文档）：目标项用 editContent({ intro, children }) 写，往下挂文档或再开一层',
       }
     }
 
     if (kind === 'doc') {
       const docTitle = title || '新文档'
+      if (outlineUnder?.kind === 'free') {
+        // 挂在游离大纲之下：树边以它的 uuid 发声（没有宿主文档可锚），认领口径与挂文档一致
+        const portKey = typeof input.portKey === 'string' ? input.portKey.trim() : ''
+        const children = outlineUnder.entity.children
+        if (portKey && !children.some((c) => c.key === portKey)) {
+          return {
+            error: children.length
+              ? '「' + outlineUnder.entity.title + '」的大纲没有目标项 key「' + portKey + '」。可认领的：' + children.map((c) => c.key + '（' + c.title + '）').join('、')
+              : '「' + outlineUnder.entity.title + '」还没有目标项（没有可认领的接口）',
+          }
+        }
+        const added = addNode(store, { title: docTitle, goalId, origin: 'ai', ...(typeof input.description === 'string' ? { description: input.description } : {}) })
+        if (!added.created) {
+          return { error: '本目标里已经有「' + added.node.title + '」这个文档（' + added.node.id + '），没有另建一份' }
+        }
+        const r = addEdge(added.store, outlineUnder.uuid, added.node.id, portKey || undefined)
+        if (!r.added) return { error: r.reason ?? '这份文档没能挂上那一层' }
+        this.deps.set(r.store)
+        const claimed = portKey ? '，认领了目标项「' + (children.find((c) => c.key === portKey)?.title ?? portKey) + '」' : ''
+        return {
+          ok: true,
+          uuid: added.node.id,
+          title: added.node.title,
+          created: true,
+          note: '已建文档「' + added.node.title + '」并挂到大纲「' + outlineUnder.entity.title + '」之下' + claimed + '；教学正文用 editContent 写',
+        }
+      }
       if (host) {
         // 点目标项建文档时带上那条目标项的 key = 创建即认领（与 connect 的 portKey 同一口径）
         const portKey = typeof input.portKey === 'string' ? input.portKey.trim() : ''
@@ -363,7 +455,7 @@ export class NodeService {
       }
     }
 
-    return { error: 'kind 只能是 doc / outline / note / exam / superdoc（entry 由目标生成）' }
+    return { error: 'kind 只能是 doc / outline / note / exam / superdoc / video（entry 由目标生成）' }
   }
 
   /** 目标的全量清单（agent 的导航图；含挂件，全部带 uuid） */
@@ -399,6 +491,24 @@ export class NodeService {
           attempts: e.attempts.length,
         })),
       })),
+      // 游离大纲（不依附文档的结构层）：一样在导航图上——get(uuid) 照样取、editContent 照样写
+      freeOutlines: (store.outlines ?? [])
+        .filter((o) => o.goalId === goalId)
+        .map((o) => ({ uuid: outlineUuid(o.id), title: o.title, entries: o.children.length })),
+      /*
+       * 视频节点（目标 × 视频的绑定）：videos 段给「绑了什么」，清单给全部视频——
+       * 要绑一个就 editContent({ videoId })。被引用的视频删除会被拦（删除守卫读这张表）。
+       */
+      videos: {
+        nodes: (store.videoNodes ?? [])
+          .filter((v) => v.goalId === goalId)
+          .map((v) => ({
+            uuid: v.id,
+            videoId: v.videoId,
+            title: v.videoId ? (store.videos?.find((x) => x.id === v.videoId)?.title ?? null) : null,
+          })),
+        all: (store.videos ?? []).map((v) => ({ videoId: v.id, title: v.title, plugin: v.pluginName ?? v.pluginId })),
+      },
       // 游离挂件（剪了线 / 没绑过的）：独立实体，也在导航图上——get(uuid) 照样取、editContent 照样写
       detached: {
         notes: (store.detached?.[goalId]?.notes ?? []).map((n) => ({ uuid: n.id, title: n.name, chars: n.content.length })),
@@ -407,7 +517,67 @@ export class NodeService {
           .filter((e) => e.goalId === goalId && !nodeById(store, e.nodeId))
           .map((e) => ({ uuid: e.id, title: e.title, questions: e.questions.length, attempts: e.attempts.length })),
       },
-      note: '要动哪个就 const n = await api.node.get(uuid) 取对象；动手前 await n.help() 看它自己怎么说。游离的挂件在 detached 里，拖线 / connect 绑到文档之下。',
+      note: '要动哪个就 const n = await api.node.get(uuid) 取对象；动手前 await n.help() 看它自己怎么说。游离的挂件在 detached 里，拖线 / connect 绑到文档之下；要给这个目标绑视频，取 videos.nodes 里的节点（或新建一枚）再 editContent({ videoId })，videoId 从 videos.all 里挑。',
+    }
+  }
+
+  /**
+   * 一页纸简报（写正文之前先看它）：这份文档是什么、认领了哪条目标项、同层兄弟
+   * 在写什么、全图已经讲过哪些小节。把 get + getPortData + 读大纲 + 兄弟比对
+   * 一次做完——省掉一轮 node.list() 全图 + 逐个读的开销。
+   */
+  brief(uuid: string):
+    | {
+        ok: true
+        self: { title: string; description: string; status: string; teachingChars: number; hasContent: boolean }
+        port: { key: string; title: string; summary: string } | null
+        siblings: Array<{ title: string; summary: string }>
+        taught: Array<{ title: string; headings: string[] }>
+        note: string
+      }
+    | { error: string } {
+    const store = this.deps.getLatest()
+    const raw = (uuid ?? '').trim()
+    const loc = locateUuid(store, raw)
+    if (!loc) return { error: '没有 uuid 为「' + raw + '」的节点；先 api.node.list() 查清楚' }
+    if (loc.kind !== 'doc') return { error: 'brief 只讲文档节点（写正文之前的那一眼）；大纲 / 挂件直接 get 取对象' }
+    const node = nodeById(store, loc.docId)
+    if (!node) return { error: '这份文档已经不在了' }
+    const teaching = node.docs?.teaching ?? ''
+
+    // 认领的目标项：树边上的 portKey 说了算（to 两种拼法都认——接文档卡 / 接大纲卡）
+    const claim = store.edges.find((e) => (e.to === node.id || e.to === 'o:' + node.id) && e.portKey)
+    const parent = claim ? outlineByMember(store, claim.from.startsWith('o:') ? claim.from : 'o:' + claim.from) : null
+    const entries =
+      parent?.kind === 'attached' ? parent.outline?.children ?? [] : parent?.kind === 'free' ? parent.entity.children : []
+    const mine = claim?.portKey ? entries.find((c) => c.key === claim.portKey) : undefined
+
+    // 全图已讲索引：各文档正文里的 H2/H3 小节标题（不是全文——几百字符就够避开重复讲解）
+    const taught = store.nodes
+      .filter((n) => n.goalId === node.goalId && n.id !== node.id)
+      .map((n) => ({
+        title: n.title,
+        headings: Array.from((n.docs?.teaching ?? '').matchAll(/^#{2,3}[ \t]+(.+)$/gm))
+          .map((m) => m[1].trim().slice(0, 60))
+          .slice(0, 8),
+      }))
+      .filter((x) => x.headings.length)
+
+    return {
+      ok: true,
+      self: {
+        title: node.title,
+        description: node.description,
+        status: node.status,
+        teachingChars: teaching.length,
+        hasContent: !!teaching.trim(),
+      },
+      port: mine ? { key: mine.key, title: mine.title, summary: mine.summary } : null,
+      siblings: entries.filter((c) => c !== mine).map((c) => ({ title: c.title, summary: c.summary })),
+      taught,
+      note:
+        'port 是这份文档认领的目标项（范围与边界以它为准）；siblings 是同层其他目标项（讲过的别重讲）；' +
+        'taught 是全图各文档已经讲过的小节标题（出现过的概念按「已讲」处理，最多当一句预备带过）。',
     }
   }
 
@@ -419,16 +589,31 @@ export class NodeService {
     if (!loc) return { error: '没有 uuid 为「' + raw + '」的节点；先 api.node.list() 查清楚' }
 
     if (loc.kind === 'outline') {
-      // 大纲是文档的「计划」层：删除 = 清空计划。文档、树边、下游文档都原样保留。
+      // 大纲是「计划」层：附身大纲删除 = 清空计划（文档、树边、下级都原样保留）；
+      // 游离大纲删除 = 实体连同它两端的树边一起摘（下级断线成游离成员，不连带删除）。
       const node = nodeById(store, loc.docId)
-      const next = clearOutline(store, loc.docId, Date.now())
-      if (!next) return { error: '这份大纲还没有写过内容，没有可删的东西' }
+      if (node?.outline) {
+        const next = clearOutline(store, loc.docId, Date.now())
+        if (!next) return { error: '这份大纲还没有写过内容，没有可删的东西' }
+        this.deps.set(next)
+        return { ok: true, note: '已删除「' + node.title + '」的大纲：计划清空，文档与它的下级文档都还在' }
+      }
+      const next = deleteOutlineEntity(store, loc.docId)
+      if (!next) return { error: '这份大纲已经不在了' }
+      const entity = (store.outlines ?? []).find((o) => o.id === loc.docId)
       this.deps.set(next)
-      return { ok: true, note: '已删除「' + (node?.title ?? loc.docId) + '」的大纲：计划清空，文档与它的下级文档都还在' }
+      return { ok: true, note: '已删除独立大纲「' + (entity?.title ?? loc.docId) + '」：它两端的树边一并摘掉（下级都还在，只是没有了上级）' }
     }
     if (loc.kind === 'entry') return { error: '入口由目标绑定生成，删不掉（目标删了它自然消失）' }
     if (loc.kind === 'exam') {
       return { error: '试卷的删除走 api.exam.delete——要先确认没有等着判分 / 讲解的考试' }
+    }
+    if (loc.kind === 'video') {
+      // 删视频节点 = 摘掉这层绑定（视频资源与它名下的分段、进度都原样保留）
+      const next = deleteVideoNode(store, loc.nodeId)
+      if (!next) return { error: '这个视频节点已经不在了' }
+      this.deps.set(next)
+      return { ok: true, note: '已删除这枚视频节点：目标与视频的绑定解除，视频资源还在侧栏里' }
     }
 
     if (loc.kind === 'doc') {

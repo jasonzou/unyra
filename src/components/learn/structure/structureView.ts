@@ -4,11 +4,13 @@
  * ## deriveCanvas（v2 的心脏）
  *
  * 输入只有 `(store, goalId, 存过的坐标表)`，输出 `{ cards, edges, heightOf }`：
- * - **卡片就是节点**（uuid 直接对上 store 实体）：入口、每份文档、可见的大纲、
- *   每份笔记 / 试卷 / 超级文档各一张卡；
- * - **连线全部派生**：入口→根文档（目标绑定）、大纲→子文档（store.edges 树边）、
- *   文档→自己的大纲与挂件（归属）——图上没有任何一条存出来的线；
- * - **坐标以存过的为准，没存的自动铺排**：从入口出发按关系深度落列（BFS，
+ * - **卡片就是节点**（uuid 直接对上 store 实体）：每份文档、附身大纲（node.outline，
+ *   写了才有卡）、游离大纲（store.outlines 的独立实体，没有文档卡）、每份笔记 /
+ *   试卷 / 超级文档各一张卡；
+ * - **连线全部派生**：树边（store.edges，两端是树成员 id——文档 id 或 o:{大纲id}）
+ *   画在成员卡之间（to 以 o: 开头即接在大纲卡上的分类链，否则交替链）；
+ *   归属边画「文档 → 自己的大纲与挂件」——图上没有任何一条存出来的线；
+ * - **坐标以存过的为准，没存的自动铺排**：从根的脸出发按深度落列（BFS，
  *   同列往下挪到不重叠处），完全确定——同一份输入永远派生出同一张图。
  *
  * 为什么从组件里拆出来：仓库的 oxlint 规矩是「组件文件只导出组件」；这些事都能单测，
@@ -16,11 +18,11 @@
  */
 
 import type { LearnStore } from '../../../learn/types'
-import { examsOfNode, nodeById, parentIds, prereqIds } from '../../../learn/graph'
+import { examsOfNode, nodeById, prereqIds } from '../../../learn/graph'
 import { notesOf } from '../../../learn/notes'
 import { attemptScore, type ExamAttempt } from '../../../learn/exam'
 import { superDocsOf } from '../../../learn/types'
-import { outlineUuid, type GNodeKind } from '../../../learn/nodeKinds'
+import { docIdOfOutlineUuid, outlineUuid, type GNodeKind } from '../../../learn/nodeKinds'
 import {
   CARD_H,
   CARD_W,
@@ -110,6 +112,8 @@ export interface CardView {
   slots?: OutlineSlotView[]
   /** 这张文档卡是本图的入口（目标的根）——卡片上挂「入口」徽章；一张图有且只有一个 */
   entry?: boolean
+  /** 游离大纲卡（独立实体，没有宿主文档）：空卡给「添加目标项」而不是「生成大纲」 */
+  free?: boolean
   /** 试卷卡的考试记录行（kind = exam 时才有；一行一次作答） */
   attempts?: ExamAttemptRow[]
   x: number
@@ -173,16 +177,6 @@ function plainText(md: string): string {
 /* ---------- 派生 ---------- */
 
 /**
- * 这份文档的大纲卡要不要上画布：**大纲实体存在就在**（根文档恒在——它的大纲
- * 是目标给的）。卡是「计划」这一层的脸：删除大纲（清空计划）卡就消失，但树连接
- * 不依赖这张卡（没有卡时连线直接画在文档与子文档之间）。
- */
-function outlineVisible(store: LearnStore, docId: string, isRoot: boolean): boolean {
-  if (isRoot) return true
-  return !!nodeById(store, docId)?.outline
-}
-
-/**
  * 从 store 派生一张能画的图（见文件头）。`saved` 是存过的坐标表（含便条）；
  * 没有目标 / 没有节点时回空图。
  */
@@ -203,6 +197,8 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     /** BFS 的下游：铺完自己之后按序铺它们 */
     next: Pending[]
     parent: Pending | null
+    /** 认领了接口的子级：铺排锚到父大纲那条目标项的行上（行号 = 目标项序号） */
+    slotAnchor?: { parent: string; index: number }
     placed?: boolean
   }
 
@@ -213,7 +209,6 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     byUuid.set(p.card.uuid, p)
   }
 
-  // 入口不再是独立的卡：它就是目标的根文档，卡片上挂「入口」徽章（一张图有且只有一个）
   const docPending = new Map<string, Pending>()
 
   const makeDoc = (docId: string): Pending => {
@@ -257,76 +252,152 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     add(p)
   }
 
-  // 树边：大纲卡在场时画「它的大纲 → 子文档」（隔着大纲 hop，深度 +2）；
-  // 大纲卡不在场（没写过计划 / 已删除）就直接画「父文档 → 子文档」（深度 +1）。
-  // 连线永远跟着事实走：删除大纲只拆卡，不拆连接。
+  /*
+   * 大纲卡两类（图上是同一种节点）：
+   * - 附身：node.outline，uuid `o:{宿主文档id}`，标题跟宿主文档；
+   * - 游离：store.outlines 里的独立实体，uuid `o:{实体id}`，没有文档卡——
+   *   分类树的结构层。
+   * 目标项的 childId 直接给**树边落点那张卡**的 uuid（认领边上的 to 成员 id）。
+   */
+  const outlinePending = new Map<string, Pending>()
+  /** 树边成员（doc id 或 o:）折成文档 id：旧式 key 对号只认文档（嵌套子级折回它的宿主） */
+  const memberDocIds = (voice: string): string[] =>
+    prereqIds(store, voice)
+      .map((m) => (m.startsWith('o:') ? m.slice(2) : m))
+      .filter((cid) => !!nodeById(store, cid))
+  const slotsOf = (voice: string, entries: { key: string; title: string }[], childDocs: string[]): OutlineSlotView[] =>
+    entries.map((e, index) => {
+      const claimed = store.edges.find((ed) => ed.from === voice && ed.portKey === e.key)
+      const legacyId =
+        childDocs
+          .map((cid) => nodeById(store, cid))
+          .find((c) => c && c.key === e.key)?.id ?? null
+      // 旧数据没有认领边时按 key 对号；对上了也看一眼真实边的拼法（to=o: 即接在大纲卡上）
+      const childId =
+        claimed?.to ??
+        (legacyId
+          ? store.edges.some((e2) => e2.from === voice && e2.to === 'o:' + legacyId)
+            ? 'o:' + legacyId
+            : legacyId
+          : null)
+      return { key: e.key, title: e.title, index, childId }
+    })
+
   for (const node of docs) {
-    const child = docPending.get(node.id)
-    if (!child) continue
-    for (const pid of parentIds(store, node.id)) {
-      const parent = docPending.get(pid)
-      if (!parent) continue
-      const hub = outlineVisible(store, pid, pid === goal.rootNodeId)
-      edges.push(hub ? { from: outlineUuid(pid), to: node.id } : { from: pid, to: node.id })
-      child.depth = Math.max(child.depth, parent.depth + (hub ? 2 : 1))
+    if (!node.outline) continue
+    const slots = slotsOf(node.id, node.outline.children, memberDocIds(node.id))
+    const intro = node.outline.intro?.trim() ?? ''
+    const p: Pending = {
+      card: {
+        uuid: outlineUuid(node.id),
+        kind: 'outline',
+        title: node.title,
+        subtitle: slots.length ? `${slots.length} 个目标项` : intro ? clip(intro) : '还没有大纲',
+        slots,
+      },
+      depth: 1,
+      anchorY: 0,
+      next: [],
+      parent: null,
     }
+    outlinePending.set(p.card.uuid, p)
+    add(p)
+  }
+  for (const entity of store.outlines ?? []) {
+    if (entity.goalId !== goalId) continue
+    const voice = outlineUuid(entity.id)
+    const slots = slotsOf(voice, entity.children, memberDocIds(voice))
+    const intro = entity.intro.trim()
+    const p: Pending = {
+      card: {
+        uuid: voice,
+        kind: 'outline',
+        title: entity.title,
+        subtitle: slots.length ? `${slots.length} 个目标项` : intro ? clip(intro) : '还没有目标项',
+        slots,
+        free: true,
+      },
+      depth: 1,
+      anchorY: 0,
+      next: [],
+      parent: null,
+    }
+    outlinePending.set(voice, p)
+    add(p)
   }
 
-  // 每份文档：大纲卡 / 挂件卡（入口就是根文档自己，不再有入口边）
+  /*
+   * 树边（store.edges，两端是树成员 id）：画在成员卡之间——
+   * - from 是文档 id：那份文档有大纲就以它的大纲卡为源（hub 翻译，交替链
+   *   文档-大纲-文档…的画法），没有就直接从文档卡出发；
+   * - from 是 o:（游离大纲的声部）：本就是大纲卡。
+   * to 以 o: 开头即接在大纲卡上的嵌套子级（分类链 文档-大纲-大纲…）。
+   */
+  // 附身大纲先按「文档右边一格」立初始深度（树边 pass 要拿它当源；嵌套接入的之后反过来调）
+  for (const node of docs) {
+    const doc = docPending.get(node.id)
+    const o = outlinePending.get(outlineUuid(node.id))
+    if (doc && o) o.depth = doc.depth + 1
+  }
+  const fromCardOf = (from: string): Pending | undefined => {
+    if (from.startsWith('o:')) return outlinePending.get(from)
+    return outlinePending.get(outlineUuid(from)) ?? docPending.get(from)
+  }
+  for (const e of store.edges) {
+    const fromCard = fromCardOf(e.from)
+    const toCard = outlinePending.get(e.to) ?? docPending.get(e.to)
+    if (!fromCard || !toCard) continue
+    // 深度按成员算：父成员的卡 + 1（附身大纲那一对的「右侧」即大纲卡本身）
+    toCard.depth = Math.max(toCard.depth, fromCard.depth + 1)
+    toCard.parent ??= fromCard
+    fromCard.next.push(toCard)
+    // 认领了接口的子级记下行号：自动铺排的顺序与锚点都按目标项来（见下面的排序与 place）
+    if (fromCard.card.kind === 'outline') {
+      const idx = fromCard.card.slots?.findIndex((s) => s.childId === toCard.card.uuid) ?? -1
+      if (idx >= 0) toCard.slotAnchor = { parent: fromCard.card.uuid, index: idx }
+    }
+    edges.push({ from: fromCard.card.uuid, to: toCard.card.uuid })
+  }
+
+  // 附身大纲与它的文档配成一对：归属边「文档 → 它的大纲」（交替链画法）；嵌套接入时反过来以大纲为入口
+  for (const node of docs) {
+    const doc = docPending.get(node.id)
+    const o = outlinePending.get(outlineUuid(node.id))
+    if (!doc || !o) continue
+    const nestedIn = edges.some((e) => e.to === o.card.uuid)
+    if (nestedIn) {
+      // 嵌套接入：文档卡排在大纲卡左边（与父大纲同列），由大纲卡带着进 BFS
+      doc.depth = Math.max(doc.depth, o.depth - 1, 1)
+      doc.parent = o
+      o.next.unshift(doc)
+    } else {
+      o.depth = doc.depth + 1
+      o.parent = doc
+      doc.next.push(o)
+    }
+    edges.push({ from: node.id, to: o.card.uuid })
+  }
+
+  /*
+   * 自动铺排的顺序 = 目标项的顺序：大纲卡 next 里的子级按认领的行号排（认领优先，
+   * 没认领的稳着排在后面）——不然铺出来的次序跟着边的先后走，图读起来和计划对不上。
+   * 嵌套接入时宿主文档卡在最前（它贴着自己的大纲），保持第一。
+   */
+  for (const o of outlinePending.values()) {
+    const slots = o.card.slots ?? []
+    const hostId = docIdOfOutlineUuid(o.card.uuid)
+    const rank = (uuid: string): number => {
+      if (hostId && uuid === hostId) return -1
+      const i = slots.findIndex((s) => s.childId === uuid)
+      return i >= 0 ? i : slots.length
+    }
+    o.next.sort((a, b) => rank(a.card.uuid) - rank(b.card.uuid))
+  }
+
+  // 挂件：笔记 / 试卷 / 超级文档，创建即挂，卡随实体（照旧挂在内容文档卡之下）
   for (const node of docs) {
     const doc = docPending.get(node.id)
     if (!doc) continue
-    const isRoot = node.id === goal.rootNodeId
-
-    const children = prereqIds(store, node.id)
-    if (node.outline && outlineVisible(store, node.id, isRoot)) {
-      /*
-       * 行与文档的对应：**认领优先**——边上的 portKey 说了算（文档改过名、还没起正经
-       * 标题，都不影响它占着哪条目标项）。旧数据的边没有 portKey，退回按 key 对号
-       * （文档标题生成的 key === 目标项 key）。
-       */
-      const slots: OutlineSlotView[] = node.outline.children.map((e, index) => ({
-        key: e.key,
-        title: e.title,
-        index,
-        childId:
-          store.edges.find((ed) => ed.from === node.id && ed.portKey === e.key)?.to ??
-          children
-            .map((cid) => nodeById(store, cid))
-            .find((c) => c && c.key === e.key)?.id ??
-          null,
-      }))
-      const intro = node.outline.intro?.trim() ?? ''
-      const outline: Pending = {
-        card: {
-          uuid: outlineUuid(node.id),
-          kind: 'outline',
-          title: node.title,
-          subtitle: slots.length ? `${slots.length} 个目标项` : intro ? clip(intro) : '还没有大纲',
-          slots,
-        },
-        depth: doc.depth + 1,
-        anchorY: 0,
-        next: [],
-        parent: doc,
-      }
-      add(outline)
-      edges.push({ from: node.id, to: outline.card.uuid })
-      doc.next.push(outline)
-      // 子文档排在它的大纲后面（BFS 顺序即铺排顺序）
-      for (const cid of children) {
-        const child = docPending.get(cid)
-        if (child) outline.next.push(child)
-      }
-    } else {
-      // 大纲卡不可见时子文档直接跟在文档后面
-      for (const cid of children) {
-        const child = docPending.get(cid)
-        if (child) doc.next.push(child)
-      }
-    }
-
-    // 挂件：笔记 / 试卷 / 超级文档，创建即挂，卡随实体
     for (const note of notesOf(node)) {
       const p: Pending = {
         card: {
@@ -433,6 +504,29 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     })
   }
 
+  /*
+   * 视频节点（目标 × 视频的绑定，游离实体）：标题跟绑的视频走（空节点给占位名 +
+   * 虚线框），卡上的「选择视频」在组件里——它要读 store.videos 与统一通道。
+   * 没有树边、没有归属线：绑定本身就是这张卡的全部意义。
+   */
+  for (const entity of store.videoNodes ?? []) {
+    if (entity.goalId !== goalId) continue
+    const video = entity.videoId ? (store.videos ?? []).find((v) => v.id === entity.videoId) : undefined
+    add({
+      card: {
+        uuid: entity.id,
+        kind: 'video',
+        title: video?.title ?? '未绑定视频',
+        subtitle: video ? (video.pluginName ?? '已绑定') : '选一个视频，把这门课和它绑在一起',
+        ...(video ? {} : { blank: true }),
+      },
+      depth: 2,
+      anchorY: 0,
+      next: [],
+      parent: null,
+    })
+  }
+
   /* 2. 高度（内容算出来的） */
 
   const heightOf: HeightOf = (c) => {
@@ -460,7 +554,19 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     p.placed = true
     const savedPos = positions[p.card.uuid]
     const parentCard = p.parent ? placedByUuid.get(p.parent.card.uuid) : undefined
-    const anchorY = parentCard ? parentCard.y : 0
+    let anchorY = parentCard ? parentCard.y : 0
+    /*
+     * 认领了接口的子级锚到父大纲那条目标项的**行**上（卡的中心对准那一行圆点）：
+     * 自动排列读起来就是「第几条目标项的落地排在第几行」，连线也顺势更平。
+     * 撞上别的卡时仍由 freeSpotNear 往下腾位——顺序已按行号排好，腾位不会乱序。
+     */
+    if (p.slotAnchor) {
+      const anchorCard = placedByUuid.get(p.slotAnchor.parent)
+      if (anchorCard) {
+        const h = heightOf({ uuid: p.card.uuid, kind: p.card.kind })
+        anchorY = anchorCard.y + slotAnchorY(p.slotAnchor.index) - h / 2
+      }
+    }
     let card: CardView
     if (savedPos) {
       card = { ...p.card, x: savedPos.x, y: savedPos.y, ...(savedPos.note ? { note: savedPos.note } : {}) }
@@ -489,7 +595,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
   return { cards, edges, heightOf }
 }
 
-/* ---------- 色板（六种节点） ---------- */
+/* ---------- 色板（七种节点） ---------- */
 
 export const KIND_TONE: Record<GNodeKind, string> = {
   entry: 'border-rose-500/35 bg-rose-500/[0.06]',
@@ -498,6 +604,7 @@ export const KIND_TONE: Record<GNodeKind, string> = {
   note: 'border-emerald-500/30 bg-emerald-500/[0.06]',
   exam: 'border-amber-500/30 bg-amber-500/[0.06]',
   superdoc: 'border-violet-500/30 bg-violet-500/[0.06]',
+  video: 'border-cyan-500/30 bg-cyan-500/[0.06]',
 }
 
 export const KIND_BADGE: Record<GNodeKind, string> = {
@@ -507,6 +614,7 @@ export const KIND_BADGE: Record<GNodeKind, string> = {
   note: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
   exam: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
   superdoc: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
+  video: 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300',
 }
 
 /** 目标项圆点与它的连线只用这一个颜色：颜色在图上只承载一个含义「来自某条目标项」 */

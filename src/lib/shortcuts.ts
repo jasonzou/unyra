@@ -106,6 +106,12 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
     def: 'F11',
   },
   {
+    id: 'learn.structPopout',
+    label: '弹出节点宇宙',
+    hint: '把当前目标的节点宇宙弹到文档区上方（浮层，不切页签）；再按一次或 Esc 收回',
+    def: 'F1',
+  },
+  {
     id: 'web.newTab',
     label: '新建网页页签',
     hint: '在焦点格里开一个网页页签（内置浏览器）；焦点已经在网页页签上时，把光标挪到它的地址栏',

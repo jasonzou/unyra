@@ -21,7 +21,7 @@
 import type { LearnStore } from '../types'
 
 /** 全部节点类型（键 = uuid 派生前缀之外的判别字段） */
-export type GNodeKind = 'entry' | 'outline' | 'doc' | 'note' | 'exam' | 'superdoc'
+export type GNodeKind = 'entry' | 'outline' | 'doc' | 'note' | 'exam' | 'superdoc' | 'video'
 
 /** 一条关系记录：type 是**对方相对我**的身份（对方是我的上游 / 下游） */
 export interface NodeRelation {
@@ -197,16 +197,19 @@ export abstract class GNode {
 
   /**
    * 认领占用查的是树边（portKey 存在边上）；今天能声明接口又能挂树边的上游只有大纲，
-   * 锚在宿主文档上。其余类型没有可占用的记录，返回 null 放行。
+   * 锚在宿主文档上（游离大纲则用自己的 uuid 发声，两种拼法都查）。其余类型没有可
+   * 占用的记录，返回 null 放行。
    */
   private claimTakenBy(up: GNode, portKey: string, exceptDownUuid: string): string | null {
     const hostId = docIdOfOutlineUuid(up.uuid)
     if (!hostId) return null
-    const edge = this.ctx.store().edges.find((e) => e.from === hostId && e.portKey === portKey && e.to !== exceptDownUuid)
+    const edge = this.ctx
+      .store()
+      .edges.find((e) => (e.from === hostId || e.from === up.uuid) && e.portKey === portKey && e.to !== exceptDownUuid)
     return edge ? edge.to : null
   }
 
-  /** 摘掉一条连接（双向清除；对「大纲 ↔ 文档」就是拆掉那条树边） */
+  /** 摘掉一条连接（双向清除；对「大纲 ↔ 文档 / 大纲」就是拆掉那条树边） */
   disconnect(target: unknown): NodeResult {
     if (!(target instanceof GNode)) {
       return { error: 'disconnect 的参数要是一个节点对象（api.node.get(uuid) 取到再拆）' }

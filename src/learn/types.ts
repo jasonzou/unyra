@@ -288,6 +288,29 @@ export function outlineOf(node: { outline?: OutlineDoc }): OutlineDoc | null {
 }
 
 /**
+ * **游离大纲**实体：不依附任何文档、独立长在树上的计划节点（分类层）。
+ *
+ * 与附身大纲（`node.outline`，文档先在、计划后补）是一对孪生：两者在节点宇宙里
+ * 共用 `o:` 前缀的 uuid（游离实体的 id 就是 `o:` 后面那一段），画布与 agent 看到
+ * 的是同一种「大纲节点」；区别只在**有没有宿主文档**——游离大纲没有内容文档卡，
+ * 它下面的文档是子级（叶子），不是「它自己的正文」。上级大纲当分类、底层大纲当
+ * 指导的分类树就靠它长出来。落盘在目标目录的 outlines.json（游离大纲与以游离
+ * 大纲为起点的树边；一个目标一张都没有就不写文件）。
+ */
+export interface OutlineEntity {
+  /** 实体 id：图上 uuid 是 `o:{id}`；与文档 id 同空间但不重叠（建时校验） */
+  id: string
+  goalId: string
+  /** 显示名（没有宿主文档，标题自己管；附身大纲显示的是宿主文档的标题） */
+  title: string
+  /** 导语与目标项：形状与 OutlineDoc 相同（一层为止的规矩也相同） */
+  intro: string
+  children: OutlineEntry[]
+  createdAt: number
+  updatedAt: number
+}
+
+/**
  * 一条目标级持久化函数（method，见 learn/methods）。
  *
  * code 是一段**匿名 async 函数源码**（与 execute 的 body 同一种写法），
@@ -422,7 +445,14 @@ export interface KnowledgeNode {
   updatedAt: number
 }
 
-/** 依赖边：from 依赖 to。from 是上层（较接近目标），to 是它的前置知识。 */
+/**
+ * 依赖边：from 依赖 to。from 是上层（较接近目标），to 是它的前置知识。
+ *
+ * 两端都是**树成员 id**：文档 = 节点 id；大纲 = `o:{大纲实体id}`（附身大纲的实体 id
+ * 就是宿主文档 id，游离大纲是自己的 id）。`to` 以 `o:` 开头即「接在大纲卡上」的
+ * 嵌套子级（分类链）；`from` 只在父级是**游离大纲**时才带 `o:` 前缀（附身大纲那一层
+ * 的边仍以宿主文档 id 为准，画布上派生成「从它的大纲出发」）。
+ */
 export interface DependencyEdge {
   from: string
   to: string
@@ -496,8 +526,13 @@ export type TabRef =
    *   页里没有输入组件，打开即自动解析；
    * - 不带 videoId：**创建**态（全局一份），只有输入框 + 插件匹配 + 创建按钮。
    * 页签持久化；解析结果不落盘（流地址带签名会过期，重开再解析）。
+   *
+   * goalId（可选）：这份视频被某个**视频节点**绑到那个目标名下时，页签跟着归进
+   * 那个目标的页签组（见 groups/goals 的 refOwner）——打开它 = 打开那个组，
+   * 组被收起（锚大纲关闭进停靠场）时它一起收。身份仍是 videoId（tabKey 不看 goalId），
+   * 绑定关系变了重开一次页签就对齐。
    */
-  | { kind: 'video'; videoId?: string }
+  | { kind: 'video'; videoId?: string; goalId?: string }
   /**
    * 插件开发文档页签：介绍插件契约与配置面板（见 components/plugins/PluginDoc）。
    * 跟着页签持久化（normalize 认它），内容全是静态文档，没有要落盘的状态。
@@ -691,8 +726,56 @@ export interface VideoResource {
    * localStorage）；插件专属的状态放 fields。
    */
   progress?: { source?: string; positionMs: number; updatedAt: number }
+  /**
+   * **被哪些视频节点引用着**（见 store.videoNodes 的 VideoNodeEntity）：绑定是双向的——
+   * 节点记 videoId，资源这边记引用它的节点 id。这一份是**镜像**（读盘归一时从
+   * videoNodes 重建），引用判定的唯一事实源仍是 store.videoNodes；写操作
+   * （bind / 解绑 / 删节点）两边同一次提交一起动。
+   */
+  boundTo?: string[]
+  /**
+   * 视频总结（一个动作生成的内容总结 + 语义分段，见 learn/video/summarize）：
+   * **按选集 source** 存（合集 / 分 P 每一项的字幕各不相同），一项一份。
+   * 进度条上的分段点与底部区（字幕/总结/视频分段）都读它；生成过就不再生成。
+   * 两段都可缺省（手改的数据允许残缺，界面按缺失兜底）。
+   */
+  recaps?: Record<string, VideoRecap>
   createdAt: number
   updatedAt?: number
+}
+
+/** 视频的一段语义分段：从哪个时间戳开始、讲了什么（进度条上的分段点） */
+export interface VideoChapter {
+  /** 这一段的开始时间（整数毫秒，对准转录段的时间轴） */
+  startMs: number
+  /** 这一段的内容概述（一句话，给悬停信息用） */
+  summary: string
+}
+
+/**
+ * 一份「视频总结」：**一个动作**生成的内容总结 + 语义分段（按选集 source 存）。
+ * 总结是这个视频讲了什么的一段话；分段把内容按话题切开，变成进度条上的分段点。
+ */
+export interface VideoRecap {
+  /** 视频内容描述（一段连贯的话） */
+  summary?: string
+  /** 语义分段（进度条分段点 + 底部「视频分段」页签的行） */
+  chapters?: VideoChapter[]
+}
+
+/**
+ * 视频节点（节点宇宙的游离类型）：把**一个学习目标**与**一个视频资源**绑在一起。
+ * 只作为游离实体存在（不进大纲树——它是「这门课配这个视频」的引用，不是知识结构），
+ * 一个目标可以有多枚，同一个视频也可以被多个目标各自绑一枚。
+ */
+export interface VideoNodeEntity {
+  /** 节点宇宙身份（无前缀，与笔记 / 试卷同一款拼法） */
+  id: string
+  goalId: string
+  /** 绑定的视频资源 id；null = 空节点（刚从 palette 落下，还没选视频） */
+  videoId: string | null
+  createdAt: number
+  updatedAt: number
 }
 
 export interface LearnStore {
@@ -711,6 +794,16 @@ export interface LearnStore {
    * 落盘在各目标目录的 detached.json（这个目标一个游离件都没有就不写文件）。
    */
   detached?: Record<string, DetachedPool>
+  /**
+   * 游离大纲池（不依附文档的计划实体，见 OutlineEntity）：与 detached 同一纪律的
+   * 可选字段，旧数据没有它按空池兜底；使用处一律 `?? []`。
+   */
+  outlines?: OutlineEntity[]
+  /**
+   * 视频节点池（目标 × 视频的绑定，见 VideoNodeEntity）：同样按目标归档、落盘在
+   * 各目标目录的 video-nodes.json；可选字段，理由同 outlines。
+   */
+  videoNodes?: VideoNodeEntity[]
   /** 临时变量：按节点分组，带过期时间（见 lib/tmpStore） */
   tmp: TmpStore
   /**

@@ -102,7 +102,7 @@ export const API_GROUPS: ApiGroupDoc[] = [
 - api.tiktok()：响一声提示音。
 - api.help()：api 集总览（与 api.__help() 同义）。
 - api.compact({ summary, tasks? })：提交交接摘要；本轮结束后生效。
-- api.fetch(url | { url })：抓网页转 Markdown（等同 api.web.fetch）。
+- api.fetch(url | { url } | urls[] + { maxChars? })：抓网页转 Markdown（等同 api.web.fetch）；给数组 = 并发批量（一次最多 5 篇，逐条返回、失败不拖累其他篇），maxChars 直接截好。
 - api.see(图片地址 | base64 | { url?, base64?, mime?, name? } | { pdf?, page? })：看一张图或一份 PDF 的指定页，它们附在你的下一步里。`,
     [
       a('help', 'help()', 'api 集总览', '任何时候都能调。返回的是组名与一句说明，不含具体签名；具体用法用 api.<组>.__help()。', 'const overview = await api.help()'),
@@ -119,7 +119,7 @@ export const API_GROUPS: ApiGroupDoc[] = [
       ),
       a('tiktok', 'tiktok()', '响一声系统提示音', '需要把用户视线叫回来时用；不要连续响。', 'await api.tiktok()'),
       a('compact', 'compact({ summary, tasks? })', '提交上下文交接摘要', '只在本轮是压缩轮时调用；summary 是正文摘要，tasks 是未完成事项。本轮结束后旧消息才失活。', `await api.compact({ summary: '## 已讲清\\n- 极限的定义', tasks: ['继续讲夹逼定理'] })`),
-      a('fetch', 'fetch(url | { url })', '抓网页并转 Markdown（web.fetch 的别名）', '与 api.web.fetch 完全等价，提示词里教的就是这个名字。回 { ok, title, content, error? }，失败不抛异常，先判 ok。', `const page = await api.fetch({ url: 'https://example.com/spec' })`),
+      a('fetch', 'fetch(url | { url } | urls[], { maxChars? })', '抓网页并转 Markdown（web.fetch 的别名）；数组 = 并发批量', '与 api.web.fetch 完全等价，提示词里教的就是这个名字。回 { ok, title, content, error? }，失败不抛异常，先判 ok；批量给数组（一次最多 5 篇，回 { ok, results: [...] }，一篇失败只标记它自己）；maxChars 直接截好，省掉自己 slice。', `const pages = await api.fetch([url1, url2], { maxChars: 6000 })`),
       a(
         'see',
         'see(url | base64 | { url?, base64?, mime?, name? } | { pdf?, page?, name? })',
@@ -162,9 +162,11 @@ const p = await api.see({ pdf: 'moji:static/<uuid>', page: [1, 3] })`,
     [
       a('list', 'node.list()', '目标的全图清单', '回 goal（含入口 uuid）与 nodes：每份文档带 uuid / 标题 / path / 状态 / 上游 / 大纲（目标项数）/ 笔记 / 试卷 / 超级文档（各带 uuid）。导航、找落点、核对存在性全靠它。', 'const list = await api.node.list()'),
       a('get', 'node.get(uuid)', '取一个节点对象', '回执在门面里被包成真对象（content / editContent / help / connect / disconnect）。uuid 全部来自 list()，不要手拼——大纲与入口的前缀规则 help() 里会讲。', "const n = await api.node.get(list.nodes[0].uuid)"),
-      a('create', 'node.create({ kind, title?, under? , ...? })', '建节点（画布与 agent 同一条通道）', 'kind: doc / outline / note / exam / superdoc。under 给了 = 创建即绑（挂件挂到那份文档、文档挂进那一层，同目标同名文档复用不另建）；under 不给 = **独立游离实体**（笔记/超级文档进游离池、试卷宿主悬空、文档无父无纲），之后拖线 / connect 绑定。outline 配宿主文档一起成形：不给 under 就建「新文档+空大纲」，给了 under 就给那份文档补空卷大纲。试卷遇空壳复用原位。', `await api.node.create({ kind: 'note', title: '错题本', under: 文档uuid })`),
+      a('create', 'node.create({ kind, title?, under? , ...? })', '建节点（画布与 agent 同一条通道）', 'kind: doc / outline / note / exam / superdoc / video。under 给了 = 创建即绑（挂件挂到那份文档、文档挂进那一层，同目标同名文档复用不另建）；under 不给 = **独立游离实体**（笔记/超级文档进游离池、试卷宿主悬空、文档无父无纲），之后拖线 / connect 绑定。outline 配宿主文档一起成形：不给 under 就建「新文档+空大纲」，给了 under 就给那份文档补空卷大纲。试卷遇空壳复用原位。video 不参与树结构：不给 under 建，建好 editContent({ videoId }) 绑一个现有视频（清单在 list() 的 videos.all）。', `await api.node.create({ kind: 'note', title: '错题本', under: 文档uuid })`),
       a('delete', 'node.delete(uuid)', '删节点（删谁只删谁）', '删文档只删它自己：相连的线摘掉、下游文档断线成游离（不删除）、名下的笔记/试卷/超级文档随它走；删大纲 = 清空那份计划（文档与树边不动）；删挂件只删它自己。删试卷走 api.exam.delete（要先确认没有待判分的考试）。', `await api.node.delete(笔记uuid)`),
       a('invoke', 'node.invoke(uuid, 成员名, 参数数组)', '调节点对象的成员', '门面自动走它（n.editContent(...) 最终就是一次 node.invoke）；connect / disconnect 的对象参数会被折成 uuid。直接调时参数是数组形状。', `await api.node.invoke(文档uuid, 'editContent', [{ title: '极限', description: '', teaching: '# 极限', status: 'learning' }])`),
+      a('brief', 'node.brief(uuid)', '文档的一页纸简报（写正文之前先看它）', '一次给齐：self（标题/描述/状态/字数）、port（认领的目标项——范围与边界以它为准）、siblings（同层其他目标项）、taught（全图各文档已讲过的小节标题——出现过的概念别重讲）。省掉 list 全图 + 逐个读。', `const brief = await api.node.brief(文档uuid)`),
+      a('finish', 'node.finish(uuid, { content?, state?, memory?, delivery?, open? })', '收尾仪式一次做完', '写完文档的五件事（editContent / state.update / memory.create / delivery.submit / 指给用户看）一个调用。content 先落：它失败就直接回、其余全不做；其余步骤逐个落、逐个如实报告（steps 里哪步没落上就单独补一次）。', `await api.node.finish(uuid, { content, state: { self: 'familiar', note: '已讲夹逼定理' }, delivery: { sources }, open: true })`),
     ],
     `const list = await api.node.list()
 const doc = list.nodes.find((n) => n.title === '极限')
@@ -204,6 +206,7 @@ if (doc) {
 同一条要补充就用 update 改，不要另开一条重复的。`,
     [
       a('list', 'memory.list({ type? }?)', '列记忆条目', '回 count / long / work 与每条摘要（不含全文）；type 可只列一类。', `const mem = await api.memory.list({ type: 'long' })`),
+      a('context', 'memory.context({ scope?, maxChars? })', '一页纸：最近的几条记忆摘要', '开场先领一页（画像、路线这类跨轮不变的东西都在里面），省掉 list + 逐条 get 两步。scope: work（默认，本目标）| long；默认截到 600 字。', `const ctx = await api.memory.context({ scope: 'work', maxChars: 600 })`),
       a('get', 'memory.get(uuid)', '读一条记忆全文', '按 uuid 取 title / keys / content / 时间；看不见的条目按「没有」处理。', `const one = await api.memory.get(mem.items[0].uuid)`),
       a('create', 'memory.create({ type, title, keys?, content })', '新建一条记忆', 'type: work（本目标）| long（跨目标）；title 省略时取正文首行。', `await api.memory.create({ type: 'work', title: '本轮进度', keys: ['极限', '进度'], content: '讲完夹逼定理，下一轮做两道放缩题。' })`),
       a('update', 'memory.update(uuid, { title?, keys?, content?, type? })', '更新一条记忆', '只改给了的字段；改 type 等于搬家（work ↔ long）。', `await api.memory.update(one.uuid, { content: '补充：放缩方向还会错。' })`),

@@ -126,6 +126,9 @@ const dict: Record<string, string> = {
     'Saved to {0}, but Unyra cannot open this extension (text types only). Save again with a different extension.',
   '已取消保存，先不关闭了': 'Save canceled — not closing',
   '已取消保存': 'Save canceled',
+
+  // ---------- 节点宇宙浮层（Tab 键弹出，LearnWorkspace 的入口） ----------
+  '先建一个学习目标，才有节点宇宙可看': 'Create a learning goal first — the node universe needs one',
 }
 
 export default dict

@@ -59,6 +59,10 @@ function readGoalLedgers(
     structureByGoal: Record<string, StructureMap>
     detachedByGoal: Record<string, DetachedPool>
     resources: Record<string, StaticResource[]>
+    /** 游离大纲（独立实体）+ 以它们为起点的树边，目标目录的 outlines.json */
+    outlinesByGoal: Record<string, { outlines: unknown[]; edges: Array<Record<string, unknown>> }>
+    /** 视频节点（目标 × 视频的绑定），目标目录的 video-nodes.json */
+    videoNodesByGoal: Record<string, unknown[]>
   },
 ): void {
   const convs = parseJson<{ conversations?: unknown[] }>(files.get(`${goalDir}/chat.json`))
@@ -109,6 +113,23 @@ function readGoalLedgers(
         (d): d is SuperDocFile => !!d && typeof d === 'object' && typeof (d as SuperDocFile).id === 'string' && typeof (d as SuperDocFile).name === 'string',
       ),
     }
+  }
+
+  // 游离大纲池（不依附文档的计划实体）+ 以游离大纲为起点的树边
+  const outlinesFile = parseJson<{ outlines?: unknown[]; edges?: Array<Record<string, unknown>> }>(
+    files.get(`${goalDir}/outlines.json`),
+  )
+  if (outlinesFile && (Array.isArray(outlinesFile.outlines) || Array.isArray(outlinesFile.edges))) {
+    out.outlinesByGoal[goalId] = {
+      outlines: Array.isArray(outlinesFile.outlines) ? outlinesFile.outlines : [],
+      edges: Array.isArray(outlinesFile.edges) ? outlinesFile.edges : [],
+    }
+  }
+
+  // 视频节点（目标 × 视频的绑定，见 learn/video/nodes）
+  const videoNodesFile = parseJson<{ nodes?: unknown[] }>(files.get(`${goalDir}/video-nodes.json`))
+  if (Array.isArray(videoNodesFile?.nodes) && videoNodesFile.nodes.length) {
+    out.videoNodesByGoal[goalId] = videoNodesFile.nodes
   }
 }
 
@@ -173,6 +194,8 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
     structureByGoal: {} as Record<string, StructureMap>,
     detachedByGoal: {} as Record<string, DetachedPool>,
     resources: {} as Record<string, StaticResource[]>,
+    outlinesByGoal: {} as Record<string, { outlines: unknown[]; edges: Array<Record<string, unknown>> }>,
+    videoNodesByGoal: {} as Record<string, unknown[]>,
   }
 
   for (const [dir, { file }] of nodeFiles) {
@@ -205,7 +228,9 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
 
     for (const dep of file.dependencies ?? []) {
       if (!dep || typeof dep.to !== 'string' || !dep.to) continue
-      edges.push({ from: file.id, to: dep.to, createdAt: dep.createdAt, ...(typeof dep.portKey === 'string' && dep.portKey ? { portKey: dep.portKey } : {}) })
+      // 旧格式的 toOutline 标记迁到拼法上：接大纲卡的边 to = o:{文档id}（分类链）
+      const to = dep.toOutline === true ? 'o:' + dep.to : dep.to
+      edges.push({ from: file.id, to, createdAt: dep.createdAt, ...(typeof dep.portKey === 'string' && dep.portKey ? { portKey: dep.portKey } : {}) })
     }
 
     for (const exam of content.exams) {
@@ -233,11 +258,23 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
   goals.sort((a, b) => at(b.createdAt) - at(a.createdAt))
   nodes.sort((a, b) => at(a.createdAt) - at(b.createdAt))
 
+  // 游离大纲与它们的树边并进总账（节点文件里的树边上面已经收过了）
+  const freeOutlines: unknown[] = []
+  for (const led of Object.values(ledgers.outlinesByGoal)) {
+    freeOutlines.push(...led.outlines)
+    edges.push(...led.edges)
+  }
+  // 视频节点（目标 × 视频的绑定）并进总账
+  const videoNodes: unknown[] = []
+  for (const led of Object.values(ledgers.videoNodesByGoal)) videoNodes.push(...led)
+
   return normalizeLearnStore({
     version: 2,
     nodes,
     edges,
     goals,
+    ...(freeOutlines.length ? { outlines: freeOutlines } : {}),
+    ...(videoNodes.length ? { videoNodes } : {}),
     conversations: ledgers.conversations,
     exams,
     tmp,
@@ -313,6 +350,8 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
     structureByGoal: {} as Record<string, StructureMap>,
     detachedByGoal: {} as Record<string, DetachedPool>,
     resources: {} as Record<string, StaticResource[]>,
+    outlinesByGoal: {} as Record<string, { outlines: unknown[]; edges: Array<Record<string, unknown>> }>,
+    videoNodesByGoal: {} as Record<string, unknown[]>,
   }
 
   // 目标目录必须是顶层（docs/{seg}）且自己那份 meta 在：结构不完整就整棵树跳过
@@ -438,7 +477,9 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
 
     for (const dep of meta.dependencies ?? []) {
       if (!dep || typeof dep.to !== 'string' || !dep.to) continue
-      edges.push({ from: meta.id, to: dep.to, createdAt: dep.createdAt, ...(typeof dep.portKey === 'string' && dep.portKey ? { portKey: dep.portKey } : {}) })
+      // 旧格式的 toOutline 标记迁到拼法上：接大纲卡的边 to = o:{文档id}（分类链）
+      const to = dep.toOutline === true ? 'o:' + dep.to : dep.to
+      edges.push({ from: meta.id, to, createdAt: dep.createdAt, ...(typeof dep.portKey === 'string' && dep.portKey ? { portKey: dep.portKey } : {}) })
     }
   }
 
@@ -457,11 +498,23 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
   goals.sort((a, b) => at(b.createdAt) - at(a.createdAt))
   nodes.sort((a, b) => at(a.createdAt) - at(b.createdAt))
 
+  // 游离大纲与它们的树边并进总账（旧布局没有 outlines.json，这里恒为空，字段补齐走同一份归一）
+  const freeOutlines2: unknown[] = []
+  for (const led of Object.values(ledgers.outlinesByGoal)) {
+    freeOutlines2.push(...led.outlines)
+    edges.push(...led.edges)
+  }
+  // 视频节点（目标 × 视频的绑定）并进总账（旧布局同样恒为空）
+  const videoNodes2: unknown[] = []
+  for (const led of Object.values(ledgers.videoNodesByGoal)) videoNodes2.push(...led)
+
   return normalizeLearnStore({
     version: 2,
     nodes,
     edges,
     goals,
+    ...(freeOutlines2.length ? { outlines: freeOutlines2 } : {}),
+    ...(videoNodes2.length ? { videoNodes: videoNodes2 } : {}),
     conversations: ledgers.conversations,
     exams,
     tmp,

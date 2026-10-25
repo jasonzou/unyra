@@ -25,6 +25,7 @@ import type {
   NoteFile,
   SuperDocFile,
   TmpEntry,
+  VideoNodeEntity,
 } from './types'
 import type { Exam } from './exam'
 import type { Conversation } from '../agent/types'
@@ -35,6 +36,7 @@ import { findNote, notesOf } from './notes'
 import { findSuperDoc } from './superdocs'
 import { superDocsOf } from './types'
 import { sortLocalFiles } from './localfiles'
+import { withVideoMirror } from './video/nodes'
 import { goalSubtreeIds, nodeById } from './graph'
 import { t } from '../i18n'
 
@@ -52,6 +54,8 @@ export type ExplorerUndo =
       goal?: LearningGoal
       conversations: Conversation[]
       reading?: ReadingStore
+      /** 只在删目标是根时才捕获：那个目标的视频节点（绑定行，恢复时接回 + 重建资源镜像） */
+      videoNodes?: VideoNodeEntity[]
       tmp: Record<string, Record<string, TmpEntry>>
       /** 单节点删除时才捕获：这个节点在阅读账里的那一片（整本账不能整份放回，见 restoreNodeReadingSlice） */
       readingSlice?: { nodeId: string; rec: NodeReading; sessions: ReadingStore['sessions']; days: string[] }
@@ -88,6 +92,7 @@ export function captureNodeDelete(store: LearnStore, nodeId: string): ExplorerUn
       goal,
       conversations: store.conversations.filter((c) => c.goalId === goal.id),
       reading: store.reading?.byGoal?.[goal.id],
+      videoNodes: (store.videoNodes ?? []).filter((v) => v.goalId === goal.id),
       tmp,
     }
   }
@@ -233,6 +238,11 @@ export function applyUndo(store: LearnStore, entry: ExplorerUndo): { store: Lear
       edges: [...s.edges, ...entry.edges.filter((e) => !edgeKey.has(e.from + '\u0001' + e.to))],
       exams: [...s.exams, ...entry.exams.filter((e) => !examIds.has(e.id))],
       tmp: { ...s.tmp, ...entry.tmp },
+    }
+    // 视频节点原样接回（引用旧片，不会重复——删除时是按 goalId 摘的），资源镜像随之重建
+    if (entry.videoNodes?.length) {
+      const back = entry.videoNodes.filter((v) => !(s.videoNodes ?? []).some((x) => x.id === v.id))
+      if (back.length) next = withVideoMirror({ ...next, videoNodes: [...(next.videoNodes ?? []), ...back] })
     }
     if (entry.readingSlice) next = restoreNodeReadingSlice(next, entry)
     // 节点带回来的挂件以节点记录里的那份为准：游离池里的孤儿副本（删除时挪进去的）清掉

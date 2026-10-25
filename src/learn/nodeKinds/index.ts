@@ -7,7 +7,7 @@
  */
 import type { GNodeKind } from './base'
 
-export const NODE_KINDS: readonly GNodeKind[] = ['entry', 'outline', 'doc', 'note', 'exam', 'superdoc']
+export const NODE_KINDS: readonly GNodeKind[] = ['entry', 'outline', 'doc', 'note', 'exam', 'superdoc', 'video']
 /** 全部类型（顺序即登记顺序；GRAPH_KINDS 是老名字的别名，画布与测试还在用） */
 export const GRAPH_KINDS: readonly GNodeKind[] = NODE_KINDS
 
@@ -23,6 +23,7 @@ export const GRAPH_KIND_LABEL: Record<GNodeKind, string> = {
   note: '笔记',
   exam: '试卷',
   superdoc: '超级文档',
+  video: '视频',
 }
 
 /** 同列排序权重：读图方向「大纲 → 文档 → 叶子」，入口最左 */
@@ -33,6 +34,7 @@ export const KIND_RANK: Record<GNodeKind, number> = {
   note: 2,
   exam: 2,
   superdoc: 2,
+  video: 2,
 }
 
 export type { GNodeKind, GNode, NodeCtx, NodeHelp, NodePort, NodeRelation, NodeResult, ConnectFilter } from './base'
@@ -46,4 +48,5 @@ export { NoteGNode } from './note'
 export { ExamGNode } from './exam'
 export { SuperdocGNode } from './superdoc'
 export { EntryGNode } from './entry'
+export { VideoGNode } from './video'
 export { NodeService, locateUuid, type NodeServiceDeps, type UuidLocation } from './service'

@@ -1092,9 +1092,17 @@ export default function TabBar({
         {presence.map(({ item: tab, leaving, exiting, entering }, i) => {
           const on = tab.id === activeId
           const wmeta = webMetaOf?.(tab)
-          const title = (tab.ref.kind === 'web' ? wmeta?.title : undefined) ?? titleOf(tab.ref)
+          /*
+           * 节点宇宙页签（kind 'outline'）特殊打扮（用户定的）：标题只显示「结构」两个字、
+           * 不设最小宽——它是一扇看整张图的窗，不是某一份文档，不该占一排页签的宽度；
+           * 颜色用紫罗兰，与文档类页签一眼分开。悬停 tooltip 仍给全名（节点标题 · 结构），
+           * 认得出它属于哪个节点。
+           */
+          const struct = tab.ref.kind === 'outline'
+          const realTitle = titleOf(tab.ref)
+          const title = struct ? t('结构') : ((tab.ref.kind === 'web' ? wmeta?.title : undefined) ?? realTitle)
           // 重名时才有：「路径 · 标题」，平时一条路径都不显示（见 Props.trailOf）
-          const trail = trailOf?.(tab.ref) ?? ''
+          const trail = struct ? '' : (trailOf?.(tab.ref) ?? '')
           const dragging = drag?.id === tab.id
           const settling = settle?.id === tab.id
           const dirty = unsaved.has(tab.id)
@@ -1147,20 +1155,28 @@ export default function TabBar({
           /*
            * min-w：页签的宽度本来由标题撑开，短标题（「导数」两个字）就窄得只剩一个
            * 可以点的小方块，一排页签看着也参差不齐。给它一个下限，短标题一样好按。
+           * 节点宇宙页签例外：它恒为「结构」两个字，要的就是窄（见上面 struct 的说明）。
            *
            * 字重（font-medium）只跟「是不是当前这一个」有关，**不跟拖动状态**：字重一变
            * 宽度就跟着变几个像素，而让位的距离是按下那一刻量出来的——页签之间会对不齐。
            * 「被拿起来了」这个观感由阴影 + 底色 + 描边给，够用了。
            */
           const cls =
-            'moji-tab group relative flex h-7 min-w-[120px] max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 text-[12px] ' +
+            'moji-tab group relative flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 text-[12px] ' +
+            (struct ? 'min-w-0 ' : 'min-w-[120px] max-w-[220px] ') +
             (on ? 'moji-tab-flare z-10 font-medium ' : '') +
             (dragging || settling
               ? 'z-10 cursor-grabbing border-line-strong bg-card text-ink-strong shadow-md'
-              : (relationCls ||
-                  (on
-                    ? 'border-line-strong bg-card text-ink-strong'
-                    : 'border-transparent text-ink-soft hover:bg-line/50 hover:text-ink'))) +
+              : struct
+                ? // 节点宇宙页签恒用主题现算色（moji-tab-struct：seal × ink 的哑光强调色，
+                  // 随主题变；不参与关联底色那套——它要的就是「与别的页签不一样」）
+                  on
+                  ? 'border-line-strong bg-card moji-tab-struct'
+                  : 'border-transparent moji-tab-struct hover:bg-line/50'
+                : (relationCls ||
+                    (on
+                      ? 'border-line-strong bg-card text-ink-strong'
+                      : 'border-transparent text-ink-soft hover:bg-line/50 hover:text-ink'))) +
             // 拖出栏后栏里这枚只剩个淡占位：正文跟着指针（影子）走了
             (lifted ? ' opacity-40' : '') +
             /*
@@ -1188,7 +1204,7 @@ export default function TabBar({
               {...(leaving ? { inert: true } : { tabIndex: 0 })}
               // 未保存时顺带说一句：那颗圆点本身没有 tooltip（它是 aria-hidden 的装饰）
               title={
-                (trail ? trail + ' · ' + title : title) +
+                (struct ? realTitle : trail ? trail + ' · ' + title : title) +
                 relationTooltip +
                 (blank ? t('（空白页签：还没有打开任何文档）') : '') +
                 (dirty ? t('（有未保存的改动，Ctrl+S 保存）') : '')

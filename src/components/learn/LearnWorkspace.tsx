@@ -164,6 +164,7 @@ import FloatWindow from '../FloatWindow'
 import { usePresence } from '../../lib/presence'
 import ExamCopyView from './ExamCopyView'
 import { OutlinePane } from './workspace/OutlinePane'
+import StructOverlay from './workspace/StructOverlay'
 import { NodeService, type GNodeKind } from '../../learn/nodeKinds'
 import { noteEntityOf } from './workspace/panes'
 import { pruneImages } from '../../learn/images'
@@ -519,6 +520,31 @@ export default function LearnWorkspace({
   const activeNode = activeNodeId ? (nodeById(store, activeNodeId) ?? null) : null
   const activeGoal = activeNode ? (store.goals.find((g) => g.id === activeNode.goalId) ?? null) : null
   const activeGoalId = activeGoal?.id ?? null
+
+  /*
+   * 节点宇宙浮层（快捷键 learn.structPopout，默认 F1，浮层本体见 workspace/StructOverlay）：
+   * 当前页签不是大纲时，按键把这个目标的宇宙弹成文档区上方的浮层；再按一次或 Esc 收回。
+   * 目标从当前页签绑定的节点现查，查不到落回当前目标；连目标都没有就 toast 指路。
+   */
+  const [structOverlayGoal, setStructOverlayGoal] = useState<string | null>(null)
+  const toggleStructOverlay = useCallback(() => {
+    if (structOverlayGoal) {
+      setStructOverlayGoal(null)
+      return
+    }
+    const ref = activeTab?.ref
+    if (ref && ref.kind === 'outline') return
+    const nid = ref ? tabNodeId(ref) : null
+    const tabNode = nid ? nodeById(store, nid) : null
+    const gid = tabNode?.goalId ?? activeGoalId
+    if (!gid) {
+      onToast(t('先建一个学习目标，才有节点宇宙可看'))
+      return
+    }
+    setStructOverlayGoal(gid)
+  }, [structOverlayGoal, activeTab, store, activeGoalId, onToast])
+  useShortcut('learn.structPopout', { down: toggleStructOverlay })
+
   /**
    * 顶栏标题只在文档区确实存在目标根大纲时显示。activeNodeId 是导师上下文，关闭文档后
    * 可能仍然保留；如果不加这道门，文档区已经空了，Topbar 却会继续显示旧目标标题。
@@ -1608,6 +1634,46 @@ export default function LearnWorkspace({
       const wasActive = focusedTab(s.docArea)?.id === tabKey(ref)
       const base = node ? touchNode(retargetNode(s, node.id), node.id) : s
       /*
+       * 绑定的视频页签：打开它 = 把它所属目标的页签组一并打开（goalTabGroup 会开组锚、
+       * 让停靠的整组归队），视频页签落进焦点格并登记在该目标名下，目标随之切过去——
+       * 「打开学习视频会一并打开学习目标对应的 tab 组」。组锚关闭（整组进停靠场）时
+       * 它随组一起收起。没绑定的、或绑定目标已不在的，走下面的普通开法（公共页签）。
+       */
+      if (ref.kind === 'video' && ref.videoId) {
+        const gid = (base.videoNodes ?? []).find((v) => v.videoId === ref.videoId)?.goalId ?? null
+        const boundGoal = gid ? base.goals.find((g) => g.id === gid) : undefined
+        if (boundGoal) {
+          const vRef: TabRef = { kind: 'video', videoId: ref.videoId, goalId: boundGoal.id }
+          /*
+           * 「真正打开 tab 组」= 与打开这个目标的一份文档**同一套语义**（retargetNode）：
+           * 当前节点/目标落到这个目标（顶栏的目标名读的是 activeNode 的目标——只写
+           * activeGoalId 不写 activeNodeId，顶栏会一直停在「请选择页签组」）、目标级
+           * 导师页签开好置前。落点节点用「这个目标最近被看到的节点」，没有才是根。
+           * 之后再补一次组锚开关：目标本来就活动着时 retargetNode 不切组，
+           * 锚关着（整组在停靠场）的话这里把整组拽回来。视频不是知识节点，不碰 touchNode。
+           */
+          const remembered = goalFocusByGoal.get(boundGoal.id)
+          const focusId = remembered && nodeById(base, remembered) ? remembered : boundGoal.rootNodeId
+          const retargeted = retargetNode(base, focusId)
+          const grouped = goalTabGroup(retargeted, boundGoal.id)
+          const openedV = openInGroup(
+            grouped.docArea,
+            grouped.docArea.focus,
+            vRef,
+            Date.now(),
+            undefined,
+            (id) => nodeById(base, id)?.goalId ?? null,
+          )
+          set({
+            ...grouped,
+            docArea: withOwners(openedV, claimTab(openedV.tabOwners, boundGoal.id, tabKey(vRef))),
+          })
+          if (wasActive) requestReveal()
+          setSidebarOpen(false)
+          return
+        }
+      }
+      /*
        * 空笔记当场定下「源码（编辑）视图」：这个默认值是按正文现算的，
        * 而用户敲下第一个字它就翻回预览了（见 emptyNote 与 learn/tabs 的 viewOf）。
        */
@@ -1642,7 +1708,7 @@ export default function LearnWorkspace({
       if (wasActive) requestReveal()
       setSidebarOpen(false)
     },
-    [getLatest, retargetNode, set],
+    [getLatest, retargetNode, goalTabGroup, set],
   )
   // 回填放在 effect 里（渲染期不许写 ref）：openTab 的身份随依赖变，每次渲染后换成最新的一份
   useEffect(() => {
@@ -3866,8 +3932,15 @@ export default function LearnWorkspace({
       onAddOutlineEntry: canvasAddOutlineEntry,
       onGenerateDoc: generateDocForNode,
       onGenerateOutline: (docUuid: string) => startPrereqOutline(docUuid),
+      // 视频卡的绑定 / 打开：绑定走节点的 editContent（与 agent 动手是同一条路），打开走 openTab 的组联动
+      onBindVideo: (nodeUuid: string, videoId: string | null) => {
+        const node = makeNodeService().get(nodeUuid)
+        if (!node || node.kind !== 'video') return { error: '这个视频节点已经不在了' }
+        return node.editContent({ videoId })
+      },
+      onOpenVideo: (videoId: string) => openTab({ kind: 'video', videoId }),
     }),
-    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, canvasSetEntry, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline],
+    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, canvasSetEntry, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline, makeNodeService, openTab],
   )
 
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())
@@ -4958,6 +5031,27 @@ export default function LearnWorkspace({
                   ),
                 })
               }}
+              onSaveRecap={(videoId, source, recap) => {
+                // 视频总结（总结+分段**一次生成**）按来源落库；生成过就不再生成（空态才给入口）
+                if (!recap.summary && !recap.chapters?.length) return
+                const latest = getLatest()
+                const list = latest.videos ?? []
+                const cur = list.find((v) => v.id === videoId)
+                if (!cur) return
+                set({
+                  ...latest,
+                  videos: list.map((v) =>
+                    v.id === videoId
+                      ? { ...v, recaps: { ...(v.recaps ?? {}), [source]: recap }, updatedAt: Date.now() }
+                      : v,
+                  ),
+                })
+                if (recap.chapters?.length) {
+                  onToast(t('已生成总结与分段：{0} 段，分段点在进度条上', String(recap.chapters.length)))
+                } else {
+                  onToast(t('已生成总结'))
+                }
+              }}
             />
           )}
 
@@ -5207,9 +5301,28 @@ export default function LearnWorkspace({
         store={store}
         videos={store.videos ?? []}
         onOpenVideo={(id) => openTab({ kind: 'video', videoId: id })}
-        onDeleteVideo={(id) =>
+        onDeleteVideo={(id) => {
+          // 删除守卫：被视频节点绑着的视频不许删（引用的节点会变成死绑）——
+          // 视频节点跟着目标走，列出目标名让用户知道是哪门课在用
+          const refs = (store.videoNodes ?? []).filter((v) => v.videoId === id)
+          if (refs.length) {
+            const names = refs
+              .map((r) => store.goals.find((g) => g.id === r.goalId)?.question ?? r.goalId)
+              .slice(0, 3)
+              .join('、')
+            onToast(
+              t(
+                refs.length > 3
+                  ? '这个视频正被 {0} 等 {1} 个目标绑着：先解绑（画布上的视频卡）再删'
+                  : '这个视频正被「{0}」绑着：先解绑（画布上的视频卡）再删',
+                names,
+                String(refs.length),
+              ),
+            )
+            return
+          }
           set({ ...store, videos: (store.videos ?? []).filter((v) => v.id !== id) })
-        }
+        }}
         // 视频的新建入口（顶栏按钮已移除）：开创建态页签
         onNewVideo={() => openTab({ kind: 'video' })}
         // 高亮跟着**激活的页签**走：关掉某个节点的教学文档页签，它就不再是选中样式
@@ -5640,6 +5753,20 @@ export default function LearnWorkspace({
           confirmLabel={t('知道了')}
           onConfirm={() => setGuardFuse(null)}
           onCancel={() => setGuardFuse(null)}
+        />
+      )}
+
+      {/* 节点宇宙浮层：Tab 弹出/收回（见上面的 toggleStructOverlay）；画布与大纲页签同一套通道 */}
+      {structOverlayGoal && (
+        <StructOverlay
+          goalId={structOverlayGoal}
+          store={store}
+          onChangeStructure={updateStructure}
+          docs={explorerDocs}
+          exams={explorerExams}
+          channel={canvasChannel}
+          onToast={onToast}
+          onClose={() => setStructOverlayGoal(null)}
         />
       )}
     </div>
