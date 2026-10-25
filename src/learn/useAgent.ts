@@ -24,7 +24,7 @@ import { emptyDelivery, hasDelivery, mergeDelivery, normalizeDelivery } from '..
 import { createExecuteTool, type AskAnswers, type AskFormPayload, type ExamToolDeps } from '../agent/tools'
 import { ASK_IDLE_TIMEOUT_MS } from '../agent/sandbox/limits'
 import { ensureActivityListeners, userIdleMs } from '../lib/userActivity'
-import { captureDrop, noteRequest } from '../agent/contextDebug'
+import { captureDrop, lastDropReport, noteRequest } from '../agent/contextDebug'
 import { assertPrefixStable, currentEpoch, lastCacheRead, noteCacheRead, resetPrefixGate } from '../agent/prefixGate'
 import { globalContextWindow, hasApiKey, loadAiSettings, resolveGlobal } from '../ai/settings'
 import type { ReasoningEffort } from '../ai/types'
@@ -963,8 +963,11 @@ export function useAgent(opts: {
             if (prevRead && prevRead.epoch === currentEpoch(convKey) && e.usage.cacheRead + 512 < prevRead.read) {
               // 定格：把前后两份实发上下文摆进对比调试器（断点已标注，见 agent/contextDebug）
               captureDrop(convKey, prevRead.read, e.usage.cacheRead)
+              // 身份差异（模型/档位翻面）跟着喊出来：它不在字节比对里，却常是骤降的真正原因
+              const identity = lastDropReport()?.identity
               console.warn(
                 `[cache-watch] ${convKey} 命中骤降：${prevRead.read} → ${e.usage.cacheRead}（-${prevRead.read - e.usage.cacheRead}）。` +
+                  (identity ? `请求身份变了：${identity}。` : '') +
                   '前后两份上下文已摆进对比调试器（断点已标注）。',
               )
             }

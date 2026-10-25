@@ -193,8 +193,9 @@ export async function runAgent(opts: AgentRunOptions): Promise<void> {
         onEvent({ type: 'done' })
         return
       }
-      // 上下文过滤器：此刻的 system / messages 就是即将发出去的那一份
-      opts.onContext?.({ system, messages, tools: opts.tools })
+      // 上下文过滤器：此刻的 system / messages 就是即将发出去的那一份；
+      // model / 档位一并递去——它们不在前缀字节里，但翻面可能整体换掉服务商缓存（对比调试器要喊）
+      opts.onContext?.({ system, messages, tools: opts.tools, model, reasoningEffort: opts.reasoningEffort })
       /*
        * 发一次请求（连同它这一趟的掐表）。
        *

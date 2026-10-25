@@ -49,6 +49,8 @@ const dict: Record<string, string> = {
   '还没有捕获到命中骤降': 'No cache-hit drop captured yet',
   '这是它安静的原因：平时不录制任何上下文。只有某次请求的缓存命中字数低于上一次，前后两份才会被摆到这里。': 'That is why it is quiet: nothing is recorded day to day. Only when a request costs fewer cached tokens than the previous one do the two contexts get lined up here.',
   '清空报告': 'Clear report',
+  '请求身份变了：{0}——不在字节比对里，但换模型/换档位可能整体换掉服务商的缓存。':
+    'Request identity changed: {0} — invisible to the byte diff, but a model/effort flip can invalidate the whole provider-side cache.',
   '下载这两份实发上下文（.json.gz）': 'Download both sent contexts (.json.gz)',
   '一致': 'same',
   '变化': 'changed',

@@ -20,6 +20,9 @@ export interface ContextSnapshot {
   system: string
   messages: ChatMessage[]
   tools?: unknown[]
+  /** 请求身份（runtime 递来）：骤降自证用——模型/档位翻面不在字节比对里，却可能换引擎换缓存 */
+  model?: string
+  reasoningEffort?: string
 }
 
 /** 合并视图里的一条：两边按断点对齐后摆在一起 */
@@ -50,6 +53,8 @@ export interface ContextDropReport {
   /** 定格时的前后两份实发上下文（原样字节；下载包的内容） */
   prev: ContextSnapshot
   curr: ContextSnapshot
+  /** 两次请求的身份差异（模型/档位翻面）：不在字节比对里，却可能整体换掉服务商缓存 */
+  identity?: string
   /** 一句话结论：后一次这份在哪断开 */
   headline: string
   /** 合并摆出的消息序列（被裁掉的来自上一次，新增的来自这一次；一致的头也在，由界面折叠） */
@@ -75,8 +80,11 @@ const fire = (): void => {
 
 /** 每次请求发出前记账（learn/useAgent 的 onContext，与实发完全一致的那一份） */
 export function noteRequest(key: string, snapshot: ContextSnapshot): void {
+  // 定格即深拷贝：runtime 递来的是活引用（messages 在本轮内还会被逐跳 push），不拷贝的话
+  // 同一轮的 prev/curr 就是同一个数组——「前后对比」是同义反复，下载包里的证据也跟着作废
+  const frozen = JSON.parse(JSON.stringify(snapshot)) as ContextSnapshot
   const pair = pairs.get(key)
-  pairs.set(key, { prev: pair?.curr ?? snapshot, curr: snapshot })
+  pairs.set(key, { prev: pair?.curr ?? frozen, curr: frozen })
 }
 
 /**
@@ -125,6 +133,7 @@ export function dropBundleOf(report: ContextDropReport): Record<string, unknown>
     currRead: report.currRead,
     kind: report.kind,
     headline: report.headline,
+    ...(report.identity ? { identity: report.identity } : {}),
     prev: report.prev,
     curr: report.curr,
   }
@@ -224,10 +233,25 @@ function analyze(
 ): ContextDropReport {
   const p = prev.messages
   const c = curr.messages
+  /*
+   * 请求身份对账：模型与思考档位不进前缀比对的字节（前缀纪律只管 messages+tools），
+   * 但它们翻面可能整体换掉服务商的缓存（换模型必然全 miss；DeepSeek V4 这类混合引擎
+   * 思考开/关可能路由到不同引擎）。deepseek-reasoner+none 还会在 bodyFor 里静默换成
+   * deepseek-chat——门禁与哨兵都看不见，这里必须自己喊出来。
+   */
+  const identityParts: string[] = []
+  if (prev.model !== curr.model && (prev.model !== undefined || curr.model !== undefined))
+    identityParts.push(`模型 ${prev.model ?? '（无）'} → ${curr.model ?? '（无）'}`)
+  if (
+    prev.reasoningEffort !== curr.reasoningEffort &&
+    (prev.reasoningEffort !== undefined || curr.reasoningEffort !== undefined)
+  )
+    identityParts.push(`档位 ${prev.reasoningEffort ?? '（无）'} → ${curr.reasoningEffort ?? '（无）'}`)
+  const identity = identityParts.length ? identityParts.join('，') : undefined
   const toolsChanged =
     JSON.stringify(prev.tools ?? []) !== JSON.stringify(curr.tools ?? [])
   const systemChanged = !p.length || !c.length || messageText(p[0]) !== messageText(c[0])
-  const base = { key, at: Date.now(), prevRead, currRead, prev, curr }
+  const base = { key, at: Date.now(), prevRead, currRead, prev, curr, ...(identity ? { identity } : {}) }
 
   if (toolsChanged) {
     // 工具声明也在缓存前缀里（第 0 位之前）：断点不在任何一条消息上
