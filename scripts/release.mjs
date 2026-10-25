@@ -128,17 +128,20 @@ if (publish) {
    * 这个脚本也按 `-` 决定 Release 标不标 prerelease——所以格式必须钉死：
    *   正式版 X.Y.Z（tag vX.Y.Z）→ 占 Latest，正式客户端会收到；
    *   尝鲜版 X.Y.Z-beta.N（tag vX.Y.Z-beta.N）→ 标 prerelease、不占 Latest，
-   *   只有尝鲜策略的客户端会收到。
-   * 为什么必须是 `beta` 这个后缀：electron-updater 的 GitHub provider 内置 alpha/beta
+   *   只有尝鲜策略的客户端会收到；
+   *   内测版 X.Y.Z-alpha（或 -alpha.N）→ 同样标 prerelease、不占 Latest，
+   *   alpha 是 electron-updater 内置的另一条标准通道，alpha 策略的客户端会收到。
+   * 为什么只放开这三种后缀：electron-updater 的 GitHub provider 内置 alpha/beta
    * 两条标准预发布通道（见 node_modules/electron-updater/out/providers/GitHubProvider.js），
    * 换别的后缀（rc / dev…）会被当成自定义通道，正在跑尝鲜版的客户端会**收不到**新尝鲜版，
    * 且不报任何错。这种事不能在发布之后才发现。
    */
   const stableFormat = /^\d+\.\d+\.\d+$/
   const betaFormat = /^\d+\.\d+\.\d+-beta\.\d+$/
-  if (!stableFormat.test(version) && !betaFormat.test(version)) {
+  const alphaFormat = /^\d+\.\d+\.\d+-alpha(\.\d+)?$/
+  if (!stableFormat.test(version) && !betaFormat.test(version) && !alphaFormat.test(version)) {
     console.error('[release] 版本号格式不符合发布约定：' + version)
-    console.error('          正式版用 X.Y.Z（如 0.7.0）；尝鲜版用 X.Y.Z-beta.N（如 0.7.0-beta.1）。')
+    console.error('          正式版用 X.Y.Z（如 0.7.0）；尝鲜版用 X.Y.Z-beta.N（如 0.7.0-beta.1）；内测版用 X.Y.Z-alpha（如 0.7.0-alpha）。')
     process.exit(1)
   }
   const dirty = git(['status', '--porcelain', '--untracked-files=no'])
