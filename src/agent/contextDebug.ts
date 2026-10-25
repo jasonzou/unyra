@@ -47,6 +47,9 @@ export interface ContextDropReport {
   prevRead: number
   currRead: number
   kind: DropKind
+  /** 定格时的前后两份实发上下文（原样字节；下载包的内容） */
+  prev: ContextSnapshot
+  curr: ContextSnapshot
   /** 一句话结论：后一次这份在哪断开 */
   headline: string
   /** 合并摆出的消息序列（被裁掉的来自上一次，新增的来自这一次；一致的头也在，由界面折叠） */
@@ -108,11 +111,39 @@ export function subscribeDrops(fn: () => void): () => void {
   }
 }
 
+/**
+ * 下载包的形状：报告的结论 + 前后两份实发上下文的**原样字节**（不多不少）。
+ * 调试器把它序列化后 gzip 成 .json.gz 供下载——交给别的眼睛看，或贴进 bug 报告。
+ */
+export function dropBundleOf(report: ContextDropReport): Record<string, unknown> {
+  return {
+    app: 'unyra',
+    type: 'context-drop',
+    key: report.key,
+    at: report.at,
+    prevRead: report.prevRead,
+    currRead: report.currRead,
+    kind: report.kind,
+    headline: report.headline,
+    prev: report.prev,
+    curr: report.curr,
+  }
+}
+
 /* ---------- 断点分析 ---------- */
 
-/** 消息的指纹与原文都把 tool_calls / tool_call_id 算进去：结构变了也算断 */
+/**
+ * 消息的指纹与原文：发往模型的字段全摆出来——含思考原文 reasoning_content（思考模式
+ * 的回传契约就落在这个字段上，比对时不能瞎）与 tool_calls / tool_call_id（结构变了也算断）。
+ */
 const messageText = (m: ChatMessage): string =>
-  JSON.stringify({ role: m.role, content: m.content, tool_calls: m.tool_calls ?? null, id: m.tool_call_id ?? null })
+  JSON.stringify({
+    role: m.role,
+    content: m.content,
+    reasoning_content: m.reasoning_content ?? null,
+    tool_calls: m.tool_calls ?? null,
+    id: m.tool_call_id ?? null,
+  })
 
 /**
  * 消息职责：从 wire 形状推（这里拿不到会话原数据，只看发出去的字节）。
@@ -196,7 +227,7 @@ function analyze(
   const toolsChanged =
     JSON.stringify(prev.tools ?? []) !== JSON.stringify(curr.tools ?? [])
   const systemChanged = !p.length || !c.length || messageText(p[0]) !== messageText(c[0])
-  const base = { key, at: Date.now(), prevRead, currRead }
+  const base = { key, at: Date.now(), prevRead, currRead, prev, curr }
 
   if (toolsChanged) {
     // 工具声明也在缓存前缀里（第 0 位之前）：断点不在任何一条消息上

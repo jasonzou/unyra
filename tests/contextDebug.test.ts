@@ -8,6 +8,7 @@ import type { ChatMessage } from '../src/ai/types'
 import {
   captureDrop,
   clearDropReports,
+  dropBundleOf,
   dutyOf,
   lastDropReport,
   noteRequest,
@@ -43,6 +44,17 @@ describe('滚动与定格', () => {
     expect(captureDrop('c1', 50, 5)).toBe(true)
     clearDropReports()
     expect(lastDropReport()).toBeNull()
+  })
+
+  it('下载包：报告结论 + 前后两份实发上下文的原样字节', () => {
+    noteRequest('c1', snap([msg('user', '你好')]))
+    noteRequest('c1', snap([msg('user', '你好'), msg('assistant', '答')]))
+    expect(captureDrop('c1', 900, 300)).toBe(true)
+    const bundle = dropBundleOf(lastDropReport()!)
+    expect(bundle.type).toBe('context-drop')
+    expect(bundle.kind).toBe('append')
+    expect((bundle.prev as { messages: unknown[] }).messages).toHaveLength(2)
+    expect((bundle.curr as { messages: unknown[] }).messages).toHaveLength(3)
   })
 })
 
