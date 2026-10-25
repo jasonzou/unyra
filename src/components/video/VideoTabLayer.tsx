@@ -14,7 +14,7 @@
  */
 import { MonitorPlay } from 'lucide-react'
 import { t } from '../../i18n'
-import type { LearnTab, TabRef, VideoResource } from '../../learn/types'
+import type { LearnTab, TabRef, VideoRecap, VideoResource } from '../../learn/types'
 import VideoStudyTab, { type VideoCreateDraft } from './VideoStudyTab'
 
 export type VideoTab = LearnTab & { ref: Extract<TabRef, { kind: 'video' }> }
@@ -34,9 +34,11 @@ interface Props {
   onProgress: (videoId: string, positionMs: number, source: string) => void
   /** 选集切换：把「停在的那一项」写进资源（重开页签回到同一集） */
   onSelection: (videoId: string, source: string, title: string) => void
+  /** AI 视频总结完成（总结 + 分段一次生成）：按来源写进资源；生成过没有再次入口 */
+  onSaveRecap: (videoId: string, source: string, recap: VideoRecap) => void
 }
 
-export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onResolved, onProgress, onSelection }: Props) {
+export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onResolved, onProgress, onSelection, onSaveRecap }: Props) {
   return (
     <>
       {tabs.map((tab) => {
@@ -71,6 +73,9 @@ export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onReso
                 }}
                 onSelection={(source, title) => {
                   if (videoId) onSelection(videoId, source, title)
+                }}
+                onSaveRecap={(source, recap) => {
+                  if (videoId) onSaveRecap(videoId, source, recap)
                 }}
               />
             )}

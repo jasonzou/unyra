@@ -6,6 +6,7 @@
  * 且只依赖节点查表与前置边。
  */
 import type { LearnStore, TabRef } from '../types'
+import { withVideoMirror } from '../video/nodes'
 import { withoutTmpNodes } from '../../lib/tmpStore'
 import { allStoredTabs, closeIds, dropTabs, withOwners } from '../groups'
 import { dropDrafts } from '../drafts'
@@ -89,14 +90,27 @@ export function deleteGoal(store: LearnStore, goalId: string): LearnStore {
     (nextActiveGoalId ? latestConversation({ ...store, conversations: remaining }, nextActiveGoalId)?.id : null) ??
     null
   // 整棵子树都没了：它的节点文档页签、笔记页签一并关掉（与 deleteNode 同一条规则）；
-  // 记忆页签挂在目标上（不挂节点，tabNodeIdOf 够不着它），目标没了也得一起关
+  // 记忆页签挂在目标上（不挂节点，tabNodeIdOf 够不着它），目标没了也得一起关；
+  // 绑定视频的页签同理——它记着 ref.goalId（groups/goals 的归属判据）
   const doomedTabs = allStoredTabs(store.docArea)
-    .filter((t) => removed.has(tabNodeIdOf(t.ref)) || (t.ref.kind === 'mind' && t.ref.goalId === goalId))
+    .filter(
+      (t) =>
+        removed.has(tabNodeIdOf(t.ref)) ||
+        (t.ref.kind === 'mind' && t.ref.goalId === goalId) ||
+        (t.ref.kind === 'video' && t.ref.goalId === goalId),
+    )
     .map((t) => t.id)
   return {
     ...store,
     goals,
     nodes,
+    /*
+     * 视频节点跟着目标走：它名下的绑定行摘掉、视频资源上的引用镜像随之重建
+     * （资源本体与它的分段、进度都不动——视频是用户级的，删目标不该带走）。
+     */
+    ...(store.videoNodes?.some((v) => v.goalId === goalId)
+      ? withVideoMirror({ ...store, videoNodes: store.videoNodes.filter((v) => v.goalId !== goalId) })
+      : {}),
     /*
      * 阅读与打卡这两本账**跟着目标一起走**（见 learn/reading 的 ReadingBook）：
      * 目标都没了，它的账不该还留在内存里，也不该继续写在数据目录里——两本一起摘掉。

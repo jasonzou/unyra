@@ -162,6 +162,32 @@ export function buildApi(
     wrapApi(api, 'memory.update', (args) => memory.update(asText(args[0]).trim(), asRecord(args[1])), log)
     // 删除带可选 { confirm }：长期记忆要它，工作记忆不需要（见 learn/memory）
     wrapApi(api, 'memory.delete', (args) => memory.remove(asText(args[0]).trim(), args[1] && typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined), log)
+    /**
+     * 一页纸（开场先看它）：本目标记忆里最近的几条摘要拼成一页，省掉 list + 逐条 get 两步。
+     * 画像、路线这类跨轮不变的东西，本就该在动手前先领一页。
+     */
+    wrapApi(api, 'memory.context', async (args) => {
+      const q = args[0] && typeof args[0] === 'object' ? (args[0] as Record<string, unknown>) : {}
+      const scope = q.scope === 'long' ? 'long' : 'work'
+      const maxChars = typeof q.maxChars === 'number' ? Math.max(200, Math.min(q.maxChars, 4000)) : 600
+      const listed = await Promise.resolve(memory.list({ type: scope }))
+      const rawItems = (listed as { items?: unknown })?.items
+      const items: unknown[] = Array.isArray(rawItems) ? rawItems : Array.isArray(listed) ? (listed as unknown[]) : []
+      const picked = items.slice(0, 3)
+      const parts: string[] = []
+      for (const it of picked) {
+        const uuid = typeof (it as { uuid?: unknown })?.uuid === 'string' ? (it as { uuid: string }).uuid : typeof it === 'string' ? it : ''
+        if (!uuid) continue
+        const full = (await Promise.resolve(memory.get(uuid))) as { title?: unknown; content?: unknown; error?: unknown } | null
+        if (!full || typeof full.error !== 'undefined') continue
+        const title = typeof full.title === 'string' ? full.title : ''
+        const content = typeof full.content === 'string' ? full.content.trim() : ''
+        if (content) parts.push('## ' + title + '\n' + content)
+      }
+      let text = parts.join('\n\n')
+      if (text.length > maxChars) text = text.slice(0, maxChars) + '\n…（已截断，全文用 memory.get(uuid) 取）'
+      return { ok: true, scope, count: parts.length, text }
+    }, log)
   }
 
   // 日程：给用户排提醒（见 learn/schedule）。响铃与「确认」在宿主，agent 只写这张表
@@ -282,13 +308,12 @@ export function buildApi(
   // 网络搜索与网页抓取（基于 DeepSeek 官方 Search API 与 Fetch API）
   if (opts.web) {
     const web = opts.web
-    const handleFetch = (args: unknown[]) => {
-      const first = args[0]
+    const fetchOne = async (item: unknown): Promise<unknown> => {
       let url = ''
-      if (typeof first === 'string') {
-        url = first.trim()
-      } else if (first && typeof first === 'object') {
-        const obj = first as Record<string, unknown>
+      if (typeof item === 'string') {
+        url = item.trim()
+      } else if (item && typeof item === 'object') {
+        const obj = item as Record<string, unknown>
         url = asText(obj.url ?? obj.link ?? obj.href).trim()
       }
       if (!url) {
@@ -296,11 +321,49 @@ export function buildApi(
           ok: false,
           title: '',
           content: '',
-          error:
-            'fetch 需要有效的 url 参数，例如 api.fetch({ url: "https://..." }) 或 api.fetch("https://...")',
+          error: 'fetch 需要有效的 url 参数，例如 api.fetch({ url: "https://..." }) 或 api.fetch("https://...")',
         }
       }
-      return web.fetch(typeof first === 'object' && first !== null ? { ...first, url } : { url })
+      return web.fetch(item && typeof item === 'object' ? { ...(item as Record<string, unknown>), url } : { url })
+    }
+    /** maxChars 截断：省掉模型每次 slice 的手脚；单篇与批量同一套 */
+    const clipContent = (maxChars: number | undefined) => (r: unknown): unknown => {
+      const rec = r as { content?: unknown } | null
+      if (maxChars && rec && typeof rec.content === 'string' && rec.content.length > maxChars) {
+        return {
+          ...rec,
+          content: rec.content.slice(0, maxChars) + '\n…（已按 maxChars 截断，全文共 ' + rec.content.length + ' 字符）',
+        }
+      }
+      return r
+    }
+    /**
+     * 单篇与批量同一入口：api.fetch(url 或 {url}, { maxChars? })；
+     * 批量 api.fetch([url, {url}, …], { maxChars? })——并发抓、逐条返回 {ok}，
+     * 一篇失败只标记它自己，不拖累其他篇（省掉串行试错整轮整轮地烧）。
+     */
+    const handleFetch = async (args: unknown[]): Promise<unknown> => {
+      const options = args[1] && typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : {}
+      const maxChars = typeof options.maxChars === 'number' && options.maxChars > 0 ? Math.floor(options.maxChars) : undefined
+      const clip = clipContent(maxChars)
+      if (Array.isArray(args[0])) {
+        const items = args[0]
+        if (!items.length) return { ok: false, error: '批量 fetch 要给 url 数组：api.fetch([url1, url2], { maxChars })' }
+        if (items.length > 5) {
+          return { ok: false, error: '一次最多并发抓 5 篇（收到 ' + items.length + '）——挑最权威的几篇就够' }
+        }
+        const results = await Promise.all(
+          items.map(async (item) => {
+            try {
+              return await fetchOne(item).then(clip)
+            } catch (err) {
+              return { ok: false, title: '', content: '', error: err instanceof Error ? err.message : String(err) }
+            }
+          }),
+        )
+        return { ok: true, results }
+      }
+      return fetchOne(args[0]).then(clip)
     }
     // 支持 api.fetch 与 api.web.fetch
     // 顶层 fetch 是 web.fetch 的快捷别名：提示词里教的就是 api.fetch，别删
@@ -1320,6 +1383,65 @@ export function buildApi(
    * 放最后：门面要读已注册的 node.get / node.invoke。
    */
   registerNodeApi(api, opts.nodes, log)
+
+  /**
+   * 收尾仪式一次做完（node.finish）：content / state / memory / delivery / open 五件事
+   * 一个调用，省掉五连发里任一参数写错整批回退的开销。**content 先落**——它失败就
+   * 直接回（后面全部不做，不会出现「文档没写、账都记了」的倒挂）；其余步骤逐个
+   * 落、逐个如实报告（哪一步没落上看 steps，单独补一次就行）。
+   */
+  if (opts.nodes) {
+    wrapApi(api, 'node.finish', async (args) => {
+      const service = opts.nodes?.service()
+      if (!service) return { error: '这一轮没有节点能力（宿主未注入 NodeService）' }
+      const uuid = asText(args[0]).trim()
+      const plan = args[1] && typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : {}
+      const node = service.get(uuid)
+      if (!node) return { error: '没有 uuid 为「' + uuid + '」的节点；先 api.node.list() 查清楚' }
+      const steps: Record<string, unknown> = {}
+
+      if (plan.content !== undefined) {
+        const reason = opts.nodes?.guard?.('edit', node.kind, plan.content)
+        if (reason) return { error: reason }
+        const r = node.editContent(plan.content)
+        if ('error' in r) return { error: 'content：' + r.error }
+        steps.content = 'written'
+        opts.nodes?.afterEdit?.(node.uuid, node.kind)
+      }
+
+      const stepOf = (r: unknown, name: string, done: string): void => {
+        steps[name] = r && typeof r === 'object' && typeof (r as { error?: unknown }).error !== 'undefined' ? (r as { error: unknown }).error : done
+      }
+      if (plan.state && typeof plan.state === 'object' && opts.state) {
+        const s = plan.state as Record<string, unknown>
+        stepOf(opts.state.update(node.uuid, { self: s.self, by: s.by ?? 'agent', mastery: s.mastery, note: s.note }), 'state', 'written')
+      }
+      if (plan.memory && typeof plan.memory === 'object' && opts.memory) {
+        stepOf(opts.memory.create(plan.memory as Record<string, unknown>), 'memory', 'written')
+      }
+      if (plan.delivery && typeof plan.delivery === 'object' && opts.delivery) {
+        stepOf(opts.delivery.submit(plan.delivery as Record<string, unknown>), 'delivery', 'written')
+      }
+      // 镜头最后切：账都落好了才把用户看到的东西指给他
+      if (plan.open === true) {
+        const listed = service.list() as { nodes?: Array<{ uuid?: string; path?: string }> }
+        const path = listed.nodes?.find((n) => n.uuid === uuid)?.path
+        const point = path ? (api as { ui?: { point?: (t: unknown) => Promise<unknown> } }).ui?.point : undefined
+        if (typeof point === 'function') {
+          await point(path)
+          steps.open = 'done'
+        } else {
+          steps.open = 'skipped（这一轮没有 ui.point）'
+        }
+      }
+
+      const allGood = Object.values(steps).every((v) => v === 'written' || v === 'done' || (typeof v === 'string' && v.startsWith('skipped')))
+      return allGood
+        ? { ok: true, steps, note: '收尾五件事一次落完' }
+        : { ok: true, steps, note: 'content 已写入；有一步没落上（看 steps 里的说明），单独补一次即可' }
+    }, log)
+  }
+
   if (addons?.nodeFacade) attachNodeFacade(api)
 
   // 根 help：顶层函数与各组的总览。真沙箱由 sandboxRuntime 再挂一次（同步、不花宿主往返）

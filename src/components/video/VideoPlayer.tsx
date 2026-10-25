@@ -48,6 +48,7 @@ import {
   toTranscript,
 } from '../../video/subtitles'
 import type { Transcript, TranscriptSegment } from '../../video/types'
+import type { VideoChapter } from '../../learn/types'
 
 export interface VideoPlayerProps {
   src: string
@@ -75,6 +76,12 @@ export interface VideoPlayerProps {
   sidePanelOpen?: boolean
   /** 页签此刻是否激活：视频页签 keepalive 只藏不卸，藏起来的时候必须停播 */
   active?: boolean
+  /**
+   * 当前来源的 AI 语义分段（「视频分段」，见 learn/video/summarize）：
+   * 进度条上的分段点——点一下跳到那段开头，悬停给这一段的内容概述；
+   * 悬停预览落进某一段之内时，预览下方显示那段标题。
+   */
+  chapters?: VideoChapter[] | null
   className?: string
 }
 
@@ -162,6 +169,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       onToggleSidePanel,
       sidePanelOpen = false,
       active = true,
+      chapters,
       className = '',
     },
     ref,
@@ -235,7 +243,6 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [hoverPercent, setHoverPercent] = useState<number | null>(null)
     const [hoverTime, setHoverTime] = useState<number | null>(null)
     const [hoverPosPx, setHoverPosPx] = useState(0)
-    const [isSeekingThumbnail, setIsSeekingThumbnail] = useState(false)
     const isDraggingProgress = useRef(false)
 
     // 反馈与特效
@@ -715,15 +722,12 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             : rect.width / 2
         setHoverPosPx(clampedX)
 
-        // 节流给离屏预览视频 seek
+        // 节流给离屏预览视频 seek（不带加载态：seek 是异步的，加载图标会在滑动时一路闪）
         const now = Date.now()
         if (now - lastPreviewSeekTimeRef.current > 80) {
           lastPreviewSeekTimeRef.current = now
           const pVid = previewVideoRef.current
-          if (pVid && Number.isFinite(timeSec)) {
-            setIsSeekingThumbnail(true)
-            pVid.currentTime = timeSec
-          }
+          if (pVid && Number.isFinite(timeSec)) pVid.currentTime = timeSec
         }
       },
       [effectiveDuration],
@@ -736,7 +740,6 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
 
     // 当离屏预览视频 seek 完毕时，将画面绘制在 previewCanvasRef
     const handlePreviewVideoSeeked = useCallback(() => {
-      setIsSeekingThumbnail(false)
       const pVid = previewVideoRef.current
       const canvas = previewCanvasRef.current
       if (!pVid || !canvas || !pVid.videoWidth) return
@@ -815,6 +818,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     // 进度条百分比
     const currentPercent = effectiveDuration > 0 ? (currentTime / effectiveDuration) * 100 : 0
     const bufferedPercent = effectiveDuration > 0 ? (buffered / effectiveDuration) * 100 : 0
+
+    /*
+     * 悬停时刻落在哪个分段之内（progress bar 预览下方的分段标题）：
+     * startMs <= 悬停时刻 < 下一段的 startMs（最后一段到片尾）。
+     */
+    const hoverChapter =
+      chapters && hoverTime != null && chapters.length
+        ? (chapters.find((ch, i) => {
+            const ms = hoverTime * 1000
+            return ms >= ch.startMs && (i === chapters.length - 1 || ms < chapters[i + 1].startMs)
+          }) ?? null)
+        : null
 
     // 根据播放器自身尺寸（宽、高与视频画面比例）精确计算字幕字号与定位
     const subtitleLayout = calculateSubtitleLayout(
@@ -1018,7 +1033,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                 }}
                 className="pointer-events-none absolute bottom-5 z-40 flex flex-col items-center gap-1"
               >
-                {/* 预览缩略图盒子 */}
+                {/* 预览缩略图盒子（无加载态：seek 期间沿用上一帧，滑动才不会一路闪） */}
                 <div className="relative h-[90px] w-[160px] overflow-hidden rounded-md border border-white/20 bg-black shadow-xl">
                   <canvas
                     ref={previewCanvasRef}
@@ -1026,16 +1041,20 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                     height={90}
                     className="h-full w-full object-cover"
                   />
-                  {isSeekingThumbnail && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
-                      <Loader2 size={14} className="animate-spin text-white/80" />
-                    </div>
-                  )}
                 </div>
                 {/* 悬停时间胶囊 */}
                 <span className="rounded bg-black/80 px-1.5 py-0.5 font-mono text-[11px] font-medium text-white shadow backdrop-blur-xs">
                   {formatClock(hoverTime * 1000)}
                 </span>
+                {/* 落在某个分段之内：预览下方显示那一段的标题 */}
+                {hoverChapter && (
+                  <span
+                    title={hoverChapter.summary}
+                    className="max-w-[220px] truncate rounded bg-seal/90 px-1.5 py-0.5 text-[10.5px] font-medium text-white shadow"
+                  >
+                    {hoverChapter.summary}
+                  </span>
+                )}
               </div>
             )}
 
@@ -1060,6 +1079,27 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
               }}
               className="absolute -ml-1.5 h-3 w-3 rounded-full bg-seal shadow transition-transform group-hover/progress:scale-125"
             />
+
+            {/* AI 语义分段点：点一下跳到那段开头，悬停给出这一段的内容概述（title 原生提示，零布局风险） */}
+            {(chapters ?? []).map((ch) => (
+              <button
+                key={ch.startMs}
+                type="button"
+                onMouseDown={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                onClick={() => {
+                  const video = videoRef.current
+                  if (!video) return
+                  video.currentTime = ch.startMs / 1000
+                  setCurrentTime(ch.startMs / 1000)
+                }}
+                title={`${formatClock(ch.startMs)} · ${ch.summary}`}
+                style={{
+                  left: `${effectiveDuration > 0 ? Math.min(100, Math.max(0, (ch.startMs / (effectiveDuration * 1000)) * 100)) : 0}%`,
+                }}
+                className="absolute top-1/2 z-10 h-2 w-2 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border border-white/60 bg-seal shadow transition-transform hover:scale-150"
+              />
+            ))}
           </div>
 
           {/* 控制条按钮行 */}

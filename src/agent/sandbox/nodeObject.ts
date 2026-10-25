@@ -105,6 +105,13 @@ export function registerNodeApi(api: Record<string, unknown>, ops: NodeOps | und
     return service.list()
   }, log)
 
+  // 一页纸简报（写正文之前的那一眼）：self / port / siblings / taught 一次给齐
+  wrapApi(api, 'node.brief', (args) => {
+    const service = svc()
+    if (!service) return { error: NO_SERVICE }
+    return service.brief(asText(args[0]).trim())
+  }, log)
+
   wrapApi(api, 'node.delete', (args) => {
     const service = svc()
     if (!service) return { error: NO_SERVICE }

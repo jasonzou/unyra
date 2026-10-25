@@ -31,6 +31,7 @@ export {
 export {
   addEdge,
   backtrackTargets,
+  docIdOfMember,
   isUnlocked,
   parentIds,
   pathToRoot,

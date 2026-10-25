@@ -181,6 +181,27 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
       if (goalDetached && (goalDetached.notes.length || goalDetached.superdocs.length)) {
         files.set(`${path}/detached.json`, jsonText({ version: 1, notes: goalDetached.notes, superdocs: goalDetached.superdocs }))
       }
+      /**
+       * 游离大纲池：不依附文档的计划实体 + 以它们为起点（from = o:uuid）的树边。
+       * 附身大纲仍住在节点文件里（与宿主文档配对），两类大纲各回各家；一张都没有不写。
+       */
+      const freeOutlines = (store.outlines ?? []).filter((o) => o.goalId === goal.id)
+      const freeEdges = store.edges.filter((e) => e.from.startsWith('o:'))
+      if (freeOutlines.length || freeEdges.length) {
+        files.set(
+          `${path}/outlines.json`,
+          jsonText({
+            version: 1,
+            outlines: freeOutlines,
+            edges: freeEdges.map((e) => ({ from: e.from, to: e.to, createdAt: e.createdAt, ...(e.portKey ? { portKey: e.portKey } : {}) })),
+          }),
+        )
+      }
+      /** 视频节点（目标 × 视频的绑定，见 learn/video/nodes）：一枚都没有就不写 */
+      const goalVideoNodes = (store.videoNodes ?? []).filter((v) => v.goalId === goal.id)
+      if (goalVideoNodes.length) {
+        files.set(`${path}/video-nodes.json`, jsonText({ version: 1, nodes: goalVideoNodes }))
+      }
     }
 
     /**

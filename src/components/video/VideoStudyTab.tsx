@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Clapperboard, Download, Loader2, MonitorPlay, Plus, Puzzle } from 'lucide-react'
+import { Clapperboard, Download, Loader2, MonitorPlay, Plus, Puzzle, Sparkles } from 'lucide-react'
 import { t } from '../../i18n'
 import { isWeb, native } from '../../lib/native'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
@@ -21,9 +21,10 @@ import { matchVideoPlugin, resolveVideoSource, resolveVideoTranscript, videoSour
 import { openRelayStream } from '../../video/registry'
 import { buildPagesMarkdown, type PagesExportEntry } from '../../video/export'
 import { formatClock, segmentIndexAt } from '../../video/transcript'
+import { summarizeVideoRecap } from '../../learn/video/summarize'
 import type { Transcript, VideoSource } from '../../video/types'
 import type { PluginSettingField } from '../../lib/plugins'
-import type { VideoResource } from '../../learn/types'
+import type { VideoRecap, VideoResource } from '../../learn/types'
 import { registerVideoAudio } from '../../learn/video/videoRegistry'
 import VideoPlayer, { type VideoPlayerHandle } from './VideoPlayer'
 
@@ -31,6 +32,10 @@ import VideoPlayer, { type VideoPlayerHandle } from './VideoPlayer'
 const INPUT_KEY = 'moji.video.input'
 /** 合集列表收起与否：跟输入一样落在 localStorage，重启后保持上次的选择 */
 const COLLAPSED_KEY = 'moji.video.collapsed'
+/** 自动总结（用户设置）：打开视频就自动生成内容总结与分段 */
+const AUTO_RECAP_KEY = 'moji.video.autoRecap'
+/** 底部区的分栏门槛：不到用它就还是三页签（用户定的 700px） */
+const SPLIT_MIN_WIDTH = 700
 
 const readLastInput = (): string => {
   try {
@@ -68,13 +73,15 @@ interface Props {
   onProgress?: (positionMs: number, source: string) => void
   /** 选集切换：把「停在的那一项」写进资源（重开回到同一集） */
   onSelection?: (source: string, title: string) => void
+  /** AI 视频总结完成（内容总结 + 语义分段**一次生成**）：按**当前来源**写进资源；生成过就没有再次入口 */
+  onSaveRecap?: (source: string, recap: VideoRecap) => void
   /** 自己的页签 id：音频控制登记的键（页签条的快捷静音按钮按它找上来） */
   tabId?: string
   /** 页签此刻是否激活：切走就停播（VideoPlayer 的 active） */
   active?: boolean
 }
 
-export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress, onSelection, tabId, active = true }: Props) {
+export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress, onSelection, onSaveRecap, tabId, active = true }: Props) {
   const bound = !!video
   /** 创建态输入（绑定态不用它——页里没有输入组件） */
   const [input, setInput] = useState(() => video?.input ?? readLastInput())
@@ -131,6 +138,46 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
   const [transcriptNote, setTranscriptNote] = useState<string | null>(null)
   /** 播放器此刻的位置（ms）：timeupdate 约 4Hz，直接跟着走足够高亮与自动滚动用 */
   const [currentMs, setCurrentMs] = useState(0)
+  /**
+   * 当前解析的是哪一项（选集 source）的**渲染期**读数：currentSourceRef 是给回调用的，
+   * 状态这份给「这一集的分段点」用（换集/续播解析完就跟着换）。
+   */
+  const [currentSource, setCurrentSource] = useState(() => video?.selection?.source ?? video?.input ?? '')
+  /** AI 视频总结进行中（生成按钮转圈、禁点；总结与分段**合在同一个动作**） */
+  const [recapBusy, setRecapBusy] = useState(false)
+  /** 底部区的页签：字幕（转录列表）/ 总结（内容描述）/ 视频分段（章节行）——只在**窄**布局用 */
+  const [bottomTab, setBottomTab] = useState<'sub' | 'summary' | 'chapters'>('sub')
+  /** 自动总结（用户设置，localStorage）：打开视频就自动生成总结与分段 */
+  const [autoRecap, setAutoRecap] = useState(() => {
+    try {
+      return localStorage.getItem(AUTO_RECAP_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleAutoRecap = useCallback(() => {
+    setAutoRecap((v) => {
+      const next = !v
+      try {
+        localStorage.setItem(AUTO_RECAP_KEY, next ? '1' : '0')
+      } catch {
+        // 会话内生效即可
+      }
+      return next
+    })
+  }, [])
+  /** 底部区够不够宽走**分栏**（左字幕、右总结+分段）；不够就还是三页签。实测驱动，不由窗口猜 */
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const [wide, setWide] = useState(false)
+  useEffect(() => {
+    const el = bottomRef.current
+    if (!el) return
+    const measure = () => setWide(el.clientWidth > SPLIT_MIN_WIDTH)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [relayUrl])
   /** 合集列表收起与否（用户可收起；选择落 localStorage，重启保持） */
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const toggleCollapsed = useCallback(() => {
@@ -203,6 +250,16 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
   /** 播放推进到哪一段：段间空隙（-1）时全部行保持素净 */
   const activeIdx = segments.length ? segmentIndexAt(segments, currentMs) : -1
 
+  /** 当前来源的内容总结与分段（**生成过就不再生成**：底部两个页签与进度条分段点都读它们） */
+  /** 当前来源的总结（内容描述 + 语义分段**一份**）：进度条分段点、底部两个页签都读它 */
+  const recapOfSource = video?.recaps?.[currentSource] ?? null
+  const summaryOfSource = recapOfSource?.summary ?? ''
+  const chapterRows = recapOfSource?.chapters ?? []
+  /** 当前播放落在哪个分段（-1 = 还没分段 / 段间）；分段行的高亮用 */
+  const activeChapterIdx = chapterRows.length
+    ? chapterRows.reduce((acc, ch, i) => (currentMs >= ch.startMs ? i : acc), -1)
+    : -1
+
   /**
    * 解析一轮：换流 → 更新整页。错误原话进横幅（库抛什么显示什么，不做预判文案）。
    * fields 是视频级的 createFields 值（创建时填的），与插件全局配置在宿主合并。
@@ -229,6 +286,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
         else setTranscriptNote(t('这条来源没有字幕：需要登录的平台，请到「设置 → 插件」的插件配置里填好凭据后重试。'))
         setCurrentMs(0)
         currentSourceRef.current = text
+        setCurrentSource(text)
         lastProgressRef.current = 0
         onResolved?.(src.title)
         // 选集切换（合集项 / 分 P）：把那串输入记进资源，重开页签回到同一集
@@ -376,6 +434,52 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
   const seekMs = useCallback((ms: number) => {
     playerRef.current?.seekMs(ms)
   }, [])
+
+  /*
+   * AI 视频总结（内容总结 + 语义分段，**合在同一个动作一次生成**）：
+   * 不走导师 agent——内部的一次性补全（少提示词、思考档位 none，见 learn/video/summarize）。
+   * 产出按当前来源写进资源：总结落在「总结」页签、分段变成进度条分段点与「视频分段」行。
+   * **单个来源生成过就不再生成**：入口只在空态出现，run 函数里再守一道。
+   * 失败原话进顶部横幅（与解析失败同一块），播放不打断。
+   * 普通函数而不是 useCallback：与 exportPages 同一个理由（React Compiler 的
+   * 自动缓存在这条 async 跨 await 闭包上保留不了）。
+   */
+  const runRecap = async () => {
+    if (!transcript?.segments?.length || recapBusy || recapOfSource) return
+    setRecapBusy(true)
+    try {
+      const recap = await summarizeVideoRecap({
+        title: source?.title ?? video?.title ?? '',
+        transcript,
+      })
+      onSaveRecap?.(currentSourceRef.current || currentSource, recap)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRecapBusy(false)
+    }
+  }
+
+  /*
+   * 自动总结（用户开了开关）：流解析出来、字幕可用、这一来源还没有总结时**自动跑一次**。
+   * 每个来源只试一次（autoTriedRef 记账——失败也不在同一帧里反复重试，重开页签才再试）。
+   * runRecap 是普通函数（身份随渲染变），经 ref 回填拿最新的一份（与 openTabRef 同一套）。
+   */
+  const autoTriedRef = useRef<Set<string>>(new Set())
+  const runRecapRef = useRef<() => Promise<void>>(async () => {})
+  useEffect(() => {
+    runRecapRef.current = runRecap
+  })
+  useEffect(() => {
+    if (!autoRecap || !video || !relayUrl) return
+    if (!transcript?.segments?.length) return
+    const src = currentSourceRef.current || currentSource
+    if (video.recaps?.[src]) return
+    const key = video.id + '|' + src
+    if (autoTriedRef.current.has(key)) return
+    autoTriedRef.current.add(key)
+    void runRecapRef.current()
+  }, [autoRecap, video, relayUrl, transcript, currentSource])
 
   /** 当前段变了就把那行滚进视野（跟随定位：钉在可视区 20% 高度，用户定的） */
   useEffect(() => {
@@ -607,6 +711,141 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
       </>
     ) : null
 
+  /*
+   * 底部区的内容件（窄布局与分栏布局共用同几块，只换摆法）：
+   * - 字幕列表（listRef 挂在谁身上，跟随定位就滚谁——两个布局各渲染一份，同时只挂一个）；
+   * - 总结正文 / 生成分段行 / 空态生成入口（总结与分段**合在同一个动作**，空态两个页签给同一个按钮）。
+   */
+  const maskStyle = { maskImage: fadeMask(edges), WebkitMaskImage: fadeMask(edges) } as const
+  const transcriptEl = (
+    <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      {segments.length ? (
+        segments.map((seg, i) => (
+          <div key={seg.startMs} ref={(el) => { rowRefs.current[i] = el }}>
+            <button
+              type="button"
+              onClick={() => seekMs(seg.startMs)}
+              className={
+                'flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition ' +
+                (i === activeIdx ? 'bg-seal/10' : 'hover:bg-line/50')
+              }
+            >
+              <span
+                className={
+                  'mt-px w-11 shrink-0 pt-px text-right font-mono text-[10.5px] ' +
+                  (i === activeIdx ? 'text-seal' : 'text-ink-faint')
+                }
+              >
+                {formatClock(seg.startMs)}
+              </span>
+              <span
+                className={
+                  'min-w-0 flex-1 text-[12.5px] leading-relaxed ' +
+                  (i === activeIdx ? 'font-medium text-ink-strong' : 'text-ink')
+                }
+              >
+                {seg.text}
+              </span>
+            </button>
+          </div>
+        ))
+      ) : (
+        <div className="px-3 py-8 text-center text-[12px] leading-relaxed text-ink-faint">
+          {transcriptNote ?? t('这条来源没有可用的转录。')}
+        </div>
+      )}
+    </div>
+  )
+  const summaryEl = (
+    <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-2.5">
+      <p className="text-[12.5px] leading-relaxed text-ink">{summaryOfSource}</p>
+    </div>
+  )
+  const chaptersEl = (
+    <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      {chapterRows.map((ch, i) => (
+        <button
+          key={ch.startMs}
+          type="button"
+          onClick={() => seekMs(ch.startMs)}
+          title={ch.summary}
+          className={
+            'flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition ' +
+            (i === activeChapterIdx ? 'bg-seal/10' : 'hover:bg-line/50')
+          }
+        >
+          <span
+            className={
+              'mt-px w-11 shrink-0 pt-px text-right font-mono text-[10.5px] ' +
+              (i === activeChapterIdx ? 'text-seal' : 'text-ink-faint')
+            }
+          >
+            {formatClock(ch.startMs)}
+          </span>
+          <span
+            className={
+              'min-w-0 flex-1 text-[12.5px] leading-relaxed ' +
+              (i === activeChapterIdx ? 'font-medium text-ink-strong' : 'text-ink')
+            }
+          >
+            {ch.summary}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+  const hasTranscript = !!transcript?.segments?.length
+  const recapEmptyEl = (
+    <GenerateEmpty
+      busy={recapBusy}
+      busyLabel={t('正在总结…')}
+      hint={
+        hasTranscript
+          ? t('还没有总结：按字幕让 AI 生成内容总结与语义分段，分段点会钉在进度条上（生成后不再重复）')
+          : t('这条来源没有可用字幕，无法总结')
+      }
+      actionLabel={t('生成总结')}
+      disabled={!hasTranscript}
+      onRun={() => void runRecap()}
+    />
+  )
+  /** 头行右侧的公共件：自动总结开关 + 时长 + 字幕来源徽章（两种布局都在；source 由调用处窄化后传入） */
+  const metaRightOf = (src: VideoSource) => (
+    <>
+      <button
+        type="button"
+        onClick={toggleAutoRecap}
+        title={
+          autoRecap
+            ? t('自动总结已开启：打开视频时自动生成内容总结与分段（点一下关闭）')
+            : t('自动总结已关闭：打开视频时自动生成内容总结与分段（点一下开启）')
+        }
+        className={
+          'flex h-6 w-6 shrink-0 items-center justify-center rounded transition hover:bg-line/60 ' +
+          (autoRecap ? 'text-seal' : 'text-ink-faint')
+        }
+      >
+        <Sparkles size={13} />
+      </button>
+      {src.durationMs ? (
+        <span className="shrink-0 font-mono text-[10.5px] text-ink-faint">{formatClock(src.durationMs)}</span>
+      ) : null}
+      {transcript ? (
+        <span className="shrink-0 rounded border border-line bg-paper px-1.5 py-px text-[10px] text-ink-faint">
+          {(transcript.origin === 'subtitle' ? t('字幕') : t('语音识别')) +
+            (transcript.language
+              ? ' · ' +
+                (transcript.language === 'ai-zh'
+                  ? t('AI 中文字幕')
+                  : /^(zh-Hans|zh-CN)$/i.test(transcript.language)
+                    ? t('中文字幕')
+                    : transcript.language)
+              : '')}
+        </span>
+      ) : null}
+    </>
+  )
+
   /* ---------- 绑定态：没有输入组件，自动解析 ---------- */
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-paper select-none">
@@ -636,6 +875,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
                 sidePanel={sidePanel}
                 subLabel={pageLabel}
                 transitionStill={switchStill}
+                chapters={chapterRows.length ? chapterRows : null}
                 // 选集列表开关：有列表才给按钮（没有列表时控件栏不画这一颗）
                 onToggleSidePanel={sidePanel ? toggleCollapsed : undefined}
                 sidePanelOpen={!collapsed}
@@ -658,70 +898,95 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
                 }}
               />
           </div>
-          {/* 字幕条：高度 = 30%；标题行 + 列表的可视区就这么多 */}
-          <div className="flex h-[30%] shrink-0 flex-col border-t border-line">
-            <div className="flex shrink-0 items-center gap-2 border-b border-line bg-card/40 px-3 py-1.5">
-              <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-strong">{source.title}</span>
-              {source.durationMs ? (
-                <span className="shrink-0 font-mono text-[10.5px] text-ink-faint">{formatClock(source.durationMs)}</span>
-              ) : null}
-              {transcript ? (
-                <span className="shrink-0 rounded border border-line bg-paper px-1.5 py-px text-[10px] text-ink-faint">
-                  {(transcript.origin === 'subtitle' ? t('字幕') : t('语音识别')) +
-                    (transcript.language
-                      ? ' · ' +
-                        (transcript.language === 'ai-zh'
-                          ? t('AI 中文字幕')
-                          : /^(zh-Hans|zh-CN)$/i.test(transcript.language)
-                            ? t('中文字幕')
-                            : transcript.language)
-                      : '')}
-                </span>
-              ) : null}
+          {/*
+            底部区：字幕 / 总结 / 视频分段。**宽度 ≤700px 用三页签，更宽用分栏**
+            （左栏字幕、右栏总结在上+分段在下——实测 bottomRef 的宽度，不由窗口猜）。
+            总结与分段合在同一个动作：空态给同一个「生成总结」，生成过就只有内容。
+          */}
+          <div ref={bottomRef} className="flex h-[30%] shrink-0 flex-col border-t border-line">
+            <div className="flex shrink-0 items-center gap-0.5 border-b border-line bg-card/40 px-2 py-1">
+              {!wide &&
+                ([
+                  ['sub', t('字幕')],
+                  ['summary', t('总结')],
+                  ['chapters', t('视频分段')],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setBottomTab(key)}
+                    className={
+                      'rounded-md px-2 py-0.5 text-[11.5px] font-medium transition ' +
+                      (bottomTab === key ? 'bg-seal/10 text-seal-deep' : 'text-ink-faint hover:bg-line/50 hover:text-ink')
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              <span className="min-w-0 flex-1" />
+              {metaRightOf(source)}
             </div>
-            {/* 转录面板：mask 挂外层、滚动留内层（见 scrollFade 的说明），点击行 seek 播放器 */}
-            <div
-              className="flex min-h-0 flex-1 flex-col"
-              style={{ maskImage: fadeMask(edges), WebkitMaskImage: fadeMask(edges) }}
-            >
-              <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-                {segments.length ? (
-                  segments.map((seg, i) => (
-                    <div key={seg.startMs} ref={(el) => { rowRefs.current[i] = el }}>
-                      <button
-                        type="button"
-                        onClick={() => seekMs(seg.startMs)}
-                        className={
-                          'flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition ' +
-                          (i === activeIdx ? 'bg-seal/10' : 'hover:bg-line/50')
-                        }
-                      >
-                        <span
-                          className={
-                            'mt-px w-11 shrink-0 pt-px text-right font-mono text-[10.5px] ' +
-                            (i === activeIdx ? 'text-seal' : 'text-ink-faint')
-                          }
-                        >
-                          {formatClock(seg.startMs)}
-                        </span>
-                        <span
-                          className={
-                            'min-w-0 flex-1 text-[12.5px] leading-relaxed ' +
-                            (i === activeIdx ? 'font-medium text-ink-strong' : 'text-ink')
-                          }
-                        >
-                          {seg.text}
-                        </span>
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <div className="px-3 py-8 text-center text-[12px] leading-relaxed text-ink-faint">
-                    {transcriptNote ?? t('这条来源没有可用的转录。')}
+
+            {wide ? (
+              /* 分栏三栏：字幕 | 总结 | 视频分段，各占一列（总结与分段放一栏太挤，用户定的） */
+              <div className="flex min-h-0 flex-1">
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-line">
+                  <div className="shrink-0 px-3 pb-0.5 pt-1.5 text-[10.5px] font-medium text-ink-faint">{t('字幕')}</div>
+                  <div className="flex min-h-0 flex-1 flex-col" style={maskStyle}>
+                    {transcriptEl}
                   </div>
+                </div>
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-line">
+                  <div className="shrink-0 px-3 pb-0.5 pt-1.5 text-[10.5px] font-medium text-ink-faint">{t('总结')}</div>
+                  {summaryOfSource ? (
+                    summaryEl
+                  ) : recapOfSource ? (
+                    /* 残缺数据（手改过）：总结文本缺失，合并动作生成过就不再生成 */
+                    <div className="flex flex-1 items-center justify-center px-4 text-center text-[11px] text-ink-faint">
+                      {t('总结文本缺失（数据不完整）')}
+                    </div>
+                  ) : (
+                    <div className="flex min-h-0 flex-1 flex-col">{recapEmptyEl}</div>
+                  )}
+                </div>
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <div className="shrink-0 px-3 pb-0.5 pt-1.5 text-[10.5px] font-medium text-ink-faint">
+                    {t('视频分段')}
+                  </div>
+                  {chapterRows.length ? (
+                    chaptersEl
+                  ) : (
+                    <div className="flex flex-1 items-center justify-center px-4 text-center text-[11px] text-ink-faint">
+                      {recapBusy ? (
+                        <span className="flex items-center gap-1.5">
+                          <Loader2 size={12} className="animate-spin text-seal/70" />
+                          {t('正在总结…')}
+                        </span>
+                      ) : (
+                        t('分段会与总结一并生成')
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* 窄：三页签（内容区 mask 挂外层、滚动留内层，见 scrollFade 的说明） */
+              <div className="flex min-h-0 flex-1 flex-col" style={maskStyle}>
+                {bottomTab === 'sub' ? (
+                  transcriptEl
+                ) : bottomTab === 'summary' ? (
+                  summaryOfSource ? (
+                    summaryEl
+                  ) : (
+                    recapEmptyEl
+                  )
+                ) : chapterRows.length ? (
+                  chaptersEl
+                ) : (
+                  recapEmptyEl
                 )}
               </div>
-            </div>
+            )}
           </div>
         </>
       ) : (
@@ -742,6 +1007,48 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * 底部「总结 / 视频分段」页签的空态：一句说明 + 生成按钮（进行中给转圈）。
+ * **生成过的来源不会走到这里**（页签直接渲染内容）——这就是「不能重复生成」的守卫。
+ */
+function GenerateEmpty({
+  busy,
+  busyLabel,
+  hint,
+  actionLabel,
+  disabled,
+  onRun,
+}: {
+  busy: boolean
+  busyLabel: string
+  hint: string
+  actionLabel: string
+  disabled?: boolean
+  onRun: () => void
+}) {
+  if (busy) {
+    return (
+      <div className="flex h-full items-center justify-center gap-2 text-[12px] text-ink-faint">
+        <Loader2 size={14} className="animate-spin text-seal/70" />
+        {busyLabel}
+      </div>
+    )
+  }
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2.5 p-4 text-center">
+      <p className="max-w-[380px] text-[11.5px] leading-relaxed text-ink-faint">{hint}</p>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onRun}
+        className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper transition hover:bg-ink-strong disabled:pointer-events-none disabled:opacity-35"
+      >
+        {actionLabel}
+      </button>
     </div>
   )
 }

@@ -38,25 +38,54 @@ function adjacency(edges: readonly DependencyEdge[]): Adjacency {
   return index
 }
 
-/** 前置节点（下层）：沿 from → to */
+/** 前置节点（下层）：沿 from → to。返回的是树成员 id（文档 id 或 `o:` 大纲 uuid） */
 export function prereqIds(store: LearnStore, id: string): string[] {
   return adjacency(store.edges).out.get(id) ?? []
 }
 
-/** 父节点（上层）：沿 to → from */
+/**
+ * 父节点（上层）：沿 to → from。查询 id 是文档时**两种拼法都认**（接文档卡的边
+ * to = 文档 id；嵌套接大纲卡的边 to = `o:{文档id}`）。from 侧解析成文档 id——
+ * 附身大纲那一层的边本来就以宿主文档 id 发声；游离大纲（`o:` 发声）没有文档，
+ * 对「父文档」而言是透明的分类层，跳过。
+ */
 export function parentIds(store: LearnStore, id: string): string[] {
-  return adjacency(store.edges).in.get(id) ?? []
+  const inn = adjacency(store.edges).in
+  const direct = inn.get(id) ?? []
+  const nested = inn.get('o:' + id) ?? []
+  const out: string[] = []
+  for (const from of [...direct, ...nested]) {
+    const docId = docIdOfMember(store, from)
+    if (docId && !out.includes(docId)) out.push(docId)
+  }
+  return out
+}
+
+/**
+ * 树成员 id → 文档 id：文档原样返回；`o:{附身大纲}` 解析出宿主文档；`o:{游离大纲}`
+ * 没有文档，返回 null（调用方据此把它当透明的分类层跳过）。
+ */
+export function docIdOfMember(store: LearnStore, member: string): string | null {
+  if (!member.startsWith('o:')) return member
+  const raw = member.slice(2)
+  return store.nodes.some((n) => n.id === raw) ? raw : null
 }
 
 export function isUnlocked(store: LearnStore, id: string): boolean {
   const prereqs = prereqIds(store, id)
   if (!prereqs.length) return true
-  return prereqs.every((pid) => nodeById(store, pid)?.status === 'mastered')
+  return prereqs.every((pid) => {
+    const docId = docIdOfMember(store, pid)
+    return !docId || nodeById(store, docId)?.status === 'mastered'
+  })
 }
 
 export function unmetPrereqs(store: LearnStore, id: string): KnowledgeNode[] {
   return prereqIds(store, id)
-    .map((pid) => nodeById(store, pid))
+    .map((pid) => {
+      const docId = docIdOfMember(store, pid)
+      return docId ? nodeById(store, docId) : undefined
+    })
     .filter((n): n is KnowledgeNode => !!n && n.status !== 'mastered')
 }
 
@@ -120,14 +149,21 @@ export function backtrackTargets(store: LearnStore, id: string): KnowledgeNode[]
     .filter((n): n is KnowledgeNode => !!n && n.status !== 'mastered' && isUnlocked(store, n.id))
 }
 
-/** 新增依赖边 from → to；自环、重复、成环一律拒绝 */
+/** 树成员存在性：文档 = 节点在；`o:` = 附身大纲（节点带着大纲在）或游离大纲（实体在） */
+function memberExists(store: LearnStore, member: string): boolean {
+  if (!member.startsWith('o:')) return !!nodeById(store, member)
+  const raw = member.slice(2)
+  return !!nodeById(store, raw)?.outline || (store.outlines ?? []).some((o) => o.id === raw)
+}
+
+/** 新增依赖边 from → to（两端都是树成员 id，见 DependencyEdge）；自环、重复、成环一律拒绝 */
 export function addEdge(
   store: LearnStore,
   from: string,
   to: string,
   portKey?: string,
 ): { store: LearnStore; added: boolean; reason?: string } {
-  if (from === to || !nodeById(store, from) || !nodeById(store, to)) return { store, added: false }
+  if (from === to || !memberExists(store, from) || !memberExists(store, to)) return { store, added: false }
   if (store.edges.some((e) => e.from === from && e.to === to)) return { store, added: false }
   if (wouldCreateCycle(store, from, to)) return { store, added: false }
   // 一个接口只认领一个下游：同一条上游上，portKey 已被别的下游占了就拒绝（带上原因，别让调用方猜）

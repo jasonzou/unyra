@@ -118,8 +118,8 @@ describe('P0：图索引', () => {
  *（见 tests/nodeGraph 的「连接协议」），这里只钉清单与展示表。
  */
 describe('P0：类型登记表', () => {
-  it('GRAPH_KINDS 就是六种节点（全图化重构后的宇宙）', () => {
-    expect(GRAPH_KINDS).toEqual(['entry', 'outline', 'doc', 'note', 'exam', 'superdoc'])
+  it('GRAPH_KINDS 就是七种节点（全图化重构后的宇宙；视频 2026-10-25 入列）', () => {
+    expect(GRAPH_KINDS).toEqual(['entry', 'outline', 'doc', 'note', 'exam', 'superdoc', 'video'])
   })
 
   it('同列次序：入口最左、大纲在上、文档居中、叶子在下', () => {
@@ -128,9 +128,10 @@ describe('P0：类型登记表', () => {
     expect(KIND_RANK.doc).toBeLessThan(KIND_RANK.note)
     expect(KIND_RANK.note).toBe(KIND_RANK.exam)
     expect(KIND_RANK.exam).toBe(KIND_RANK.superdoc)
+    expect(KIND_RANK.superdoc).toBe(KIND_RANK.video)
   })
 
-  it('显示名表齐六种（卡片徽标与设置目录共用这一份）', () => {
+  it('显示名表齐七种（卡片徽标与设置目录共用这一份）', () => {
     expect(Object.keys(GRAPH_KIND_LABEL)).toEqual([...GRAPH_KINDS])
     expect(GRAPH_KIND_LABEL.doc).toBe('文档')
   })

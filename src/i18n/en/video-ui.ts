@@ -103,6 +103,24 @@ const dict: Record<string, string> = {
   '退出全屏 (F)': 'Exit fullscreen (F)',
   '全屏 (F)': 'Fullscreen (F)',
 
+  /* ---------- 视频总结（AI 一次性补全：总结+分段一个动作，见 learn/video/summarize） ---------- */
+  '总结': 'Recap',
+  '视频分段': 'Chapters',
+  '正在总结…': 'Summarizing…',
+  '还没有总结：按字幕让 AI 生成内容总结与语义分段，分段点会钉在进度条上（生成后不再重复）':
+    'No recap yet: let the AI generate a content recap and chapters from the subtitles — chapter dots pin onto the progress bar (generated once, never repeated)',
+  '生成总结': 'Generate recap',
+  '这条来源没有可用字幕，无法总结': 'No usable subtitles for this source — cannot summarize',
+  '分段会与总结一并生成': 'Chapters are generated together with the recap',
+  '总结文本缺失（数据不完整）': 'Recap text missing (incomplete data)',
+  '自动总结已开启：打开视频时自动生成内容总结与分段（点一下关闭）':
+    'Auto-recap is on: recap + chapters are generated whenever you open a video (click to turn off)',
+  '自动总结已关闭：打开视频时自动生成内容总结与分段（点一下开启）':
+    'Auto-recap is off: turn it on to generate recap + chapters whenever you open a video',
+  '已生成总结与分段：{0} 段，分段点在进度条上': 'Recap and chapters generated: {0} parts, shown as dots on the progress bar',
+  '已生成总结': 'Recap generated',
+  '这份转录是空的，没有可总结的内容': 'The transcript is empty — nothing to summarize',
+
   /* ---------- 转录段面板 ---------- */
   '字幕': 'Subtitles',
   '语音识别': 'Speech-to-text',
@@ -155,6 +173,12 @@ const dict: Record<string, string> = {
   '视频信息里没有分 P（cid）': 'No page (cid) in the video info',
   '播放接口没有给出可用流': 'The play API returned no usable stream',
   '这个视频返回了 {0} 段流，实验通道暂不支持': 'This video returned {0} stream parts; the experimental channel does not support that yet',
+
+  /* ---------- 侧栏视频区（删除守卫） ---------- */
+  '这个视频正被「{0}」绑着：先解绑（画布上的视频卡）再删':
+    'This video is bound to "{0}": unbind it first (the video card on the canvas), then delete',
+  '这个视频正被 {0} 等 {1} 个目标绑着：先解绑（画布上的视频卡）再删':
+    'This video is bound to {1} goals ({0} and more): unbind first (the video cards on the canvas), then delete',
 }
 
 export default dict

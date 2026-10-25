@@ -418,7 +418,7 @@ const dict: Record<string, string> = {
   '入口节点选定的文档：这门课从这里开始': 'The document chosen by the entry node: this is where the course starts',
   '「{0}」的空文档已挂上：点卡片上的「生成文档」让 AI 来写': 'Empty doc attached to "{0}": click Generate on the card to let the AI write it',
   '已建文档「{0}」：点标题打开写正文': 'Created doc "{0}": click its title to open and write',
-  '读父级文档，把「先要学会什么」铺成目标项': 'Read the parent doc and lay out what to learn first as outline goals',
+  '读宿主文档，把「先要学会什么」铺成目标项': 'Read the host doc and lay out what to learn first as outline goals',
   '没能创建文档实体，请稍后再试': 'Could not create the document, please try again later',
   '已移除 {0} 张卡。内容没有删，Ctrl+Z 可以撤回': 'Removed {0} cards. Content is untouched — Ctrl+Z to undo',
   '生成超级文档': 'Generate super doc',
@@ -602,6 +602,8 @@ const dict: Record<string, string> = {
   '已启动超级实验室，导师马上会问你想做什么': 'Super Lab started — the tutor will ask what you want to build in a moment',
   '规划大纲需要 AI，请先在设置中填写「{0}」的 API Key': 'Planning the outline needs AI — set the {0} API Key in Settings first',
   '已请导师规划「{0}」的大纲，大纲页会随写入更新': 'Asked the tutor to plan the outline of "{0}"; the outline page updates as it writes',
+  '已请导师规划「{0}」这一层的大纲，大纲页会随写入更新': 'Asked the tutor to plan the "{0}" layer; the outline page updates as it writes',
+  '读它认领的目标项与上级上下文，规划这一层怎么拆': 'Read the goal item it claimed and the parent context, then plan how this layer splits',
   '伪编译需要超级导师，请先在设置中填写「{0}」的 API Key': 'Pseudo-compile needs Super Tutor — set the {0} API Key in Settings first',
   '先选一个知识点：伪编译要在这篇文档的上下文里做': 'Pick a knowledge node first: pseudo-compile runs in the context of this document',
   '现在发不出编译请求：先打开一个知识点，等对话框就绪再点': 'Cannot send the compile request right now: open a knowledge node and wait for the conversation to be ready',
@@ -726,26 +728,43 @@ const dict: Record<string, string> = {
   '跳过教学': 'Skip tour',
   '上一步': 'Back',
   '下一步': 'Next',
-  '这种组合连不成：文档拖到大纲卡上、其余拖到文档卡上，再不然拖到空白处':
-    'That combination does not attach: drag docs onto outline cards, everything else onto doc cards — or drop it on empty canvas',
+  '这种组合连不成：文档拖到大纲卡上，大纲拖到文档卡或大纲卡上，挂件拖到文档卡上，再不然拖到空白处':
+    'That combination does not attach: drag docs onto outline cards, outlines onto doc or outline cards, widgets onto doc cards — or drop it on empty canvas',
+  '已建一张独立的大纲卡：目标项写在卡上，往下挂文档或再开一层大纲':
+    'Created a standalone outline card: write its goal items on the card, then hang docs or another outline level under it',
+  '已在这张大纲之下开了新的一层：目标项写在大纲卡上，往下挂文档或再开一层':
+    'Opened a new level under this outline: write goal items on its card, then hang docs or another outline level under it',
   '欢迎来到节点宇宙': 'Welcome to the node universe',
   '一张图画下这门课的全部节点：文档、大纲、笔记与试卷都在上面摆着。六步走完大约半分钟；想中途退出，随时按 Esc 或点「跳过教学」。':
     'One canvas holds every node of this course: docs, outlines, notes and exams. The six steps take about half a minute; press Esc or click "Skip tour" to leave at any time.',
   '从左侧列表放节点': 'Add nodes from the list',
-  '按住一项拖出来：拖到空白处立一份独立节点；拖到卡上则创建即挂——文档拖到大纲卡上，笔记、试卷、超级文档拖到文档卡上。':
-    'Drag an item out: drop it on empty canvas for a standalone node, or drop it on a card to attach on creation — docs onto outline cards; notes, exams and super docs onto doc cards.',
+  '按住一项拖出来：拖到空白处立一份独立节点；拖到卡上则创建即挂——文档拖到大纲卡上，大纲拖到大纲卡上在它之下再开一层，笔记、试卷、超级文档拖到文档卡上。':
+    'Drag an item out: drop it on empty canvas for a standalone node, or drop it on a card to attach on creation — docs onto outline cards; outlines onto outline cards to open a new level under them; notes, exams and super docs onto doc cards.',
   '每张卡是一个节点': 'Each card is a node',
   '点标题直接打开内容，按住卡片拖动摆位，右键有更多操作（设为入口、注释、删除）。摆乱了不怕，右下角一键自动排列。':
     'Click a title to open the content, drag a card to move it, right-click for more (set as entry, note, delete). Messed it up? Auto-arrange is one click away.',
   '菱形是接口点': 'Diamonds are ports',
-  '大纲卡右侧的菱形接口：从空接口拖出去挂一份文档，认领那条目标项；已挂的接口可以拖到别处换绑。':
-    'The diamonds on an outline card are ports: drag from an empty port to attach a doc and claim that item; drag a claimed port elsewhere to re-bind it.',
+  '大纲卡右侧的菱形接口：从空接口拖出去挂一份文档或子大纲，认领那条目标项；已挂的接口可以拖到别处换绑。上层大纲当分类、下层大纲当指导，一层一层往下长。':
+    'The diamonds on an outline card are ports: drag from an empty port to attach a doc or a sub-outline and claim that item; drag a claimed port elsewhere to re-bind it. Upper outlines are categories, lower ones are guidance — the tree grows level by level.',
   '小地图就是导航': 'The mini-map is your navigation',
   '左上角的缩略图：点哪里，镜头就去哪里，也可以按住拖。图大了全靠它找路。':
     'The thumbnail at the top left: click to move the camera there, or hold and drag. On a big graph it is how you find your way.',
   '工具组在这里': 'The tool group',
   '缩放、切换连线样式、撤回、适应画布、自动排列。想重看本教学，随时点最右边的问号。':
     'Zoom, edge style, undo, fit canvas, auto arrange. To replay this tour, click the question mark on the right any time.',
+  /* ---------- 结构画布：视频节点（目标 × 视频的绑定，见 learn/video/nodes） ---------- */
+  '视频节点拖到空白处放下：它不挂进大纲树，只把一个视频绑到这个目标':
+    'Drop the video node on empty canvas: it never joins the outline tree — it just binds one video to this goal',
+  '已建一张视频卡：点「选择视频」挑一个现有视频绑上': 'Created a video card: click "Pick a video" to bind an existing one',
+  '这张视频卡还没有绑视频：点卡上的「选择视频」': 'This video card has no video yet: click "Pick a video" on the card',
+  '从现有视频里挑一个绑到这个目标（打开它会一并打开这门课的页签组）':
+    'Pick an existing video to bind to this goal (opening it also opens this goal\'s tab group)',
+  '选择视频': 'Pick a video',
+  '换绑': 'Rebind',
+  '换一个视频': 'Pick another video',
+  '挑一个视频绑到这个目标': 'Pick a video to bind to this goal',
+  '还没有可绑的视频：先在侧栏「视频」里新建一个': 'No videos to bind yet: create one in the sidebar "Videos" section first',
+  '解绑视频': 'Unbind video',
 }
 
 export default dict

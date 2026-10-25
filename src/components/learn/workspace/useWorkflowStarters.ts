@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { KnowledgeNode, LearnStore, SelfReport } from '../../../learn/types'
 import { SELF_REPORT_LABEL } from '../../../learn/types'
 import { nodeById, updateLearning } from '../../../learn/graph'
+import { outlineByMember } from '../../../learn/outline'
 import { listWorkflowRows, removeWorkflow, type WorkflowRow } from '../../../learn/workflows'
 import { setCodeHost, type CodeCompileRequest } from '../../../lib/docHost'
 import { examNeedingWork } from './examTools'
@@ -188,18 +189,32 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
   }
 
   /**
-   * 前置知识大纲：文档卡右键菜单触发——读那份文档，把「先要学会什么」
-   * 落成大纲目标项（内置工作流「前置知识大纲」）。ownerNodeId 是文档卡的
-   * 知识节点 id，工作流跑在它的上下文里。
+   * 前置知识大纲 / 拆层大纲：同一个工作流的两种落点——
+   * - 文档卡（右键菜单 / 空大纲卡的按钮）：读那份文档，把「先要学会什么」落成目标项；
+   * - 游离大纲卡（挂在大纲下的那一层）：读它认领的目标项与上级上下文，规划这一层怎么拆。
+   * ownerNodeId 收两种：文档 id 或 `o:` 大纲 uuid（工作流的 target 参数原样带着，
+   * 会话一律锚在一个真实文档上——游离大纲那层锚到目标的根文档）。
    */
   const startPrereqOutline = (nodeId?: string) => {
-    const target = nodeId ? nodeById(getLatest(), nodeId) : activeNode
-    if (!target) return
     if (!hasKey) {
       onToast(t('生成大纲需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
       onOpenSettings()
       return
     }
+    if (nodeId && nodeId.startsWith('o:')) {
+      const found = outlineByMember(getLatest(), nodeId)
+      if (found?.kind === 'free') {
+        const rootId = getLatest().goals.find((g) => g.id === found.entity.goalId)?.rootNodeId ?? activeNode?.id
+        if (!rootId) return
+        agent.runWorkflow('prereq-outline', { nodeId: rootId, params: { target: nodeId } })
+        onToast(t('已请导师规划「{0}」这一层的大纲，大纲页会随写入更新', found.entity.title))
+        return
+      }
+      // o:{文档id} 是附身大纲：按宿主文档走（与文档卡右键同一条路）
+      nodeId = found?.kind === 'attached' ? found.docId : nodeId.slice(2)
+    }
+    const target = nodeId ? nodeById(getLatest(), nodeId) : activeNode
+    if (!target) return
     agent.runWorkflow('prereq-outline', { nodeId: target.id, params: { target: target.id } })
     onToast(t('已请导师规划「{0}」的前置知识大纲，大纲页会随写入更新', target.title))
   }
