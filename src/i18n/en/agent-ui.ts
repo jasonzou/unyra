@@ -49,6 +49,11 @@ const dict: Record<string, string> = {
   '还没有捕获到命中骤降': 'No cache-hit drop captured yet',
   '这是它安静的原因：平时不录制任何上下文。只有某次请求的缓存命中字数低于上一次，前后两份才会被摆到这里。': 'That is why it is quiet: nothing is recorded day to day. Only when a request costs fewer cached tokens than the previous one do the two contexts get lined up here.',
   '清空报告': 'Clear report',
+  '请求身份变了：{0}——不在字节比对里，但换模型/换档位可能整体换掉服务商的缓存。':
+    'Request identity changed: {0} — invisible to the byte diff, but a model/effort flip can invalidate the whole provider-side cache.',
+  '思考档位已切换：已有上下文的对话下一轮将无法命中服务商缓存，将整段重算':
+    'Effort level switched: conversations with existing context will miss the provider cache on their next turn and re-run at full price.',
+  '下载这两份实发上下文（.json.gz）': 'Download both sent contexts (.json.gz)',
   '一致': 'same',
   '变化': 'changed',
   '新增': 'added',
@@ -236,6 +241,7 @@ const dict: Record<string, string> = {
 
   /* ---------- AskFormCard（结构化表单） ---------- */
   '导师想先确认几件事': 'The tutor wants to confirm a few things first',
+  '再点一下就提交全部答案': 'Click again to submit all answers',
   '第 {0} / {1} 题': 'Question {0} / {1}',
   '这一题的答案会直接存进你的画像（头像菜单 →「用户」里能改、能清空），导师以后不用再问': 'This answer is saved straight into your profile (view or clear it under the avatar menu → "User"); the tutor will not need to ask again',
   '存进我的资料': 'Save to my profile',

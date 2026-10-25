@@ -258,6 +258,27 @@ export function AskFormCard({
               <div className="mt-1 flex flex-col gap-1">
                 {q.options.map((o) => {
                   const checked = draftOf(q.id).picked.includes(o.id)
+                  /*
+                    最后一题若是单选：选中的那一项**自己变成提交按钮**——再点它一下就带着
+                    全部答案交卷。对错、二选一这类一秒能答完的题，省掉再瞄一眼右下角
+                    「提交」的那一步；想换答案就点别的选项，选中态会跟着过去。
+                  */
+                  const quickSubmit = last && q.type === 'single' && checked && o.id !== OTHER_ID
+                  if (quickSubmit) {
+                    return (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={submit}
+                        title={t('再点一下就提交全部答案')}
+                        className="flex items-center gap-2 rounded-lg border border-seal bg-seal px-2.5 py-1.5 text-[12px] text-paper transition hover:bg-seal-deep"
+                      >
+                        <Check size={13} className="shrink-0" />
+                        <span className="min-w-0 flex-1 text-left" dangerouslySetInnerHTML={{ __html: renderInline(o.label) }} />
+                        <span className="shrink-0 text-[10.5px] font-medium opacity-90">{t('提交')}</span>
+                      </button>
+                    )
+                  }
                   return (
                     <label
                       key={o.id}

@@ -30,6 +30,7 @@
  */
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Trash2 } from 'lucide-react'
 import type { LearnStore } from '../../../learn/types'
 import type { ExamActions, NodeDocActions } from '../explorer/types'
@@ -43,11 +44,13 @@ import {
   clampZoom,
   fitZoom,
   EDGE_STYLES,
+  STRUCT_MIN_ZOOM_FACTOR,
   type EdgeStyle,
   type StructureMap,
 } from '../../../learn/structure'
 import { nodeById } from '../../../learn/graph'
 import { t } from '../../../i18n'
+import { StructureTour } from './StructureTour'
 import {
   CARD_PAD_B,
   DOC_LINES,
@@ -200,11 +203,52 @@ function KindIcon({ kind }: { kind: GNodeKind }) {
   )
 }
 
+/**
+ * 右下角工具组的图标按钮：文字说明只住在悬停 tip 里，平时零占位。
+ * tip 从按钮**左侧**探出——工具组贴着画布右下角，右边没有地方。
+ */
+function ControlButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="group/btn relative flex h-6 w-6 items-center justify-center rounded transition hover:bg-line/60 disabled:pointer-events-none disabled:opacity-40"
+    >
+      {children}
+      <span className="pointer-events-none absolute right-full top-1/2 z-30 mr-1.5 -translate-y-1/2 whitespace-nowrap rounded-md border border-line bg-card px-1.5 py-0.5 text-[11px] text-ink-soft opacity-0 shadow-sm transition group-hover/btn:opacity-100">
+        {label}
+      </span>
+    </button>
+  )
+}
+
+/** 工具组图标的公共笔画：24×24、描边 2、圆角端点——与 KindIcon 同一套笔画语言 */
+const ICON_STROKE = {
+  width: 14,
+  height: 14,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+} as const
+
 /** 全景缩略图的窗口大小（屏幕像素） */
 const MINI_W = 248
 const MINI_H = 160
-/** 单卡在缩略图上的最大缩放：图很小的时候别把一张卡放大成半块窗口 */
-const MINI_MAX_SCALE = 0.5
 
 /** 缩略图上各类型的填充色（与卡片色板同族；SVG 要具体色值，大纲跟主题印章色走） */
 const MINI_FILL: Record<GNodeKind, string> = {
@@ -340,6 +384,8 @@ export const StructureCanvas = memo(function StructureCanvas({
   const flashTimer = useRef<number | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [menuText, setMenuText] = useState('')
+  /** 新手教学开着没有（入口在右下角工具组的问号按钮，见 StructureTour） */
+  const [tourOpen, setTourOpen] = useState(false)
 
   /** 空格按住时左键也能拖画布（见 onPointerDown） */
   const spaceRef = useRef(false)
@@ -389,12 +435,15 @@ export const StructureCanvas = memo(function StructureCanvas({
   const byId = useMemo(() => new Map(displayCards.map((c) => [c.uuid, c])), [displayCards])
 
   /**
-   * 从列表拖出一张挂件时，高亮**能当它宿主**的文档卡（挂件只挂文档）。
-   * 连线时同理：从大纲拉出的线高亮文档卡，从文档拉出的线高亮大纲卡。
+   * 从列表拖出一张挂件时，高亮**能当它宿主**的卡。宿主认类型：
+   * 文档只挂在大纲之下；大纲（给宿主文档补一份空大纲）与挂件
+   * （笔记 / 试卷 / 超级文档）都挂到文档卡。连线时同理：
+   * 从大纲拉出的线高亮文档卡，从文档拉出的线高亮大纲卡。
    */
   const candidateIds = useMemo(() => {
     if (paletteKind) {
-      return new Set(cards.filter((c) => c.kind === 'doc').map((c) => c.uuid))
+      const want = paletteKind === 'doc' ? 'outline' : 'doc'
+      return new Set(cards.filter((c) => c.kind === want).map((c) => c.uuid))
     }
     const g = gestureRef.current
     if (g?.mode === 'link') {
@@ -1193,8 +1242,8 @@ export const StructureCanvas = memo(function StructureCanvas({
           let under: string | null = null
           if (target) {
             if (g.kind === 'doc') {
-              // 文档拖到别的卡上：目标是文档 = 挂到它名下；目标是大纲 = 挂进那一层
-              under = target.kind === 'outline' || target.kind === 'doc' ? target.uuid : null
+              // 文档只能挂进大纲之下（与发光的候选同一口径，见 candidateIds）
+              under = target.kind === 'outline' ? target.uuid : null
             } else if (g.kind === 'outline') {
               // 大纲拖到文档上 = 给它补一份大纲
               under = target.kind === 'doc' ? target.uuid : null
@@ -1203,7 +1252,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               under = target.kind === 'doc' ? target.uuid : target.kind === 'outline' ? docIdOfOutlineUuid(target.uuid) : null
             }
             if (!under) {
-              onToast?.(t('这种组合连不成：挂件拖到文档卡上、文档拖到大纲或文档卡上，其余拖到空白处'))
+              onToast?.(t('这种组合连不成：文档拖到大纲卡上、其余拖到文档卡上，再不然拖到空白处'))
               return
             }
           }
@@ -1366,27 +1415,53 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   /* ---------- 全景缩略图 ---------- */
 
-  /** 缩略图的世界包络与缩放系数：节点总包围盒外扩一圈留白，装进固定大小的窗口 */
+  /**
+   * 缩略图的世界包络：节点总包围盒外扩一圈留白，再按缩放下限的口径以中心整体
+   * 放大 1/STRUCT_MIN_ZOOM_FACTOR——节点只占画面的这份比例，四周是真实的画布空地。
+   * 之后按**统一等比**缩放装进固定窗口，短的那一轴向外扩世界补齐窗口比例：
+   * 占满容器靠的是「拍到更多画面」，绝不是把图拉变形；扩出来的那圈正是镜头
+   * 缩到下限后本来就看得到的那片空白。
+   */
   const mini = useMemo(() => {
     if (!bounds) return null
+    const grow = 1 / STRUCT_MIN_ZOOM_FACTOR
     const pad = 40
-    const b = { x: bounds.x - pad, y: bounds.y - pad, width: bounds.width + pad * 2, height: bounds.height + pad * 2 }
-    const scale = Math.min(MINI_W / b.width, MINI_H / b.height, MINI_MAX_SCALE)
-    return { bounds: b, scale, width: b.width * scale, height: b.height * scale }
+    const cx = bounds.x + bounds.width / 2
+    const cy = bounds.y + bounds.height / 2
+    const w0 = (bounds.width + pad * 2) * grow
+    const h0 = (bounds.height + pad * 2) * grow
+    const scale = Math.min(MINI_W / w0, MINI_H / h0)
+    const w = Math.max(w0, MINI_W / scale)
+    const h = Math.max(h0, MINI_H / scale)
+    return { bounds: { x: cx - w / 2, y: cy - h / 2, width: w, height: h } }
   }, [bounds])
   const miniRef = useRef<SVGSVGElement | null>(null)
   const minimapDragRef = useRef(false)
 
-  /** 把缩略图上的一点变成镜头中心（屏幕坐标 → 世界坐标 → 相机平移） */
+  /** 把缩略图上的一点变成镜头中心（屏幕坐标 → 窗口占比 → 世界坐标 → 相机平移） */
   const jumpByMinimap = useCallback(
     (clientX: number, clientY: number) => {
       const el = miniRef.current
       const m = mini
       if (!el || !m) return
       const rect = el.getBoundingClientRect()
-      const wx = m.bounds.x + (clientX - rect.left) / m.scale
-      const wy = m.bounds.y + (clientY - rect.top) / m.scale
       const cam = cameraRef.current
+      /*
+        视口框不许拖出包络：把「镜头中心」夹在「包络缩掉半个视口」的范围内。
+        视口比包络还大（图很小）时夹不出区间，就钉在包络中心。
+      */
+      const halfW = view.width / cam.zoom / 2
+      const halfH = view.height / cam.zoom / 2
+      let wx = m.bounds.x + ((clientX - rect.left) / rect.width) * m.bounds.width
+      let wy = m.bounds.y + ((clientY - rect.top) / rect.height) * m.bounds.height
+      wx =
+        halfW * 2 >= m.bounds.width
+          ? m.bounds.x + m.bounds.width / 2
+          : Math.min(Math.max(wx, m.bounds.x + halfW), m.bounds.x + m.bounds.width - halfW)
+      wy =
+        halfH * 2 >= m.bounds.height
+          ? m.bounds.y + m.bounds.height / 2
+          : Math.min(Math.max(wy, m.bounds.y + halfH), m.bounds.y + m.bounds.height - halfH)
       setAnimating(false)
       setCamera({ x: view.width / 2 - wx * cam.zoom, y: view.height / 2 - wy * cam.zoom, zoom: cam.zoom })
     },
@@ -1587,7 +1662,8 @@ export const StructureCanvas = memo(function StructureCanvas({
                 top: card.y,
                 width: CARD_W,
                 height: h,
-                cursor: lifted ? 'grabbing' : 'grab',
+                // 悬停不抢光标（箭头就好），拖起来才换成抓住的手——「可拖」由选中态与阴影说
+                cursor: lifted ? 'grabbing' : undefined,
               }}
             >
               {/*
@@ -1831,46 +1907,125 @@ export const StructureCanvas = memo(function StructureCanvas({
         全景缩略图：节点按类型着色的微缩卡片（带描边与圆角）+ 半透明的当前视口框。
         点/拖哪里，镜头就把哪里居中——大图上找路比滚轮翻得快。
       */}
+      {/*
+        左上角固定组：全景缩略图占最角落，节点列表排在它下面——两块都贴着左上，
+        用一个纵列装着，谁也不压谁。
+      */}
+      <div className="absolute top-4 left-4 z-20 flex flex-col items-start gap-2.5">
       {mini && (
         <div
-          className="absolute bottom-6 left-4 z-20 flex items-center justify-center rounded-xl border border-line bg-card/90 p-1.5 shadow-sm backdrop-blur"
+          data-tour="minimap"
+          className="flex items-center justify-center rounded-xl border border-line bg-card/90 p-1.5 shadow-sm backdrop-blur"
           style={{ width: MINI_W + 12, height: MINI_H + 12 }}
         >
           <svg
             ref={miniRef}
-            width={mini.width}
-            height={mini.height}
+            width={MINI_W}
+            height={MINI_H}
+            viewBox={`${mini.bounds.x} ${mini.bounds.y} ${mini.bounds.width} ${mini.bounds.height}`}
             className="block cursor-pointer touch-none"
             onPointerDown={onMinimapPointerDown}
             onPointerMove={onMinimapPointerMove}
             onPointerUp={onMinimapPointerUp}
             onPointerCancel={onMinimapPointerUp}
           >
-            {displayCards.map((c) => (
-              <rect
-                key={c.uuid}
-                x={(c.x - mini.bounds.x) * mini.scale}
-                y={(c.y - mini.bounds.y) * mini.scale}
-                width={CARD_W * mini.scale}
-                height={height(c) * mini.scale}
-                rx={2}
-                fill={MINI_FILL[c.kind]}
-                stroke="var(--color-card, #fff)"
-                strokeWidth={0.6}
-                opacity={0.85}
-              />
-            ))}
+            {/*
+              缩略「照片」：viewBox 直接吃世界坐标，包络本身就是窗口的比例
+              （短轴靠扩世界补齐，见 mini 的说明）——画面占满容器且**绝不变形**。
+              卡片画结构而不是色块——徽章条、目标项行、摘要行都在，缩多小都看得出
+              「这是一张卡」；连线照抄主画布的路径点。所有描边挂 non-scaling-stroke：
+              粗细永远按屏幕像素算。
+            */}
+            {edges.map((edge) => {
+              const from = byId.get(edge.from)
+              const to = byId.get(edge.to)
+              if (!from || !to) return null
+              const path = routeOf(edge)
+              if (!path) return null
+              const accent = from.kind === 'outline' && to.kind === 'doc'
+              return (
+                <path
+                  key={`${edge.from}>${edge.to}`}
+                  d={edgePathD(path, edgeStyle)}
+                  fill="none"
+                  stroke={accent ? SLOT_ACCENT : 'currentColor'}
+                  className={accent ? '' : 'text-ink-faint/60'}
+                  strokeWidth={0.8}
+                  opacity={0.7}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )
+            })}
+            {displayCards.map((c) => {
+              const fill = MINI_FILL[c.kind]
+              // 空文档 / 没挂进树里的游离文档：虚线描边，与主画布的虚线卡同一套语言
+              const hollow = !!c.blank || (c.kind === 'doc' && !c.entry && !edges.some((e) => e.to === c.uuid))
+              return (
+                <g key={c.uuid}>
+                  <rect
+                    x={c.x}
+                    y={c.y}
+                    width={CARD_W}
+                    height={height(c)}
+                    rx={3}
+                    fill={fill}
+                    fillOpacity={0.22}
+                    stroke={fill}
+                    strokeOpacity={0.9}
+                    strokeWidth={0.9}
+                    strokeDasharray={hollow ? '3 2' : undefined}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {/* 头部条：卡片顶部那行类型徽章位，深一档才有「卡」的层次 */}
+                  <rect x={c.x} y={c.y} width={CARD_W} height={OUTLINE_HEAD} rx={3} fill={fill} fillOpacity={0.45} />
+                  {c.kind === 'outline' &&
+                    (c.slots ?? []).map((s, i) => {
+                      const y = c.y + (dotY[`${c.uuid}|${s.key}`] ?? slotAnchorY(i))
+                      return (
+                        <line
+                          key={s.key}
+                          x1={c.x + 8}
+                          y1={y}
+                          x2={c.x + 52}
+                          y2={y}
+                          stroke={fill}
+                          strokeOpacity={0.85}
+                          strokeWidth={1}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )
+                    })}
+                  {c.kind === 'doc' && c.excerpt && (
+                    <g stroke="currentColor" className="text-ink-faint/60" strokeWidth={1}>
+                      <line
+                        x1={c.x + 12}
+                        y1={c.y + OUTLINE_HEAD + DOC_LINE_H * 0.6}
+                        x2={c.x + CARD_W - 12}
+                        y2={c.y + OUTLINE_HEAD + DOC_LINE_H * 0.6}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        x1={c.x + 12}
+                        y1={c.y + OUTLINE_HEAD + DOC_LINE_H * 1.6}
+                        x2={c.x + CARD_W * 0.72}
+                        y2={c.y + OUTLINE_HEAD + DOC_LINE_H * 1.6}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
+                  )}
+                </g>
+              )
+            })}
             <rect
-              x={(-camera.x / camera.zoom - mini.bounds.x) * mini.scale}
-              y={(-camera.y / camera.zoom - mini.bounds.y) * mini.scale}
-              width={(view.width / camera.zoom) * mini.scale}
-              height={(view.height / camera.zoom) * mini.scale}
-              rx={3}
-              fill="var(--color-seal, #a8432f)"
-              fillOpacity={0.12}
+              x={-camera.x / camera.zoom}
+              y={-camera.y / camera.zoom}
+              width={view.width / camera.zoom}
+              height={view.height / camera.zoom}
+              fill="none"
               stroke="var(--color-seal, #a8432f)"
               strokeOpacity={0.85}
-              strokeWidth={1.5}
+              strokeWidth={1.4}
+              vectorEffect="non-scaling-stroke"
             />
           </svg>
         </div>
@@ -1879,7 +2034,8 @@ export const StructureCanvas = memo(function StructureCanvas({
       {/* 左侧节点列表：拖到画布上生成节点（必须拖出列表再松手，见 Gesture.palette.leftList） */}
       <div
         ref={paletteRef}
-        className="absolute top-4 left-4 z-20 flex w-[148px] flex-col gap-1 rounded-xl border border-line bg-card/85 p-2 backdrop-blur"
+        data-tour="palette"
+        className="flex w-[148px] flex-col gap-1 rounded-xl border border-line bg-card/85 p-2 backdrop-blur"
       >
         <div className="px-1 pb-1 text-[10px] font-semibold text-ink-faint">{t('拖到画布或文档卡上')}</div>
         {PALETTE.map((kind) => (
@@ -1895,6 +2051,7 @@ export const StructureCanvas = memo(function StructureCanvas({
             <span className="min-w-0 flex-1 truncate">{t(GRAPH_KIND_LABEL[kind])}</span>
           </div>
         ))}
+      </div>
       </div>
 
       {/*
@@ -1916,58 +2073,87 @@ export const StructureCanvas = memo(function StructureCanvas({
         </div>
       )}
 
-      {/* 右下角：缩放读数、适应画布、自动排列 */}
-      <div className="absolute right-4 bottom-4 z-20 flex items-center gap-1 rounded-lg border border-line bg-card/85 px-1.5 py-1 text-[11px] text-ink-soft backdrop-blur">
-        <button
-          type="button"
-          className="rounded px-1.5 py-0.5 hover:bg-line/60"
+      {/*
+        右下角工具组：缩放读数 + 一排图标按钮（文字说明住悬停 tip，见 ControlButton），
+        最右是新手教学的入口。图标即功能，tooltip 只在犹豫的那半秒里接住。
+      */}
+      <div
+        data-tour="controls"
+        className="absolute right-4 bottom-4 z-20 flex items-center gap-0.5 rounded-lg border border-line bg-card/85 px-1.5 py-1 text-[11px] text-ink-soft backdrop-blur"
+      >
+        <ControlButton
+          label={t('缩小')}
           onClick={() => {
             const cam = cameraRef.current
             const next = clampZoom(cam.zoom - 0.15, boundsOf(cards, height), view)
             if (next !== cam.zoom) setCamera({ ...cam, zoom: next })
           }}
         >
-          −
-        </button>
+          <svg {...ICON_STROKE}>
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+            <path d="M8 11h6" />
+          </svg>
+        </ControlButton>
         <span className="w-10 text-center tabular-nums">{zoomPct}%</span>
-        <button
-          type="button"
-          className="rounded px-1.5 py-0.5 hover:bg-line/60"
+        <ControlButton
+          label={t('放大')}
           onClick={() => {
             const cam = cameraRef.current
             const next = clampZoom(cam.zoom + 0.15, boundsOf(cards, height), view)
             if (next !== cam.zoom) setCamera({ ...cam, zoom: next })
           }}
         >
-          +
-        </button>
-        <span className="mx-1 h-3 w-px bg-line" />
-        <button
-          type="button"
-          title={t('切换连线样式')}
-          className="rounded px-1.5 py-0.5 hover:bg-line/60"
+          <svg {...ICON_STROKE}>
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+            <path d="M11 8v6" />
+            <path d="M8 11h6" />
+          </svg>
+        </ControlButton>
+        <span className="mx-0.5 h-3.5 w-px bg-line" />
+        <ControlButton
+          label={edgeStyle === 'straight' ? t('切换为曲线') : t('切换为直线')}
           onClick={() => {
             const next = EDGE_STYLES[(EDGE_STYLES.indexOf(edgeStyle) + 1) % EDGE_STYLES.length]
             // 只是显示口径，不进撤回栈（Ctrl+Z 不该把线拉回曲线）
             onChange({ ...(saved ?? { version: 2, positions: {} }), edgeStyle: next })
           }}
         >
-          {edgeStyle === 'straight' ? t('直线') : t('曲线')}
-        </button>
-        <button
-          type="button"
-          disabled={!canUndo}
-          className="rounded px-1.5 py-0.5 hover:bg-line/60 disabled:opacity-40"
-          onClick={undo}
-        >
-          {t('撤回')}
-        </button>
-        <button type="button" className="rounded px-1.5 py-0.5 hover:bg-line/60" onClick={fit}>
-          {t('适应画布')}
-        </button>
-        <button type="button" className="rounded px-1.5 py-0.5 hover:bg-line/60" onClick={autoArrange}>
-          {t('自动排列')}
-        </button>
+          <svg {...ICON_STROKE}>
+            {edgeStyle === 'straight' ? <path d="M4 18C10 18 14 6 20 6" /> : <path d="M5 19 19 5" />}
+          </svg>
+        </ControlButton>
+        <ControlButton label={t('撤回上一步')} disabled={!canUndo} onClick={undo}>
+          <svg {...ICON_STROKE}>
+            <path d="M9 14 4 9l5-5" />
+            <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" />
+          </svg>
+        </ControlButton>
+        <ControlButton label={t('适应画布')} onClick={fit}>
+          <svg {...ICON_STROKE}>
+            <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+            <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+            <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+            <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+          </svg>
+        </ControlButton>
+        <ControlButton label={t('自动排列')} onClick={autoArrange}>
+          <svg {...ICON_STROKE}>
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+        </ControlButton>
+        <span className="mx-0.5 h-3.5 w-px bg-line" />
+        <ControlButton label={t('新手教学')} onClick={() => setTourOpen(true)}>
+          <svg {...ICON_STROKE}>
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+            <path d="M12 17h.01" />
+          </svg>
+        </ControlButton>
       </div>
 
       {/* 从列表拖出来时跟着指针的那张卡 */}
@@ -1982,6 +2168,9 @@ export const StructureCanvas = memo(function StructureCanvas({
           <span className="text-ink-soft">{t('松手放下')}</span>
         </div>
       )}
+
+      {/* 新手教学：全屏遮罩挖洞、逐步指路，随时可退（见 StructureTour） */}
+      {tourOpen && <StructureTour onClose={() => setTourOpen(false)} />}
 
       {/* 节点右键菜单 */}
       {menu && menuCard && (

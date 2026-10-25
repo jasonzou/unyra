@@ -10,10 +10,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import type { KnowledgeNode, LearnStore, SelfReport, WorkflowEffortSetting } from '../../../learn/types'
+import type { KnowledgeNode, LearnStore, SelfReport } from '../../../learn/types'
 import { SELF_REPORT_LABEL } from '../../../learn/types'
 import { nodeById, updateLearning } from '../../../learn/graph'
-import { listWorkflowRows, removeWorkflow, setWorkflowEffort, type WorkflowRow } from '../../../learn/workflows'
+import { listWorkflowRows, removeWorkflow, type WorkflowRow } from '../../../learn/workflows'
 import { setCodeHost, type CodeCompileRequest } from '../../../lib/docHost'
 import { examNeedingWork } from './examTools'
 import type { useAgent } from '../../../learn/useAgent'
@@ -271,10 +271,6 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     set(removeWorkflow(getLatest(), row.id))
     onToast(t('已删除工作流「{0}」', t(row.name)))
   }
-  /** 设置里改一条工作流的思考档位（三态；内置与登记通吃，键 = id 记在全局 efforts 表） */
-  const setWorkflowEffortRow = (row: WorkflowRow, effort: WorkflowEffortSetting) => {
-    set(setWorkflowEffort(getLatest(), row.id, effort))
-  }
 
   return {
     newExam,
@@ -288,6 +284,5 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     workflowRows,
     runWorkflowRow,
     removeWorkflowRow,
-    setWorkflowEffortRow,
   }
 }

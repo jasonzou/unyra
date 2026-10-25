@@ -1,8 +1,5 @@
-import { REASONING_EFFORTS, type ReasoningEffort } from '../ai/types'
 import { promptModuleByKey, type PromptModule } from './ai/promptModules'
-import type { LearnStore, WorkflowEntry, WorkflowEffortSetting } from './types'
-
-export type { WorkflowEffortSetting }
+import type { LearnStore, WorkflowEntry } from './types'
 
 /**
  * 工作流：**不由某条用户消息直接驱动**的任务模板（开讲、回忆、出卷、超级实验室……）。
@@ -53,12 +50,6 @@ export interface WorkflowRow extends WorkflowEntry {
   promptModule?: string
   /** 能不能从工作流列表直接跑：出卷/阅卷要专用入口（选类型等级 / 先交卷），列表里不给他们按钮 */
   runnable: boolean
-  /**
-   * 思考档位的三态设置（见 WorkflowEffortSetting）。这是**用户的配置**，不是推荐值——
-   * 列表合成时从 store.workflows.efforts 按 id 挂上（见 listWorkflowRows）；
-   * 内置的推荐档在 BUILTIN_DEFS.effort，用户没配时经 resolveWorkflowEffort 的 'default' 兜住。
-   */
-  effort?: WorkflowEffortSetting
 }
 
 /* ---------- 内置工作流的指令 ---------- */
@@ -156,12 +147,11 @@ const BROWSER_USE_INSTRUCTION = ['## 使用「浏览器操作」工作流。', '
 
 /**
  * 内置条目的定义形：没有时间戳（它们不是「登记」出来的），runnable 可以不给（默认能跑）。
- * effort 是**推荐档**——交付物型的厚（教学文档、出卷）、对话型的薄（了解、压缩），
- * 逐条写在定义里；这是产品对「这项功能的底线质量」的表态，用户随时可以覆盖。
+ * 思考档位曾经有逐条推荐（effort）与用户的三态配置，2026-10-25 整体删除：
+ * 档位全应用只有全局滑条一份（见 learn/effortGuard）。
  */
-type BuiltinDef = Omit<WorkflowRow, 'tier' | 'runnable' | 'createdAt' | 'updatedAt' | 'effort'> & {
+type BuiltinDef = Omit<WorkflowRow, 'tier' | 'runnable' | 'createdAt' | 'updatedAt'> & {
   runnable?: boolean
-  effort?: ReasoningEffort
 }
 
 /** 内置工作流的定义：id 稳定（触发与校验都靠它），名字就是对话里的分界条文案。 */
@@ -195,7 +185,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     params: ['target'],
     prep: 'ask',
     // 核心交付物是教学文档：要深，但 max 的等待不值
-    effort: 'high',
   },
   {
     id: 'goal-outline',
@@ -205,7 +194,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 同「开讲」：总述也是讲义，排版配方要先于动笔在场
     promptModule: 'goal-outline doc-html',
     // 标题 / 描述 / 大纲决定后续学习路径，值得想透；规程整篇在「学习大纲」模块里
-    effort: 'high',
   },
   {
     id: 'outline',
@@ -218,7 +206,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 交付物长在大纲页里（用户多半正盯着它）：只响一声铃、不抢主位
     prep: 'show',
     // 大纲规划要全局权衡层级
-    effort: 'high',
   },
   {
     id: 'prereq-outline',
@@ -231,7 +218,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 交付物同在大纲页里：只响一声铃、不抢主位
     prep: 'show',
     // 前置的取舍与顺序同样要全局权衡，与「生成大纲」同档
-    effort: 'high',
   },
   {
     id: 'exam',
@@ -243,7 +229,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 它自己会先 ask 一次（类型 / 难度），所以没有占位符、也从列表里可跑
     prep: 'ask',
     // 题干与干扰项质量直接影响学习；卷子的章法主要靠指令模板，high 是质量与等待的平衡点
-    effort: 'high',
   },
   {
     id: 'exam-grade',
@@ -255,7 +240,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 必须先有人交卷：从列表里空跑只会得到「没有需要讲解的考试」
     runnable: false,
     // 判分记错账会污染掌握度，讲解要质量；判分对照本身偏机械，max 的边际收益不值多等的
-    effort: 'high',
   },
   {
     id: 'explain',
@@ -269,7 +253,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 只响一声铃、不切主位：交付物就画在用户盯着的那段文字旁边（同「伪编译」）
     prep: 'show',
     // 选中即出的两三句注解，等待感最明显
-    effort: 'low',
   },
   {
     id: 'superlab',
@@ -281,7 +264,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     params: ['target'],
     prep: 'ask',
     // 生成可交互 HTML/JS：复杂代码合成是 max 收益最大的场景，失败代价最高、也等得起
-    effort: 'max',
   },
   {
     id: 'code-compile',
@@ -296,7 +278,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 响一声铃就够：用户点的是代码块，回执也在那儿（转圈 → 运行亮起），见 WorkflowRow.prep
     prep: 'show',
     // 转译规则明确、代码块通常短
-    effort: 'medium',
   },
   {
     id: 'plot-fix',
@@ -310,7 +291,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 响一声铃就够：用户点的是错误卡片，修复结果直接落在文档里
     prep: 'show',
     // 区间与原文都已给全，照着替换即可；JSON 合法性靠验收清单而不是思考深度
-    effort: 'medium',
   },
   {
     id: 'compact',
@@ -319,8 +299,7 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     instruction: COMPACT_INSTRUCTION,
     // api.compact 的生效时机与参数口径随这条工作流注入一次
     promptModule: 'compact',
-    // 压缩是摘录式改写：材料全在上下文里，不需要额外推理，None 最快也最省
-    effort: 'none',
+    // 压缩是摘录式改写：材料全在上下文里，不需要额外推理
   },
   {
     id: 'browser-use',
@@ -330,8 +309,7 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 操作规程与安全纪律都在「内置浏览器」模块里
     promptModule: 'browser',
     params: ['target'],
-    // 全程看图干活：识别与决策都轻，low 足够——快才是浏览效率
-    effort: 'low',
+    // 全程看图干活：识别与决策都轻——快才是浏览效率
   },
   {
     id: 'essay-commit',
@@ -343,17 +321,11 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     params: ['target', 'message', 'feed'],
     runnable: false,
     // 归类、合并、改写都要判断，值得多想一会儿
-    effort: 'high',
   },
 ]
 
-/** 内置工作流的 id 集：normalize 剪 efforts 幽灵键、UI 判「有没有推荐档」都认它 */
+/** 内置工作流的 id 集：normalize 校验登记键、UI 判「是不是内置」都认它 */
 export const BUILTIN_WORKFLOW_IDS: ReadonlySet<string> = new Set(BUILTIN_DEFS.map((d) => d.id))
-
-/** 内置工作流的推荐档（id → 档位）：resolveWorkflowEffort 的 'default' 落点 */
-export const BUILTIN_EFFORT: Record<string, ReasoningEffort> = Object.fromEntries(
-  BUILTIN_DEFS.map((d) => [d.id, d.effort ?? 'high']),
-)
 
 /* ---------- 触发前的宿主准备 ---------- */
 
@@ -372,23 +344,6 @@ export const BUILTIN_EFFORT: Record<string, ReasoningEffort> = Object.fromEntrie
  */
 export function workflowPrep(prep: WorkflowRow['prep']): { beep: boolean } {
   return { beep: !!prep }
-}
-
-/**
- * 一轮该用哪档思考。行上没配（用户没动过）时：内置用推荐档、登记的跟随聊天；
- * 'chat' 跟随聊天滑条；'default' 取内置推荐（登记的没有推荐，回落聊天）；
- * 其余即固定档，原样。聊天滑条只对聊天框发起的轮直接生效——工作流轮的档位
- * **独立于它**（这是有意设计：出卷要深、了解要快，一个全局滑条伺候不了所有任务）。
- * 抽成纯函数与 workflowPrep 同一条理由：配置解析要有能被钉住的地方。
- */
-export function resolveWorkflowEffort(
-  row: Pick<WorkflowRow, 'id' | 'tier' | 'effort'>,
-  chatEffort: ReasoningEffort,
-): ReasoningEffort {
-  const setting = row.effort ?? (row.tier === 'builtin' ? 'default' : 'chat')
-  if (setting === 'chat') return chatEffort
-  if (setting === 'default') return BUILTIN_EFFORT[row.id] ?? chatEffort
-  return setting
 }
 
 /**
@@ -422,9 +377,6 @@ export function builtinWorkflowRows(): WorkflowRow[] {
     runnable: d.runnable ?? true,
     createdAt: 0,
     updatedAt: 0,
-    // 推荐档不冒充用户配置：row.effort 只装用户的三态设置（listWorkflowRows 再挂），
-    // 推荐档经 BUILTIN_EFFORT 按 id 查——两套语义不能混在同一个字段里
-    effort: undefined,
   }))
 }
 
@@ -436,12 +388,9 @@ const goalOf = (store: LearnStore, goalId: string): WorkflowEntry[] =>
 
 /** 三级并成一张列表：内置在前，全局次之，目标级最后（同名的不会有——登记时就按名去重） */
 export function listWorkflowRows(store: LearnStore, goalId: string | null): WorkflowRow[] {
-  // 用户配过的思考档位（键 = id，内置与登记通吃）挂到行上；没配的保持 undefined
-  const efforts = store.workflows?.efforts ?? {}
   const rows: WorkflowRow[] = builtinWorkflowRows()
-  for (const r of rows) r.effort = efforts[r.id]
-  for (const e of globalOf(store)) rows.push({ ...e, tier: 'global', runnable: true, effort: efforts[e.id] })
-  if (goalId) for (const e of goalOf(store, goalId)) rows.push({ ...e, tier: 'goal', runnable: true, effort: efforts[e.id] })
+  for (const e of globalOf(store)) rows.push({ ...e, tier: 'global', runnable: true })
+  if (goalId) for (const e of goalOf(store, goalId)) rows.push({ ...e, tier: 'goal', runnable: true })
   return rows
 }
 
@@ -510,8 +459,6 @@ export function upsertWorkflow(
   const book = {
     global: tier === 'global' ? nextList : (store.workflows?.global ?? []),
     byGoal: tier === 'goal' ? { ...(store.workflows?.byGoal ?? {}), [goalId]: nextList } : (store.workflows?.byGoal ?? {}),
-    // 档位配置按 id 记在全局表里，登记的新建 / 覆盖都原样带走
-    efforts: store.workflows?.efforts,
   }
   return { ok: true, store: { ...store, workflows: book }, entry, updated: !!existing }
 }
@@ -538,34 +485,7 @@ export function removeWorkflow(store: LearnStore, id: string): LearnStore {
     else delete byGoal[goalId]
   }
   if (!removedId) return store
-  // 登记删了，配过的档位也一并删：efforts 按 id 记在全局表里，留键成幽灵
-  const efforts = { ...(store.workflows?.efforts ?? {}) }
-  delete efforts[removedId]
-  return { ...store, workflows: { global: nextGlobal, byGoal, efforts } }
-}
-
-/**
- * 给一条工作流配思考档位（三态，键 = id，内置与登记通吃；配置写在全局 efforts 表）。
- * id 不认识任何工作流（内置 ∪ 已登记）时原样返回 store——配置不能落在不存在的东西上。
- */
-export function setWorkflowEffort(store: LearnStore, id: string, effort: WorkflowEffortSetting): LearnStore {
-  const key = (id ?? '').trim()
-  if (!key) return store
-  const known =
-    BUILTIN_WORKFLOW_IDS.has(key) ||
-    globalOf(store).some((w) => w.id === key) ||
-    Object.values(store.workflows?.byGoal ?? {}).some((list) => list.some((w) => w.id === key))
-  if (!known) return store
-  const efforts = { ...(store.workflows?.efforts ?? {}) }
-  efforts[key] = effort
-  return {
-    ...store,
-    workflows: {
-      global: globalOf(store),
-      byGoal: store.workflows?.byGoal ?? {},
-      efforts,
-    },
-  }
+  return { ...store, workflows: { global: nextGlobal, byGoal } }
 }
 
 /**
@@ -613,26 +533,6 @@ export function normalizeWorkflowEntries(raw: unknown): WorkflowEntry[] {
       createdAt: typeof m.createdAt === 'number' ? m.createdAt : Date.now(),
       updatedAt: typeof m.updatedAt === 'number' ? m.updatedAt : Date.now(),
     })
-  }
-  return out
-}
-
-/**
- * 读回 state.json 里的思考档位配置：键必须指向一条真实存在的工作流（validIds 由调用方
- * 按「内置 ∪ 当时还登记着的」算好），值必须是三态之一；其余整键丢弃——幽灵键留着，
- * 只会让读代码的人以为还有第 14 条内置工作流。
- */
-export function normalizeWorkflowEfforts(
-  raw: unknown,
-  validIds: ReadonlySet<string>,
-): Record<string, WorkflowEffortSetting> {
-  if (!raw || typeof raw !== 'object') return {}
-  const out: Record<string, WorkflowEffortSetting> = {}
-  for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (!validIds.has(id)) continue
-    if (v === 'default' || v === 'chat' || REASONING_EFFORTS.includes(v as ReasoningEffort)) {
-      out[id] = v as WorkflowEffortSetting
-    }
   }
   return out
 }

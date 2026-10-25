@@ -204,6 +204,13 @@ export type ChatContent = string | ChatContentPart[] | null
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: ChatContent
+  /**
+   * 思考模式下 assistant 消息的思维链原文。GLM / DeepSeek V4 一类思考模型的回传契约：
+   * 回传 assistant 消息（尤其带 tool_calls 的）必须带上它，否则 400。只在真的产生过
+   * 思考时携带；实发（agent/runtime 的逐跳 push）与历史还原（learn/agent/history）
+   * 两侧按同一键序镜像，字节必须一致——前缀门禁按整消息 JSON 比对。
+   */
+  reasoning_content?: string
   /** assistant 消息里的工具调用（回填历史时使用） */
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
   /** role 为 tool 时对应的调用 id */

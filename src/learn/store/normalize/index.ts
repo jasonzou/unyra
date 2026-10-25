@@ -18,7 +18,7 @@ import { allTabs, ensureAnchorOutlines, focusedTab, normalizeDocs, reconcileOwne
 import { tabNodeId } from '../../tabs'
 import { normalizeAgentTabs } from '../../agentTabs'
 import { normalizeDrafts } from '../../drafts'
-import { BUILTIN_WORKFLOW_IDS, normalizeWorkflowEfforts, normalizeWorkflowEntries } from '../../workflows'
+import { normalizeWorkflowEntries } from '../../workflows'
 import { normalizeReadingBook } from '../../reading'
 import { normalizeEssayDock, normalizeEssays } from '../../essays'
 import { normalizeEssayCommits } from '../../essayCommits'
@@ -213,12 +213,8 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       const items = normalizeWorkflowEntries(list)
       if (items.length) workflows.byGoal[goalId] = items
     }
-    // 思考档位配置：只认「内置 ∪ 这次还活着的工作流」的键。登记删了键还留着的幽灵
-    // 一律剪掉——读盘是唯一一次全量过手的机会（与上面 tmp / 阅读记录同一条纪律）
-    const validWorkflowIds = new Set<string>(BUILTIN_WORKFLOW_IDS)
-    for (const e of workflows.global) validWorkflowIds.add(e.id)
-    for (const list of Object.values(workflows.byGoal)) for (const e of list) validWorkflowIds.add(e.id)
-    workflows.efforts = normalizeWorkflowEfforts(d.workflows?.efforts, validWorkflowIds)
+    // 旧文件里的 workflows.efforts（每条工作流的思考档位）2026-10-25 起不再读：
+    // 档位全应用只有全局滑条一份，旧配置直接作废，下次落盘自然消失。
 
     const byId = new Map(fixedNodes.map((n) => [n.id, n]))
     /*

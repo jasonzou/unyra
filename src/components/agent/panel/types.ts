@@ -7,20 +7,24 @@
 
 import type { ReactNode } from 'react'
 
-/** 「+」菜单的层级：null 是一级；另外两项各是一层二级菜单 */
-export type MenuSub = 'workflow' | 'history' | null
+/** 「+」菜单的层级：null 是一级；二级只有「对话历史」一层 */
+export type MenuSub = 'history' | null
 
 /**
  * 「+」菜单里的一项。
  *
  * 带 sub 的那一项是"往下一层"：点它不执行动作，只换层（右边配一个箭头）。
- * 于是「工作流」这种归纳性的分组不必另写一套渲染——它在一级菜单里就是普通一项。
+ * 于是「对话历史」这种归纳性的分组不必另写一套渲染——它在一级菜单里就是普通一项。
+ *
+ * tone 是图标小方块的配色类（bg + text，KIND_BADGE 同族的 15% 底色写法）：
+ * 一项一色，扫一眼就能按颜色认出常点的那几项。
  */
 export interface MenuItem {
   key: string
   label: string
   hint?: string
   icon: ReactNode
+  tone?: string
   disabled?: boolean
   sub?: Exclude<MenuSub, null>
   run?: () => void

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Eraser, GitCompareArrows, X } from 'lucide-react'
+import { Download, Eraser, GitCompareArrows, X } from 'lucide-react'
 import {
   clearDropReports,
+  dropBundleOf,
   lastDropReport,
   subscribeDrops,
   type ContextDropReport,
@@ -32,6 +33,29 @@ export default function ContextDebugger({ onClose }: Props) {
   const [open, setOpen] = useState<Record<number, boolean>>({})
   const toggle = (i: number) => setOpen((prev) => ({ ...prev, [i]: !prev[i] }))
 
+  /** 下载定格的那两份实发上下文：一个 gzip 压缩的 JSON（.json.gz），原样字节 */
+  const [saving, setSaving] = useState(false)
+  const downloadBundle = async (): Promise<void> => {
+    if (!report || saving) return
+    setSaving(true)
+    try {
+      const text = JSON.stringify(dropBundleOf(report))
+      const gz = typeof CompressionStream === 'function'
+      const blob = gz
+        ? await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).blob()
+        : new Blob([text], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download =
+        'context-drop-' + new Date(report.at).toISOString().replace(/[-:T]/g, '').slice(0, 14) + (gz ? '.json.gz' : '.json')
+      a.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-center gap-2 border-b border-line px-3.5 py-2.5">
@@ -42,6 +66,15 @@ export default function ContextDebugger({ onClose }: Props) {
             {t('只盯一件事：缓存命中字数跌了，就把前后两份上下文摆出来，标出断在哪。')}
           </div>
         </div>
+        <button
+          type="button"
+          title={t('下载这两份实发上下文（.json.gz）')}
+          disabled={!report || saving}
+          onClick={() => void downloadBundle()}
+          className="flex h-6 w-6 items-center justify-center rounded-md text-ink-soft transition hover:bg-line/70 hover:text-ink disabled:opacity-40"
+        >
+          <Download size={13} />
+        </button>
         <button
           type="button"
           title={t('清空报告')}
@@ -72,6 +105,15 @@ export default function ContextDebugger({ onClose }: Props) {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3.5 py-3">
+          {/* 身份横幅：模型/档位翻面——不在字节比对里，却可能整体换掉服务商缓存 */}
+          {report.identity && (
+            <div className="shrink-0 rounded-lg border border-red-500/50 bg-red-500/[0.06] px-3 py-2.5">
+              <p className="text-[12px] font-medium leading-relaxed text-red-600 dark:text-red-400">
+                {t('请求身份变了：{0}——不在字节比对里，但换模型/换档位可能整体换掉服务商的缓存。', report.identity)}
+              </p>
+            </div>
+          )}
+
           {/* 结论行：命中数字与一句话断点结论 */}
           <div className="shrink-0 rounded-lg border border-warn/40 bg-warn/[0.05] px-3 py-2.5">
             <div className="flex items-baseline gap-2 text-[11.5px]">

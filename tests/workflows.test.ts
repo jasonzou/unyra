@@ -11,16 +11,12 @@ import { promptModuleByKey } from '../src/learn/ai/promptModules'
 import { buildState } from '../src/learn/files'
 import type { LearnStore } from '../src/learn/types'
 import {
-  BUILTIN_EFFORT,
   builtinWorkflowRows,
   findWorkflow,
   listWorkflowRows,
-  normalizeWorkflowEfforts,
   normalizeWorkflowEntries,
   removeWorkflow,
   renderWorkflowInstruction,
-  resolveWorkflowEffort,
-  setWorkflowEffort,
   upsertWorkflow,
   workflowModules,
   workflowPrep,
@@ -71,12 +67,6 @@ describe('内置工作流', () => {
       expect(r.tier).toBe('builtin')
       expect(r.instruction.trim()).not.toBe('')
     }
-    // 浏览器操作是看图干活的快流程：推荐档钉在 low（用户仍可在设置里覆盖）
-    expect(BUILTIN_EFFORT['browser-use']).toBe('low')
-    // 压缩上下文是摘录式改写，不需要额外推理：推荐档钉在 none
-    expect(BUILTIN_EFFORT['compact']).toBe('none')
-    // 随笔整理要归类、合并、改写，推荐档给 high
-    expect(BUILTIN_EFFORT['essay-commit']).toBe('high')
   })
 
   it('学习大纲：指令是标准函数调用，规程整篇在「学习大纲」模块里', () => {
@@ -340,68 +330,10 @@ describe('读回校验 normalizeWorkflowEntries', () => {
   })
 })
 
-describe('思考档位（三态配置）', () => {
-  it('解析：内置没配走推荐档，登记没配跟随聊天；chat 用滑条值，固定档原样', () => {
-    const created = upsertWorkflow(store(), 'global', 'g1', { name: '自定义甲', instruction: 'x' }, AT)
-    expect(created.ok).toBe(true)
-    if (!created.ok) return
-    const rows = listWorkflowRows(created.store, 'g1')
-    const teach = rows.find((x) => x.id === 'teach-node')
-    const custom = rows.find((x) => x.id === created.entry.id)
-    // 推荐档不冒充用户配置：行上没配就是没配（BUILTIN_EFFORT 才是推荐值的家）
-    expect(teach?.effort).toBeUndefined()
-    expect(custom?.effort).toBeUndefined()
-    if (!teach || !custom) return
-    // 内置没配 → 推荐档：开讲 high、超级实验室 max（表里最重的一档）
-    expect(resolveWorkflowEffort(teach, 'max')).toBe('high')
-    const superlab = rows.find((x) => x.id === 'superlab')
-    if (superlab) expect(resolveWorkflowEffort(superlab, 'low')).toBe('max')
-    // 登记的没配 → 跟随聊天；显式 'chat' 同
-    expect(resolveWorkflowEffort(custom, 'medium')).toBe('medium')
-    expect(resolveWorkflowEffort({ ...custom, effort: 'chat' }, 'low')).toBe('low')
-    // 固定档原样
-    expect(resolveWorkflowEffort({ ...custom, effort: 'max' }, 'low')).toBe('max')
-  })
-
-  it('配置与删除：setWorkflowEffort 落在全局 efforts 表；删工作流连键一起删；未知 id 原样返回', () => {
-    const created = upsertWorkflow(store(), 'global', 'g1', { name: '自定义乙', instruction: 'x' }, AT)
-    expect(created.ok).toBe(true)
-    if (!created.ok) return
-    // 内置也能配，列表行上立刻看得见
-    const withBuiltin = setWorkflowEffort(created.store, 'explain', 'max')
-    expect(withBuiltin.workflows?.efforts?.explain).toBe('max')
-    expect(listWorkflowRows(withBuiltin, null).find((x) => x.id === 'explain')?.effort).toBe('max')
-    // 登记的配了再删，键不残留（留键成幽灵）
-    const withCustom = setWorkflowEffort(withBuiltin, created.entry.id, 'low')
-    expect(withCustom.workflows?.efforts?.[created.entry.id]).toBe('low')
-    const removed = removeWorkflow(withCustom, created.entry.id)
-    expect(removed.workflows?.efforts?.[created.entry.id]).toBeUndefined()
-    expect(removed.workflows?.efforts?.explain).toBe('max')
-    // 未知 id / 空 id：原样返回（同一引用，没有假动作）
-    expect(setWorkflowEffort(withBuiltin, 'wf_notexist', 'low')).toBe(withBuiltin)
-    expect(setWorkflowEffort(withBuiltin, '', 'low')).toBe(withBuiltin)
-  })
-
-  it('读回校验 normalizeWorkflowEfforts：值不合法与幽灵键都剪掉', () => {
-    const valid = new Set(['teach-node', 'wf_x'])
-    const out = normalizeWorkflowEfforts(
-      { 'teach-node': 'chat', wf_x: 'high', wf_ghost: 'low', nope: 'medium', wf_bad: 'ultra' },
-      valid,
-    )
-    expect(out).toEqual({ 'teach-node': 'chat', wf_x: 'high' })
-    expect(normalizeWorkflowEfforts(null, valid)).toEqual({})
-  })
-
-  it('落盘往返：buildState 写 efforts，空表不写；登记 / 覆盖不丢已有的配置', () => {
-    const base = setWorkflowEffort(store(), 'teach-node', 'chat')
-    const written = buildState(base)
-    expect((written.workflows as { efforts?: Record<string, string> }).efforts).toEqual({ 'teach-node': 'chat' })
-    // 空表不写：「这个字段存在」本身就是声明的那条纪律
+describe('思考档位唯一性（三态配置已删）', () => {
+  it('工作流行不再带档位字段；state.json 也不再写 efforts（旧键读回即弃、下次落盘消失）', () => {
+    for (const r of builtinWorkflowRows()) expect('effort' in r).toBe(false)
     expect(buildState(store()).workflows).toBeUndefined()
-    const r = upsertWorkflow(base, 'global', 'g1', { name: '丙', instruction: 'x' }, AT)
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.store.workflows?.efforts?.['teach-node']).toBe('chat')
   })
   it('写教学文档的两条内置工作流，配方在动笔之前就注入（doc-html）', () => {
     const rows = builtinWorkflowRows()

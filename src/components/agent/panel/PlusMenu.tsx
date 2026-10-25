@@ -33,7 +33,7 @@ export function PlusMenu({
   menuMounted: boolean
   /** 正在播退场动画（那时断掉指针事件） */
   menuClosing: boolean
-  /** 现在停在哪一级：null = 一级；二级只有「工作流」与「对话历史」两项 */
+  /** 现在停在哪一级：null = 一级；二级只有「对话历史」一项 */
   menuSub: MenuSub
   /** 逻辑上的展开状态（那颗「+」的 aria-expanded 与高亮都看它） */
   menuOpen: boolean
@@ -84,9 +84,7 @@ export function PlusMenu({
                   {t('更多')}
                 </button>
                 <ChevronRight size={11} className="text-ink-faint" />
-                <span className="truncate font-semibold text-ink-strong">
-                  {menuSub === 'workflow' ? t('工作流模板') : t('对话历史')}
-                </span>
+                <span className="truncate font-semibold text-ink-strong">{t('对话历史')}</span>
               </>
             )}
             <span className="ml-auto flex items-center gap-1 text-[10px] text-ink-faint">

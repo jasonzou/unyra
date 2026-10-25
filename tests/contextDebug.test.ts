@@ -8,6 +8,7 @@ import type { ChatMessage } from '../src/ai/types'
 import {
   captureDrop,
   clearDropReports,
+  dropBundleOf,
   dutyOf,
   lastDropReport,
   noteRequest,
@@ -43,6 +44,56 @@ describe('滚动与定格', () => {
     expect(captureDrop('c1', 50, 5)).toBe(true)
     clearDropReports()
     expect(lastDropReport()).toBeNull()
+  })
+
+  it('下载包：报告结论 + 前后两份实发上下文的原样字节', () => {
+    noteRequest('c1', snap([msg('user', '你好')]))
+    noteRequest('c1', snap([msg('user', '你好'), msg('assistant', '答')]))
+    expect(captureDrop('c1', 900, 300)).toBe(true)
+    const bundle = dropBundleOf(lastDropReport()!)
+    expect(bundle.type).toBe('context-drop')
+    expect(bundle.kind).toBe('append')
+    expect((bundle.prev as { messages: unknown[] }).messages).toHaveLength(2)
+    expect((bundle.curr as { messages: unknown[] }).messages).toHaveLength(3)
+  })
+
+  it('快照定格即深拷贝：轮内继续 push 不污染上一份', () => {
+    const arr = [msg('system', 'S'), msg('user', '你好')]
+    noteRequest('c1', { system: 'S', messages: arr, tools: [] })
+    // 模拟 runtime 逐跳 push：同一份活数组在第二跳又长了一截
+    arr.push(msg('assistant', '答'))
+    noteRequest('c1', { system: 'S', messages: arr, tools: [] })
+    expect(captureDrop('c1', 900, 300)).toBe(true)
+    const report = lastDropReport()!
+    expect(report.prev.messages).toHaveLength(2)
+    expect(report.curr.messages).toHaveLength(3)
+  })
+
+  it('请求身份翻面写进报告：模型/档位变了 identity 点名，没变不写', () => {
+    const messages = [msg('system', 'S'), msg('user', '你好')]
+    noteRequest('c1', { system: 'S', messages, tools: [], model: 'deepseek-reasoner', reasoningEffort: 'low' })
+    noteRequest('c1', {
+      system: 'S',
+      messages: [...messages, msg('assistant', '答')],
+      tools: [],
+      model: 'deepseek-reasoner',
+      reasoningEffort: 'none',
+    })
+    expect(captureDrop('c1', 900, 300)).toBe(true)
+    const report = lastDropReport()!
+    expect(report.identity).toContain('档位 low → none')
+    expect(report.identity).not.toContain('模型')
+    // 身份没变时：不写 identity
+    noteRequest('c1', { system: 'S', messages, tools: [], model: 'm', reasoningEffort: 'low' })
+    noteRequest('c1', {
+      system: 'S',
+      messages: [...messages, msg('assistant', '答2')],
+      tools: [],
+      model: 'm',
+      reasoningEffort: 'low',
+    })
+    captureDrop('c1', 900, 300)
+    expect(lastDropReport()!.identity).toBeUndefined()
   })
 })
 

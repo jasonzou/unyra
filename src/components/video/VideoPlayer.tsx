@@ -73,6 +73,8 @@ export interface VideoPlayerProps {
   onToggleSidePanel?: () => void
   /** 列表此刻是否展开（决定按钮高亮与提示语） */
   sidePanelOpen?: boolean
+  /** 页签此刻是否激活：视频页签 keepalive 只藏不卸，藏起来的时候必须停播 */
+  active?: boolean
   className?: string
 }
 
@@ -159,6 +161,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       transitionStill,
       onToggleSidePanel,
       sidePanelOpen = false,
+      active = true,
       className = '',
     },
     ref,
@@ -196,6 +199,14 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         // 忽略
       }
     }, [])
+    /**
+     * 页签切走就停播：视频页签 keepalive 只藏不卸，display:none 挡不住声音——
+     * 离开页签必须显式 pause。回到页签不自动续播，从暂停处接着看由用户自己按。
+     */
+    useEffect(() => {
+      if (active) return
+      videoRef.current?.pause()
+    }, [active])
     const [playbackRate, setPlaybackRate] = useState(readStoredRate)
 
     // 全屏与镜像

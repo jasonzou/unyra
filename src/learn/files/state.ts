@@ -2,7 +2,7 @@
 
 import type { Drafts } from '../drafts'
 import { DEFAULT_SCHEDULE_SOUND } from '../schedule'
-import type { DocKind, DocScroll, FavoriteItem, LearnStore, LearnTab, LocalFile, MemoryItem, WorkflowEffortSetting, WorkflowEntry } from '../types'
+import type { DocKind, DocScroll, FavoriteItem, LearnStore, LearnTab, LocalFile, MemoryItem, WorkflowEntry } from '../types'
 
 /**
  * 界面状态（相对用户目录的 state.json）。
@@ -41,10 +41,10 @@ export interface LearnState {
   essayDock?: unknown
   /**
    * 全局工作流（跨目标、跟着用户走；目标级的在各自目录的 workflow.json）。
-   * efforts 是每条工作流的思考档位配置（键 = id，内置与登记通吃）——同样全局一份，
-   * 档位是「设置」不是学习数据，不随目标文件走。
+   * 曾经还存过每条工作流的思考档位（efforts），2026-10-25 删除：档位全应用只有
+   * 全局滑条一份。旧文件里的 efforts 键读回时直接忽略（见 parseDocs）。
    */
-  workflows?: { global?: WorkflowEntry[]; efforts?: Record<string, WorkflowEffortSetting> }
+  workflows?: { global?: WorkflowEntry[] }
   /**
    * 记忆库里的**长期**那一半（见 learn/memory）。
    *
@@ -100,17 +100,7 @@ export function buildState(store: LearnStore): Record<string, unknown> {
     // 分组登记表只在真有组时写（与 favorites 同一条纪律）
     ...(store.favGroups?.length ? { favGroups: store.favGroups } : {}),
     // 全局工作流没有就不写：空清单只会让人以为登记过东西（与 mind.json / method.json 同一条纪律）。
-    // 档位配置（efforts）同理：一张空表不如没有——「这个字段存在」本身就是一种声明
-    ...(store.workflows?.global?.length || (store.workflows?.efforts && Object.keys(store.workflows.efforts).length)
-      ? {
-          workflows: {
-            ...(store.workflows?.global?.length ? { global: store.workflows.global } : {}),
-            ...(store.workflows?.efforts && Object.keys(store.workflows.efforts).length
-              ? { efforts: store.workflows.efforts }
-              : {}),
-          },
-        }
-      : {}),
+    ...(store.workflows?.global?.length ? { workflows: { global: store.workflows.global } } : {}),
     /*
      * 长期记忆：只在真有条目时写（与 workflows 同一条纪律——空清单只会让人以为存过什么）。
      * 工作记忆不在这里：它按目标写在各自目录的 mind.json（见 buildDocs）。

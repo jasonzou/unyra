@@ -39,6 +39,7 @@ import {
   type ReasoningEffort,
 } from '../../ai/types'
 import { useHoverMenu } from '../../lib/hoverMenu'
+import { effortSwitched } from '../../learn/effortGuard'
 import { t } from '../../i18n'
 import EffortSlider from './EffortSlider'
 import { ProviderLogo } from '../settings/ProviderLogo'
@@ -153,7 +154,12 @@ export default function ModelPicker({ onChanged }: Props) {
     onChanged()
   }
 
-  const pickEffort = (e: ReasoningEffort) => apply({ effort: e })
+  const pickEffort = (e: ReasoningEffort) => {
+    const prev = effort
+    apply({ effort: e })
+    // 档位真的变了：已有上下文的对话要提醒一句（下一轮无法命中服务商缓存，见 learn/effortGuard）
+    if (e !== prev) effortSwitched(e, prev)
+  }
 
   const pickProvider = (p: ProviderConfig) => {
     // 换提供商时清空模型，让它回落到该家的第一个

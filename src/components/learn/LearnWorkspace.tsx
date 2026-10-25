@@ -271,6 +271,7 @@ import { SchedulePage } from '../schedule/SchedulePage'
 import AgentTabStrip from '../agent/AgentTabStrip'
 import ContextDebugger from '../agent/ContextDebugger'
 import { resetPrefixGate } from '../../agent/prefixGate'
+import { setEffortNotice } from '../../learn/effortGuard'
 import { docAreaElement, locateNeedle, scrollToDoc, visibleDocBody } from '../../lib/docDom'
 import { localRevealKey, nodeRevealKey, requestSourceReveal } from '../../lib/docReveal'
 import { publishReadingDay } from '../../lib/readingPulse'
@@ -428,6 +429,14 @@ export default function LearnWorkspace({
       }),
     [openContextDebugger],
   )
+  // 思考档位唯一性守卫的提醒出口（探针在 useAgent 注册，见 learn/effortGuard）：
+  // 用户手动切档且已有带上下文的对话时，提醒一句「下一轮全价重算」
+  useEffect(() => {
+    setEffortNotice(() => {
+      onToast(t('思考档位已切换：已有上下文的对话下一轮将无法命中服务商缓存，将整段重算'))
+    })
+    return () => setEffortNotice(null)
+  }, [onToast])
   /**
    * 上下文轨迹：**独立的 Electron 窗口**（与考试窗口同一套结构，见 electron/app/traceWindow）。
    * 主窗口是数据拥有者：打开时把当前激活会话整份递过去，开着期间随数据变化持续 push；
@@ -3047,13 +3056,11 @@ export default function LearnWorkspace({
     setSelfReport,
     clearMistake,
     startSuperLab,
-    startBrowserUse,
     startOutline,
     startPrereqOutline,
     workflowRows,
     runWorkflowRow,
     removeWorkflowRow,
-    setWorkflowEffortRow,
   } = useWorkflowStarters({
     getLatest,
     set,
@@ -3134,7 +3141,6 @@ export default function LearnWorkspace({
         compacting: false,
         onCompact: nope,
         onSuperLab: nope,
-        onBrowserUse: nope,
         onExam: nope,
         sub: { sessions: [], defs: [], running: false, live: [] },
         viewSubId: null,
@@ -3241,10 +3247,10 @@ export default function LearnWorkspace({
         if (convId) void agent.compactNow(convId)
       },
       // 菜单动作绑到这一枚页签的落点节点（节点归属的解析见 runWorkflow）
+      // onSuperLab 仍在这里：斜杠命令 /superlab 消费它（更多菜单已摘除工作流分组）
       onSuperLab: () => {
         if (nodeId) startSuperLab(nodeId)
       },
-      onBrowserUse: () => startBrowserUse(nodeId ?? undefined),
       onExam: () => newExam(nodeId ?? undefined),
       sub: {
         sessions,
@@ -4620,7 +4626,6 @@ export default function LearnWorkspace({
                 flowRows={workflowRows}
                 onRunWorkflow={runWorkflowRow}
                 onRemoveWorkflow={removeWorkflowRow}
-                onWorkflowEffort={setWorkflowEffortRow}
                 goals={store.goals}
                 memory={store.memory ?? { long: [], work: {} }}
                 activeGoalId={activeGoalId}
@@ -5415,9 +5420,6 @@ export default function LearnWorkspace({
                           onNotice={onToast}
                           onOpenAgentSettings={() => openTab({ kind: 'agentSettings' })}
                           onOpenSettings={() => openTab({ kind: 'agentSettings' })}
-                          onOpenMinds={() => {
-                            if (props.goalId) openTab({ kind: 'mind', goalId: props.goalId })
-                          }}
                           effort={effort}
                           onSetEffort={setGlobalEffort}
                           compactThreshold={agentSettings.compact.threshold}

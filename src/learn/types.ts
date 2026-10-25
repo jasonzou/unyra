@@ -1,5 +1,4 @@
 import type { Conversation } from '../agent/types'
-import type { ReasoningEffort } from '../ai/types'
 import type { Drafts } from './drafts'
 import type { Exam } from './exam'
 import type { DocWorkspace } from './groups'
@@ -1039,27 +1038,15 @@ export interface WorkflowEntry {
 }
 
 /**
- * 工作流的思考档位设置（三态）：'default' 用内置推荐档（BUILTIN_DEFS 里的 effort），
- * 'chat' 跟随聊天滑条（输入框右下角那个，只对聊天发起的轮直接生效），
- * 其余是固定四档之一。省略时内置视作 'default'、登记的视作 'chat'
- * （解析见 learn/workflows 的 resolveWorkflowEffort）。
- */
-export type WorkflowEffortSetting = 'default' | 'chat' | ReasoningEffort
-
-/**
  * 工作流登记表：global 是**跨目标**的一层（跟着用户走，存 state.json）；
  * byGoal 按目标归档（存各自目标目录的 workflow.json，与 method.json 同层同纪律）。
  * 内置工作流不在这里——它们的指令在代码里（learn/workflows 的 BUILTIN_DEFS）。
+ * 思考档位曾经有每条工作流的三态配置（workflows.efforts），2026-10-25 删除：
+ * 档位全应用只有全局滑条一份（翻面会让服务商整体换缓存，见 learn/effortGuard）。
  */
 export interface WorkflowBook {
   global: WorkflowEntry[]
   byGoal: Record<string, WorkflowEntry[]>
-  /**
-   * 每条工作流的思考档位配置（键 = 工作流 id，内置与登记通吃），存 state.json 的
-   * workflows.efforts——**全局一份**，不随目标文件走：档位是「设置」不是学习数据。
-   * 登记被删除时同步删键（见 removeWorkflow）；幽灵键由 normalize 剪掉。
-   */
-  efforts?: Record<string, WorkflowEffortSetting>
 }
 
 export const MASTERY_LABEL: Record<MasteryStatus, string> = {
