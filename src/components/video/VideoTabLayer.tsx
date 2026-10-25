@@ -61,6 +61,7 @@ export default function VideoTabLayer({ tabs, activeId, videos, onCreate, onReso
               <VideoStudyTab
                 video={resource}
                 tabId={tab.id}
+                active={active}
                 onCreate={videoId ? undefined : (draft) => onCreate(tab.id, draft)}
                 onResolved={(title) => {
                   if (videoId) onResolved(videoId, title)

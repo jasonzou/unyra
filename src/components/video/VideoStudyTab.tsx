@@ -70,9 +70,11 @@ interface Props {
   onSelection?: (source: string, title: string) => void
   /** 自己的页签 id：音频控制登记的键（页签条的快捷静音按钮按它找上来） */
   tabId?: string
+  /** 页签此刻是否激活：切走就停播（VideoPlayer 的 active） */
+  active?: boolean
 }
 
-export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress, onSelection, tabId }: Props) {
+export default function VideoStudyTab({ video = null, onCreate, onResolved, onProgress, onSelection, tabId, active = true }: Props) {
   const bound = !!video
   /** 创建态输入（绑定态不用它——页里没有输入组件） */
   const [input, setInput] = useState(() => video?.input ?? readLastInput())
@@ -627,6 +629,7 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
               <VideoPlayer
                 ref={playerRef}
                 src={relayUrl}
+                active={active}
                 title={source.title}
                 durationMs={source.durationMs}
                 transcript={transcript}
