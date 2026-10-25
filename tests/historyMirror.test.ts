@@ -23,15 +23,16 @@ const executeTool: AgentTool = {
 }
 
 /** 假流：按剧本逐跳返回，并把每一跳实发的 messages 快照记下来 */
-function fakeStream(script: Array<{ content: string; toolCalls?: Array<{ id: string; name: string; arguments: string }> }>) {
+function fakeStream(script: Array<{ content: string; reasoning?: string; toolCalls?: Array<{ id: string; name: string; arguments: string }> }>) {
   const requests: ChatMessage[][] = []
   const stream = async (opts: StreamChatOptions): Promise<StreamChatResult> => {
     requests.push(JSON.parse(JSON.stringify(opts.messages)))
     const hop = script[requests.length - 1]
     if (!hop) throw new Error('剧本不够长：第 ' + requests.length + ' 跳没有台词')
-    // 与真实客户端一致：正文经 onDelta 流出（useAgent 靠它把正文累进 parts）
+    // 与真实客户端一致：思考/正文经 onDelta 流出（applyEvent 靠它把片段累进 parts）
+    if (hop.reasoning) opts.onDelta?.({ reasoning: hop.reasoning })
     if (hop.content) opts.onDelta?.({ content: hop.content })
-    return { content: hop.content, reasoning: '', toolCalls: hop.toolCalls ?? [], finishReason: 'stop' }
+    return { content: hop.content, reasoning: hop.reasoning ?? '', toolCalls: hop.toolCalls ?? [], finishReason: 'stop' }
   }
   return { requests, stream }
 }
@@ -136,6 +137,37 @@ describe('toChatHistory 与 runtime 实发的逐跳镜像', () => {
     expect(history).toHaveLength(3)
     expect(history[1]).toMatchObject({ role: 'assistant', content: '答', tool_calls: [{ id: 'x1' }] })
     expect(history[2]).toMatchObject({ role: 'tool', tool_call_id: 'x1' })
+  })
+
+  it('思考跳：实发 assistant 带 reasoning_content，重建逐字节对上（思考模型的回传契约）', async () => {
+    const userText = '讲讲递归'
+    const { requests, parts } = await runTurn(
+      [
+        {
+          content: '让我先想一下。',
+          reasoning: '先想清楚递归的两个要素。',
+          toolCalls: [{ id: 'call-1', name: 'execute', arguments: '{"body":"read"}' }],
+        },
+        { content: '读完了，下面开讲。', reasoning: '组织一下语言。' },
+      ],
+      userText,
+    )
+    // 第二跳的请求里，第一跳的 assistant 消息必须带着思考回传（GLM 缺了直接 400）
+    expect(requests[1][2]).toMatchObject({
+      role: 'assistant',
+      content: '让我先想一下。',
+      reasoning_content: '先想清楚递归的两个要素。',
+    })
+    const next = nextTurnRequests(userText, parts)
+    expect(next.length).toBeGreaterThan(requests[1].length)
+    // 字节级前缀：JSON.stringify 连键序一起比——前缀门禁与线上缓存认的就是这份字节
+    expect(JSON.stringify(next.slice(0, requests[1].length))).toBe(JSON.stringify(requests[1]))
+    // 最后一跳的正文（当时还没随任何请求发出）也要带上自己的思考
+    expect(next[requests[1].length]).toEqual({
+      role: 'assistant',
+      content: '读完了，下面开讲。',
+      reasoning_content: '组织一下语言。',
+    })
   })
 
   it('mid-loop 注入的提示词模块：还原时在片段位置补发 assistant 消息，与实发逐字节前缀', async () => {

@@ -96,10 +96,17 @@ export function toChatHistory(
     for (const seg of hopSegments(m.parts)) {
       const text = seg.filter((p) => p.type === 'text').map((p) => p.text).join('')
       const calls = seg.filter((p): p is Extract<AgentPart, { type: 'tool' }> => p.type === 'tool')
+      /**
+       * 本跳的思考原文：思考模型的回传契约（GLM/DeepSeek V4 缺了直接 400）。各 delta
+       * 按到达顺序合并，与 agent/runtime 实发 push 的 result.reasoning 逐字节一致；
+       * 键序（content 之后、tool_calls 之前）也要一致——前缀门禁按整消息 JSON 比对。
+       */
+      const thinking = seg.filter((p) => p.type === 'thinking').map((p) => p.text).join('')
       if (text || calls.length) {
         out.push({
           role: 'assistant',
           content: text || null,
+          ...(thinking ? { reasoning_content: thinking } : {}),
           ...(calls.length
             ? {
                 tool_calls: calls.map((t) => ({
@@ -140,7 +147,7 @@ export function toChatHistory(
         }
       } else {
         // 整跳没有正文也没有调用（只有 thinking，或干脆为空）：占位一条，与既有行为一致
-        out.push({ role: 'assistant', content: '（已处理）' })
+        out.push({ role: 'assistant', content: '（已处理）', ...(thinking ? { reasoning_content: thinking } : {}) })
       }
       /**
        * 动态注入的提示词模块（learn/ai/prompt-modules）：它发生在跳的边界——线上实发
@@ -199,8 +206,12 @@ function dropOrphans(history: ChatMessage[]): ChatMessage[] {
     }
     const paired = m.tool_calls.filter((c) => answered.has(c.id))
     if (!paired.length) {
-      // 调用全被丢掉了，这条 assistant 只剩正文
-      out.push({ role: 'assistant', content: m.content })
+      // 调用全被丢掉了，这条 assistant 只剩正文（思考原文照旧带上）
+      out.push({
+        role: 'assistant',
+        content: m.content,
+        ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}),
+      })
       continue
     }
     out.push({ ...m, tool_calls: paired })

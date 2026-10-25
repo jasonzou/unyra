@@ -346,10 +346,13 @@ export async function runAgent(opts: AgentRunOptions): Promise<void> {
           name: tc.name,
           arguments: sanitizeArgs(tc.arguments),
         }))
-        // 把 assistant 的这次回复（含工具调用）写回历史，再逐条执行工具
+        // 把 assistant 的这次回复（含工具调用）写回历史，再逐条执行工具。
+        // 思考模式的回传契约：这条消息必须带上本跳的 reasoning_content（GLM/DeepSeek V4
+        // 缺了直接 400）；键序与 learn/agent/history 的还原镜像严格一致。
         messages.push({
           role: 'assistant',
           content: result.content || null,
+          ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
           tool_calls: toolCalls.map((tc) => ({
             id: tc.id,
             type: 'function' as const,
@@ -434,7 +437,12 @@ export async function runAgent(opts: AgentRunOptions): Promise<void> {
       if (opts.injections) {
         const injected = await opts.injections()
         if (injected !== null) {
-          if (result.content) messages.push({ role: 'assistant', content: result.content })
+          if (result.content)
+            messages.push({
+              role: 'assistant',
+              content: result.content,
+              ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
+            })
           messages.push({ role: injected.role, content: injected.content })
           onEvent({ type: 'hop' })
           continue
