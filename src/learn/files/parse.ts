@@ -248,7 +248,6 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
     workflows: {
       global: s.workflows?.global ?? null,
       byGoal: ledgers.workflowsByGoal,
-      efforts: s.workflows?.efforts ?? null,
     },
     activeGoalId: s.activeGoalId ?? null,
     activeNodeId: s.activeNodeId ?? null,
@@ -473,7 +472,6 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
     workflows: {
       global: s.workflows?.global ?? null,
       byGoal: ledgers.workflowsByGoal,
-      efforts: s.workflows?.efforts ?? null,
     },
     activeGoalId: s.activeGoalId ?? null,
     activeNodeId: s.activeNodeId ?? null,

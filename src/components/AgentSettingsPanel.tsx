@@ -19,8 +19,7 @@ import {
   type AgentSettings,
 } from '../agent/settings'
 import { isDevUnlocked } from '../lib/devMode'
-import { REASONING_EFFORTS, REASONING_LABEL } from '../ai/types'
-import { BUILTIN_EFFORT, type WorkflowEffortSetting, type WorkflowRow, type WorkflowTier } from '../learn/workflows'
+import { type WorkflowRow, type WorkflowTier } from '../learn/workflows'
 import { getActiveSkills } from '../agent/skill/registry'
 import type { LearningGoal, MemoryStore } from '../learn/types'
 import type { MemoryInput, MemoryPatch } from '../learn/memory'
@@ -67,8 +66,6 @@ interface Props {
   onRunWorkflow?: (row: WorkflowRow) => void
   /** 删除一条登记的工作流（内置的到不了这里） */
   onRemoveWorkflow?: (row: WorkflowRow) => void
-  /** 改一条工作流的思考档位（三态；内置与登记通吃，键 = id 记在全局 efforts 表） */
-  onWorkflowEffort?: (row: WorkflowRow, effort: WorkflowEffortSetting) => void
   /** 学习目标清单（记忆管理页用） */
   goals?: LearningGoal[]
   /** 记忆库：长期跨目标 + 工作按目标（见 learn/memory） */
@@ -141,7 +138,6 @@ export default function AgentSettingsPanel({
   flowRows,
   onRunWorkflow,
   onRemoveWorkflow,
-  onWorkflowEffort,
   goals = [],
   memory = { long: [], work: {} },
   activeGoalId = null,
@@ -354,8 +350,8 @@ export default function AgentSettingsPanel({
               settings={settings}
               onChange={onChange}
             />
-          ) : tab === 'flow' && flowRows && onRunWorkflow && onRemoveWorkflow && onWorkflowEffort ? (
-            <FlowTab rows={flowRows} onRun={onRunWorkflow} onRemove={onRemoveWorkflow} onEffort={onWorkflowEffort} />
+          ) : tab === 'flow' && flowRows && onRunWorkflow && onRemoveWorkflow ? (
+            <FlowTab rows={flowRows} onRun={onRunWorkflow} onRemove={onRemoveWorkflow} />
           ) : (
             <DevTab onSelectTab={select} />
           )}
@@ -525,12 +521,10 @@ function FlowTab({
   rows,
   onRun,
   onRemove,
-  onEffort,
 }: {
   rows: WorkflowRow[]
   onRun: (row: WorkflowRow) => void
   onRemove: (row: WorkflowRow) => void
-  onEffort: (row: WorkflowRow, effort: WorkflowEffortSetting) => void
 }) {
   const [pending, setPending] = useState<WorkflowRow | null>(null)
   return (
@@ -569,27 +563,6 @@ function FlowTab({
                       <p className="mt-0.5 text-[10.5px] text-ink-faint">{t('指令 {0} 字', row.instruction.length)}</p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
-                      <label
-                        className="flex items-center gap-1 text-[10.5px] text-ink-faint"
-                        title={t('思考档位：工作流轮的档位独立于聊天滑条。默认 = 内置推荐档；跟随聊天 = 用滑条那档')}
-                      >
-                        {t('思考')}
-                        <select
-                          value={row.effort ?? (row.tier === 'builtin' ? 'default' : 'chat')}
-                          onChange={(e) => onEffort(row, e.target.value as WorkflowEffortSetting)}
-                          className="rounded-lg border border-line bg-card px-2 py-1 text-[11.5px] text-ink-soft outline-none transition focus:border-seal/60"
-                        >
-                          {row.tier === 'builtin' && (
-                            <option value="default">{t('默认（{0}）', REASONING_LABEL[BUILTIN_EFFORT[row.id] ?? 'high'])}</option>
-                          )}
-                          <option value="chat">{t('跟随聊天')}</option>
-                          {REASONING_EFFORTS.map((e) => (
-                            <option key={e} value={e}>
-                              {REASONING_LABEL[e]}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
                       {row.runnable && (
                         <button
                           type="button"

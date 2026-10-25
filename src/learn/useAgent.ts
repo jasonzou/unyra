@@ -27,8 +27,8 @@ import { ensureActivityListeners, userIdleMs } from '../lib/userActivity'
 import { captureDrop, lastDropReport, noteRequest } from '../agent/contextDebug'
 import { assertPrefixStable, currentEpoch, lastCacheRead, noteCacheRead, resetPrefixGate } from '../agent/prefixGate'
 import { globalContextWindow, hasApiKey, loadAiSettings, resolveGlobal } from '../ai/settings'
-import type { ReasoningEffort } from '../ai/types'
-import { appendFreeMessage, freeConversationById, mutateFreeConversation, FREE_GOAL_ID } from './freeChat'
+import { appendFreeMessage, freeConversationById, getFreeConversations, mutateFreeConversation, FREE_GOAL_ID } from './freeChat'
+import { setEffortContextProbe } from './effortGuard'
 import { loadAgentSettings } from '../agent/settings'
 import { makeMcpOps } from '../agent/mcp/ops'
 import { makePermissionOps } from '../agent/permissions'
@@ -43,7 +43,7 @@ import { needsPersonaAnnounce, personaMessage } from '../agent/persona'
 import { needsDocFormatAnnounce, docFormatMessage, docFormatAllowsModule } from '../agent/docFormat'
 import { conversationById, nodeById, resolveDisplayedConversation, addConversation } from './graph'
 import { makeExamTool } from './agentOps'
-import { findWorkflow, renderWorkflowInstruction, resolveWorkflowEffort, workflowPrep, workflowModules } from './workflows'
+import { findWorkflow, renderWorkflowInstruction, workflowPrep, workflowModules } from './workflows'
 import { generateConversationTitle, namingSource } from './title'
 import { createMemoryOps } from './memory'
 import { createScheduleOps } from './schedule'
@@ -368,12 +368,6 @@ export function useAgent(opts: {
        */
       isCompactTurn = false,
       /**
-       * 这一轮的思考档位覆盖。聊天轮不传（用全局滑条）；工作流轮由 runWorkflow 按
-       * 三态配置解析好再传进来（见 resolveWorkflowEffort）——聊天滑条只对聊天轮
-       * 直接生效，工作流轮的档位独立于它。
-       */
-      effortOverride?: ReasoningEffort,
-      /**
        * 这一轮触发前要注入的提示词模块（动态提示词注入，见 learn/ai/promptModules）。
        * 由 runWorkflow 算好带来（内置 promptModule / 登记的 prompt）。注入点与人格补发
        * 同一处——排在用户消息之前、只在队尾追加（前缀缓存安全）；活着的消息里已有
@@ -638,7 +632,8 @@ export function useAgent(opts: {
         sandbox: sandboxBase,
         provider: global.provider,
         model: global.model,
-        effort: effortOverride ?? global.effort,
+        // 档位全应用唯一（全局滑条）：子代理与它的宿主同档，绝不各自翻面（见 learn/effortGuard）
+        effort: global.effort,
         contextWindow: window,
       })
       // subagent api 挂进沙箱（导师专用；子代理的 apiAllow 白名单里没有这一组）
@@ -868,7 +863,7 @@ export function useAgent(opts: {
           provider: global.provider,
           model: global.model,
           // 工作流轮的档位由触发方按三态配置解析好传进来；聊天轮用全局滑条
-          reasoningEffort: effortOverride ?? global.effort,
+          reasoningEffort: global.effort,
           /**
            * 系统提示词用**对话里固化的那份**（见上面的固化逻辑）：只描述目标、不含当前
            * 节点，切节点一字不变（前缀缓存不被整段作废）；节点背景不再随消息注入，
@@ -1152,7 +1147,6 @@ export function useAgent(opts: {
       files?: PendingFile[],
       mark?: string,
       isCompactTurn = false,
-      effortOverride?: ReasoningEffort,
       /** 工作流触发时随指令注入的提示词模块（见 runTurnUnchecked 同名参数） */
       modules?: PromptModule[],
       /** 工作流启动实参（见 runTurnUnchecked 同名参数） */
@@ -1177,7 +1171,7 @@ export function useAgent(opts: {
       chain.set(target.conversationId, ticket)
       try {
         if (prev) await prev
-        await runTurnUnchecked(target, text, hidden, context, quote, pending, files, mark, isCompactTurn, effortOverride, modules, wfParams)
+        await runTurnUnchecked(target, text, hidden, context, quote, pending, files, mark, isCompactTurn, modules, wfParams)
       } finally {
         release()
         if (chain.get(target.conversationId) === ticket) chain.delete(target.conversationId)
@@ -1559,9 +1553,7 @@ export function useAgent(opts: {
           // 测试环境没有 native 桥：提醒本来就是「尽力」
         }
       }
-      // 这一轮的思考档位按三态配置解析：'default' 用内置推荐、'chat' 跟随滑条、其余固定档。
-      // 聊天滑条只对聊天轮直接生效——工作流的档位独立于它（见 resolveWorkflowEffort）。
-      const effort = resolveWorkflowEffort(found, resolveGlobal().effort)
+      // 档位全应用唯一（全局滑条）：聊天轮与工作流轮同档，绝不自动翻面（见 learn/effortGuard）。
       // 把这一轮的 promise 交回给调用方：手动压缩要知道「这一轮什么时候跑完」（见 compactNow）
       return runTurn(
         target,
@@ -1574,7 +1566,6 @@ export function useAgent(opts: {
         found.name,
         // 压缩轮跑完不再触发自动压缩（否则写不成摘要时会一轮接一轮，见 isCompactTurn 的说明）
         found.id === 'compact',
-        effort,
         // 触发时随指令注入的提示词模块（内置 promptModule / 登记的 prompt；
         // 同一上下文只注一次，重复触发靠活消息上的标记去重）
         workflowModules(found),
@@ -1889,6 +1880,22 @@ export function useAgent(opts: {
    * 面板据此画入口按钮（会话数）、弹出列表与子会话视图（实时流式与导师视图同一套渲染）。
    */
   const subBucket = conversation?.subagents
+
+  /**
+   * 思考档位唯一性守卫的探针（见 learn/effortGuard）：档位全应用只有全局滑条一份，
+   * ModelPicker 在用户手动切档前问这里一句「有没有已带上下文的对话」——导师会话与
+   * 自由聊天都算。卸载时注销，不留悬空闭包。
+   */
+  useEffect(() => {
+    setEffortContextProbe(() => {
+      const s = getLatest()
+      return (
+        s.conversations.some((c) => activeMessages(c.messages).length > 0) ||
+        getFreeConversations().some((c) => activeMessages(c.messages).length > 0)
+      )
+    })
+    return () => setEffortContextProbe(null)
+  }, [getLatest])
 
   return {
     conversation,

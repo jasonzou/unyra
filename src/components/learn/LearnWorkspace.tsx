@@ -271,6 +271,7 @@ import { SchedulePage } from '../schedule/SchedulePage'
 import AgentTabStrip from '../agent/AgentTabStrip'
 import ContextDebugger from '../agent/ContextDebugger'
 import { resetPrefixGate } from '../../agent/prefixGate'
+import { setEffortNotice } from '../../learn/effortGuard'
 import { docAreaElement, locateNeedle, scrollToDoc, visibleDocBody } from '../../lib/docDom'
 import { localRevealKey, nodeRevealKey, requestSourceReveal } from '../../lib/docReveal'
 import { publishReadingDay } from '../../lib/readingPulse'
@@ -428,6 +429,14 @@ export default function LearnWorkspace({
       }),
     [openContextDebugger],
   )
+  // 思考档位唯一性守卫的提醒出口（探针在 useAgent 注册，见 learn/effortGuard）：
+  // 用户手动切档且已有带上下文的对话时，提醒一句「下一轮全价重算」
+  useEffect(() => {
+    setEffortNotice(() => {
+      onToast(t('思考档位已切换：已有上下文的对话下一轮将无法命中服务商缓存，将整段重算'))
+    })
+    return () => setEffortNotice(null)
+  }, [onToast])
   /**
    * 上下文轨迹：**独立的 Electron 窗口**（与考试窗口同一套结构，见 electron/app/traceWindow）。
    * 主窗口是数据拥有者：打开时把当前激活会话整份递过去，开着期间随数据变化持续 push；
@@ -3053,7 +3062,6 @@ export default function LearnWorkspace({
     workflowRows,
     runWorkflowRow,
     removeWorkflowRow,
-    setWorkflowEffortRow,
   } = useWorkflowStarters({
     getLatest,
     set,
@@ -4620,7 +4628,6 @@ export default function LearnWorkspace({
                 flowRows={workflowRows}
                 onRunWorkflow={runWorkflowRow}
                 onRemoveWorkflow={removeWorkflowRow}
-                onWorkflowEffort={setWorkflowEffortRow}
                 goals={store.goals}
                 memory={store.memory ?? { long: [], work: {} }}
                 activeGoalId={activeGoalId}

@@ -358,7 +358,7 @@ exam.* 只管**作答侧**：交卷后 exam.read() 看作答，exam.grade(...) �
       a('list', 'wf.list({ full?, brief? }?)', '列可用工作流', '默认简略（只给 id/name/tier/description/chars）；full:true 带完整指令。', `const flows = await api.wf.list()`),
       a('get', 'wf.get(idOrName)', '看一条工作流的完整定义', '回 instruction、params 与说明；不含 prompt 规程正文（它在触发时注入）。', `const flow = await api.wf.get('开讲')`),
       a('create', 'wf.create({ name, instruction, description?, prompt?, tier? })', '登记/覆盖工作流', 'instruction 必填；prompt 是可选规程（同上下文只注一次）；tier 省略=目标级，global=跨目标。同名同级覆盖。', `await api.wf.create({ name: '课前摸底', instruction: '第一步：用 api.ask 摸底；第二步：按盲点把讲义写进节点（n.editContent）。' })`),
-      a('remove', 'wf.remove(idOrName)', '删除一条登记工作流', '内置工作流删不掉；删除后设置里的工作流列表同步消失，efforts 配置一并清掉。', `await api.wf.remove('课前摸底')`),
+      a('remove', 'wf.remove(idOrName)', '删除一条登记工作流', '内置工作流删不掉；删除后设置里的工作流列表同步消失。', `await api.wf.remove('课前摸底')`),
       a('invoke', 'wf.invoke(idOrName, { params? })', '触发一条工作流', '不对：它只排队。回执说「已排队」就不要再调、也不要自己做。一次编排最多排一条，链上最多连三条。', `await api.wf.invoke('出卷', { params: { node: '极限' } })`),
     ],
   ),

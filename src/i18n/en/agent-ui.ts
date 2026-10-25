@@ -51,6 +51,8 @@ const dict: Record<string, string> = {
   '清空报告': 'Clear report',
   '请求身份变了：{0}——不在字节比对里，但换模型/换档位可能整体换掉服务商的缓存。':
     'Request identity changed: {0} — invisible to the byte diff, but a model/effort flip can invalidate the whole provider-side cache.',
+  '思考档位已切换：已有上下文的对话下一轮将无法命中服务商缓存，将整段重算':
+    'Effort level switched: conversations with existing context will miss the provider cache on their next turn and re-run at full price.',
   '下载这两份实发上下文（.json.gz）': 'Download both sent contexts (.json.gz)',
   '一致': 'same',
   '变化': 'changed',
