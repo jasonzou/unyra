@@ -5,6 +5,7 @@ import type { Exam } from '../src/learn/exam'
 import { entryUuid, outlineUuid } from '../src/learn/nodeKinds'
 import { CARD_H, CARD_W, COL_GAP, emptyStructure, type StructureMap } from '../src/learn/structure'
 import { deriveCanvas, edgeElbow, edgePathD } from '../src/components/learn/structure/structureView'
+import { getTourMockCanvas, getTourCamera } from '../src/components/learn/structure/tourMockData'
 
 /* ---------- 夹具：一个目标（根 + 子文档 + 挂件） ---------- */
 
@@ -381,4 +382,31 @@ describe('认领接口的文档卡：没有正经标题就显示接口的 label'
     const uniqueKeys = new Set(edgeKeys)
     expect(edgeKeys.length).toBe(uniqueKeys.size)
   })
-});
+  it('教学假数据包含完备节点模型与连接，退出后不留痕迹', () => {
+    const mock = getTourMockCanvas()
+    expect(mock.cards.length).toBe(6)
+    expect(mock.edges.length).toBe(5)
+
+    // 包含各类典型节点
+    const kinds = mock.cards.map((c) => c.kind)
+    expect(kinds).toContain('doc')
+    expect(kinds).toContain('outline')
+    expect(kinds).toContain('video')
+    expect(kinds).toContain('exam')
+    expect(kinds).toContain('note')
+
+    // 入口节点
+    const entryCard = mock.cards.find((c) => c.entry)
+    expect(entryCard?.title).toBe('计算机网络核心导学')
+
+    // 大纲节点包含 slots
+    const outlineCard = mock.cards.find((c) => c.kind === 'outline')
+    expect(outlineCard?.slots?.length).toBe(3)
+
+    // 相机视口计算
+    const cam = getTourCamera(1200, 700)
+    expect(cam.zoom).toBeGreaterThan(0.6)
+    expect(cam.x).toBeDefined()
+    expect(cam.y).toBeDefined()
+  })
+})
