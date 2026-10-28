@@ -4,33 +4,66 @@ import {
   FileImage,
   ImagePlus,
   Loader2,
+  RotateCw,
   Smartphone,
   Trash2,
   ZoomIn,
 } from 'lucide-react'
 import { requestDeviceFile, useLanServer } from '../../lib/lanSync'
+import { readLocalImage } from '../../lib/localFiles'
 import HandwrittenImagePreview from './HandwrittenImagePreview'
 import { t } from '../../i18n'
 
 interface Props {
   images: string[]
   onAddImage: (img: string) => void
+  onUpdateImage: (index: number, newImg: string) => void
   onRemoveImage: (index: number) => void
   onPreviewImage: (src: string) => void
   onOpenLan: () => void
 }
 
 /**
+ * 将图片顺时针旋转 90 度并返回新 data URL
+ */
+async function rotateImage90(src: string): Promise<string> {
+  let targetSrc = src
+  if (!src.startsWith('data:')) {
+    const loaded = await readLocalImage(src).catch(() => null)
+    if (loaded) targetSrc = loaded
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.height
+      canvas.height = img.width
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return resolve(src)
+      ctx.translate(canvas.width / 2, canvas.height / 2)
+      ctx.rotate((90 * Math.PI) / 180)
+      ctx.drawImage(img, -img.width / 2, -img.height / 2)
+      resolve(canvas.toDataURL('image/jpeg', 0.92))
+    }
+    img.onerror = () => resolve(src)
+    img.src = targetSrc
+  })
+}
+
+/**
  * 统一手写答卷上传卡片：
  * 位于卷面首部，支持手机扫码拍照与本地选择多张答题卷/答题卡照片，
- * 避免逐题重复上传，交卷时由 Agent 统一审阅与裁切贴题。
+ * 支持顺时针旋转修正方向，交卷时由【检题助手】统一审阅与裁切贴题。
  */
 const UnifiedHandwrittenSheetsCard = forwardRef<HTMLDivElement, Props>(function UnifiedHandwrittenSheetsCard(
-  { images, onAddImage, onRemoveImage, onPreviewImage, onOpenLan },
+  { images, onAddImage, onUpdateImage, onRemoveImage, onPreviewImage, onOpenLan },
   ref,
 ) {
   const { status } = useLanServer()
   const [snapping, setSnapping] = useState(false)
+  const [rotatingIndex, setRotatingIndex] = useState<number | null>(null)
 
   const handleMobileSnap = async () => {
     if (!status.running || status.devices.length === 0) {
@@ -69,6 +102,17 @@ const UnifiedHandwrittenSheetsCard = forwardRef<HTMLDivElement, Props>(function 
     })
 
     e.target.value = ''
+  }
+
+  const handleRotate = async (idx: number) => {
+    if (rotatingIndex !== null) return
+    setRotatingIndex(idx)
+    try {
+      const rotated = await rotateImage90(images[idx])
+      onUpdateImage(idx, rotated)
+    } finally {
+      setRotatingIndex(null)
+    }
   }
 
   return (
@@ -151,17 +195,31 @@ const UnifiedHandwrittenSheetsCard = forwardRef<HTMLDivElement, Props>(function 
 
                 <div className="mt-1.5 flex items-center justify-between px-0.5 text-[11px]">
                   <span className="font-medium text-ink-soft">{t('答卷 {0}', idx + 1)}</span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onRemoveImage(idx)
-                    }}
-                    title={t('移除这张答卷')}
-                    className="rounded p-0.5 text-ink-faint hover:text-rose-600 transition cursor-pointer"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={rotatingIndex === idx}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleRotate(idx)
+                      }}
+                      title={t('顺时针旋转 90°')}
+                      className="rounded p-0.5 text-ink-faint hover:text-seal transition cursor-pointer disabled:opacity-50"
+                    >
+                      <RotateCw size={12} className={rotatingIndex === idx ? 'animate-spin' : ''} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onRemoveImage(idx)
+                      }}
+                      title={t('移除这张答卷')}
+                      className="rounded p-0.5 text-ink-faint hover:text-rose-600 transition cursor-pointer"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -171,7 +229,7 @@ const UnifiedHandwrittenSheetsCard = forwardRef<HTMLDivElement, Props>(function 
             <Smartphone size={11} className="text-seal" />
             <span>
               {t(
-                '已上传 {0} 份答卷照片。交卷时将自动进行小 Agent 漏题预检；交卷后由 AI 导师亲自审卷判分并裁切贴题。',
+                '已上传 {0} 份答卷照片。若照片角度倾斜可点 ↻ 旋转；交卷时将由【检题助手】进行漏题预检，交卷后 AI 导师亲自审卷判分并裁切贴题。',
                 images.length,
               )}
             </span>

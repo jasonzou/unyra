@@ -12,7 +12,7 @@ export interface OmissionCheckResult {
   reason?: string
 }
 
-const SYSTEM_PROMPT = `你是一名负责考场手写答卷预检的细致小助手。
+const SYSTEM_PROMPT = `你是一名负责考场手写答卷预检的细致助手【检题助手】。
 学习者上传了若干张手写答卷照片，准备提交试卷。你的唯一任务是：对照整份试卷的题目列表，快速审视手写答卷照片，检查学习者是否存在明显漏写、未作答的题目。
 
 请严格返回合法 JSON 对象，格式如下：
@@ -24,10 +24,45 @@ const SYSTEM_PROMPT = `你是一名负责考场手写答卷预检的细致小助
 
 重要判定准则：
 1. missingQuestions 必须是试卷题目序号数组（题号从 1 开始，如 [7, 21]）。
-2. 只要学习者写了答案、推导步骤、选项字母、算式，哪怕写了“不会”、“不知道”、“跳过”，都算已作答，绝不属于遗漏。
-3. 只有当答卷上完全没有写这道题的编号，或者该题编号后一片空白没有任何作答痕迹时，才判定为遗漏。
-4. 如果所有题目均有作答痕迹，hasOmissions 必须为 false，missingQuestions 必须为 []。
-5. 保持严格客观、快速判断，不要进行深度判分或纠错。`
+2. 注意照片角度：学习者拍照可能存在旋转、倾斜、横置或倒立角度，请多方向综合审阅。
+3. 只要答卷上有任何作答内容、推导公式、计算过程、选择题选项字母（如 A、B、C、D、对、错、√、×）或文字，哪怕写了“不会”、“跳过”，都算已作答，绝不属于遗漏。
+4. 严禁误判：如果答卷上有书写笔迹与作答痕迹，但因草稿排版紧凑或未严格标清题号而难以精准对应，切勿轻易判定为“全部未做”！只要有实质作答笔迹，判定 hasOmissions 为 false，missingQuestions 为 []，交给主阅卷导师深度判阅。
+5. 只有当某道题在整张答卷上确实完全没有任何作答痕迹时，才判定为遗漏。
+6. 如果所有题目均有作答痕迹，hasOmissions 必须为 false，missingQuestions 必须为 []。
+7. 保持客观快速判断，不要进行深度判分或纠错。`
+
+/**
+ * 在浏览器/渲染进程中适度等比例压缩超大照片，避免几兆的原图冲垮多模态上下文或超时
+ */
+function downscaleImage(dataUrl: string, maxDimension = 1600): Promise<string> {
+  if (typeof document === 'undefined') return Promise.resolve(dataUrl)
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      let { width, height } = img
+      if (width <= maxDimension && height <= maxDimension) {
+        return resolve(dataUrl)
+      }
+      if (width > height) {
+        height = Math.round((height * maxDimension) / width)
+        width = maxDimension
+      } else {
+        width = Math.round((width * maxDimension) / height)
+        height = maxDimension
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return resolve(dataUrl)
+      ctx.drawImage(img, 0, 0, width, height)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
 
 /**
  * 将本地图片路径或 dataURL 转换为 ChatContentPart
@@ -42,14 +77,17 @@ async function toImagePart(pathOrUrl: string): Promise<ChatContentPart | null> {
     dataUrl = loaded
   }
 
-  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl)
+  // 压缩大图，避免十几兆手机高像素原图导致请求超时或解析失败
+  dataUrl = await downscaleImage(dataUrl).catch(() => dataUrl)
+
+  const match = /^data:([^;]+);base64,(.+)$/s.exec(dataUrl.trim())
   if (!match) return null
 
   return imagePart(match[1], match[2])
 }
 
 /**
- * 试卷提交前预检：通过快速视觉 Agent 识别手写答卷中是否有遗漏未作答题目
+ * 试卷提交前预检：由【检题助手】识别手写答卷中是否有遗漏未作答题目
  */
 export async function checkExamOmissions(opts: {
   exam: { title: string; questions: ExamQuestion[] }
@@ -88,7 +126,7 @@ export async function checkExamOmissions(opts: {
       )
       .join('\n')
 
-    const userPrompt = `整份试卷《${exam.title}》共有 ${exam.questions.length} 道题：\n${questionListText}\n\n附件为学习者上传的 ${imageParts.length} 张手写答卷照片。请检查是否有明显漏做的题目。`
+    const userPrompt = `整份试卷《${exam.title}》共有 ${exam.questions.length} 道题：\n${questionListText}\n\n附件为学习者上传的 ${imageParts.length} 张手写答卷照片。请检题助手检查是否有明显漏做的题目。`
 
     const userContent: ChatContentPart[] = [textPart(userPrompt), ...imageParts]
 

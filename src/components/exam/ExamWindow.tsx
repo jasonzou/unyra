@@ -247,6 +247,14 @@ export default function ExamWindow() {
     })
   }, [guest])
 
+  const updateHandwrittenImage = useCallback((indexToUpdate: number, newImg: string) => {
+    setHandwrittenImages((prev) => {
+      const next = prev.map((img, i) => (i === indexToUpdate ? newImg : img))
+      guest?.emit({ type: 'setHandwritten', images: next })
+      return next
+    })
+  }, [guest])
+
   const handleRequestSubmit = useCallback(async () => {
     if (submittedRef.current) return
     if (handwrittenImages.length > 0 && state) {
@@ -499,6 +507,7 @@ export default function ExamWindow() {
                 ref={sheetsRef}
                 images={handwrittenImages}
                 onAddImage={addHandwrittenImage}
+                onUpdateImage={updateHandwrittenImage}
                 onRemoveImage={removeHandwrittenImage}
                 onPreviewImage={setPreviewImage}
                 onOpenLan={() => setLanOpen(true)}
@@ -606,13 +615,13 @@ export default function ExamWindow() {
         onClose={() => setPreviewImage(null)}
       />
 
-      {/* 小 Agent 漏题预检中动画 */}
+      {/* 检题助手 漏题预检中动画 */}
       {checkingOmissions && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
           <div className="moji-dialog-in flex items-center gap-3 rounded-xl border border-line-strong bg-card px-5 py-4 shadow-xl">
             <Loader2 size={18} className="animate-spin text-seal" />
             <div className="flex flex-col">
-              <span className="text-[13px] font-semibold text-ink-strong">{t('小 Agent 正在预检手写答卷…')}</span>
+              <span className="text-[13px] font-semibold text-ink-strong">{t('【检题助手】正在预检手写答卷…')}</span>
               <span className="text-[11px] text-ink-faint">{t('正在检查手写答卷是否存在遗漏未写题目，请稍候')}</span>
             </div>
           </div>
@@ -627,11 +636,11 @@ export default function ExamWindow() {
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-amber-500/10 text-amber-600">
                 <AlertTriangle size={15} />
               </div>
-              <h3 className="text-[14px] font-bold text-ink-strong">{t('手写答卷疑似存在未作答题目')}</h3>
+              <h3 className="text-[14px] font-bold text-ink-strong">{t('【检题助手】提醒：疑似存在未作答题目')}</h3>
             </div>
 
             <div className="mt-3 text-[12px] leading-relaxed text-ink-soft">
-              <p>{t('AI 小导师快速预检发现，以下题目在上传的手写答卷中尚未找到作答痕迹：')}</p>
+              <p>{t('检题助手快速预检发现，以下题目在上传的手写答卷中尚未找到作答痕迹：')}</p>
               <div className="my-2.5 flex flex-wrap gap-1.5">
                 {omissionWarning.missingQuestions.map((qNum) => (
                   <span

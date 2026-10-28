@@ -519,6 +519,10 @@ const api = {
       ipcRenderer.on('exam:windowClosed', listener)
       return () => ipcRenderer.removeListener('exam:windowClosed', listener)
     },
+
+    /** 裁切手写答案图片（由 Agent 阅卷工具或考试回看调用） */
+    cropImage: (payload: { imagePath: string; box: CropBoxInput; rotate?: number }): Promise<CropImageResult> =>
+      ipcRenderer.invoke('exam:cropImage', payload),
   },
 
   /**

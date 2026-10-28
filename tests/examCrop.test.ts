@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeCropRect } from '../electron/exam/imageCrop'
+import { normalizeCropRect, rotateBitmap } from '../electron/exam/imageCrop'
 import { hasAnswerValue } from '../src/learn/exam/grade'
 import { recordInput, newAttempt } from '../src/learn/examRecords'
 import {
@@ -320,5 +320,65 @@ describe('Agent 裁切工具与试卷回看贴题关联 (attachCroppedAnswerImag
     const graded = res.store.exams[0].attempts[0]
     expect(graded.status).toBe('graded')
     expect(graded.results?.[0].croppedAnswerImage).toBe(croppedAnswerImage)
+  })
+
+  it('rotateBitmap 像素级顺时针旋转测试 (90°, 180°, 270°)', () => {
+    // 构造 2x2 图像缓冲区，4 个不同颜色的像素
+    // (0,0): 红色 (255, 0, 0, 255)
+    // (1,0): 绿色 (0, 255, 0, 255)
+    // (0,1): 蓝色 (0, 0, 255, 255)
+    // (1,1): 白色 (255, 255, 255, 255)
+    const buf = Buffer.from([
+      255, 0, 0, 255,   0, 255, 0, 255,
+      0, 0, 255, 255,   255, 255, 255, 255,
+    ])
+
+    // 顺时针旋转 90 度
+    const r90 = rotateBitmap(buf, 2, 2, 90)
+    expect(r90.width).toBe(2)
+    expect(r90.height).toBe(2)
+    // 旋转后：
+    // (0,0) 应该是原来的 (0,1) 蓝色
+    // (1,0) 应该是原来的 (0,0) 红色
+    // (0,1) 应该是原来的 (1,1) 白色
+    // (1,1) 应该是原来的 (1,0) 绿色
+    expect(r90.buffer.slice(0, 4)).toEqual(Buffer.from([0, 0, 255, 255]))
+    expect(r90.buffer.slice(4, 8)).toEqual(Buffer.from([255, 0, 0, 255]))
+    expect(r90.buffer.slice(8, 12)).toEqual(Buffer.from([255, 255, 255, 255]))
+    expect(r90.buffer.slice(12, 16)).toEqual(Buffer.from([0, 255, 0, 255]))
+
+    // 旋转 180 度
+    const r180 = rotateBitmap(buf, 2, 2, 180)
+    expect(r180.buffer.slice(0, 4)).toEqual(Buffer.from([255, 255, 255, 255])) // 原来 (1,1)
+    expect(r180.buffer.slice(12, 16)).toEqual(Buffer.from([255, 0, 0, 255])) // 原来 (0,0)
+
+    // 旋转 270 度
+    const r270 = rotateBitmap(buf, 2, 2, 270)
+    expect(r270.buffer.slice(0, 4)).toEqual(Buffer.from([0, 255, 0, 255])) // 原来 (1,0)
+  })
+
+  it('先裁剪后评分时，已裁切的图片能稳妥保留并落入题目回看', () => {
+    let store = makeInitialStore()
+    const attempt: ExamAttempt = {
+      ...newAttempt('att_pre_crop', T0, false),
+      status: 'submitted',
+      answers: [],
+      handwrittenImages: ['C:/photos/sheet1.jpg'],
+    }
+    store = upsertAttempt(store, mockExam.id, attempt)
+
+    // 先调用 attachCroppedAnswerImage 贴图
+    store = attachCroppedAnswerImage(store, mockExam.id, 'att_pre_crop', 'q1', 'C:/crops/q1.png')
+
+    // 接着 Agent 进行判分（payload 里未重复提供 croppedAnswerImage）
+    const res = applyGradeResult(store, mockExam.id, 'att_pre_crop', {
+      passed: true,
+      summary: '通过',
+      results: [{ questionId: 'q1', correct: true, score: 10, comment: '好' }],
+    })
+
+    expect(res.ok).toBe(true)
+    const graded = res.store.exams[0].attempts[0]
+    expect(graded.results?.[0].croppedAnswerImage).toBe('C:/crops/q1.png')
   })
 })

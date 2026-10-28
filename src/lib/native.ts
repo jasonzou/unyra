@@ -289,8 +289,8 @@ export interface NativeBridge {
     onEvent(cb: (payload: unknown) => void): () => void
     /** 订阅「考试窗口关掉了」（任何原因）；返回取消订阅函数 */
     onClosed(cb: (info: { reason: string }) => void): () => void
-    /** 裁切手写答案图片 */
-    cropImage?(payload: { imagePath: string; box: CropBoxInput }): Promise<CropImageResult>
+    /** 裁切手写答案图片（支持顺时针旋转修正） */
+    cropImage?(payload: { imagePath: string; box: CropBoxInput; rotate?: number }): Promise<CropImageResult>
   }
   /**
    * 考试窗口的**考试窗口那一侧**：只能发事件、收状态、要求全屏、放行关闭，
@@ -310,8 +310,8 @@ export interface NativeBridge {
     setFullscreen(on: boolean): void
     /** 「确认放弃 / 已交卷」之后放行关闭；之后由界面自己调 window.close() */
     allowClose(): void
-    /** 裁切手写答案图片 */
-    cropImage?(payload: { imagePath: string; box: CropBoxInput }): Promise<CropImageResult>
+    /** 裁切手写答案图片（支持顺时针旋转修正） */
+    cropImage?(payload: { imagePath: string; box: CropBoxInput; rotate?: number }): Promise<CropImageResult>
   }
   /**
    * 上下文轨迹窗口（第三个 BrowserWindow，`?contextTrace=1` 分支）的**主窗口那一侧**。

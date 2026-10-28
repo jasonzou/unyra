@@ -384,15 +384,18 @@ export function examReadPayload(input: {
         ? {
             gradingNote:
               (attempt?.handwrittenImages?.length || paper.questions.some((q) => attempt?.answers.some((x) => x.questionId === q.id && x.image))
-                ? '📷 学习者提交了手机拍摄的手写答案图片（见题目 userAnswer.image 或 handwrittenImages）。请审阅手写答案进行判分，并使用 api.exam.cropAnswer({ questionId, box: [ymin, xmin, ymax, xmax] }) 裁出各题作答区域贴到试卷上。\n\n'
-                : '') +
-              '学习者已交卷，请**两步走完这一次**：\n' +
-              '① 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment, userAnswer }] })。' +
-              '每一道答错的题都要给 comment（单选/多选/对错/填空也一样，不能只讲简答题），系统已判好的客观题也请补上讲解。\n' +
-              '② 写错题讲解：先看上面 history 里的 **weak**（历次考错的题）与 attempt 里的记录' +
-              '（overtimeMin 超时、blurCount 切屏、dwell 单题耗时——反复改答案、在某题上耗很久、超时作答都是信号），' +
-              '判断他的薄弱项，针对性讲解，然后 api.exam.explain({ content: "…markdown…", attemptId: "' + (attempt?.id ?? '') + '" }) 写上。\n' +
-              '讲解要落到「他为什么错、下次怎么想」，别把参考答案抄一遍；历史里反复出现的同一个错法要正面点出来。',
+                ? '📷 学习者提交了手机拍摄的手写答案图片（共 ' + (attempt?.handwrittenImages?.length ?? 1) + ' 份，见 handwrittenImages）。' +
+                  '请完成阅卷：\n' +
+                  '① 裁切贴题：针对每道作答题目调用 api.exam.cropAnswer({ questionId, box: [ymin, xmin, ymax, xmax], sourceImage: 0, rotate: 0 }) 将对应手写答案裁切贴在试卷副本对应题目上（若答卷方向倒置或倾斜，可用 rotate: 90/180/270 顺时针旋转修正）。\n' +
+                  '② 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment, userAnswer }] })。全部题目（含单选/多选/对错/填空/简答）由你根据手写内容亲自审阅判分，识别到的手写答案填入 userAnswer。\n' +
+                  '③ 错题讲解：api.exam.explain({ content: "…markdown…", attemptId: "' + (attempt?.id ?? '') + '" })。\n\n'
+                : '学习者已交卷，请**两步走完这一次**：\n' +
+                  '① 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment }] })。' +
+                  '每一道答错的题都要给 comment（单选/多选/对错/填空也一样，不能只讲简答题），系统已判好的客观题也请补上讲解。\n' +
+                  '② 写错题讲解：先看上面 history 里的 **weak**（历次考错的题）与 attempt 里的记录' +
+                  '（overtimeMin 超时、blurCount 切屏、dwell 单题耗时——反复改答案、在某题上耗很久、超时作答都是信号），' +
+                  '判断他的薄弱项，针对性讲解，然后 api.exam.explain({ content: "…markdown…", attemptId: "' + (attempt?.id ?? '') + '" }) 写上。\n' +
+                  '讲解要落到「他为什么错、下次怎么想」，别把参考答案抄一遍；历史里反复出现的同一个错法要正面点出来。'),
           }
         : {}),
       ...(status === 'graded'

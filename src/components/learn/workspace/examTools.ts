@@ -252,6 +252,7 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
         questionId?: string
         sourceImage?: string | number
         box?: CropBoxInput
+        rotate?: number
       }
       if (!p.questionId) {
         return { ok: false, message: '必须指定题目 id (questionId)' }
@@ -291,7 +292,7 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
         return { ok: false, message: '当前运行环境不支持图片裁剪功能' }
       }
 
-      const res = await bridge.cropImage({ imagePath: src, box: p.box })
+      const res = await bridge.cropImage({ imagePath: src, box: p.box, rotate: p.rotate })
       if (!res.ok || !res.croppedPath) {
         return { ok: false, message: '裁切失败: ' + (res.error || '未知错误') }
       }

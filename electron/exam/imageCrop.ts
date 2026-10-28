@@ -109,11 +109,82 @@ export function normalizeCropRect(
 }
 
 /**
- * 裁剪手写答案图片并存储到用户数据目录
+ * 旋转 32 位 RGBA/BGRA 像素缓冲区（顺时针 90°、180°、270°）
+ */
+export function rotateBitmap(
+  buffer: Buffer,
+  width: number,
+  height: number,
+  degrees: number,
+): { buffer: Buffer; width: number; height: number } {
+  const norm = ((degrees % 360) + 360) % 360
+  if (norm === 0) return { buffer, width, height }
+
+  if (norm === 90) {
+    const newWidth = height
+    const newHeight = width
+    const out = Buffer.alloc(buffer.length)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const srcIdx = (y * width + x) * 4
+        const dstX = height - 1 - y
+        const dstY = x
+        const dstIdx = (dstY * newWidth + dstX) * 4
+        out[dstIdx] = buffer[srcIdx]
+        out[dstIdx + 1] = buffer[srcIdx + 1]
+        out[dstIdx + 2] = buffer[srcIdx + 2]
+        out[dstIdx + 3] = buffer[srcIdx + 3]
+      }
+    }
+    return { buffer: out, width: newWidth, height: newHeight }
+  }
+
+  if (norm === 180) {
+    const out = Buffer.alloc(buffer.length)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const srcIdx = (y * width + x) * 4
+        const dstX = width - 1 - x
+        const dstY = height - 1 - y
+        const dstIdx = (dstY * width + dstX) * 4
+        out[dstIdx] = buffer[srcIdx]
+        out[dstIdx + 1] = buffer[srcIdx + 1]
+        out[dstIdx + 2] = buffer[srcIdx + 2]
+        out[dstIdx + 3] = buffer[srcIdx + 3]
+      }
+    }
+    return { buffer: out, width, height }
+  }
+
+  if (norm === 270) {
+    const newWidth = height
+    const newHeight = width
+    const out = Buffer.alloc(buffer.length)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const srcIdx = (y * width + x) * 4
+        const dstX = y
+        const dstY = width - 1 - x
+        const dstIdx = (dstY * newWidth + dstX) * 4
+        out[dstIdx] = buffer[srcIdx]
+        out[dstIdx + 1] = buffer[srcIdx + 1]
+        out[dstIdx + 2] = buffer[srcIdx + 2]
+        out[dstIdx + 3] = buffer[srcIdx + 3]
+      }
+    }
+    return { buffer: out, width: newWidth, height: newHeight }
+  }
+
+  return { buffer, width, height }
+}
+
+/**
+ * 裁剪手写答案图片并存储到用户数据目录（支持顺时针旋转修正）
  */
 export async function cropExamAnswerImage(
   imagePath: string,
   box: CropBoxInput,
+  rotate = 0,
 ): Promise<CropImageResult> {
   try {
     let image: Electron.NativeImage
@@ -137,6 +208,17 @@ export async function cropExamAnswerImage(
       return { ok: false, error: '裁切失败，区域为空' }
     }
 
+    let finalImage = cropped
+    if (rotate && rotate % 360 !== 0) {
+      const croppedSize = cropped.getSize()
+      const rawBmp = cropped.toBitmap()
+      const rotated = rotateBitmap(rawBmp, croppedSize.width, croppedSize.height, rotate)
+      finalImage = nativeImage.createFromBitmap(rotated.buffer, {
+        width: rotated.width,
+        height: rotated.height,
+      })
+    }
+
     const targetDir = path.join(getUserDataDir(), 'exam-crops')
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true })
@@ -145,10 +227,10 @@ export async function cropExamAnswerImage(
     const fileName = `crop_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.png`
     const targetPath = path.join(targetDir, fileName)
 
-    const pngBuffer = cropped.toPNG()
+    const pngBuffer = finalImage.toPNG()
     fs.writeFileSync(targetPath, pngBuffer)
 
-    const dataUrl = cropped.toDataURL()
+    const dataUrl = finalImage.toDataURL()
 
     return {
       ok: true,

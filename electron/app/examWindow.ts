@@ -250,11 +250,11 @@ export function registerExamIpc(): void {
   // 裁切手写答案图片
   ipcMain.handle(
     'exam:cropImage',
-    async (_event, payload: { imagePath: string; box: CropBoxInput }) => {
+    async (_event, payload: { imagePath: string; box: CropBoxInput; rotate?: number }) => {
       if (!payload || !payload.imagePath || !payload.box) {
         return { ok: false, error: '缺少 imagePath 或 box 参数' }
       }
-      return await cropExamAnswerImage(payload.imagePath, payload.box)
+      return await cropExamAnswerImage(payload.imagePath, payload.box, payload.rotate)
     },
   )
 }

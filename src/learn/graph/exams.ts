@@ -209,6 +209,12 @@ export function applyGradeResult(
   const results = hasImages
     ? exam.questions.map((q) => {
         const item = (payload.results ?? []).find((x) => x.questionId === q.id)
+        const existingAns = answers.find((a) => a.questionId === q.id)
+        const existingResult = attempt.results?.find((r) => r.questionId === q.id)
+        const comment = typeof item?.comment === 'string' ? unescapeNewlines(item.comment) : undefined
+        const croppedAnswerImage = typeof item?.croppedAnswerImage === 'string'
+          ? item.croppedAnswerImage
+          : existingResult?.croppedAnswerImage || existingAns?.image
         if (!item) {
           return {
             questionId: q.id,
@@ -216,10 +222,9 @@ export function applyGradeResult(
             score: 0,
             maxScore: q.points,
             by: 'agent' as const,
+            ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
           }
         }
-        const comment = typeof item.comment === 'string' ? unescapeNewlines(item.comment) : undefined
-        const croppedAnswerImage = typeof item.croppedAnswerImage === 'string' ? item.croppedAnswerImage : undefined
         const score = typeof item.score === 'number'
           ? Math.max(0, Math.min(q.points, item.score))
           : item.correct
@@ -243,8 +248,12 @@ export function applyGradeResult(
       const idx = results.findIndex((x) => x.questionId === item.questionId)
       if (idx < 0) continue
       const q = exam.questions[idx]
+      const existingAns = answers.find((a) => a.questionId === q.id)
+      const existingResult = attempt.results?.find((r) => r.questionId === q.id)
       const comment = typeof item.comment === 'string' ? unescapeNewlines(item.comment) : undefined
-      const croppedAnswerImage = typeof item.croppedAnswerImage === 'string' ? item.croppedAnswerImage : undefined
+      const croppedAnswerImage = typeof item.croppedAnswerImage === 'string'
+        ? item.croppedAnswerImage
+        : existingResult?.croppedAnswerImage || existingAns?.image
       if (isAutoGradable(q)) {
         if (comment || croppedAnswerImage) {
           results[idx] = {
@@ -356,9 +365,23 @@ export function attachCroppedAnswerImage(
   const attempt = exam?.attempts.find((a) => a.id === attemptId)
   if (!exam || !attempt) return store
 
-  const results = (attempt.results ?? []).map((r) =>
-    r.questionId === questionId ? { ...r, croppedAnswerImage: croppedImagePath } : r,
-  )
+  let results = attempt.results
+  if (results) {
+    const hasResult = results.some((r) => r.questionId === questionId)
+    results = hasResult
+      ? results.map((r) => (r.questionId === questionId ? { ...r, croppedAnswerImage: croppedImagePath } : r))
+      : [
+          ...results,
+          {
+            questionId,
+            correct: null,
+            score: 0,
+            maxScore: exam.questions.find((q) => q.id === questionId)?.points ?? 0,
+            croppedAnswerImage: croppedImagePath,
+            by: 'agent' as const,
+          },
+        ]
+  }
 
   const answers = attempt.answers.map((ans) =>
     ans.questionId === questionId ? { ...ans, image: croppedImagePath } : ans,
@@ -369,7 +392,7 @@ export function attachCroppedAnswerImage(
 
   return upsertAttempt(store, examId, {
     ...attempt,
-    results,
+    ...(results ? { results } : {}),
     answers,
   })
 }
