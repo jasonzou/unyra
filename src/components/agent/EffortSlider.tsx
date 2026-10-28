@@ -1,7 +1,7 @@
 /**
  * 思考档位调节器（Codex 风格能量流体微粒滑块）：
  * 沿圆角胶囊能量管以 5 档推理强度（无 / 低 / 中 / 高 / 最大）切换，
- * 内部带有自主横向流动的气泡微粒（Fluid Bubble Stream），随档位动态切换主题色：
+ * 内部带有自主横向平缓流动的气泡微粒（Fluid Bubble Stream），随档位动态切换主题色：
  * 无档中性灰、低档薄荷绿、中档琥珀金、高档紫罗兰、最大档印章红。
  * 纯白圆钮随档位平滑吸附，支持拖拽、点击与方向键调节。
  */
@@ -57,13 +57,16 @@ const EFFORT_VISUALS: Record<ReasoningEffort, EffortVisual> = {
   },
 }
 
-/** 档位对应的能量液微粒流动速度（像素/帧） */
+/**
+ * 档位对应的能量液微粒流动速度（像素/秒）：
+ * 采用帧率无关的时间增量 dt 计算，在普屏与高刷屏上均保持优雅舒缓的流速。
+ */
 const FLOW_SPEEDS: Record<ReasoningEffort, number> = {
   none: 0,
-  low: 0.75,
-  medium: 1.25,
-  high: 1.95,
-  max: 2.85,
+  low: 10,     // 约 25 秒穿行全轨，安适舒缓
+  medium: 18,  // 约 14 秒穿行全轨，温润流动
+  high: 28,    // 约 9 秒穿行全轨，活跃流体
+  max: 40,     // 约 6 秒穿行全轨，高能充沛
 }
 
 interface FlowParticle {
@@ -83,10 +86,10 @@ function createInitialParticles(count: number, width: number): FlowParticle[] {
     x: (i / count) * Math.max(width, 100) + (Math.random() - 0.5) * 20,
     baseYRatio: 0.2 + Math.random() * 0.6,
     radius: 1.0 + Math.random() * 1.5, // 半径 1.0 ~ 2.5px（直径 2 ~ 5px）
-    speedMult: 0.8 + Math.random() * 0.45,
-    baseAlpha: 0.45 + Math.random() * 0.35,
-    waveAmp: 0.8 + Math.random() * 1.4,
-    waveFreq: 0.0025 + Math.random() * 0.003,
+    speedMult: 0.85 + Math.random() * 0.3,
+    baseAlpha: 0.4 + Math.random() * 0.35,
+    waveAmp: 0.6 + Math.random() * 1.0, // 柔和起伏幅度
+    waveFreq: 0.0008 + Math.random() * 0.001, // 慢速呼吸微波周期
     wavePhase: Math.random() * Math.PI * 2,
   }))
 }
@@ -145,6 +148,7 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
 
     let rafId: number
     let running = true
+    let lastTime: number | null = null
 
     // 初始化粒子群
     if (particlesRef.current.length === 0) {
@@ -172,6 +176,11 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
     const render = (time: number) => {
       if (!running) return
 
+      if (lastTime === null) lastTime = time
+      // 帧间隔秒数（dt），封顶 80ms 防止切后台恢复后瞬移
+      const dt = Math.min((time - lastTime) / 1000, 0.08)
+      lastTime = time
+
       const w = canvas.width / (window.devicePixelRatio || 1)
       const h = canvas.height / (window.devicePixelRatio || 1)
 
@@ -185,8 +194,8 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
 
         for (let i = 0; i < particles.length; i++) {
           const p = particles[i]
-          // 沿水平方向向前流动
-          p.x += baseSpeed * p.speedMult
+          // 沿水平方向向前舒缓流动（像素/秒 * dt）
+          p.x += baseSpeed * p.speedMult * dt
 
           // 当气泡流至流体右边界（接近白圆钮）时，循环至最左端重新生成
           if (p.x > fillPx + 4) {
@@ -201,7 +210,7 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
 
           if (alpha <= 0.02) continue
 
-          // 微波上下浮动
+          // 慢速微波上下浮动
           const y = p.baseYRatio * h + Math.sin(time * p.waveFreq + p.wavePhase) * p.waveAmp
 
           ctx.save()
@@ -226,6 +235,7 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
       if (document.hidden) {
         cancelAnimationFrame(rafId)
       } else {
+        lastTime = null
         rafId = requestAnimationFrame(render)
       }
     }
