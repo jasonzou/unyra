@@ -187,19 +187,75 @@ describe('视频节点：归一与守卫的纯函数', () => {
 })
 
 describe('落盘往返：视频节点住目标目录的 video-nodes.json', () => {
-  it('build → parse：绑定行原样进出，boundTo 镜像重建一致', () => {
+  it('build → parse：绑定行与下级树边原样进出，boundTo 镜像重建一致', () => {
     const { svc, read } = serviceOf(storeOf())
     const created = svc.create({ kind: 'video' })
     if (!('uuid' in created)) return
     svc.get(created.uuid)!.editContent({ videoId: 'v1' })
+    // 创建挂在视频节点之下的文档
+    const doc = svc.create({ kind: 'doc', title: '视频总览文档', under: created.uuid })
+    expect(doc).toMatchObject({ ok: true, created: true })
+    if (!('uuid' in doc)) return
+
+    // 验证边存在：created.uuid -> doc.uuid
+    expect(read().edges.some((e) => e.from === created.uuid && e.to === doc.uuid)).toBe(true)
+
     const files = buildDocs(read())
-    expect(files.get('docs/微积分/video-nodes.json')).toBeTruthy()
+    const videoJson = files.get('docs/微积分/video-nodes.json')
+    expect(videoJson).toBeTruthy()
+    expect(videoJson).toContain(created.uuid)
+    expect(videoJson).toContain(doc.uuid)
+
     // 视频资源是用户级的（state.json），roundtrip 要把 state 侧也带上
     const back = parseDocs(files, buildState(read()))
     expect(back?.videoNodes ?? []).toHaveLength(1)
     expect(back?.videoNodes?.[0]).toMatchObject({ goalId: 'g1', videoId: 'v1' })
     // 镜像按事实源重建（读回来的 boundTo 不作数）
     expect(back?.videos?.find((v) => v.id === 'v1')?.boundTo).toEqual([created.uuid])
+    // 树边经 parseDocs 后正确恢复
+    expect(back?.edges.some((e) => e.from === created.uuid && e.to === doc.uuid)).toBe(true)
+
+    // 摘线验证：通过 disconnect 断开连接
+    const docGNode = svc.get(doc.uuid)
+    const videoGNode = svc.get(created.uuid)
+    expect(docGNode && videoGNode).toBeTruthy()
+    const unlinkRes = docGNode?.disconnect(videoGNode!)
+    expect(unlinkRes).toMatchObject({ ok: true })
+    expect(read().edges.some((e) => e.from === created.uuid && e.to === doc.uuid)).toBe(false)
+  })
+
+  it('文档已存在时以 under: videoNodeUuid 创建会自动补全连线', () => {
+    const { svc, read } = serviceOf(storeOf())
+    const v = svc.create({ kind: 'video' })
+    if (!('uuid' in v)) return
+    const d1 = svc.create({ kind: 'doc', title: '已有文档' })
+    if (!('uuid' in d1)) return
+    expect(read().edges.some((e) => e.from === v.uuid && e.to === d1.uuid)).toBe(false)
+
+    // 再次以 under: v.uuid 创建同名文档
+    const d2 = svc.create({ kind: 'doc', title: '已有文档', under: v.uuid })
+    expect(d2).toMatchObject({ ok: true, created: false, uuid: d1.uuid })
+    expect(read().edges.some((e) => e.from === v.uuid && e.to === d1.uuid)).toBe(true)
+  })
+
+  it('normalizeLearnStore 自动修补包含 videos 代码块的无上游文档连线', () => {
+    const base = storeOf()
+    const vId = 'vn-repair'
+    const docId = 'doc-repair'
+    const unlinkedDoc: KnowledgeNode = {
+      ...node(docId, '视频总览', 'spzl'),
+      docs: { teaching: '# 总览\n```videos\n' + vId + '\n1-10\n```' },
+    }
+    const storeToFix: LearnStore = {
+      ...base,
+      videoNodes: [{ id: vId, goalId: 'g1', videoId: 'v1', createdAt: 1, updatedAt: 1 }],
+      nodes: [...base.nodes, unlinkedDoc],
+      edges: [],
+    }
+    // 序列化落盘再读回，触发 normalizeLearnStore 自动补齐边
+    const files = buildDocs(storeToFix)
+    const restored = parseDocs(files, buildState(storeToFix))
+    expect(restored?.edges.some((e) => e.from === vId && e.to === docId)).toBe(true)
   })
 })
 

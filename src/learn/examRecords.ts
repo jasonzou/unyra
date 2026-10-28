@@ -44,6 +44,10 @@ export interface InputEvent {
   value: string[]
   /** 填空 / 简答的文本 */
   text?: string
+  /** 手机拍照上传或由 Agent 裁切出的手写答案图片（绝对路径或 dataURL） */
+  image?: string
+  /** 原始整页拍照图片的路径 */
+  rawImage?: string
   /** 发生的时刻（毫秒）；由调用方注入，保持这里是纯函数 */
   at: number
 }
@@ -71,6 +75,8 @@ function overtimeAt(exam: Exam, attempt: ExamAttempt, at: number): boolean {
 export function recordInput(attempt: ExamAttempt, exam: Exam, ev: InputEvent): ExamAttempt {
   const value = Array.isArray(ev.value) ? ev.value.filter((x): x is string => typeof x === 'string') : []
   const text = typeof ev.text === 'string' ? ev.text : undefined
+  const image = typeof ev.image === 'string' ? ev.image : undefined
+  const rawImage = typeof ev.rawImage === 'string' ? ev.rawImage : undefined
   const overtime = overtimeAt(exam, attempt, ev.at)
 
   const inputs = attempt.inputs.slice()
@@ -94,17 +100,24 @@ export function recordInput(attempt: ExamAttempt, exam: Exam, ev: InputEvent): E
       ...(overtime ? { overtime: true } : {}),
     }
   } else {
-    inputs.push({ questionId: ev.questionId, value, ...(text === undefined ? {} : { text }), at: ev.at, ...(overtime ? { overtime: true } : {}) })
+    inputs.push({ questionId: ev.questionId, value, ...(text === undefined ? {} : { text }), ...(image === undefined ? {} : { image }), ...(rawImage === undefined ? {} : { rawImage }), at: ev.at, ...(overtime ? { overtime: true } : {}) })
   }
 
   // answers 与 inputs 同源：题目的先后也照第一次输入的顺序排，判分与展示都按它读
   const answers = attempt.answers.slice()
   const idx = answers.findIndex((a) => a.questionId === ev.questionId)
-  const next: ExamAnswer = { questionId: ev.questionId, value, ...(text === undefined ? {} : { text }) }
+  const next: ExamAnswer = { questionId: ev.questionId, value, ...(text === undefined ? {} : { text }), ...(image === undefined ? {} : { image }), ...(rawImage === undefined ? {} : { rawImage }) }
+  const rawToAdd = rawImage || image
+  let handwrittenImages = attempt.handwrittenImages
+  if (rawToAdd) {
+    const list = handwrittenImages ? handwrittenImages.slice() : []
+    if (!list.includes(rawToAdd)) list.push(rawToAdd)
+    handwrittenImages = list
+  }
   if (idx < 0) answers.push(next)
   else answers[idx] = next
 
-  return { ...attempt, inputs, answers, dwell }
+  return { ...attempt, inputs, answers, dwell, ...(handwrittenImages ? { handwrittenImages } : {}) }
 }
 
 /**

@@ -71,3 +71,4 @@ export {
   resolveExamMinutes,
   wrongQuestions,
 } from './exam/view'
+

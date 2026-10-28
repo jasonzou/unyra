@@ -118,6 +118,8 @@ export interface StructureCanvasProps {
   onGenerateDoc?: (nodeUuid: string, hint?: string) => void
   /** 文档卡右键菜单的「生成前置知识大纲」 */
   onGenerateOutline?: (docUuid: string) => void
+  /** 视频卡点「生成总览」：交给 AI 根据选集生成总览文档并挂在视频节点子级 */
+  onGenerateVideoDoc?: (videoNodeUuid: string) => void
   onToast?: (msg: string) => void
   /** 外部指定的聚焦目标（chip 路由）：把镜头挪到 uuid 对得上的那张卡 */
   focusTarget?: { nodeId: string; nonce: number } | null
@@ -207,6 +209,7 @@ function KindIcon({ kind }: { kind: GNodeKind }) {
       </svg>
     )
   }
+  
   return (
     <svg {...common}>
       <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L13.663 8.5a2 2 0 0 0 1.401 1.398l6.135 1.581a.5.5 0 0 1 0 .964L13.5 14.063a2 2 0 0 0-1.4 1.402l-1.582 6.135a.5.5 0 0 1-.963 0z" />
@@ -328,6 +331,7 @@ export const StructureCanvas = memo(function StructureCanvas({
   onOpenVideo,
   onGenerateDoc,
   onGenerateOutline,
+  onGenerateVideoDoc,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -462,7 +466,7 @@ export const StructureCanvas = memo(function StructureCanvas({
     if (paletteKind) {
       const wants: GNodeKind[] =
         paletteKind === 'doc'
-          ? ['outline']
+          ? ['outline', 'video']
           : paletteKind === 'outline'
             ? ['doc', 'outline']
             : paletteKind === 'video'
@@ -473,7 +477,13 @@ export const StructureCanvas = memo(function StructureCanvas({
     const g = gestureRef.current
     if (g?.mode === 'link') {
       const wants: GNodeKind[] | null =
-        g.fromKind === 'outline' ? ['doc', 'outline'] : g.fromKind === 'doc' ? ['outline'] : null
+        g.fromKind === 'outline'
+          ? ['doc', 'outline']
+          : g.fromKind === 'video'
+            ? ['doc']
+            : g.fromKind === 'doc'
+              ? ['outline', 'video']
+              : null
       // 从大纲拉到大纲：自己那张不算落点（连自己没有意义）
       return wants
         ? new Set(cards.filter((c) => wants.includes(c.kind) && c.uuid !== g.from).map((c) => c.uuid))
@@ -1214,6 +1224,10 @@ export const StructureCanvas = memo(function StructureCanvas({
             const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
             // 从目标项圆点拖出来的线 = 认领那个口（与点目标项建文档同一口径）；反方向拖没有口可指
             tryConnect(outline, doc, fromCard?.kind === 'outline' ? g.slotKey : undefined)
+          } else if (isPair('video', 'doc')) {
+            const video = fromCard?.kind === 'video' ? g.from : target.uuid
+            const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
+            tryConnect(video, doc)
           } else if (isPair('outline', 'outline')) {
             /*
              * 大纲连大纲 = 落点的大纲之下再开一层（上层当分类、下层当指导）。
@@ -1317,8 +1331,8 @@ export const StructureCanvas = memo(function StructureCanvas({
           let under: string | null = null
           if (target) {
             if (g.kind === 'doc') {
-              // 文档只能挂进大纲之下（与发光的候选同一口径，见 candidateIds）
-              under = target.kind === 'outline' ? target.uuid : null
+              // 文档能挂进大纲之下，也能挂在视频节点之下（与发光的候选同一口径，见 candidateIds）
+              under = target.kind === 'outline' || target.kind === 'video' ? target.uuid : null
             } else if (g.kind === 'outline') {
               // 大纲拖到文档上 = 给它补一份大纲（附身，node.outline）
               under = target.kind === 'doc' ? target.uuid : null
@@ -1607,7 +1621,7 @@ export const StructureCanvas = memo(function StructureCanvas({
             width={edgeSize.width}
             height={edgeSize.height}
           >
-            {edges.map((edge) => {
+            {edges.map((edge, idx) => {
               const from = byId.get(edge.from)
               const to = byId.get(edge.to)
               if (!from || !to) return null
@@ -1626,7 +1640,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                 (hoverEdge?.from === edge.from && hoverEdge?.to === edge.to) || isSelected || glow
               const showDots = hoverEdge?.from === edge.from && hoverEdge?.to === edge.to
               return (
-                <g key={`${edge.from}>${edge.to}`}>
+                <g key={`${edge.from}>${edge.to}-${idx}`}>
                   <path
                     d={edgePathD(points, edgeStyle)}
                     fill="none"
@@ -1841,7 +1855,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                       if (docId) onGenerateOutline?.(docId)
                     }}
                   >
-                    {t('生成大纲')}
+                    {t('生成总览')}
                   </button>
                 </div>
               ) : card.kind === 'doc' && card.excerpt ? (
@@ -1887,12 +1901,28 @@ export const StructureCanvas = memo(function StructureCanvas({
                 </div>
               ) : card.kind === 'exam' && (card.attempts?.length ?? 0) > 0 ? (
                 /*
-                  试卷的考试记录：一行一次作答（与大纲目标项同一套行高与圆点节奏——
-                  高度由派生层的 examCardHeight 算，这里只管照着画）。
-                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素
-                  （见 onPointerDown 开头的 closest）的 click 会被吞掉。
+                  试卷的考试记录：一行一次作答，顶部配有「开始考试」按钮；
+                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素的 click 会被吞掉。
                 */
                 <div className="flex flex-col pb-2">
+                  <div className="flex items-center justify-between px-3 pb-1 pt-0.5 border-b border-line/40">
+                    <span className="text-[10px] text-ink-faint">{t('作答记录 ({0})', card.attempts!.length)}</span>
+                    <button
+                      type="button"
+                      title={t('开始考试（打开独立考试窗口）')}
+                      onClick={() => {
+                        const exam = store.exams.find((e) => e.id === card.uuid)
+                        if (exam && !nodeById(store, exam.nodeId)) {
+                          onToast?.(t('这份试卷还没绑到文档上：拖线连到某张文档卡之后就能开考'))
+                          return
+                        }
+                        if (exam) exams.onStart(exam.nodeId, exam.id)
+                      }}
+                      className="rounded bg-seal/15 px-2 py-0.5 text-[10.5px] font-semibold text-seal-deep hover:bg-seal/25 transition cursor-pointer"
+                    >
+                      {t('开始考试')}
+                    </button>
+                  </div>
                   {card.attempts!.map((row) => (
                     <button
                       key={row.n}
@@ -1910,29 +1940,63 @@ export const StructureCanvas = memo(function StructureCanvas({
                     </button>
                   ))}
                 </div>
-              ) : card.kind === 'video' ? (
+              ) : card.kind === 'exam' && !card.blank ? (
                 /*
-                  视频卡：副行显示绑定状态；「选择视频 / 换绑」打开下拉（现有视频列表 + 解绑）。
-                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素的 click 会被吞掉。
+                  有内容的试卷（还没有作答记录）：显示考试按钮
                 */
                 <div className="flex items-center justify-between gap-2 px-3 pb-2">
                   <span className="min-w-0 flex-1 truncate text-[11px] text-ink-soft">{card.subtitle}</span>
                   <button
                     type="button"
-                    title={t('从现有视频里挑一个绑到这个目标（打开它会一并打开这门课的页签组）')}
-                    className="shrink-0 bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
-                    onClick={(e) => {
-                      const r = e.currentTarget.getBoundingClientRect()
-                      setMenu({
-                        x: Math.min(r.right, window.innerWidth - 264),
-                        y: Math.min(r.bottom + 6, window.innerHeight - 200),
-                        uuid: card.uuid,
-                        mode: 'videoPick',
-                      })
+                    title={t('开始考试（打开独立考试窗口）')}
+                    className="shrink-0 rounded bg-seal/15 px-2.5 py-0.5 text-[11px] font-semibold text-seal-deep hover:bg-seal/25 transition cursor-pointer"
+                    onClick={() => {
+                      const exam = store.exams.find((e) => e.id === card.uuid)
+                      if (exam && !nodeById(store, exam.nodeId)) {
+                        onToast?.(t('这份试卷还没绑到文档上：拖线连到某张文档卡之后就能开考'))
+                        return
+                      }
+                      if (exam) exams.onStart(exam.nodeId, exam.id)
                     }}
                   >
-                    {card.blank ? t('选择视频') : t('换绑')}
+                    {t('开始考试')}
                   </button>
+                </div>
+              ) : card.kind === 'video' ? (
+                /*
+                  视频卡：副行显示绑定状态；绑定后显示「生成大纲」按钮；「选择视频 / 换绑」打开下拉。
+                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素的 click 会被吞掉。
+                */
+                <div className="flex items-center justify-between gap-2 px-3 pb-2">
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-ink-soft">{card.subtitle}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!card.blank && (
+                      <button
+                        type="button"
+                        title={t('为这个视频生成总览文档')}
+                        className="shrink-0 rounded bg-seal/15 px-2 py-0.5 text-[11px] font-medium text-seal-deep hover:bg-seal/25 transition cursor-pointer"
+                        onClick={() => onGenerateVideoDoc?.(card.uuid)}
+                      >
+                        {t('生成总览')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title={t('从现有视频里挑一个绑到这个目标（打开它会一并打开这门课的页签组）')}
+                      className="shrink-0 rounded bg-line/60 px-2 py-0.5 text-[11px] text-ink-soft hover:bg-line/90 transition cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        setMenu({
+                          x: Math.min(r.right, window.innerWidth - 264),
+                          y: Math.min(r.bottom + 6, window.innerHeight - 200),
+                          uuid: card.uuid,
+                          mode: 'videoPick',
+                        })
+                      }}
+                    >
+                      {card.blank ? t('选择视频') : t('换绑')}
+                    </button>
+                  </div>
                 </div>
               ) : (card.kind === 'exam' || card.kind === 'superdoc') && card.blank && leafOwnerNodeId ? (
                 /*
@@ -1965,7 +2029,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                 出线把手（右）只长在 doc 上：大纲的出线全走目标项的菱形口（从口上拖出去
                 才会认领），挂件与入口没有出线。
               */}
-              {card.kind === 'doc' && (
+              {(card.kind === 'doc' || card.kind === 'video') && (
                 <div
                   data-link-handle={card.uuid}
                   title={t('拖出去连到另一个节点')}
@@ -1973,9 +2037,8 @@ export const StructureCanvas = memo(function StructureCanvas({
                   style={{ top: EDGE_ANCHOR_Y }}
                 />
               )}
-              {/* 进线接口（左）：实心、不透明。入口不画——没有任何类型能把线连进入口；
-                  入口就是根文档自己（card.entry），它同样不该有进线点 */}
-              {card.kind !== 'entry' && !card.entry && (
+              {/* 进线接口（左）：实心、不透明。入口不画；视频卡为顶层资源无上游，不该有进线点 */}
+              {card.kind !== 'entry' && !card.entry && card.kind !== 'video' && (
                 <div
                   className="pointer-events-none absolute -left-[7.5px] h-3.5 w-3.5 -translate-y-1/2 rounded-full border-2 border-card bg-seal"
                   style={{ top: EDGE_ANCHOR_Y }}
@@ -2042,7 +2105,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               「这是一张卡」；连线照抄主画布的路径点。所有描边挂 non-scaling-stroke：
               粗细永远按屏幕像素算。
             */}
-            {edges.map((edge) => {
+            {edges.map((edge, idx) => {
               const from = byId.get(edge.from)
               const to = byId.get(edge.to)
               if (!from || !to) return null
@@ -2051,7 +2114,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               const accent = from.kind === 'outline' && to.kind === 'doc'
               return (
                 <path
-                  key={`${edge.from}>${edge.to}`}
+                  key={`${edge.from}>${edge.to}-${idx}`}
                   d={edgePathD(path, edgeStyle)}
                   fill="none"
                   stroke={accent ? SLOT_ACCENT : 'currentColor'}

@@ -72,10 +72,10 @@ function attemptRows(attempts: ExamAttempt[]): ExamAttemptRow[] {
   })
 }
 
-/** 试卷卡有多高：边框 + 标题行 + 每条考试记录一行 + 内边距（没有记录就是标准高度） */
+/** 试卷卡有多高：边框 + 标题行 + 头部考试按钮行 + 每条考试记录一行 + 内边距（没有记录就是标准高度） */
 export function examCardHeight(rows: number): number {
   if (!rows) return CARD_H
-  return Math.max(CARD_FRAME_H + OUTLINE_HEAD + rows * SLOT_ROW + CARD_PAD_B, CARD_H)
+  return Math.max(CARD_FRAME_H + OUTLINE_HEAD + (rows + 1) * SLOT_ROW + CARD_PAD_B, CARD_H)
 }
 
 /** 大纲卡有多高：边框 + 标题行 + 每条目标项一行 + 底部「＋ 添加目标项」一行 + 内边距 */
@@ -83,6 +83,8 @@ export function outlineCardHeight(count: number): number {
   if (!count) return CARD_H
   return Math.max(CARD_FRAME_H + OUTLINE_HEAD + (count + 1) * SLOT_ROW + CARD_PAD_B, CARD_H)
 }
+
+
 
 /* ---------- 卡片与目标项 ---------- */
 
@@ -107,8 +109,7 @@ export interface CardView {
   /** 空文档卡：正文还没有，卡片上给一颗「生成」 */
   blank?: boolean
   /** 用户贴在卡片上的便条（存进坐标表） */
-  note?: string
-  /** 大纲卡的目标项行（kind = outline 时才有） */
+  note?: string  /** 大纲卡的目标项行（kind = outline 时才有） */
   slots?: OutlineSlotView[]
   /** 这张文档卡是本图的入口（目标的根）——卡片上挂「入口」徽章；一张图有且只有一个 */
   entry?: boolean
@@ -203,6 +204,14 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
   }
 
   const edges: CanvasEdge[] = []
+  const edgeSeen = new Set<string>()
+  const pushEdge = (from: string, to: string): boolean => {
+    const k = `${from}>${to}`
+    if (edgeSeen.has(k)) return false
+    edgeSeen.add(k)
+    edges.push({ from, to })
+    return true
+  }
   const byUuid = new Map<string, Pending>()
 
   const add = (p: Pending): void => {
@@ -326,6 +335,27 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     add(p)
   }
 
+  const videoPending = new Map<string, Pending>()
+  for (const entity of store.videoNodes ?? []) {
+    if (entity.goalId !== goalId) continue
+    const video = entity.videoId ? (store.videos ?? []).find((v) => v.id === entity.videoId) : undefined
+    const p: Pending = {
+      card: {
+        uuid: entity.id,
+        kind: 'video',
+        title: video?.title ?? '未绑定视频',
+        subtitle: video ? (video.pluginName ?? '已绑定') : '选一个视频，把这门课和它绑在一起',
+        ...(video ? {} : { blank: true }),
+      },
+      depth: 1,
+      anchorY: 0,
+      next: [],
+      parent: null,
+    }
+    videoPending.set(entity.id, p)
+    add(p)
+  }
+
   /*
    * 树边（store.edges，两端是树成员 id）：画在成员卡之间——
    * - from 是文档 id：那份文档有大纲就以它的大纲卡为源（hub 翻译，交替链
@@ -341,22 +371,22 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
   }
   const fromCardOf = (from: string): Pending | undefined => {
     if (from.startsWith('o:')) return outlinePending.get(from)
-    return outlinePending.get(outlineUuid(from)) ?? docPending.get(from)
+    return outlinePending.get(outlineUuid(from)) ?? docPending.get(from) ?? videoPending.get(from)
   }
   for (const e of store.edges) {
     const fromCard = fromCardOf(e.from)
     const toCard = outlinePending.get(e.to) ?? docPending.get(e.to)
     if (!fromCard || !toCard) continue
+    if (!pushEdge(fromCard.card.uuid, toCard.card.uuid)) continue
     // 深度按成员算：父成员的卡 + 1（附身大纲那一对的「右侧」即大纲卡本身）
     toCard.depth = Math.max(toCard.depth, fromCard.depth + 1)
     toCard.parent ??= fromCard
-    fromCard.next.push(toCard)
+    if (!fromCard.next.includes(toCard)) fromCard.next.push(toCard)
     // 认领了接口的子级记下行号：自动铺排的顺序与锚点都按目标项来（见下面的排序与 place）
     if (fromCard.card.kind === 'outline') {
       const idx = fromCard.card.slots?.findIndex((s) => s.childId === toCard.card.uuid) ?? -1
       if (idx >= 0) toCard.slotAnchor = { parent: fromCard.card.uuid, index: idx }
     }
-    edges.push({ from: fromCard.card.uuid, to: toCard.card.uuid })
   }
 
   // 附身大纲与它的文档配成一对：归属边「文档 → 它的大纲」（交替链画法）；嵌套接入时反过来以大纲为入口
@@ -375,7 +405,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
       o.parent = doc
       doc.next.push(o)
     }
-    edges.push({ from: node.id, to: o.card.uuid })
+    pushEdge(node.id, o.card.uuid)
   }
 
   /*
@@ -412,7 +442,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
         parent: doc,
       }
       add(p)
-      edges.push({ from: node.id, to: note.id })
+      pushEdge(node.id, note.id)
       doc.next.push(p)
     }
     for (const exam of examsOfNode(store, node.id)) {
@@ -432,7 +462,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
         parent: doc,
       }
       add(p)
-      edges.push({ from: node.id, to: exam.id })
+      pushEdge(node.id, exam.id)
       doc.next.push(p)
     }
     for (const sdoc of superDocsOf(node)) {
@@ -450,7 +480,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
         parent: doc,
       }
       add(p)
-      edges.push({ from: node.id, to: sdoc.id })
+      pushEdge(node.id, sdoc.id)
       doc.next.push(p)
     }
   }
@@ -504,28 +534,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     })
   }
 
-  /*
-   * 视频节点（目标 × 视频的绑定，游离实体）：标题跟绑的视频走（空节点给占位名 +
-   * 虚线框），卡上的「选择视频」在组件里——它要读 store.videos 与统一通道。
-   * 没有树边、没有归属线：绑定本身就是这张卡的全部意义。
-   */
-  for (const entity of store.videoNodes ?? []) {
-    if (entity.goalId !== goalId) continue
-    const video = entity.videoId ? (store.videos ?? []).find((v) => v.id === entity.videoId) : undefined
-    add({
-      card: {
-        uuid: entity.id,
-        kind: 'video',
-        title: video?.title ?? '未绑定视频',
-        subtitle: video ? (video.pluginName ?? '已绑定') : '选一个视频，把这门课和它绑在一起',
-        ...(video ? {} : { blank: true }),
-      },
-      depth: 2,
-      anchorY: 0,
-      next: [],
-      parent: null,
-    })
-  }
+  
 
   /* 2. 高度（内容算出来的） */
 

@@ -195,9 +195,10 @@ export class OutlineGNode extends GNode {
     }
     this.ctx.commit(r.store)
     const claimed = portKey ? '，认领了目标项「' + (this.ports.find((p) => p.key === portKey)?.label ?? portKey) + '」' : ''
-    return down.kind === 'outline'
-      ? { ok: true, note: '已在「' + this.title + '」之下开了新的一层「' + down.title + '」' + claimed + '；那层的目标项由它自己列' }
-      : { ok: true, note: '已把文档「' + down.title + '」挂到「' + this.title + '」之下' + claimed }
+    if (down.kind === 'outline') {
+      return { ok: true, note: '已在「' + this.title + '」之下开了新的一层「' + down.title + '」' + claimed + '；那层的目标项由它自己列' }
+    }
+    return { ok: true, note: '已把文档「' + down.title + '」挂到「' + this.title + '」之下' + claimed }
   }
 
   protected unlink(target: GNode): NodeResult {

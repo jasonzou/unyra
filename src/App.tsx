@@ -8,6 +8,7 @@ import UserDialog from './components/user/UserDialog'
 import LoginPage from './components/user/LoginPage'
 import UpdateDialog from './components/update/UpdateDialog'
 import NoticeDialog from './components/notice/NoticeDialog'
+import LanConnectDialog from './components/lan/LanConnectDialog'
 import { bootstrapNotice, startNoticePolling } from './lib/notice'
 import { startupMark } from './lib/startupTrace'
 import { userRepo } from './user/api'
@@ -54,6 +55,8 @@ export default function App({ boot }: Props) {
    * 内容与失败原因都在 lib/notice 的快照里（见 components/notice/NoticeDialog）。
    */
   const [noticeOpen, setNoticeOpen] = useState(false)
+  /** 局域网互联弹窗（手机扫码直连与文件互传） */
+  const [lanOpen, setLanOpen] = useState(false)
   const [toast, setToast] = useState<ToastData | null>(null)
   const [users, setUsers] = useState<User[]>(boot.users)
   const [activeUserId, setActiveUserId] = useState<string | null>(boot.session?.userId ?? null)
@@ -249,6 +252,7 @@ export default function App({ boot }: Props) {
         {closeAsk && <CloseDialog onDecide={handleCloseDecision} />}
         {/* 公告在登录页也挂着：应用级的消息（新版发布、服务调整）与登没登录无关 */}
         {noticeOpen && <NoticeDialog onClose={() => setNoticeOpen(false)} />}
+      {lanOpen && <LanConnectDialog open={lanOpen} onClose={() => setLanOpen(false)} onToast={showToast} />}
         <Toast toast={toast} onHide={() => setToast(null)} />
         <KeyCast />
       </div>
@@ -268,9 +272,11 @@ export default function App({ boot }: Props) {
         onToast={showToast}
         onOpenUpdate={() => setUpdateOpen(true)}
         onOpenNotice={() => setNoticeOpen(true)}
+        onOpenLan={() => setLanOpen(true)}
       />
       {updateOpen && <UpdateDialog onClose={() => setUpdateOpen(false)} />}
       {noticeOpen && <NoticeDialog onClose={() => setNoticeOpen(false)} />}
+      {lanOpen && <LanConnectDialog open={lanOpen} onClose={() => setLanOpen(false)} onToast={showToast} />}
       {userOpen && activeUserRecord && (
         <UserDialog
           users={users}

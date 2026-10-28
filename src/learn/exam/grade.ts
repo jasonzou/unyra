@@ -5,7 +5,11 @@ import type { Exam, ExamAnswer, ExamAttempt, ExamQuestion, ExamResultItem } from
 /** 某题答没答（留空与「答了但答错」是两回事） */
 export function hasAnswerValue(answer: ExamAnswer | undefined): boolean {
   if (!answer) return false
-  return (answer.text ?? '').trim() !== '' || answer.value.length > 0
+  return (
+    (answer.text ?? '').trim() !== '' ||
+    answer.value.length > 0 ||
+    Boolean(answer.image && answer.image.trim())
+  )
 }
 
 export function unansweredCount(exam: Exam, attempt: ExamAttempt): number {

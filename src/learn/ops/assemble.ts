@@ -26,6 +26,7 @@ import { createAttentionOps, createCompactOps, createFocusOps, createReadingOps 
 import { createWorkspaceOps } from './workspace'
 import { createChipOps } from './chip'
 import { createScheduleOps } from '../schedule'
+import { createVideoOps } from './video'
 
 /**
  * 排版提醒（layoutHintOf，见 agent/docFormat）：挂在整篇写入教学文档的回执上——
@@ -176,6 +177,7 @@ export function createAgentOps(deps: AgentOpsDeps): AgentOps {
     compact: createCompactOps(deps),
     // 引用 chip：生成与交付前自查——build 当场对 store 验证可定位（见 learn/ops/chip）
     chip: createChipOps(deps),
+    video: createVideoOps(deps),
     // 读网页：实现整个由界面层给（见 learn/webDocs），这里只接线
     ...(deps.web ? { web: deps.web } : {}),
     // 看图（顶层 api.see）：实现由界面层给（见 learn/see），这里只接线

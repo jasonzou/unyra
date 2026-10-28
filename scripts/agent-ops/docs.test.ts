@@ -301,6 +301,9 @@ export async function apiNameTests() {
     'skill.run': "'test-skill', 'test.js'",
     'skill.write': "{ id: 'test-skill', name: '测试' }",
     'skill.delete': "'test-skill'",
+    // 视频资源与选集信息
+    'video.list': '',
+    'video.get': "'v-probe'",
     // 路径放行（导师专用）：宿主给真实现（makePermissionOps + 专用桩 ask 总是选「放行」）——
     // Node 探针里设置只在内存（uid 为空，writeUserSettings 不落盘）
     'permission.list': '',
@@ -322,6 +325,9 @@ export async function apiNameTests() {
     'tmp.clear': '',
     'exam.read': "''",
     'exam.grade': '{ passed: true }',
+    'exam.rotateSheet': '{ sheetIndex: 0, degrees: 90 }',
+    'exam.previewCrop': "{ questionId: 'q1', box: [100, 50, 450, 950] }",
+    'exam.cropAnswer': "{ questionId: 'q1', box: [100, 50, 450, 950] }",
     'exam.explain': "{ content: '探针讲解' }",
     'exam.delete': '{}',
     'res.list': '',
@@ -413,6 +419,9 @@ export async function apiNameTests() {
       explain: () => ({ ok: true, content: '（桩）' }),
       read: () => ({ ok: true, content: '（桩）' }),
       grade: () => ({ ok: true, content: '（桩）' }),
+      rotateSheet: () => ({ ok: true, content: '（桩）' }),
+      previewCrop: () => ({ ok: true, content: '（桩）' }),
+      cropAnswer: () => ({ ok: true, content: '（桩）' }),
       remove: () => ({ ok: true, content: '（桩）' }),
     },
   })

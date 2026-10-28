@@ -90,21 +90,53 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
     const videos = normalizeVideos(d.videos)
     const videoIds = new Set(videos.map((v) => v.id))
     const videoNodes = normalizeVideoNodes(d.videoNodes, goalIds, videoIds)
+    const videoNodeIds = new Set(videoNodes.map((v) => v.id))
 
     const rawEdges: unknown[] = Array.isArray(d.edges) ? d.edges : []
     const edges: DependencyEdge[] = []
+    const edgeSeen = new Set<string>()
     for (const rawEdge of rawEdges) {
       if (!rawEdge || typeof rawEdge !== 'object') continue
       const r = rawEdge as Record<string, unknown>
       const from = typeof r.from === 'string' ? r.from : ''
       // 旧格式的 toOutline 标记迁到拼法上：接大纲卡的边 to = o:{文档id}（分类链）
       const to = r.toOutline === true && typeof r.to === 'string' && !r.to.startsWith('o:') ? 'o:' + r.to : typeof r.to === 'string' ? r.to : ''
-      // 树成员校验：文档 id 在节点表里；o: 前缀解开后是节点 id（附身大纲）或游离实体 id
+      // 树成员校验：文档 id 在节点表里；o: 前缀解开后是节点 id（附身大纲）或游离实体 id；res: 前缀解开后是资源归纳实体 id
       const memberOk = (m: string): boolean =>
-        !!m && (ids.has(m) || (!!m.startsWith('o:') && (ids.has(m.slice(2)) || freeIds.has(m.slice(2)))))
+        !!m && (
+          ids.has(m) ||
+          videoNodeIds.has(m) ||
+          (m.startsWith('o:') && (ids.has(m.slice(2)) || freeIds.has(m.slice(2))))
+        )
       if (!from || !to || from === to || !memberOk(from) || !memberOk(to)) continue
+      const edgeKey = `${from}>${to}`
+      if (edgeSeen.has(edgeKey)) continue
+      edgeSeen.add(edgeKey)
       const portKey = typeof r.portKey === 'string' && r.portKey ? r.portKey : undefined
       edges.push({ from, to, createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(), ...(portKey ? { portKey } : {}) })
+    }
+
+    // 自动修补：若文档正文中包含 ```videos 代码块且当前没有上游连线，自动恢复其到对应视频节点的连线
+    for (const node of nodes) {
+      if (!node.docs?.teaching?.includes('```videos')) continue
+      const hasUpstream = edges.some((e) => e.to === node.id)
+      if (hasUpstream) continue
+      const vMatch = /```videos\s*[\r\n]+([^\r\n]+)/.exec(node.docs.teaching)
+      let targetVNodeId = vMatch ? vMatch[1].trim().replace(/^\{\{\s*|\s*\}\}$/g, '').replace(/^(?:uuid|videoNodeUUID)\s*[:：]\s*/i, '').trim() : ''
+      if (targetVNodeId.toLowerCase() === 'videonodeuuid') targetVNodeId = ''
+
+      let matchedVNode = targetVNodeId ? videoNodes.find((vn) => vn.id === targetVNodeId || vn.videoId === targetVNodeId) : undefined
+      if (!matchedVNode && node.goalId) {
+        const goalVNodes = videoNodes.filter((vn) => vn.goalId === node.goalId)
+        if (goalVNodes.length === 1) matchedVNode = goalVNodes[0]
+      }
+      if (matchedVNode) {
+        const edgeKey = `${matchedVNode.id}>${node.id}`
+        if (!edgeSeen.has(edgeKey)) {
+          edgeSeen.add(edgeKey)
+          edges.push({ from: matchedVNode.id, to: node.id, createdAt: Date.now() })
+        }
+      }
     }
 
     // 无归属的节点（旧数据）挂到第一个目标上，避免丢失
@@ -325,6 +357,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       ...(videos.length ? { videos } : {}),
       // 视频节点（目标 × 视频的绑定）：目标没了的行丢掉、指向不存在视频的绑定摘掉
       ...(videoNodes.length ? { videoNodes } : {}),
+      // 资源归纳节点（终端实体）：目标没了的行丢掉
       /*
        * 结构图（见 learn/structure）：按目标存的节点表与连线。逐张过一遍——
        * 坏坐标、认不出的类型、违规的边都在 normalizeStructure 里丢掉，

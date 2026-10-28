@@ -186,9 +186,13 @@ export const PROMPT_MODULES: PromptModule[] = [
 - 收尾：对话里告诉用户试卷已生成并列出名称与题量，请用户开始作答。
 
 四、「阅卷」流程（「阅卷」工作流的执行规程；一次 execute 连着做完，不分两轮）
-- 第零步：await api.exam.__help() 把 grade / explain 的参数查清楚再动手。
+- 第零步：await api.exam.__help() 把 grade / rotateSheet / previewCrop / cropAnswer / explain 的参数查清楚再动手。
 - 读卷：api.exam.read() 读当前节点的试卷与 attempts（给了「作答记录」attemptId 就读那一次，否则取最新）。**用户的 answers / inputs / dwell / blurs 是客观事实，严禁修改篡改任何字符**。
-- 判分：客观题对照参考答案、填空与简答依据 rubric，**一条 api.exam.grade({ attemptId, passed, summary, results }) 落账**（results = [{ questionId, correct, score, maxScore, comment, by: "agent" }]）。不要手写数据文件。
+- 手写答卷方向转正与裁切贴题（若 attempt 中包含手写照片 handwrittenImages 或 answers[].image）：
+  ① **方向转正**：若用户拍摄角度横置或颠倒，**必须先调用 api.exam.rotateSheet({ sheetIndex: 0, degrees: 90 })** 将其顺时针旋转转正！转正后你将直接在下一跳收到正向图片；
+  ② **红框防截断预检**：为防止裁切偏差或文字被边缘截断，正式裁切前**必须先调用 api.exam.previewCrop({ questionId, box: [ymin, xmin, ymax, xmax], sourceImage: 0 })** 在图像上标出醒目红框。仔细审查返回的红框预检图：确保完整框入该题解答，且未截断公式、未包含邻题。若不理想，微调坐标再次 previewCrop 审查；
+  ③ **正式裁切贴题**：确认预检红框无误后，调用 **api.exam.cropAnswer({ questionId, box: [ymin, xmin, ymax, xmax], sourceImage: 0 })** 将各题手写区域正式裁切并贴在试卷对应题目上。
+- 判分：若有手写答卷，客观题与主观题均以手写内容为准由你亲自判阅，严禁机械判分；并将识别到的选项/手写文字填入 userAnswer，**一条 api.exam.grade({ attemptId, passed, summary, results }) 落账**（results = [{ questionId, correct, score, maxScore, comment, userAnswer, by: "agent" }]）。不要手写数据文件。
 - 讲解：api.exam.explain({ content, attemptId }) 写详尽的步骤推导解析（Markdown），它自动打开试卷副本。
 - 收尾：const n = await api.node.get(目标节点uuid)；const c = await n.content; c.status = passed ? "mastered" : "learning"; await n.editContent(c) 修正掌握状态；高频薄弱错法用 api.state.mistake(目标节点uuid, { pattern, cause }) 记进错误记忆。
 - 指令给了「目标节点」就只动它；**没给**就 api.node.list() 凭上下文判断（判断不了 api.ask）。`,
@@ -332,6 +336,59 @@ const root = await api.node.get(根uuid)；const c = await root.content。c.titl
 **目标是游离大纲**（uuid 带 o: 前缀、api.node.get 后 help() 会说明没有宿主文档）——它是挂在别的大纲之下的分类层：先 await 它.getPortData() 读它认领的那条目标项（上级交给它的任务就是这一层的定位），再看它的上游（relations 里的 up）拿上级大纲乃至宿主文档的上下文，然后规划这一层的目标项：一般 3~6 条、彼此错开不重叠、合起来恰好覆盖它认领的那条目标项。写法不变：对它 editContent({ intro, children }) 整份写入。
 
 边界：只负责计划——目标项长成文档是「生成文档」流程在画布上做的事，本轮产出里没有新节点；写完在对话里用两三句说清定了哪几条、为什么。指令给了「目标节点」就只写它；没给就 api.node.list() 凭上下文判断，判断不了 api.ask。`,
+  },
+  {
+    key: 'video-overview',
+    title: '视频总览生成',
+    text: `「视频总览」工作流——为绑定的视频资源规划语义分类结构并生成总览文档：
+
+一、判断选集与终止条件（核心铁律）
+1. 第一步必须调用 const info = await api.video.get(videoId) 获取视频详情与选集（episodes）信息。
+2. 判断视频是否有选集：
+   - 若 !info.hasEpisodes 或 info.episodeCount <= 1（视频没有分 P 或合集选集）：
+     **必须立即停止工作流**，严禁创建任何文档或节点，直接在对话中回复告知用户：“此视频无法生成总览文档”（说明该视频为单集内容，无分 P 或合集选集，无法按选集拆解生成总览分类）。
+3. 若视频有选集（info.hasEpisodes 为 true 且选集数量 > 1）：
+   - 获取所有选集的标题与序号（如 P1, P2... 或 01, 02... 序号 + 标题），根据标题语义分析知识体系脉络。
+
+二、总览文档创建与层级挂载（必须挂在视频节点子级）
+- 总览文档类型与普通文档节点完全相同（kind: 'doc'）。
+- **必须挂在视频节点之下作为子节点**（under 传入视频节点的 UUID，即工作流参数里的 target）：
+  \`\`\`javascript
+  const doc = await api.node.create({
+    kind: 'doc',
+    title: info.title + ' · 视频总览',
+    under: target, // 视频节点的 UUID，让总览文档直接作为视频节点的子级
+  })
+  \`\`\`
+  注意：under: target 会自动为文档节点与视频节点建立父子连线。若总览文档此前已存在，create 也会自动补全这根连线。
+
+三、内容分类与标题层级规范（标题最少一层，最多三层）
+根据对视频标题语义的归纳分类来编排正文结构：
+- **标题层级最少一层，最多三层（即只使用 #、##、###；严禁使用 #### 及以上四级或更深标题）**，由你对视频标题语义的分类范围来决定具体需要几层：
+  例如单层分类：
+  # Java 基础入门
+  
+  两层分类：
+  # Java 基础入门
+  ## 第一阶段 基础语法
+  
+  三层分类：
+  # Java 基础入门
+  ## 第一阶段 核心入门
+  ### 导学与环境搭建
+- 每个小节主题分类下方插入 \`\`\`videos\`\`\` 代码块组件，将对应的视频选集链路展示出来：
+  \`\`\`videos
+  {{videoNodeUUID}}
+  {{ range }}
+  \`\`\`
+  - 第一行必须是视频节点的 UUID（直接写目标视频节点实际的 uuid 字符串，即 target 参数）；
+  - 第二行是展示视频的选集范围，例如：1-20, 23, 29-30（单集写数字，区间用横杠连接，多个区间用逗号隔开）。
+
+四、写入总览文档正文
+通过 api.node.get(doc.uuid) 获取创建的文档节点，使用 editContent({ teaching }) 写入完整的总览文档内容。确保所有选集序号范围都被合理归纳，没有遗漏。
+
+五、收尾
+在对话框中向用户清晰汇报生成的视频总览文档大纲结构与选集分类分布。`,
   },
   {
     key: 'learning-process',

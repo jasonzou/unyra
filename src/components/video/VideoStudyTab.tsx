@@ -307,9 +307,11 @@ export default function VideoStudyTab({ video = null, onCreate, onResolved, onPr
   const autoResolvedRef = useRef<string | null>(null)
   useEffect(() => {
     if (!video) return
-    if (autoResolvedRef.current === video.id) return
-    autoResolvedRef.current = video.id
-    void runResolve(video.selection?.source ?? video.input, video.fields)
+    const targetSource = video.selection?.source ?? video.input
+    const key = `${video.id}::${targetSource}`
+    if (autoResolvedRef.current === key) return
+    autoResolvedRef.current = key
+    void runResolve(targetSource, video.fields)
   }, [video, runResolve])
 
   /**

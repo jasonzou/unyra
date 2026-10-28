@@ -561,6 +561,34 @@ export interface ExamOpenResult {
  *  preload 的 examHost.onClosed，渲染层 src/learn/useExamBridge.ts。 */
 export type ExamCloseReason = 'host' | 'quit' | 'closed'
 
+export type CropBoxInput =
+  | [number, number, number, number]
+  | { x: number; y: number; width: number; height: number }
+  | { ymin: number; xmin: number; ymax: number; xmax: number }
+
+export interface CropImageResult {
+  ok: boolean
+  croppedPath?: string
+  dataUrl?: string
+  error?: string
+}
+
+export interface PreviewCropResult {
+  ok: boolean
+  previewPath?: string
+  dataUrl?: string
+  rect?: { x: number; y: number; width: number; height: number }
+  box?: [number, number, number, number]
+  error?: string
+}
+
+export interface RotateImageResult {
+  ok: boolean
+  rotatedPath?: string
+  dataUrl?: string
+  error?: string
+}
+
 /* ---------- 附件 / 抓网页 ---------- */
 
 /**
@@ -864,3 +892,7 @@ export type VideoApiFetchResult =
 export type VideoStreamOpenResult =
   | { ok: true; relayUrl: string }
   | { ok: false; error: string }
+
+/* ---------- 局域网互联与文件传输服务 ---------- */
+export * from './lan'
+

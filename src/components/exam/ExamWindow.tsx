@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Award,
+  Camera,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -13,6 +14,10 @@ import {
   Timer,
   X,
 } from 'lucide-react'
+import LanButton from '../lan/LanButton'
+import LanConnectDialog from '../lan/LanConnectDialog'
+import ImageLightboxModal from './ImageLightboxModal'
+import UnifiedHandwrittenSheetsCard from './UnifiedHandwrittenSheetsCard'
 import { native } from '../../lib/native'
 import { renderInline } from '../../lib/markdown'
 import Switch from '../Switch'
@@ -50,9 +55,11 @@ const EMPTY_QUESTIONS: ExamQuestion[] = []
 interface Draft {
   value: string[]
   text: string
+  image?: string
+  rawImage?: string
 }
 
-const emptyDraft: Draft = { value: [], text: '' }
+const emptyDraft: Draft = { value: [], text: '', image: undefined, rawImage: undefined }
 
 const TYPE_THEMES: Record<string, { cls: string }> = {
   single: { cls: 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300' },
@@ -78,6 +85,10 @@ export default function ExamWindow() {
   const [confirm, setConfirm] = useState<null | 'submit' | 'abandon'>(null)
   const [localStart, setLocalStart] = useState<number | null>(null)
   const [stripOpen, setStripOpen] = useState(false)
+  const [lanOpen, setLanOpen] = useState(false)
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [handwrittenImages, setHandwrittenImages] = useState<string[]>([])
+  const sheetsRef = useRef<HTMLDivElement | null>(null)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const itemRefs = useRef(new Map<string, HTMLDivElement>())
@@ -103,10 +114,13 @@ export default function ExamWindow() {
       if (!next || typeof next !== 'object') return
       setState(next)
       if (next.phase === 'running' && next.attempt) {
+        if (Array.isArray(next.attempt.handwrittenImages)) {
+          setHandwrittenImages(next.attempt.handwrittenImages)
+        }
         setAnswers((prev) => {
           if (Object.keys(prev).length) return prev
           const out: Record<string, Draft> = {}
-          for (const a of next.attempt!.answers) out[a.questionId] = { value: a.value ?? [], text: a.text ?? '' }
+          for (const a of next.attempt!.answers) out[a.questionId] = { value: a.value ?? [], text: a.text ?? '', image: a.image, rawImage: a.rawImage }
           return out
         })
       }
@@ -199,6 +213,8 @@ export default function ExamWindow() {
         questionId: q.id,
         value: next.value,
         ...(next.text ? { text: next.text } : {}),
+        ...(next.image ? { image: next.image } : {}),
+        ...(next.rawImage ? { rawImage: next.rawImage } : {}),
         at: Date.now(),
       })
       if (!advance) return
@@ -209,6 +225,36 @@ export default function ExamWindow() {
     },
     [answers, guest, questions, gotoQuestion],
   )
+
+  const addHandwrittenImage = useCallback((img: string) => {
+    setHandwrittenImages((prev) => {
+      if (prev.includes(img)) return prev
+      const next = [...prev, img]
+      guest?.emit({ type: 'setHandwritten', images: next })
+      return next
+    })
+  }, [guest])
+
+  const removeHandwrittenImage = useCallback((indexToRemove: number) => {
+    setHandwrittenImages((prev) => {
+      const next = prev.filter((_, i) => i !== indexToRemove)
+      guest?.emit({ type: 'setHandwritten', images: next })
+      return next
+    })
+  }, [guest])
+
+  const updateHandwrittenImage = useCallback((indexToUpdate: number, newImg: string) => {
+    setHandwrittenImages((prev) => {
+      const next = prev.map((img, i) => (i === indexToUpdate ? newImg : img))
+      guest?.emit({ type: 'setHandwritten', images: next })
+      return next
+    })
+  }, [guest])
+
+  const handleRequestSubmit = useCallback(() => {
+    if (submittedRef.current) return
+    setConfirm('submit')
+  }, [])
 
   const submit = useCallback(
     (kind: 'submit' | 'abandon') => {
@@ -351,6 +397,26 @@ export default function ExamWindow() {
         <div className="flex shrink-0 items-center gap-1.5">
           {running && (
             <>
+              <button
+                type="button"
+                onClick={() => sheetsRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                className={
+                  'flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] transition cursor-pointer ' +
+                  (handwrittenImages.length > 0
+                    ? 'border-seal/40 bg-seal/10 text-seal-deep font-semibold'
+                    : 'border-dashed border-line text-ink-soft hover:border-line-strong hover:text-ink')
+                }
+                title={t('统一上传手写答卷照片')}
+              >
+                <Camera size={12} className={handwrittenImages.length > 0 ? 'text-seal' : ''} />
+                <span>{t('手写答卷')}</span>
+                {handwrittenImages.length > 0 && (
+                  <span className="rounded-full bg-seal px-1.5 py-px text-[10px] text-white font-bold tabular-nums">
+                    {handwrittenImages.length}
+                  </span>
+                )}
+              </button>
+              <LanButton onOpen={() => setLanOpen(true)} />
               <div className="flex items-center gap-1 rounded border border-line bg-paper/60 px-2 py-0.5 text-[11px] tabular-nums text-ink-soft">
                 <span>{t('已答 {0}/{1}', answeredCount, questions.length)}</span>
                 <span className="text-[10px] text-ink-faint">({answeredPercent}%)</span>
@@ -364,8 +430,8 @@ export default function ExamWindow() {
               </button>
               <button
                 type="button"
-                onClick={() => setConfirm('submit')}
-                className="flex items-center gap-1 rounded bg-seal px-3 py-1 text-[11.5px] font-semibold text-paper shadow-2xs hover:bg-seal-deep transition active:scale-[0.98]"
+                onClick={handleRequestSubmit}
+                className="flex items-center gap-1 rounded bg-seal px-3 py-1 text-[11.5px] font-semibold text-paper shadow-2xs hover:bg-seal-deep transition active:scale-[0.98] cursor-pointer"
               >
                 <Flag size={11} />
                 <span>{t('交卷')}</span>
@@ -416,6 +482,15 @@ export default function ExamWindow() {
             style={{ padding: `${PAD_TOP}px ${PAD_X}px ${PAD_BOTTOM}px` }}
           >
             <div className="mx-auto flex w-full flex-col gap-4" style={{ maxWidth: PAPER_MAX_W }}>
+              <UnifiedHandwrittenSheetsCard
+                ref={sheetsRef}
+                images={handwrittenImages}
+                onAddImage={addHandwrittenImage}
+                onUpdateImage={updateHandwrittenImage}
+                onRemoveImage={removeHandwrittenImage}
+                onPreviewImage={setPreviewImage}
+                onOpenLan={() => setLanOpen(true)}
+              />
               {questions.map((q, i) => (
                 <QuestionBlock
                   key={q.id}
@@ -512,6 +587,13 @@ export default function ExamWindow() {
       )}
 
       {/* 确认弹窗 */}
+      <LanConnectDialog open={lanOpen} onClose={() => setLanOpen(false)} />
+      <ImageLightboxModal
+        src={previewImage}
+        title={t('手写答卷原图预览')}
+        onClose={() => setPreviewImage(null)}
+      />
+
       {confirm && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
           <div className="moji-dialog-in w-[380px] rounded-xl border border-line-strong bg-card p-4 shadow-xl">
@@ -533,7 +615,17 @@ export default function ExamWindow() {
               {confirm === 'submit' ? (
                 <>
                   <p>{t('交卷后导师会判分并写错题讲解。')}</p>
-                  {answeredCount < questions.length ? (
+                  {handwrittenImages.length > 0 ? (
+                    <div className="mt-2 flex items-start gap-1.5 rounded border border-seal/30 bg-seal/10 p-2 text-seal-deep text-[11.5px]">
+                      <Camera size={13} className="mt-0.5 shrink-0 text-seal" />
+                      <span>
+                        {t(
+                          '已上传 {0} 份手写答卷照片。导师将根据手写内容审阅判分并裁切贴题，请自行检查确认作答完整。',
+                          handwrittenImages.length,
+                        )}
+                      </span>
+                    </div>
+                  ) : answeredCount < questions.length ? (
                     <div className="mt-2 flex items-start gap-1.5 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-amber-800 dark:text-amber-300 text-[11.5px]">
                       <AlertTriangle size={13} className="mt-0.5 shrink-0" />
                       <span>{t('还有 {0} 题没作答，它们会记 0 分。', questions.length - answeredCount)}</span>
@@ -580,6 +672,7 @@ export default function ExamWindow() {
 
 function isBlank(q: ExamQuestion, draft: Draft | undefined): boolean {
   if (!draft) return true
+  if (draft.image) return false
   if (q.type === 'fill' || q.type === 'short') return !draft.text.trim()
   return draft.value.length === 0
 }
@@ -725,11 +818,11 @@ function QuestionBlock({
 
   const toggle = (id: string): void => {
     if (question.type === 'single' || question.type === 'truefalse') {
-      onChange({ value: [id], text: '' }, true)
+      onChange({ ...draft, value: [id], text: '' }, true)
       return
     }
     const has = draft.value.includes(id)
-    onChange({ value: has ? draft.value.filter((x) => x !== id) : [...draft.value, id], text: '' }, false)
+    onChange({ ...draft, value: has ? draft.value.filter((x) => x !== id) : [...draft.value, id], text: '' }, false)
   }
 
   const isDone = !isBlank(question, draft)
@@ -738,13 +831,6 @@ function QuestionBlock({
   }
 
   return (
-    /*
-      `relative` 不是装饰：对错题的 radio 用了 sr-only（绝对定位），题卡若不定为
-      定位祖先，它们的包含块会一路找到下面那个 `relative` 的答题栏容器——于是
-      输入框停在题目流的「原始位置」不随滚动移动，把页面撑高几千像素；点选项聚焦到
-      它时浏览器又把整页滚过去，卷面被顶上去、底下空一大块（已复现）。
-      所以题卡必须是定位元素，任何绝对定位的零件都留在题卡里。
-    */
     <div
       ref={register}
       className={
@@ -795,13 +881,13 @@ function QuestionBlock({
         <div className="my-2.5 flex justify-center rounded border border-line/60 bg-paper/30 p-2.5 moji-exam-figure" dangerouslySetInnerHTML={{ __html: question.image }} />
       )}
 
-      {/* 作答区：高空间利用率，无臃肿大卡片 */}
+      {/* 作答区 */}
       {question.type === 'fill' ? (
         <div className="mt-3">
           <input
             value={draft.text}
-            onChange={(e) => onChange({ value: [], text: e.target.value })}
-            placeholder={t('在这里填写答案')}
+            onChange={(e) => onChange({ ...draft, value: [], text: e.target.value })}
+            placeholder={t('在这里填写答案（手写在答卷上的可在顶部统一拍照上传）')}
             spellCheck={false}
             className="w-full rounded border border-line bg-paper/40 px-3 py-1.5 text-[13px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/60 focus:bg-card focus:ring-1 focus:ring-seal/15"
           />
@@ -810,9 +896,9 @@ function QuestionBlock({
         <div className="mt-3">
           <textarea
             value={draft.text}
-            onChange={(e) => onChange({ value: [], text: e.target.value })}
+            onChange={(e) => onChange({ ...draft, value: [], text: e.target.value })}
             rows={3}
-            placeholder={t('在这里作答（可写推导过程）')}
+            placeholder={t('在这里作答（手写在答卷上的可在顶部统一拍照上传）')}
             spellCheck={false}
             className="w-full resize-y rounded border border-line bg-paper/40 px-3 py-1.5 text-[13px] leading-relaxed text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/60 focus:bg-card focus:ring-1 focus:ring-seal/15"
           />

@@ -44,6 +44,8 @@ import { registerIpc } from './app/ipc'
 import { installLocalFileCsp } from './app/exportPdf'
 import { cleanupAllProcesses, registerBaseIpc } from './base/ipc'
 import { cleanupAllMcpSessions, registerMcpIpc } from './mcp/ipc'
+import { registerLanIpc } from './lan/ipc'
+import { lanServer } from './lan/server'
 
 /* ---------- 启动追踪 ---------- */
 
@@ -91,6 +93,8 @@ function main(): void {
   registerVideoIpc()
   // 外部 MCP 服务的本地进程会话（stdio 传输，见 electron/mcp）：同样是「随时可能来问」
   registerMcpIpc()
+  // 局域网互联服务器与移动端文件传输（扫码直连与意图请求）
+  registerLanIpc()
   lap('main:ipc')
 
   /*
@@ -158,6 +162,7 @@ function main(): void {
   })
 
   app.on('window-all-closed', () => {
+    void lanServer.stop()
     cleanupAllProcesses()
     cleanupAllMcpSessions()
     if (process.platform !== 'darwin') app.quit()
@@ -165,6 +170,7 @@ function main(): void {
   // 真的在退出（托盘菜单、系统关机、或策略就是「直接关闭」）：
   // 放开关窗拦截，否则窗口会被自己拦下来，程序退不掉
   app.on('before-quit', () => {
+    void lanServer.stop()
     cleanupAllProcesses()
     cleanupAllMcpSessions()
     markQuitting()

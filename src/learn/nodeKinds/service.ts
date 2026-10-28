@@ -218,13 +218,17 @@ export class NodeService {
      */
     const underRaw = typeof input.under === 'string' ? input.under.trim() : ''
     const outlineUnder = underRaw.startsWith('o:') ? outlineByMember(store, underRaw) : null
+    const videoUnder = (store.videoNodes ?? []).find((v) => v.id === underRaw)
     if (underRaw.startsWith('o:') && !outlineUnder) {
       return { error: 'under 里的大纲（' + underRaw + '）已经不在了：先 api.node.list() 查清楚再建' }
+    }
+    if (videoUnder && kind !== 'doc') {
+      return { error: '视频节点下只能挂文档（如视频总览文档）' }
     }
     if (outlineUnder?.kind === 'free' && (kind === 'note' || kind === 'superdoc' || kind === 'exam')) {
       return { error: '游离大纲没有宿主文档，挂件挂不上去：挂件挂在文档之下，under 给文档的 uuid' }
     }
-    const under = !underRaw || outlineUnder ? null : hostDocOfUnder(store, underRaw)
+    const under = !underRaw || outlineUnder || videoUnder ? null : hostDocOfUnder(store, underRaw)
     if (under && 'error' in under) return { error: under.error }
     const host = outlineUnder?.kind === 'attached'
       ? nodeById(store, outlineUnder.docId)
@@ -274,6 +278,31 @@ export class NodeService {
 
     if (kind === 'doc') {
       const docTitle = title || '新文档'
+      if (videoUnder) {
+        const vGoalId = videoUnder.goalId || goalId
+        const added = addNode(store, { title: docTitle, goalId: vGoalId, origin: 'ai', ...(typeof input.description === 'string' ? { description: input.description } : {}) })
+        if (!added.created) {
+          const edgeRes = addEdge(store, videoUnder.id, added.node.id)
+          if (edgeRes.added) this.deps.set(edgeRes.store)
+          return {
+            ok: true,
+            uuid: added.node.id,
+            title: added.node.title,
+            created: false,
+            note: '本目标里已有该文档，已将其连线挂到视频节点之下',
+          }
+        }
+        const edgeRes = addEdge(added.store, videoUnder.id, added.node.id)
+        if (!edgeRes.added) return { error: edgeRes.reason ?? '这份文档没能挂到视频节点之下' }
+        this.deps.set(edgeRes.store)
+        return {
+          ok: true,
+          uuid: added.node.id,
+          title: added.node.title,
+          created: true,
+          note: '已建文档「' + added.node.title + '」并挂到视频节点之下；教学正文用 editContent 写',
+        }
+      }
       if (outlineUnder?.kind === 'free') {
         // 挂在游离大纲之下：树边以它的 uuid 发声（没有宿主文档可锚），认领口径与挂文档一致
         const portKey = typeof input.portKey === 'string' ? input.portKey.trim() : ''

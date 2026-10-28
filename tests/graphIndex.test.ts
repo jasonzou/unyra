@@ -118,7 +118,7 @@ describe('P0：图索引', () => {
  *（见 tests/nodeGraph 的「连接协议」），这里只钉清单与展示表。
  */
 describe('P0：类型登记表', () => {
-  it('GRAPH_KINDS 就是七种节点（全图化重构后的宇宙；视频 2026-10-25 入列）', () => {
+  it('GRAPH_KINDS 就是七种节点（全图化重构后的宇宙；视频节点入列）', () => {
     expect(GRAPH_KINDS).toEqual(['entry', 'outline', 'doc', 'note', 'exam', 'superdoc', 'video'])
   })
 

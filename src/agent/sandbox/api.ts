@@ -149,6 +149,9 @@ export function buildApi(
     // exam.* 只留作答侧：读卷、判分、讲解与删卷
     wrapApi(api, 'exam.read', (args) => exam.read(asText(args[0]).trim() || undefined), log)
     wrapApi(api, 'exam.grade', (args) => exam.grade(asRecord(args[0])), log)
+    wrapApi(api, 'exam.rotateSheet', (args) => exam.rotateSheet(asRecord(args[0])), log)
+    wrapApi(api, 'exam.previewCrop', (args) => exam.previewCrop(asRecord(args[0])), log)
+    wrapApi(api, 'exam.cropAnswer', (args) => exam.cropAnswer(asRecord(args[0])), log)
     wrapApi(api, 'exam.explain', (args) => exam.explain(asRecord(args[0])), log)
     wrapApi(api, 'exam.delete', (args) => exam.remove(asRecord(args[0])), log)
   }
@@ -1439,6 +1442,17 @@ export function buildApi(
       return allGood
         ? { ok: true, steps, note: '收尾五件事一次落完' }
         : { ok: true, steps, note: 'content 已写入；有一步没落上（看 steps 里的说明），单独补一次即可' }
+    }, log)
+  }
+
+  if (opts.video) {
+    wrapApi(api, 'video.list', async () => {
+      return opts.video?.list() ?? []
+    }, log)
+    wrapApi(api, 'video.get', async (args) => {
+      const target = asText(args[0]).trim()
+      if (!target) return { ok: false, error: 'video.get 需要提供 videoId 或视频节点的 uuid' }
+      return await opts.video?.get(target)
     }, log)
   }
 

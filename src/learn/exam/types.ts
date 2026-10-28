@@ -60,6 +60,10 @@ export interface ExamAnswer {
   value: string[]
   /** 作答文本（填空、简答） */
   text?: string
+  /** 手机拍照上传或由 Agent 裁切出的手写答案图片（绝对路径或 dataURL） */
+  image?: string
+  /** 原始整页拍照图片的路径 */
+  rawImage?: string
 }
 
 export interface ExamResultItem {
@@ -72,6 +76,8 @@ export interface ExamResultItem {
   comment?: string
   /** 判分来源 */
   by: 'system' | 'agent'
+  /** Agent 裁切并贴在题目上的手写答案图片（路径或 dataUrl） */
+  croppedAnswerImage?: string
 }
 
 /** 一次考试的状态 */
@@ -98,6 +104,10 @@ export interface ExamInput {
   /** 选项 id 列表 / 填空简答的文本（与 ExamAnswer 同义） */
   value: string[]
   text?: string
+  /** 手机拍照上传或由 Agent 裁切出的手写答案图片（绝对路径或 dataURL） */
+  image?: string
+  /** 原始整页拍照图片的路径 */
+  rawImage?: string
   at: number
   /** 最后一次被合并进来的时刻；从没合并过就没有它 */
   updatedAt?: number
@@ -129,6 +139,8 @@ export interface ExamAttempt {
    * 判分读的是它，inputs 记的是「怎么走到这一步」。
    */
   answers: ExamAnswer[]
+  /** 考试中通过手机拍照上传的原始手写答卷图片清单 */
+  handwrittenImages?: string[]
   inputs: ExamInput[]
   /** 单题耗时（毫秒）：题目 id → 在计时区里累计的时长 */
   dwell: Record<string, number>

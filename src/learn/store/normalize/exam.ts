@@ -17,6 +17,8 @@ function normalizeAnswers(raw: unknown): ExamAnswer[] {
       questionId: qid,
       value: Array.isArray(ar.value) ? ar.value.filter((x): x is string => typeof x === 'string') : [],
       text: typeof ar.text === 'string' ? ar.text : undefined,
+      ...(typeof ar.image === 'string' ? { image: ar.image } : {}),
+      ...(typeof ar.rawImage === 'string' ? { rawImage: ar.rawImage } : {}),
     })
   }
   return out
@@ -37,6 +39,7 @@ function normalizeResults(raw: unknown): ExamResultItem[] | undefined {
       maxScore: typeof xr.maxScore === 'number' ? xr.maxScore : 0,
       comment: typeof xr.comment === 'string' ? xr.comment : undefined,
       by: xr.by === 'agent' ? 'agent' : 'system',
+      ...(typeof xr.croppedAnswerImage === 'string' ? { croppedAnswerImage: xr.croppedAnswerImage } : {}),
     })
   }
   return results
@@ -73,18 +76,24 @@ function normalizeAttempt(raw: unknown, fallbackStartedAt: number): ExamAttempt 
         questionId: qid,
         value: Array.isArray(xr.value) ? xr.value.filter((v): v is string => typeof v === 'string') : [],
         text: typeof xr.text === 'string' ? xr.text : undefined,
+        ...(typeof xr.image === 'string' ? { image: xr.image } : {}),
+        ...(typeof xr.rawImage === 'string' ? { rawImage: xr.rawImage } : {}),
         at: xr.at,
         ...(typeof xr.updatedAt === 'number' ? { updatedAt: xr.updatedAt } : {}),
         ...(xr.overtime === true ? { overtime: true } : {}),
       })
     }
   }
+  const handwrittenImages = Array.isArray(r.handwrittenImages)
+    ? r.handwrittenImages.filter((x): x is string => typeof x === 'string')
+    : undefined
   return {
     id: typeof r.id === 'string' ? r.id : crypto.randomUUID(),
     startedAt: typeof r.startedAt === 'number' ? r.startedAt : fallbackStartedAt,
     ...(typeof r.endedAt === 'number' ? { endedAt: r.endedAt } : {}),
     status,
     answers: normalizeAnswers(r.answers),
+    ...(handwrittenImages && handwrittenImages.length ? { handwrittenImages } : {}),
     inputs,
     dwell,
     blurs,
@@ -140,6 +149,9 @@ export function normalizeExam(raw: unknown): Exam | null {
     if (legacy) {
       const endedAt =
         typeof r.gradedAt === 'number' ? r.gradedAt : typeof r.submittedAt === 'number' ? r.submittedAt : undefined
+      const handwrittenImages = Array.isArray(r.handwrittenImages)
+        ? r.handwrittenImages.filter((x): x is string => typeof x === 'string')
+        : undefined
       attempts = [
         {
           id: crypto.randomUUID(),
@@ -147,6 +159,7 @@ export function normalizeExam(raw: unknown): Exam | null {
           ...(endedAt ? { endedAt } : {}),
           status: legacy,
           answers,
+          ...(handwrittenImages && handwrittenImages.length ? { handwrittenImages } : {}),
           inputs: [],
           dwell: {},
           blurs: [],

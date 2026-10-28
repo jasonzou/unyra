@@ -315,19 +315,66 @@ export function setShortcutRecording(on: boolean): void {
   recording = on
 }
 
+/** 快捷键触发通知（用于教学演示与辅助指示） */
+export interface ShortcutTriggerInfo {
+  id?: string
+  label: string
+  combo: string
+}
+
+type ShortcutTriggerListener = (info: ShortcutTriggerInfo) => void
+const triggerListeners = new Set<ShortcutTriggerListener>()
+
+export function subscribeShortcutTrigger(listener: ShortcutTriggerListener): () => void {
+  triggerListeners.add(listener)
+  ensureListening()
+  return () => {
+    triggerListeners.delete(listener)
+    maybeStopListening()
+  }
+}
+
+function notifyTrigger(info: ShortcutTriggerInfo): void {
+  for (const listener of triggerListeners) {
+    try {
+      listener(info)
+    } catch {
+      // 容错
+    }
+  }
+}
+
 function onKeyDown(e: KeyboardEvent): void {
   if (recording) return
   const combo = comboFromEvent(e)
   if (!combo || !shouldFire(combo)) return
   const ids = idsFor(combo)
-  if (!ids.length) return
-  // 认领这次事件：不 preventDefault 的话，Ctrl+S 之类会被浏览器/外壳顺手做掉
-  e.preventDefault()
-  e.stopPropagation()
-  for (const id of ids) {
-    if (active.has(id)) continue
-    active.set(id, combo)
-    handlers.get(id)?.down?.(e)
+  if (ids.length) {
+    // 认领这次事件：不 preventDefault 的话，Ctrl+S 之类会被浏览器/外壳顺手做掉
+    e.preventDefault()
+    e.stopPropagation()
+    for (const id of ids) {
+      const def = SHORTCUT_DEFS.find((d) => d.id === id)
+      notifyTrigger({
+        id,
+        label: def ? t(def.label) : id,
+        combo: comboLabel(formatCombo(combo)),
+      })
+      if (active.has(id)) continue
+      active.set(id, combo)
+      handlers.get(id)?.down?.(e)
+    }
+    return
+  }
+
+  // 检查是否命中保留的常用快捷键（如 Ctrl+C, Ctrl+V, Ctrl+Z 等）
+  const canonical = formatCombo(combo)
+  const reserved = RESERVED.find((r) => r.combo === canonical)
+  if (reserved) {
+    notifyTrigger({
+      label: t(reserved.why),
+      combo: comboLabel(canonical),
+    })
   }
 }
 
@@ -358,7 +405,7 @@ function ensureListening(): void {
 }
 
 function maybeStopListening(): void {
-  if (!listening || handlers.size) return
+  if (!listening || handlers.size || triggerListeners.size) return
   listening = false
   window.removeEventListener('keydown', onKeyDown, true)
   window.removeEventListener('keyup', onKeyUp, true)

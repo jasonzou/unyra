@@ -66,7 +66,10 @@ export function parentIds(store: LearnStore, id: string): string[] {
  * 没有文档，返回 null（调用方据此把它当透明的分类层跳过）。
  */
 export function docIdOfMember(store: LearnStore, member: string): string | null {
-  if (!member.startsWith('o:')) return member
+  if (!member.startsWith('o:')) {
+    if ((store.videoNodes ?? []).some((v) => v.id === member)) return null
+    return member
+  }
   const raw = member.slice(2)
   return store.nodes.some((n) => n.id === raw) ? raw : null
 }
@@ -151,7 +154,7 @@ export function backtrackTargets(store: LearnStore, id: string): KnowledgeNode[]
 
 /** 树成员存在性：文档 = 节点在；`o:` = 附身大纲（节点带着大纲在）或游离大纲（实体在） */
 function memberExists(store: LearnStore, member: string): boolean {
-  if (!member.startsWith('o:')) return !!nodeById(store, member)
+  if (!member.startsWith('o:')) return !!nodeById(store, member) || (store.videoNodes ?? []).some((v) => v.id === member)
   const raw = member.slice(2)
   return !!nodeById(store, raw)?.outline || (store.outlines ?? []).some((o) => o.id === raw)
 }

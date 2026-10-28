@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from 'react'
 import {
   AlertTriangle,
+  Camera,
   Check,
   ChevronDown,
   Clock,
@@ -12,6 +13,8 @@ import {
   Timer,
   X,
 } from 'lucide-react'
+import HandwrittenImagePreview from '../exam/HandwrittenImagePreview'
+import ImageLightboxModal from '../exam/ImageLightboxModal'
 import type { Exam, ExamAnswer, ExamAttempt, ExamQuestion, ExamResultItem } from '../../learn/exam'
 import {
   EXAM_KIND_LABEL,
@@ -91,6 +94,7 @@ export default function ExamCopyView({ exam, attempt }: Props) {
 
   const [tutorOpen, setTutorOpen] = useState(true)
   const [telemetryOpen, setTelemetryOpen] = useState(false)
+  const [previewImg, setPreviewImg] = useState<string | null>(null)
 
   const labelOf = (questionId: string): string => {
     const i = exam.questions.findIndex((q) => q.id === questionId)
@@ -347,6 +351,27 @@ export default function ExamCopyView({ exam, attempt }: Props) {
 
         {/* --- 题目回看列表 --- */}
         <section className="mt-4">
+          {attempt.handwrittenImages && attempt.handwrittenImages.length > 0 && (
+            <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line/70 bg-paper/50 px-3 py-2 text-[11.5px] text-ink-soft">
+              <div className="flex items-center gap-2">
+                <Camera size={13} className="text-seal" />
+                <span>{t('本次考试共上传 {0} 张手机答题图片', attempt.handwrittenImages.length)}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {attempt.handwrittenImages.map((img, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setPreviewImg(img)}
+                    className="flex items-center gap-1 rounded border border-line bg-card px-2 py-0.5 text-[11px] text-ink hover:border-seal hover:text-seal-deep transition cursor-pointer"
+                  >
+                    <span>{t('答卷原图 {0}', i + 1)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mb-2.5 flex items-center justify-between">
             <h2 className="text-[14px] font-bold text-ink-strong">{t('题目回看')}</h2>
             <span className="text-[11px] text-ink-faint">{t('共 {0} 题', exam.questions.length)}</span>
@@ -360,6 +385,7 @@ export default function ExamCopyView({ exam, attempt }: Props) {
                 index={i}
                 answer={answers.find((a) => a.questionId === q.id)}
                 result={attempt.results?.find((r) => r.questionId === q.id)}
+                onPreviewImage={setPreviewImg}
               />
             ))}
           </div>
@@ -462,6 +488,12 @@ export default function ExamCopyView({ exam, attempt }: Props) {
           )}
         </section>
       </div>
+
+      <ImageLightboxModal
+        src={previewImg}
+        title={t('手写答题图片预览')}
+        onClose={() => setPreviewImg(null)}
+      />
     </div>
   )
 }
@@ -472,12 +504,15 @@ function QuestionReview({
   index,
   answer,
   result,
+  onPreviewImage,
 }: {
   question: ExamQuestion
   index: number
   answer: ExamAnswer | undefined
   result: ExamResultItem | undefined
+  onPreviewImage: (src: string) => void
 }) {
+  const answerImage = result?.croppedAnswerImage || answer?.image
   const picked = answer?.value ?? []
   const key = q.answer ?? []
   const hasKey = key.length > 0
@@ -565,7 +600,15 @@ function QuestionReview({
       {/* 选项作答比对：轻量条目，绝非大圆角卡牌 */}
       {q.type === 'single' || q.type === 'multiple' || q.type === 'truefalse' ? (
         <div className="mt-2.5 flex flex-col gap-1">
-          {(q.options ?? []).map((o) => {
+          {(q.type === 'truefalse'
+            ? q.options && q.options.length > 0
+              ? q.options
+              : [
+                  { id: 'true', text: t('对') },
+                  { id: 'false', text: t('错') },
+                ]
+            : (q.options ?? [])
+          ).map((o) => {
             const chosen = picked.includes(o.id)
             const isKey = hasKey && key.includes(o.id)
             const isRightChoice = isKey && chosen
@@ -661,6 +704,29 @@ function QuestionReview({
               />
             </div>
           )}
+        </div>
+      )}
+
+      {/* 手写答卷与裁切区域（贴在对应题目上） */}
+      {answerImage && (
+        <div className="mt-2.5 rounded-lg border border-seal/30 bg-seal/[0.03] p-2.5">
+          <div className="flex items-center justify-between gap-1 pb-1.5 text-[11px] font-medium text-seal-deep">
+            <div className="flex items-center gap-1.5">
+              <Sparkles size={12} className="text-seal" />
+              <span>{result?.croppedAnswerImage ? t('手写答案（AI 导师裁切贴题）') : t('手写作答原图')}</span>
+            </div>
+            {answer?.rawImage && answer.rawImage !== answerImage && (
+              <span className="text-[10px] text-ink-faint">{t('已自全页答卷精准裁切')}</span>
+            )}
+          </div>
+          <div className="flex justify-center rounded border border-line/60 bg-paper/50 p-1.5">
+            <HandwrittenImagePreview
+              src={answerImage}
+              alt={t('第 {0} 题手写答案', index + 1)}
+              className="max-h-[320px] max-w-full rounded object-contain shadow-2xs cursor-zoom-in"
+              onClick={() => onPreviewImage(answerImage)}
+            />
+          </div>
         </div>
       )}
 

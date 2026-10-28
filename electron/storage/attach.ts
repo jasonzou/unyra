@@ -26,7 +26,7 @@ const ATTACH_MAX_BYTES = 32 * 1024 * 1024
  * 超出就截断，并在结果里带一句 truncated——界面会如实说「只附上了开头一部分」。
  */
 const ATTACH_TEXT_MAX_BYTES = 2 * 1024 * 1024
-const ATTACH_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
+const ATTACH_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.heic'])
 const ATTACH_IMAGE_MIME: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -34,6 +34,7 @@ const ATTACH_IMAGE_MIME: Record<string, string> = {
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.bmp': 'image/bmp',
+  '.heic': 'image/heic',
 }
 
 /** 看着像二进制吗：前 4KB 里出现 NUL 就当二进制（文本文件几乎不会含 NUL） */
@@ -65,8 +66,28 @@ export async function readAttach(raw: unknown): Promise<AttachRead> {
     const ext = path.extname(p).toLowerCase()
     const buf = await fsp.readFile(p)
     const bytes = buf.length
-    if (ATTACH_IMAGE_EXTS.has(ext)) {
-      const mime = ATTACH_IMAGE_MIME[ext] ?? 'image/png'
+
+    let isImage = ATTACH_IMAGE_EXTS.has(ext)
+    let mime = ATTACH_IMAGE_MIME[ext] ?? 'image/png'
+    if (!isImage && bytes >= 4) {
+      if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+        isImage = true
+        mime = 'image/jpeg'
+      } else if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+        isImage = true
+        mime = 'image/png'
+      } else if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+        isImage = true
+        mime = 'image/gif'
+      } else if (bytes >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') {
+        isImage = true
+        mime = 'image/webp'
+      } else if (buf[0] === 0x42 && buf[1] === 0x4d) {
+        isImage = true
+        mime = 'image/bmp'
+      }
+    }
+    if (isImage) {
       return { ok: true, name, bytes, kind: 'image', dataUrl: `data:${mime};base64,${buf.toString('base64')}` }
     }
     if (looksBinary(buf)) return { ok: true, name, bytes, kind: 'binary' }

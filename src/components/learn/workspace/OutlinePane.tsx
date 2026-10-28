@@ -47,6 +47,7 @@ function sameOutlinePane(prev: OutlinePaneProps, next: OutlinePaneProps): boolea
   if (prev.store.nodes !== next.store.nodes || prev.store.exams !== next.store.exams) return false
   // 视频卡（绑定的标题 / 空卡占位）读 videoNodes 与 videos：绑定变了图要跟着变
   if (prev.store.videoNodes !== next.store.videoNodes || prev.store.videos !== next.store.videos) return false
+
   return true
 }
 

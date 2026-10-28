@@ -38,7 +38,7 @@ export interface ExamWindowState {
   totalPoints: number
   questions: ExamQuestion[]
   /** running 时有；考试窗口据此恢复作答（重开窗口也不丢） */
-  attempt?: { id: string; startedAt: number; forceSubmit: boolean; answers: ExamAnswer[] }
+  attempt?: { id: string; startedAt: number; forceSubmit: boolean; answers: ExamAnswer[]; handwrittenImages?: string[] }
   /** settled 时那句提示 */
   notice?: string
 }
@@ -48,9 +48,10 @@ export type ExamWindowEvent =
   /** 界面挂好了：请把当前状态推过来（open 的载荷不保证送达，见 lib/native 的说明） */
   | { type: 'ready' }
   | { type: 'start'; at: number; forceSubmit: boolean }
-  | { type: 'input'; questionId: string; value: string[]; text?: string; at: number }
+  | { type: 'input'; questionId: string; value: string[]; text?: string; image?: string; rawImage?: string; at: number }
   | { type: 'blurStart'; at: number }
   | { type: 'blurEnd'; at: number }
+  | { type: 'setHandwritten'; images: string[] }
   /** 交卷（含「到点强制交卷」那一次） */
   | { type: 'submit'; at: number }
   /** 放弃：判 0 分，不判分、不讲解 */
@@ -93,6 +94,7 @@ function shapeState(exam: Exam, attempt: ExamAttempt | undefined, notice?: strin
             startedAt: attempt.startedAt,
             forceSubmit: attempt.forceSubmit,
             answers: attempt.answers,
+            ...(attempt.handwrittenImages ? { handwrittenImages: attempt.handwrittenImages } : {}),
           },
         }
       : {}),
@@ -200,6 +202,8 @@ export function useExamBridge(opts: {
                 questionId: ev.questionId,
                 value: ev.value,
                 text: ev.text,
+                image: ev.image,
+                rawImage: ev.rawImage,
                 at: ev.at,
               }),
             ),
@@ -216,6 +220,15 @@ export function useExamBridge(opts: {
           const next =
             ev.type === 'blurStart' ? recordBlurStart(attempt, ev.at) : recordBlurEnd(attempt, ev.at)
           set(upsertAttempt(store, examId, next))
+          return
+        }
+
+        case 'setHandwritten': {
+          const attemptId = liveRef.current?.attemptId
+          if (!attemptId) return
+          const attempt = findAttempt(store, examId, attemptId)
+          if (!attempt || attempt.status !== 'ongoing') return
+          set(upsertAttempt(store, examId, { ...attempt, handwrittenImages: ev.images }))
           return
         }
 

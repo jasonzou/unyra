@@ -307,7 +307,12 @@ export function examReadPayload(input: {
       points: q.points,
       ...(attempt
         ? {
-            userAnswer: { value: a?.value ?? [], text: a?.text ?? '' },
+            userAnswer: {
+              value: a?.value ?? [],
+              text: a?.text ?? '',
+              ...(a?.image ? { image: a.image } : {}),
+              ...(a?.rawImage ? { rawImage: a.rawImage } : {}),
+            },
             systemGraded: r ? { correct: r.correct, score: r.score } : undefined,
             needYourGrading: r ? r.correct === null : isAutoGradable(q) === false,
             ...(attempt.inputs.some((x) => x.questionId === q.id && x.overtime)
@@ -361,6 +366,7 @@ export function examReadPayload(input: {
           }
         : {}),
       totalPapers: exams.length,
+      ...(attempt?.handwrittenImages?.length ? { handwrittenImages: attempt.handwrittenImages } : {}),
       questions,
       history,
       childNodes,
@@ -377,13 +383,22 @@ export function examReadPayload(input: {
       ...(status === 'submitted'
         ? {
             gradingNote:
-              '学习者已交卷，请**两步走完这一次**：\n' +
-              '① 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment }] })。' +
-              '每一道答错的题都要给 comment（单选/多选/对错/填空也一样，不能只讲简答题），系统已判好的客观题也请补上讲解。\n' +
-              '② 写错题讲解：先看上面 history 里的 **weak**（历次考错的题）与 attempt 里的记录' +
-              '（overtimeMin 超时、blurCount 切屏、dwell 单题耗时——反复改答案、在某题上耗很久、超时作答都是信号），' +
-              '判断他的薄弱项，针对性讲解，然后 api.exam.explain({ content: "…markdown…", attemptId: "' + (attempt?.id ?? '') + '" }) 写上。\n' +
-              '讲解要落到「他为什么错、下次怎么想」，别把参考答案抄一遍；历史里反复出现的同一个错法要正面点出来。',
+              (attempt?.handwrittenImages?.length || paper.questions.some((q) => attempt?.answers.some((x) => x.questionId === q.id && x.image))
+                ? '📷 学习者提交了手机拍摄的手写答案图片（共 ' + (attempt?.handwrittenImages?.length ?? 1) + ' 份，见 handwrittenImages）。' +
+                  '请完成阅卷：\n' +
+                  '① 方向转正与裁切贴题：\n' +
+                  '   - 若拍照方向横置或颠倒，先调 api.exam.rotateSheet({ sheetIndex: 0, degrees: 90 }) 顺时针转正，转正后你将在下一跳直接收到正向图片；\n' +
+                  '   - 裁切前调用 api.exam.previewCrop({ questionId, box: [ymin, xmin, ymax, xmax], sourceImage: 0 }) 审查红框，确认文字未被截断、未多截邻题；若有偏差微调坐标再次 previewCrop；\n' +
+                  '   - 确认无误后调用 api.exam.cropAnswer({ questionId, box, sourceImage: 0 }) 正式裁切并贴在试卷副本对应题目上。\n' +
+                  '② 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment, userAnswer }] })。全部题目（含单选/多选/对错/填空/简答）由你根据手写内容亲自审阅判分，识别到的手写答案填入 userAnswer。\n' +
+                  '③ 错题讲解：api.exam.explain({ content: "…markdown…", attemptId: "' + (attempt?.id ?? '') + '" })。\n\n'
+                : '学习者已交卷，请**两步走完这一次**：\n' +
+                  '① 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment }] })。' +
+                  '每一道答错的题都要给 comment（单选/多选/对错/填空也一样，不能只讲简答题），系统已判好的客观题也请补上讲解。\n' +
+                  '② 写错题讲解：先看上面 history 里的 **weak**（历次考错的题）与 attempt 里的记录' +
+                  '（overtimeMin 超时、blurCount 切屏、dwell 单题耗时——反复改答案、在某题上耗很久、超时作答都是信号），' +
+                  '判断他的薄弱项，针对性讲解，然后 api.exam.explain({ content: "…markdown…", attemptId: "' + (attempt?.id ?? '') + '" }) 写上。\n' +
+                  '讲解要落到「他为什么错、下次怎么想」，别把参考答案抄一遍；历史里反复出现的同一个错法要正面点出来。'),
           }
         : {}),
       ...(status === 'graded'

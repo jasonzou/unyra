@@ -365,4 +365,20 @@ describe('认领接口的文档卡：没有正经标题就显示接口的 label'
     expect(slots.find((s) => s.key === 'lianjie')?.childId).toBe('claimed1')
     expect(slots.find((s) => s.key === 'jixian')?.childId).toBe('legacy1')
   })
-})
+
+  it('重复树边去重：即使 store.edges 包含多条相同边，派生的 edges 键绝对唯一', () => {
+    const base = makeStore()
+    const store: LearnStore = {
+      ...base,
+      edges: [
+        { from: 'r', to: 'a', createdAt: 1 },
+        { from: 'r', to: 'a', createdAt: 2 },
+        { from: 'o:r', to: 'a', createdAt: 3 },
+      ],
+    }
+    const { edges } = deriveCanvas(store, 'g1', undefined)
+    const edgeKeys = edges.map((e) => `${e.from}>${e.to}`)
+    const uniqueKeys = new Set(edgeKeys)
+    expect(edgeKeys.length).toBe(uniqueKeys.size)
+  })
+});

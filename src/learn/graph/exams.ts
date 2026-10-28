@@ -1,7 +1,7 @@
 /**
  * 本文件负责：试卷与考试记录——读卷、开考、交卷、放弃，以及 Agent 判分 / 错题讲解的落库。
  */
-import type { Exam, ExamAttempt } from '../exam'
+import type { Exam, ExamAnswer, ExamAttempt } from '../exam'
 import type { LearnStore } from '../types'
 import { attemptScore, examTotalPoints, gradeObjectiveAll, isAutoGradable } from '../exam'
 import { newAttempt, settleAttempt } from '../examRecords'
@@ -121,7 +121,13 @@ export function submitAttempt(store: LearnStore, examId: string, attemptId: stri
   const attempt = exam?.attempts.find((a) => a.id === attemptId)
   if (!exam || !attempt || attempt.status !== 'ongoing') return store
   const settled = settleAttempt(attempt, exam, { status: 'submitted', at })
-  return upsertAttempt(store, examId, { ...settled, results: gradeObjectiveAll(exam, settled.answers) })
+  const hasImages = (settled.handwrittenImages && settled.handwrittenImages.length > 0) ||
+    settled.answers.some((a) => a.image)
+  // 若有手写答卷图片，所有题目（包括客观题）均在手写纸上作答，绝不进行机械式客观题判分，一律交给 Agent 亲自审卷判分
+  return upsertAttempt(store, examId, {
+    ...settled,
+    results: hasImages ? undefined : gradeObjectiveAll(exam, settled.answers),
+  })
 }
 
 /**
@@ -138,7 +144,14 @@ export function abandonAttempt(store: LearnStore, examId: string, attemptId: str
 
 /** Agent 返回的阅卷结果 */
 export interface GradePayload {
-  results?: Array<{ questionId?: string; correct?: boolean; score?: number; comment?: string }>
+  results?: Array<{
+    questionId?: string
+    correct?: boolean
+    score?: number
+    comment?: string
+    croppedAnswerImage?: string
+    userAnswer?: string | string[]
+  }>
   summary?: string
   passed?: boolean
 }
@@ -166,42 +179,118 @@ export function applyGradeResult(
     return { store, ok: false, message: '缺少 passed 或 summary' }
   }
 
-  const results = gradeObjectiveAll(exam, attempt.answers)
+  const hasImages = (attempt.handwrittenImages && attempt.handwrittenImages.length > 0) ||
+    attempt.answers.some((a) => a.image)
+
+  const answers = attempt.answers.slice()
+  // 若 Agent 在审阅手写答卷时提取出了学习者的实际作答，更新进 answers
   for (const item of payload.results ?? []) {
-    if (!item.questionId) continue
-    const idx = results.findIndex((x) => x.questionId === item.questionId)
-    if (idx < 0) continue
-    const q = exam.questions[idx]
-    const comment = typeof item.comment === 'string' ? unescapeNewlines(item.comment) : undefined
-    if (isAutoGradable(q)) {
-      // 客观题的分数以系统为准（不采信 Agent 给的对错/分数），
-      // 但 Agent 为错题补的讲解要收下——否则客观题将没有任何错题讲解。
-      if (comment) results[idx] = { ...results[idx], comment }
-      continue
-    }
-    const score =
-      typeof item.score === 'number'
-        ? Math.max(0, Math.min(q.points, item.score))
-        : item.correct
-          ? q.points
-          : 0
-    results[idx] = {
+    if (!item.questionId || item.userAnswer === undefined) continue
+    const idx = answers.findIndex((a) => a.questionId === item.questionId)
+    const val = Array.isArray(item.userAnswer)
+      ? item.userAnswer.map(String)
+      : typeof item.userAnswer === 'string'
+        ? [item.userAnswer]
+        : []
+    const textVal = typeof item.userAnswer === 'string' ? item.userAnswer : undefined
+    const existing = answers[idx]
+    const updatedAns: ExamAnswer = {
       questionId: item.questionId,
-      correct: item.correct === true,
-      score,
-      maxScore: q.points,
-      comment,
-      by: 'agent',
+      value: val,
+      ...(textVal ? { text: textVal } : {}),
+      ...(existing?.image ? { image: existing.image } : {}),
+      ...(existing?.rawImage ? { rawImage: existing.rawImage } : {}),
+    }
+    if (idx >= 0) answers[idx] = updatedAns
+    else answers.push(updatedAns)
+  }
+
+  // 如果有手写答卷图片，所有题目（包括客观题与主观题）必须由 Agent 亲自审阅判分，绝不进行机械判断
+  const results = hasImages
+    ? exam.questions.map((q) => {
+        const item = (payload.results ?? []).find((x) => x.questionId === q.id)
+        const existingAns = answers.find((a) => a.questionId === q.id)
+        const existingResult = attempt.results?.find((r) => r.questionId === q.id)
+        const comment = typeof item?.comment === 'string' ? unescapeNewlines(item.comment) : undefined
+        const croppedAnswerImage = typeof item?.croppedAnswerImage === 'string'
+          ? item.croppedAnswerImage
+          : existingResult?.croppedAnswerImage || existingAns?.image
+        if (!item) {
+          return {
+            questionId: q.id,
+            correct: null,
+            score: 0,
+            maxScore: q.points,
+            by: 'agent' as const,
+            ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
+          }
+        }
+        const score = typeof item.score === 'number'
+          ? Math.max(0, Math.min(q.points, item.score))
+          : item.correct
+            ? q.points
+            : 0
+        return {
+          questionId: q.id,
+          correct: typeof item.correct === 'boolean' ? item.correct : score === q.points,
+          score,
+          maxScore: q.points,
+          comment,
+          by: 'agent' as const,
+          ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
+        }
+      })
+    : gradeObjectiveAll(exam, answers)
+
+  if (!hasImages) {
+    for (const item of payload.results ?? []) {
+      if (!item.questionId) continue
+      const idx = results.findIndex((x) => x.questionId === item.questionId)
+      if (idx < 0) continue
+      const q = exam.questions[idx]
+      const existingAns = answers.find((a) => a.questionId === q.id)
+      const existingResult = attempt.results?.find((r) => r.questionId === q.id)
+      const comment = typeof item.comment === 'string' ? unescapeNewlines(item.comment) : undefined
+      const croppedAnswerImage = typeof item.croppedAnswerImage === 'string'
+        ? item.croppedAnswerImage
+        : existingResult?.croppedAnswerImage || existingAns?.image
+      if (isAutoGradable(q)) {
+        if (comment || croppedAnswerImage) {
+          results[idx] = {
+            ...results[idx],
+            ...(comment ? { comment } : {}),
+            ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
+          }
+        }
+        continue
+      }
+      const score =
+        typeof item.score === 'number'
+          ? Math.max(0, Math.min(q.points, item.score))
+          : item.correct
+            ? q.points
+            : 0
+      results[idx] = {
+        questionId: item.questionId,
+        correct: item.correct === true,
+        score,
+        maxScore: q.points,
+        comment,
+        by: 'agent',
+        ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
+      }
     }
   }
 
   const graded: ExamAttempt = {
     ...attempt,
     status: 'graded',
+    answers,
     results,
     summary: unescapeNewlines(payload.summary),
     passed: payload.passed,
   }
+
   let next = upsertAttempt(store, examId, graded)
   if (payload.passed) next = setNodeStatus(next, exam.nodeId, 'mastered')
   /*
@@ -263,4 +352,111 @@ function unescapeNewlines(s: string): string {
   if (s.includes('\n')) return s
   return s.replace(/\\r\\n|\\n/g, '\n').replace(/\\"/g, '"')
 }
+
+/** 将 Agent 裁切出的手写答案图片绑定到对应题目的结果与答案上 */
+export function attachCroppedAnswerImage(
+  store: LearnStore,
+  examId: string,
+  attemptId: string,
+  questionId: string,
+  croppedImagePath: string,
+): LearnStore {
+  const exam = store.exams.find((e) => e.id === examId)
+  const attempt = exam?.attempts.find((a) => a.id === attemptId)
+  if (!exam || !attempt) return store
+
+  let results = attempt.results
+  if (results) {
+    const hasResult = results.some((r) => r.questionId === questionId)
+    results = hasResult
+      ? results.map((r) => (r.questionId === questionId ? { ...r, croppedAnswerImage: croppedImagePath } : r))
+      : [
+          ...results,
+          {
+            questionId,
+            correct: null,
+            score: 0,
+            maxScore: exam.questions.find((q) => q.id === questionId)?.points ?? 0,
+            croppedAnswerImage: croppedImagePath,
+            by: 'agent' as const,
+          },
+        ]
+  }
+
+  const answers = attempt.answers.map((ans) =>
+    ans.questionId === questionId ? { ...ans, image: croppedImagePath } : ans,
+  )
+  if (!answers.some((ans) => ans.questionId === questionId)) {
+    answers.push({ questionId, value: [], image: croppedImagePath })
+  }
+
+  return upsertAttempt(store, examId, {
+    ...attempt,
+    ...(results ? { results } : {}),
+    answers,
+  })
+}
+
+/** 为一次考试追加手写原图 */
+export function attachHandwrittenImages(
+  store: LearnStore,
+  examId: string,
+  attemptId: string,
+  imagePaths: string[],
+): LearnStore {
+  const exam = store.exams.find((e) => e.id === examId)
+  const attempt = exam?.attempts.find((a) => a.id === attemptId)
+  if (!exam || !attempt) return store
+
+  const existing = attempt.handwrittenImages ?? []
+  const handwrittenImages = Array.from(new Set([...existing, ...imagePaths]))
+
+  return upsertAttempt(store, examId, {
+    ...attempt,
+    handwrittenImages,
+  })
+}
+
+/** 替换或更新一次考试中特定索引处的手写答卷图片（如顺时针旋转修正后） */
+export function updateHandwrittenImage(
+  store: LearnStore,
+  examId: string,
+  attemptId: string,
+  index: number,
+  newImagePath: string,
+): LearnStore {
+  const exam = store.exams.find((e) => e.id === examId)
+  const attempt = exam?.attempts.find((a) => a.id === attemptId)
+  if (!exam || !attempt) return store
+
+  const list = (attempt.handwrittenImages ?? []).slice()
+  if (index < 0 || index >= list.length) {
+    if (list.length === 0 && index === 0) {
+      list.push(newImagePath)
+    } else {
+      return store
+    }
+  } else {
+    const oldPath = list[index]
+    list[index] = newImagePath
+    // 若 answers 中有题目的 rawImage 指向旧图，同步更新
+    const answers = attempt.answers.map((ans) => {
+      if (ans.rawImage === oldPath) {
+        return { ...ans, rawImage: newImagePath }
+      }
+      return ans
+    })
+    return upsertAttempt(store, examId, {
+      ...attempt,
+      handwrittenImages: list,
+      answers,
+    })
+  }
+
+  return upsertAttempt(store, examId, {
+    ...attempt,
+    handwrittenImages: list,
+  })
+}
+
 
