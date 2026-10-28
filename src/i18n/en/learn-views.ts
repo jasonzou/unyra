@@ -735,23 +735,35 @@ const dict: Record<string, string> = {
   '已在这张大纲之下开了新的一层：目标项写在大纲卡上，往下挂文档或再开一层':
     'Opened a new level under this outline: write goal items on its card, then hang docs or another outline level under it',
   '欢迎来到节点宇宙': 'Welcome to the node universe',
-  '一张图画下这门课的全部节点：文档、大纲、笔记与试卷都在上面摆着。六步走完大约半分钟；想中途退出，随时按 Esc 或点「跳过教学」。':
-    'One canvas holds every node of this course: docs, outlines, notes and exams. The six steps take about half a minute; press Esc or click "Skip tour" to leave at any time.',
-  '从左侧列表放节点': 'Add nodes from the list',
-  '按住一项拖出来：拖到空白处立一份独立节点；拖到卡上则创建即挂——文档拖到大纲卡上，大纲拖到大纲卡上在它之下再开一层，笔记、试卷、超级文档拖到文档卡上。':
-    'Drag an item out: drop it on empty canvas for a standalone node, or drop it on a card to attach on creation — docs onto outline cards; outlines onto outline cards to open a new level under them; notes, exams and super docs onto doc cards.',
-  '每张卡是一个节点': 'Each card is a node',
-  '点标题直接打开内容，按住卡片拖动摆位，右键有更多操作（设为入口、注释、删除）。摆乱了不怕，右下角一键自动排列。':
-    'Click a title to open the content, drag a card to move it, right-click for more (set as entry, note, delete). Messed it up? Auto-arrange is one click away.',
-  '菱形是接口点': 'Diamonds are ports',
-  '大纲卡右侧的菱形接口：从空接口拖出去挂一份文档或子大纲，认领那条目标项；已挂的接口可以拖到别处换绑。上层大纲当分类、下层大纲当指导，一层一层往下长。':
-    'The diamonds on an outline card are ports: drag from an empty port to attach a doc or a sub-outline and claim that item; drag a claimed port elsewhere to re-bind it. Upper outlines are categories, lower ones are guidance — the tree grows level by level.',
-  '小地图就是导航': 'The mini-map is your navigation',
-  '左上角的缩略图：点哪里，镜头就去哪里，也可以按住拖。图大了全靠它找路。':
-    'The thumbnail at the top left: click to move the camera there, or hold and drag. On a big graph it is how you find your way.',
-  '工具组在这里': 'The tool group',
-  '缩放、切换连线样式、撤回、适应画布、自动排列。想重看本教学，随时点最右边的问号。':
-    'Zoom, edge style, undo, fit canvas, auto arrange. To replay this tour, click the question mark on the right any time.',
+  '节点宇宙是课程的知识全景空间：文档、大纲、视频、便签、测验与超级文档都在这张画布上摆放并自由连线。教学期间展示的是模拟数据，退出后自动恢复您的真实空间。随时按 Esc 或点击「跳过教学」即可退出。':
+    'The Node Universe is the panorama of your course: docs, outlines, videos, notes, quizzes, and super docs are laid out and connected freely. Mock data is shown during the tour and restored upon exit. Press Esc or click "Skip tour" to leave at any time.',
+  '从左侧栏创建节点': 'Create nodes from the left palette',
+  '新建目标后，画布默认是一张纯净的空白宇宙。按住左侧任意节点类型（文档、大纲、笔记、试卷、超级文档、视频）拖拽到画布空白处，即可创建独立实体；拖到卡片上则能快速建立从属连接。':
+    'After creating a new goal, the canvas starts as a pristine universe. Drag any node type from the left (Doc, Outline, Note, Exam, SuperDoc, Video) onto empty canvas to create a standalone entity, or drop onto a card to attach.',
+  '卡片即学习节点': 'Cards are learning entities',
+  '每张卡片代表一个学习实体。点击标题可直接在工作区打开文档阅读或编辑；按住卡片可自由拖拽摆位；右键卡片可唤出快捷菜单（设为入口、添加便条、重命名、删除等）。':
+    'Each card represents a learning entity. Click the title to open it in the workspace for reading or editing; drag to arrange; right-click for quick actions (set as entry, add note, rename, delete, etc.).',
+  '大纲与菱形接口': 'Outlines and diamond ports',
+  '大纲节点用于梳理知识体系结构。右侧的菱形代表目标项接口点：从空菱形拖出连线可直接认领并创建子文档；已连接的菱形可拖动重连换绑，层层向下构建严密的知识树。':
+    'Outline nodes structure knowledge hierarchies. The diamonds on the right are port sockets: drag from an empty diamond to claim and create a child doc; drag connected diamonds to re-bind, growing a rigorous knowledge tree level by level.',
+  '便签笔记与要点速记': 'Notes and flash memories',
+  '笔记节点可以自由连接或挂载在文档旁边，用于记录核心公式、面试必背或个人心得。点击笔记标题即可直接在工作区打开进行编辑与沉淀。':
+    'Note cards can attach beside documents to record core formulas, interview keynotes, or personal takeaways. Click the note title to open and edit in the workspace.',
+  '随堂测试与考试记录': 'Quizzes and exam records',
+  '试卷节点可挂载在知识点文档下检验学习成果。点击卡片右侧的「开始作答」即可开启独立测验窗口；下方清晰列出历次作答记录与判分结果（如 95 分），点击记录直接回顾错题与解析。':
+    'Exam cards attach under docs to verify learning outcomes. Click "Take exam" to open the testing window; past attempts and scores (e.g. 95) are listed below for quick review of mistakes and solutions.',
+  '超级文档交互组件': 'SuperDoc interactive labs',
+  '超级文档支持嵌入富交互式 HTML/JS 实验与沙盒仿真（如网络协议时序模拟、算法动态演练）。连线挂载在文档下，让抽象理论变成可动手操作的具象实验。':
+    'SuperDocs embed rich interactive HTML/JS experiments and simulations (like network protocol timelines or algorithm visualizations) under docs, turning abstract theories into hands-on labs.',
+  '视频与拓展学习资源': 'Videos and learning media',
+  '视频节点支持选集联动、生成总览文档以及分段笔记。可以在左侧栏拖入视频卡，随时与知识点文档建立关联。':
+    'Video nodes support episode linking, overview doc generation, and segmented notes. Drag video cards from the left to link with your knowledge docs.',
+  '小地图全景导航': 'Mini-map panorama navigation',
+  '左上角为缩略小地图：当学习体系规模逐渐扩大时，点击或拖动小地图视野框即可快速穿梭定位，随时掌握全图脉络。':
+    'The top-left mini-map provides full-course navigation: as your knowledge network expands, click or drag the viewport box to fly across the canvas and stay oriented.',
+  '画布辅助工具组': 'Canvas control toolset',
+  '右下角工具组支持视口缩放、切换直线/曲线连线风格、撤销操作、一键适应全图居中以及智能自动排列。想重温本教学，随时点击最右侧的问号。':
+    'The bottom-right controls provide zoom, line style toggle, undo, fit to screen, and auto arrange. To replay this guided tour, click the question mark button anytime.',
   /* ---------- 结构画布：视频节点（目标 × 视频的绑定，见 learn/video/nodes） ---------- */
   '视频节点拖到空白处放下：它不挂进大纲树，只把一个视频绑到这个目标':
     'Drop the video node on empty canvas: it never joins the outline tree — it just binds one video to this goal',

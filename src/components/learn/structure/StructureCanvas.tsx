@@ -50,6 +50,7 @@ import {
 } from '../../../learn/structure'
 import { nodeById } from '../../../learn/graph'
 import { t } from '../../../i18n'
+export const TOUR_SEEN_KEY = 'moji:structure:tour-seen'
 import { StructureTour } from './StructureTour'
 import { getTourMockCanvas, getTourCamera } from './tourMockData'
 import {
@@ -379,7 +380,14 @@ export const StructureCanvas = memo(function StructureCanvas({
   /** 指针停在哪个节点上（高亮用） */
   const [hoverId, setHoverId] = useState<string | null>(null)
 
+  const autoTourCheckedRef = useRef(false)
+
   const handleOpenTour = useCallback(() => {
+    try {
+      localStorage.setItem(TOUR_SEEN_KEY, '1')
+    } catch {
+      // ignore
+    }
     savedCameraRef.current = camera
     const tourCam = getTourCamera(view.width, view.height)
     setCamera(tourCam)
@@ -390,12 +398,32 @@ export const StructureCanvas = memo(function StructureCanvas({
   }, [camera, view.width, view.height])
 
   const handleCloseTour = useCallback(() => {
+    try {
+      localStorage.setItem(TOUR_SEEN_KEY, '1')
+    } catch {
+      // ignore
+    }
     setTourOpen(false)
     if (savedCameraRef.current) {
       setCamera(savedCameraRef.current)
       savedCameraRef.current = null
     }
   }, [])
+
+  // 首次进入节点宇宙时检测是否看过教程，若未看过则自动开启
+  useEffect(() => {
+    if (autoTourCheckedRef.current) return
+    if (view.width <= 0 || view.height <= 0) return
+    autoTourCheckedRef.current = true
+    try {
+      const seen = localStorage.getItem(TOUR_SEEN_KEY)
+      if (!seen) {
+        handleOpenTour()
+      }
+    } catch {
+      // ignore
+    }
+  }, [view.width, view.height, handleOpenTour])
   /** 指针停在哪条连线附近（小圆点只在此时出现） */
   const [hoverEdge, setHoverEdge] = useState<CanvasEdge | null>(null)
   /** 指针正压在某个小圆点上（换成手型光标） */
@@ -1780,7 +1808,9 @@ export const StructureCanvas = memo(function StructureCanvas({
                       ? { 'data-tour-node': 'exam' }
                       : card.uuid === 'tour-mock-note'
                         ? { 'data-tour-node': 'note' }
-                        : {})}
+                        : card.uuid === 'tour-mock-superdoc'
+                          ? { 'data-tour-node': 'superdoc' }
+                          : {})}
               className={`absolute flex flex-col border ${KIND_TONE[card.kind]} ${
                 card.blank || unassigned ? 'border-dashed' : ''
               } ${unassigned ? 'opacity-70' : ''} ${

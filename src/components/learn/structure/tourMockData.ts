@@ -51,6 +51,14 @@ export const TOUR_MOCK_CARDS: CardView[] = [
     y: 60,
   },
   {
+    uuid: 'tour-mock-superdoc',
+    kind: 'superdoc',
+    title: 'TCP 握手时序交互仿真',
+    subtitle: '富交互仿真实验 · 1,560 字符',
+    x: 1260,
+    y: 200,
+  },
+  {
     uuid: 'tour-mock-note',
     kind: 'note',
     title: '三次握手常见面试必背',
@@ -73,6 +81,7 @@ export const TOUR_MOCK_EDGES: CanvasEdge[] = [
   { from: 'tour-mock-entry-doc', to: 'tour-mock-outline' },
   { from: 'tour-mock-outline', to: 'tour-mock-child-doc' },
   { from: 'tour-mock-child-doc', to: 'tour-mock-exam' },
+  { from: 'tour-mock-child-doc', to: 'tour-mock-superdoc' },
   { from: 'tour-mock-child-doc', to: 'tour-mock-note' },
   { from: 'tour-mock-entry-doc', to: 'tour-mock-video' },
 ]
@@ -110,11 +119,11 @@ export function getTourCamera(
 ): { x: number; y: number; zoom: number } {
   const w = containerW || 1200
   const h = containerH || 700
-  const zoom = Math.min(Math.max(w / 1650, 0.65), 0.88)
-  // 假数据中心大致在 x: 860, y: 250
+  const zoom = Math.min(Math.max(w / 1750, 0.58), 0.85)
+  // 假数据中心大致在 x: 880, y: 240
   return {
-    x: Math.round(w / 2 - 860 * zoom),
-    y: Math.round(h / 2 - 250 * zoom),
+    x: Math.round(w / 2 - 880 * zoom),
+    y: Math.round(h / 2 - 240 * zoom),
     zoom,
   }
 }

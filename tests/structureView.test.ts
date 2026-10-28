@@ -384,16 +384,17 @@ describe('认领接口的文档卡：没有正经标题就显示接口的 label'
   })
   it('教学假数据包含完备节点模型与连接，退出后不留痕迹', () => {
     const mock = getTourMockCanvas()
-    expect(mock.cards.length).toBe(6)
-    expect(mock.edges.length).toBe(5)
+    expect(mock.cards.length).toBe(7)
+    expect(mock.edges.length).toBe(6)
 
-    // 包含各类典型节点
+    // 包含各类典型节点（含超级文档、便签、测验、大纲等）
     const kinds = mock.cards.map((c) => c.kind)
     expect(kinds).toContain('doc')
     expect(kinds).toContain('outline')
     expect(kinds).toContain('video')
     expect(kinds).toContain('exam')
     expect(kinds).toContain('note')
+    expect(kinds).toContain('superdoc')
 
     // 入口节点
     const entryCard = mock.cards.find((c) => c.entry)
@@ -403,9 +404,15 @@ describe('认领接口的文档卡：没有正经标题就显示接口的 label'
     const outlineCard = mock.cards.find((c) => c.kind === 'outline')
     expect(outlineCard?.slots?.length).toBe(3)
 
+    // 超级文档与试卷节点
+    const sdocCard = mock.cards.find((c) => c.kind === 'superdoc')
+    expect(sdocCard?.title).toBe('TCP 握手时序交互仿真')
+    const examCard = mock.cards.find((c) => c.kind === 'exam')
+    expect(examCard?.attempts?.length).toBe(1)
+
     // 相机视口计算
     const cam = getTourCamera(1200, 700)
-    expect(cam.zoom).toBeGreaterThan(0.6)
+    expect(cam.zoom).toBeGreaterThan(0.55)
     expect(cam.x).toBeDefined()
     expect(cam.y).toBeDefined()
   })
