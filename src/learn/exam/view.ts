@@ -387,7 +387,7 @@ export function examReadPayload(input: {
                 ? '📷 学习者提交了手机拍摄的手写答案图片（见题目 userAnswer.image 或 handwrittenImages）。请审阅手写答案进行判分，并使用 api.exam.cropAnswer({ questionId, box: [ymin, xmin, ymax, xmax] }) 裁出各题作答区域贴到试卷上。\n\n'
                 : '') +
               '学习者已交卷，请**两步走完这一次**：\n' +
-              '① 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment }] })。' +
+              '① 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment, userAnswer }] })。' +
               '每一道答错的题都要给 comment（单选/多选/对错/填空也一样，不能只讲简答题），系统已判好的客观题也请补上讲解。\n' +
               '② 写错题讲解：先看上面 history 里的 **weak**（历次考错的题）与 attempt 里的记录' +
               '（overtimeMin 超时、blurCount 切屏、dwell 单题耗时——反复改答案、在某题上耗很久、超时作答都是信号），' +

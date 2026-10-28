@@ -6,6 +6,7 @@ import {
   attachCroppedAnswerImage,
   attachHandwrittenImages,
   applyGradeResult,
+  submitAttempt,
   upsertAttempt,
 } from '../src/learn/graph/exams'
 import type { Exam, ExamAttempt } from '../src/learn/exam/types'
@@ -35,6 +36,13 @@ const mockExam: Exam = {
       type: 'fill',
       stem: '导数的物理意义是______',
       points: 5,
+    },
+    {
+      id: 'q3',
+      type: 'truefalse',
+      stem: '极限存在则唯一',
+      answer: ['true'],
+      points: 2,
     },
   ],
 }
@@ -159,6 +167,70 @@ describe('手写答案判分有效性与输入记录流 (hasAnswerValue & record
 
     // 自动追加至 handwrittenImages
     expect(attempt.handwrittenImages).toContain('C:/transfers/sheet_raw_1.png')
+  })
+})
+
+describe('手写答卷非机械化判题与 Agent 亲自介入 (submitAttempt & applyGradeResult)', () => {
+  it('submitAttempt 在包含手写图片时不进行机械式客观题判分', () => {
+    let store = makeInitialStore()
+    const attempt: ExamAttempt = {
+      id: 'att_sub_1',
+      startedAt: T0,
+      status: 'ongoing',
+      answers: [{ questionId: 'q3', value: ['false'] }], // 界面上可能误点了错误选项
+      inputs: [],
+      dwell: {},
+      blurs: [],
+      forceSubmit: false,
+      handwrittenImages: ['sheet_1.png'],
+    }
+    store = upsertAttempt(store, mockExam.id, attempt)
+    const nextStore = submitAttempt(store, mockExam.id, 'att_sub_1', T0 + 10000)
+    const settled = nextStore.exams[0].attempts[0]
+    expect(settled.status).toBe('submitted')
+    // 因为有手写图片，绝不进行机械判断！
+    expect(settled.results).toBeUndefined()
+  })
+
+  it('applyGradeResult 在有手写答卷时，客观题完全采信 Agent 亲自判定的分数与识别的作答', () => {
+    let store = makeInitialStore()
+    const attempt: ExamAttempt = {
+      id: 'att_sub_2',
+      startedAt: T0,
+      status: 'submitted',
+      answers: [{ questionId: 'q3', value: ['false'] }], // 界面上误点的
+      inputs: [],
+      dwell: {},
+      blurs: [],
+      forceSubmit: false,
+      handwrittenImages: ['sheet_1.png'],
+    }
+    store = upsertAttempt(store, mockExam.id, attempt)
+
+    // Agent 审阅手写答卷后，识别出学生在纸上写的是对的（比如 "true" / "对"），并给了满分 2 分
+    const res = applyGradeResult(store, mockExam.id, 'att_sub_2', {
+      passed: true,
+      summary: '审阅了手写答卷',
+      results: [
+        {
+          questionId: 'q3',
+          correct: true,
+          score: 2,
+          comment: '手写答案为对，理解准确',
+          userAnswer: ['true'],
+        },
+      ],
+    })
+
+    const graded = res.store.exams[0].attempts[0]
+    expect(graded.status).toBe('graded')
+    const q3Result = graded.results?.find((r) => r.questionId === 'q3')
+    expect(q3Result?.by).toBe('agent')
+    expect(q3Result?.correct).toBe(true)
+    expect(q3Result?.score).toBe(2)
+    // 学习者实际作答更新为 Agent 从手写纸上识别的内容
+    const q3Ans = graded.answers.find((a) => a.questionId === 'q3')
+    expect(q3Ans?.value).toEqual(['true'])
   })
 })
 

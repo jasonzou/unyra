@@ -9,19 +9,17 @@ import {
   ChevronRight,
   Clock,
   Flag,
-  ImagePlus,
   Loader2,
   Play,
   ShieldCheck,
   Timer,
-  Trash2,
   X,
 } from 'lucide-react'
 import LanButton from '../lan/LanButton'
 import LanConnectDialog from '../lan/LanConnectDialog'
-import { requestDeviceFile, useLanServer } from '../../lib/lanSync'
-import HandwrittenImagePreview from './HandwrittenImagePreview'
 import ImageLightboxModal from './ImageLightboxModal'
+import UnifiedHandwrittenSheetsCard from './UnifiedHandwrittenSheetsCard'
+import { checkExamOmissions, type OmissionCheckResult } from '../../learn/exam'
 import { native } from '../../lib/native'
 import { renderInline } from '../../lib/markdown'
 import Switch from '../Switch'
@@ -91,6 +89,10 @@ export default function ExamWindow() {
   const [stripOpen, setStripOpen] = useState(false)
   const [lanOpen, setLanOpen] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [handwrittenImages, setHandwrittenImages] = useState<string[]>([])
+  const [checkingOmissions, setCheckingOmissions] = useState(false)
+  const [omissionWarning, setOmissionWarning] = useState<OmissionCheckResult | null>(null)
+  const sheetsRef = useRef<HTMLDivElement | null>(null)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const itemRefs = useRef(new Map<string, HTMLDivElement>())
@@ -116,6 +118,9 @@ export default function ExamWindow() {
       if (!next || typeof next !== 'object') return
       setState(next)
       if (next.phase === 'running' && next.attempt) {
+        if (Array.isArray(next.attempt.handwrittenImages)) {
+          setHandwrittenImages(next.attempt.handwrittenImages)
+        }
         setAnswers((prev) => {
           if (Object.keys(prev).length) return prev
           const out: Record<string, Draft> = {}
@@ -224,6 +229,45 @@ export default function ExamWindow() {
     },
     [answers, guest, questions, gotoQuestion],
   )
+
+  const addHandwrittenImage = useCallback((img: string) => {
+    setHandwrittenImages((prev) => {
+      if (prev.includes(img)) return prev
+      const next = [...prev, img]
+      guest?.emit({ type: 'setHandwritten', images: next })
+      return next
+    })
+  }, [guest])
+
+  const removeHandwrittenImage = useCallback((indexToRemove: number) => {
+    setHandwrittenImages((prev) => {
+      const next = prev.filter((_, i) => i !== indexToRemove)
+      guest?.emit({ type: 'setHandwritten', images: next })
+      return next
+    })
+  }, [guest])
+
+  const handleRequestSubmit = useCallback(async () => {
+    if (submittedRef.current) return
+    if (handwrittenImages.length > 0 && state) {
+      setCheckingOmissions(true)
+      try {
+        const res = await checkExamOmissions({
+          exam: state,
+          images: handwrittenImages,
+        })
+        if (res.hasOmissions) {
+          setOmissionWarning(res)
+          return
+        }
+      } catch {
+        // 预检降级
+      } finally {
+        setCheckingOmissions(false)
+      }
+    }
+    setConfirm('submit')
+  }, [handwrittenImages, state])
 
   const submit = useCallback(
     (kind: 'submit' | 'abandon') => {
@@ -366,6 +410,25 @@ export default function ExamWindow() {
         <div className="flex shrink-0 items-center gap-1.5">
           {running && (
             <>
+              <button
+                type="button"
+                onClick={() => sheetsRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                className={
+                  'flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] transition cursor-pointer ' +
+                  (handwrittenImages.length > 0
+                    ? 'border-seal/40 bg-seal/10 text-seal-deep font-semibold'
+                    : 'border-dashed border-line text-ink-soft hover:border-line-strong hover:text-ink')
+                }
+                title={t('统一上传手写答卷照片')}
+              >
+                <Camera size={12} className={handwrittenImages.length > 0 ? 'text-seal' : ''} />
+                <span>{t('手写答卷')}</span>
+                {handwrittenImages.length > 0 && (
+                  <span className="rounded-full bg-seal px-1.5 py-px text-[10px] text-white font-bold tabular-nums">
+                    {handwrittenImages.length}
+                  </span>
+                )}
+              </button>
               <LanButton onOpen={() => setLanOpen(true)} />
               <div className="flex items-center gap-1 rounded border border-line bg-paper/60 px-2 py-0.5 text-[11px] tabular-nums text-ink-soft">
                 <span>{t('已答 {0}/{1}', answeredCount, questions.length)}</span>
@@ -380,8 +443,8 @@ export default function ExamWindow() {
               </button>
               <button
                 type="button"
-                onClick={() => setConfirm('submit')}
-                className="flex items-center gap-1 rounded bg-seal px-3 py-1 text-[11.5px] font-semibold text-paper shadow-2xs hover:bg-seal-deep transition active:scale-[0.98]"
+                onClick={handleRequestSubmit}
+                className="flex items-center gap-1 rounded bg-seal px-3 py-1 text-[11.5px] font-semibold text-paper shadow-2xs hover:bg-seal-deep transition active:scale-[0.98] cursor-pointer"
               >
                 <Flag size={11} />
                 <span>{t('交卷')}</span>
@@ -432,6 +495,14 @@ export default function ExamWindow() {
             style={{ padding: `${PAD_TOP}px ${PAD_X}px ${PAD_BOTTOM}px` }}
           >
             <div className="mx-auto flex w-full flex-col gap-4" style={{ maxWidth: PAPER_MAX_W }}>
+              <UnifiedHandwrittenSheetsCard
+                ref={sheetsRef}
+                images={handwrittenImages}
+                onAddImage={addHandwrittenImage}
+                onRemoveImage={removeHandwrittenImage}
+                onPreviewImage={setPreviewImage}
+                onOpenLan={() => setLanOpen(true)}
+              />
               {questions.map((q, i) => (
                 <QuestionBlock
                   key={q.id}
@@ -444,8 +515,6 @@ export default function ExamWindow() {
                     else itemRefs.current.delete(q.id)
                   }}
                   onChange={(next, advance) => setAnswer(q, next, advance)}
-                  onOpenLan={() => setLanOpen(true)}
-                  onPreviewImage={setPreviewImage}
                 />
               ))}
             </div>
@@ -533,9 +602,81 @@ export default function ExamWindow() {
       <LanConnectDialog open={lanOpen} onClose={() => setLanOpen(false)} />
       <ImageLightboxModal
         src={previewImage}
-        title={t('手写答案预览')}
+        title={t('手写答卷原图预览')}
         onClose={() => setPreviewImage(null)}
       />
+
+      {/* 小 Agent 漏题预检中动画 */}
+      {checkingOmissions && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
+          <div className="moji-dialog-in flex items-center gap-3 rounded-xl border border-line-strong bg-card px-5 py-4 shadow-xl">
+            <Loader2 size={18} className="animate-spin text-seal" />
+            <div className="flex flex-col">
+              <span className="text-[13px] font-semibold text-ink-strong">{t('小 Agent 正在预检手写答卷…')}</span>
+              <span className="text-[11px] text-ink-faint">{t('正在检查手写答卷是否存在遗漏未写题目，请稍候')}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 漏题预检警告弹窗 */}
+      {omissionWarning && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
+          <div className="moji-dialog-in w-[420px] rounded-xl border border-amber-500/40 bg-card p-4 shadow-xl">
+            <div className="flex items-center gap-2">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-amber-500/10 text-amber-600">
+                <AlertTriangle size={15} />
+              </div>
+              <h3 className="text-[14px] font-bold text-ink-strong">{t('手写答卷疑似存在未作答题目')}</h3>
+            </div>
+
+            <div className="mt-3 text-[12px] leading-relaxed text-ink-soft">
+              <p>{t('AI 小导师快速预检发现，以下题目在上传的手写答卷中尚未找到作答痕迹：')}</p>
+              <div className="my-2.5 flex flex-wrap gap-1.5">
+                {omissionWarning.missingQuestions.map((qNum) => (
+                  <span
+                    key={qNum}
+                    className="rounded border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[11.5px] font-bold text-amber-800 dark:text-amber-300"
+                  >
+                    {t('第 {0} 题', qNum)}
+                  </span>
+                ))}
+              </div>
+              {omissionWarning.reason && (
+                <p className="rounded bg-paper/60 p-2 text-[11px] text-ink-faint border border-line/60">
+                  {omissionWarning.reason}
+                </p>
+              )}
+              <p className="mt-2 text-[11px] text-ink-faint">
+                {t('你可以返回补充作答并拍照重新上传，也可以选择强行交卷（未作答题目将由导师按 0 分计算）。')}
+              </p>
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setOmissionWarning(null)
+                  sheetsRef.current?.scrollIntoView({ behavior: 'smooth' })
+                }}
+                className="rounded border border-line bg-paper/60 px-3 py-1.5 text-[11.5px] font-medium text-ink transition hover:bg-line/60 cursor-pointer"
+              >
+                {t('返回补充作答 / 拍照')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOmissionWarning(null)
+                  submit('submit')
+                }}
+                className="rounded bg-seal px-3.5 py-1.5 text-[11.5px] font-semibold text-paper shadow-2xs hover:bg-seal-deep transition cursor-pointer"
+              >
+                {t('仍然强行交卷')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirm && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
@@ -732,8 +873,6 @@ function QuestionBlock({
   current,
   onChange,
   register,
-  onOpenLan,
-  onPreviewImage,
 }: {
   index: number
   question: ExamQuestion
@@ -741,44 +880,7 @@ function QuestionBlock({
   current: boolean
   onChange: (next: Draft, advance?: boolean) => void
   register: (el: HTMLDivElement | null) => void
-  onOpenLan: () => void
-  onPreviewImage: (src: string) => void
 }) {
-  const { status } = useLanServer()
-  const [snapping, setSnapping] = useState(false)
-
-  const handleSnap = async () => {
-    if (!status.running || status.devices.length === 0) {
-      onOpenLan()
-      return
-    }
-    setSnapping(true)
-    try {
-      const res = await requestDeviceFile({
-        prompt: t('请拍摄第 {0} 题的手写答案', index),
-        accept: 'image/*',
-      })
-      if (res.ok && res.file) {
-        onChange({ ...draft, image: res.file.path, rawImage: res.file.path })
-      } else if (res.error && res.error.includes('没有手机设备连接')) {
-        onOpenLan()
-      }
-    } finally {
-      setSnapping(false)
-    }
-  }
-
-  const onLocalFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result as string
-      onChange({ ...draft, image: dataUrl, rawImage: dataUrl })
-    }
-    reader.readAsDataURL(file)
-    e.target.value = ''
-  }
   const stemHtml = useMemo(() => renderInline(question.stem), [question.stem])
   const isJudgement = question.type === 'truefalse'
   const options = isJudgement
@@ -803,13 +905,6 @@ function QuestionBlock({
   }
 
   return (
-    /*
-      `relative` 不是装饰：对错题的 radio 用了 sr-only（绝对定位），题卡若不定为
-      定位祖先，它们的包含块会一路找到下面那个 `relative` 的答题栏容器——于是
-      输入框停在题目流的「原始位置」不随滚动移动，把页面撑高几千像素；点选项聚焦到
-      它时浏览器又把整页滚过去，卷面被顶上去、底下空一大块（已复现）。
-      所以题卡必须是定位元素，任何绝对定位的零件都留在题卡里。
-    */
     <div
       ref={register}
       className={
@@ -860,13 +955,13 @@ function QuestionBlock({
         <div className="my-2.5 flex justify-center rounded border border-line/60 bg-paper/30 p-2.5 moji-exam-figure" dangerouslySetInnerHTML={{ __html: question.image }} />
       )}
 
-      {/* 作答区：高空间利用率，无臃肿大卡片 */}
+      {/* 作答区 */}
       {question.type === 'fill' ? (
         <div className="mt-3">
           <input
             value={draft.text}
             onChange={(e) => onChange({ ...draft, value: [], text: e.target.value })}
-            placeholder={t('在这里填写答案')}
+            placeholder={t('在这里填写答案（手写在答卷上的可在顶部统一拍照上传）')}
             spellCheck={false}
             className="w-full rounded border border-line bg-paper/40 px-3 py-1.5 text-[13px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/60 focus:bg-card focus:ring-1 focus:ring-seal/15"
           />
@@ -877,7 +972,7 @@ function QuestionBlock({
             value={draft.text}
             onChange={(e) => onChange({ ...draft, value: [], text: e.target.value })}
             rows={3}
-            placeholder={t('在这里作答（可写推导过程）')}
+            placeholder={t('在这里作答（手写在答卷上的可在顶部统一拍照上传）')}
             spellCheck={false}
             className="w-full resize-y rounded border border-line bg-paper/40 px-3 py-1.5 text-[13px] leading-relaxed text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/60 focus:bg-card focus:ring-1 focus:ring-seal/15"
           />
@@ -950,83 +1045,6 @@ function QuestionBlock({
           })}
         </div>
       )}
-
-      {/* 手写拍照作答附件区 */}
-      <div className="mt-3 pt-2.5 border-t border-line/40">
-        {draft.image ? (
-          <div className="flex flex-col gap-1.5 rounded-lg border border-seal/30 bg-seal/[0.03] p-2.5">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="flex items-center gap-1 font-semibold text-seal-deep">
-                <Camera size={12} />
-                <span>{t('已附加手写答案')}</span>
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSnap}
-                  disabled={snapping}
-                  className="flex items-center gap-1 text-[11px] text-ink-soft hover:text-ink transition cursor-pointer"
-                >
-                  <Camera size={11} />
-                  <span>{snapping ? t('拍摄中…') : t('重新拍摄')}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChange({ ...draft, image: undefined, rawImage: undefined })}
-                  className="flex items-center gap-1 text-[11px] text-rose-600 hover:text-rose-700 transition cursor-pointer"
-                >
-                  <Trash2 size={11} />
-                  <span>{t('移除')}</span>
-                </button>
-              </div>
-            </div>
-            <div className="flex justify-center p-1 bg-paper/60 rounded border border-line/50">
-              <HandwrittenImagePreview
-                src={draft.image}
-                alt={t('第 {0} 题手写答案', index)}
-                className="max-h-[220px] max-w-full rounded object-contain shadow-2xs cursor-zoom-in"
-                onClick={() => onPreviewImage(draft.image!)}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={handleSnap}
-                disabled={snapping}
-                className="flex items-center gap-1.5 rounded border border-dashed border-line-strong hover:border-seal/60 bg-paper/40 px-2.5 py-1 text-[11.5px] font-medium text-ink-soft hover:text-seal-deep hover:bg-seal/[0.04] transition cursor-pointer disabled:opacity-50"
-              >
-                {snapping ? (
-                  <>
-                    <Loader2 size={12} className="animate-spin text-seal" />
-                    <span>{t('等待手机拍照上传…')}</span>
-                  </>
-                ) : (
-                  <>
-                    <Camera size={12} className="text-seal" />
-                    <span>{t('手机拍照手写答案')}</span>
-                  </>
-                )}
-              </button>
-              <label className="flex items-center gap-1 rounded border border-dashed border-line/60 hover:border-line bg-paper/20 px-2 py-1 text-[11px] text-ink-faint hover:text-ink cursor-pointer transition">
-                <ImagePlus size={11} />
-                <span>{t('本地图片')}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  onChange={onLocalFilePicked}
-                />
-              </label>
-            </div>
-            <span className="text-[10px] text-ink-faint">
-              {t('交卷后 Agent 自动判分并裁切贴题')}
-            </span>
-          </div>
-        )}
-      </div>
     </div>
   )
 }

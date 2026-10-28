@@ -600,7 +600,15 @@ function QuestionReview({
       {/* 选项作答比对：轻量条目，绝非大圆角卡牌 */}
       {q.type === 'single' || q.type === 'multiple' || q.type === 'truefalse' ? (
         <div className="mt-2.5 flex flex-col gap-1">
-          {(q.options ?? []).map((o) => {
+          {(q.type === 'truefalse'
+            ? q.options && q.options.length > 0
+              ? q.options
+              : [
+                  { id: 'true', text: t('对') },
+                  { id: 'false', text: t('错') },
+                ]
+            : (q.options ?? [])
+          ).map((o) => {
             const chosen = picked.includes(o.id)
             const isKey = hasKey && key.includes(o.id)
             const isRightChoice = isKey && chosen

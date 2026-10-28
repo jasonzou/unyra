@@ -250,7 +250,7 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
       const p = (payload && typeof payload === 'object' ? payload : {}) as {
         attemptId?: string
         questionId?: string
-        sourceImage?: string
+        sourceImage?: string | number
         box?: CropBoxInput
       }
       if (!p.questionId) {
@@ -269,7 +269,12 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
         return { ok: false, message: '找不到对应的考试记录' }
       }
 
-      let src = p.sourceImage
+      let src: string | undefined
+      if (typeof p.sourceImage === 'number') {
+        src = found.attempt.handwrittenImages?.[p.sourceImage]
+      } else if (typeof p.sourceImage === 'string') {
+        src = p.sourceImage
+      }
       if (!src) {
         const ans = found.attempt.answers.find((a) => a.questionId === p.questionId)
         src = ans?.rawImage || ans?.image || found.attempt.handwrittenImages?.[0]

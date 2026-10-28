@@ -1,7 +1,7 @@
 /**
  * 本文件负责：试卷与考试记录——读卷、开考、交卷、放弃，以及 Agent 判分 / 错题讲解的落库。
  */
-import type { Exam, ExamAttempt } from '../exam'
+import type { Exam, ExamAnswer, ExamAttempt } from '../exam'
 import type { LearnStore } from '../types'
 import { attemptScore, examTotalPoints, gradeObjectiveAll, isAutoGradable } from '../exam'
 import { newAttempt, settleAttempt } from '../examRecords'
@@ -121,7 +121,13 @@ export function submitAttempt(store: LearnStore, examId: string, attemptId: stri
   const attempt = exam?.attempts.find((a) => a.id === attemptId)
   if (!exam || !attempt || attempt.status !== 'ongoing') return store
   const settled = settleAttempt(attempt, exam, { status: 'submitted', at })
-  return upsertAttempt(store, examId, { ...settled, results: gradeObjectiveAll(exam, settled.answers) })
+  const hasImages = (settled.handwrittenImages && settled.handwrittenImages.length > 0) ||
+    settled.answers.some((a) => a.image)
+  // 若有手写答卷图片，所有题目（包括客观题）均在手写纸上作答，绝不进行机械式客观题判分，一律交给 Agent 亲自审卷判分
+  return upsertAttempt(store, examId, {
+    ...settled,
+    results: hasImages ? undefined : gradeObjectiveAll(exam, settled.answers),
+  })
 }
 
 /**
@@ -144,6 +150,7 @@ export interface GradePayload {
     score?: number
     comment?: string
     croppedAnswerImage?: string
+    userAnswer?: string | string[]
   }>
   summary?: string
   passed?: boolean
@@ -172,50 +179,109 @@ export function applyGradeResult(
     return { store, ok: false, message: '缺少 passed 或 summary' }
   }
 
-  const results = gradeObjectiveAll(exam, attempt.answers)
+  const hasImages = (attempt.handwrittenImages && attempt.handwrittenImages.length > 0) ||
+    attempt.answers.some((a) => a.image)
+
+  const answers = attempt.answers.slice()
+  // 若 Agent 在审阅手写答卷时提取出了学习者的实际作答，更新进 answers
   for (const item of payload.results ?? []) {
-    if (!item.questionId) continue
-    const idx = results.findIndex((x) => x.questionId === item.questionId)
-    if (idx < 0) continue
-    const q = exam.questions[idx]
-    const comment = typeof item.comment === 'string' ? unescapeNewlines(item.comment) : undefined
-    const croppedAnswerImage = typeof item.croppedAnswerImage === 'string' ? item.croppedAnswerImage : undefined
-    if (isAutoGradable(q)) {
-      // 客观题的分数以系统为准（不采信 Agent 给的对错/分数），
-      // 但 Agent 为错题补的讲解要收下——否则客观题将没有任何错题讲解。
-      if (comment || croppedAnswerImage) {
-        results[idx] = {
-          ...results[idx],
-          ...(comment ? { comment } : {}),
+    if (!item.questionId || item.userAnswer === undefined) continue
+    const idx = answers.findIndex((a) => a.questionId === item.questionId)
+    const val = Array.isArray(item.userAnswer)
+      ? item.userAnswer.map(String)
+      : typeof item.userAnswer === 'string'
+        ? [item.userAnswer]
+        : []
+    const textVal = typeof item.userAnswer === 'string' ? item.userAnswer : undefined
+    const existing = answers[idx]
+    const updatedAns: ExamAnswer = {
+      questionId: item.questionId,
+      value: val,
+      ...(textVal ? { text: textVal } : {}),
+      ...(existing?.image ? { image: existing.image } : {}),
+      ...(existing?.rawImage ? { rawImage: existing.rawImage } : {}),
+    }
+    if (idx >= 0) answers[idx] = updatedAns
+    else answers.push(updatedAns)
+  }
+
+  // 如果有手写答卷图片，所有题目（包括客观题与主观题）必须由 Agent 亲自审阅判分，绝不进行机械判断
+  const results = hasImages
+    ? exam.questions.map((q) => {
+        const item = (payload.results ?? []).find((x) => x.questionId === q.id)
+        if (!item) {
+          return {
+            questionId: q.id,
+            correct: null,
+            score: 0,
+            maxScore: q.points,
+            by: 'agent' as const,
+          }
+        }
+        const comment = typeof item.comment === 'string' ? unescapeNewlines(item.comment) : undefined
+        const croppedAnswerImage = typeof item.croppedAnswerImage === 'string' ? item.croppedAnswerImage : undefined
+        const score = typeof item.score === 'number'
+          ? Math.max(0, Math.min(q.points, item.score))
+          : item.correct
+            ? q.points
+            : 0
+        return {
+          questionId: q.id,
+          correct: typeof item.correct === 'boolean' ? item.correct : score === q.points,
+          score,
+          maxScore: q.points,
+          comment,
+          by: 'agent' as const,
           ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
         }
+      })
+    : gradeObjectiveAll(exam, answers)
+
+  if (!hasImages) {
+    for (const item of payload.results ?? []) {
+      if (!item.questionId) continue
+      const idx = results.findIndex((x) => x.questionId === item.questionId)
+      if (idx < 0) continue
+      const q = exam.questions[idx]
+      const comment = typeof item.comment === 'string' ? unescapeNewlines(item.comment) : undefined
+      const croppedAnswerImage = typeof item.croppedAnswerImage === 'string' ? item.croppedAnswerImage : undefined
+      if (isAutoGradable(q)) {
+        if (comment || croppedAnswerImage) {
+          results[idx] = {
+            ...results[idx],
+            ...(comment ? { comment } : {}),
+            ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
+          }
+        }
+        continue
       }
-      continue
-    }
-    const score =
-      typeof item.score === 'number'
-        ? Math.max(0, Math.min(q.points, item.score))
-        : item.correct
-          ? q.points
-          : 0
-    results[idx] = {
-      questionId: item.questionId,
-      correct: item.correct === true,
-      score,
-      maxScore: q.points,
-      comment,
-      by: 'agent',
-      ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
+      const score =
+        typeof item.score === 'number'
+          ? Math.max(0, Math.min(q.points, item.score))
+          : item.correct
+            ? q.points
+            : 0
+      results[idx] = {
+        questionId: item.questionId,
+        correct: item.correct === true,
+        score,
+        maxScore: q.points,
+        comment,
+        by: 'agent',
+        ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
+      }
     }
   }
 
   const graded: ExamAttempt = {
     ...attempt,
     status: 'graded',
+    answers,
     results,
     summary: unescapeNewlines(payload.summary),
     passed: payload.passed,
   }
+
   let next = upsertAttempt(store, examId, graded)
   if (payload.passed) next = setNodeStatus(next, exam.nodeId, 'mastered')
   /*
