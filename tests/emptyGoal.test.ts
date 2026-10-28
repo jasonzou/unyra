@@ -5,6 +5,7 @@ import {
   allTabs,
   closeIn,
   emptyDocs,
+  goalTabsOf,
   isAnchorOutline,
   openAnchorOutline,
   unloadAnchoredGroups,
@@ -131,5 +132,17 @@ describe('空学习目标持久化与画布派生', () => {
     const restored = openAnchorOutline(settled, FIRST_GROUP, outlineRef, goalOfNode, 2)
     expect(allTabs(restored).some((t) => t.id === tabKey(outlineRef))).toBe(true)
     expect(restored.parkedTabs?.[goalId]).toBeUndefined()
+  })
+
+  it('空目标仅打开结构页签时，能被 goalTabsOf 正确归属于该目标', () => {
+    const goalId = 'goal-empty-topbar'
+    const outlineRef: TabRef & { kind: 'outline' } = { kind: 'outline', nodeId: goalId, goalId }
+    const goalOfNode = (id: string) => (id === goalId ? goalId : null)
+
+    const docs = openAnchorOutline(emptyDocs(), FIRST_GROUP, outlineRef, goalOfNode, 1)
+    const tabs = allTabs(docs)
+    const matched = goalTabsOf(docs.tabOwners, tabs, goalOfNode, goalId)
+    expect(matched.length).toBe(1)
+    expect(matched[0].id).toBe(tabKey(outlineRef))
   })
 })

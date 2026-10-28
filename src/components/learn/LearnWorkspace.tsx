@@ -521,7 +521,10 @@ export default function LearnWorkspace({
 
   const activeNodeId = store.activeNodeId
   const activeNode = activeNodeId ? (nodeById(store, activeNodeId) ?? null) : null
-  const activeGoal = activeNode ? (store.goals.find((g) => g.id === activeNode.goalId) ?? null) : null
+  const activeGoal =
+    store.goals.find((g) => g.id === store.activeGoalId) ??
+    store.goals.find((g) => g.id === activeNode?.goalId) ??
+    null
   const activeGoalId = activeGoal?.id ?? null
 
   /*
@@ -552,19 +555,14 @@ export default function LearnWorkspace({
    * 顶栏标题只在文档区确实存在目标根大纲时显示。activeNodeId 是导师上下文，关闭文档后
    * 可能仍然保留；如果不加这道门，文档区已经空了，Topbar 却会继续显示旧目标标题。
    */
-  const hasTargetOutline = useMemo(
-    () =>
-      activeGoal
-        ? tabs.some(
-            (t) =>
-              t.ref.kind === 'outline' &&
-              (t.ref.nodeId === (activeGoal.rootNodeId || activeGoal.id) ||
-                (t.ref as { goalId?: string }).goalId === activeGoal.id),
-          )
-        : false,
-    [activeGoal, tabs],
-  )
-  const topbarGoalQuestion = hasTargetOutline ? (activeGoal?.title || activeGoal?.question || '') : ''
+  const hasTargetTabs = useMemo(() => {
+    if (!activeGoal) return false
+    const owners = store.docArea.tabOwners
+    const goalOfNode = (nodeId: string) =>
+      nodeById(store, nodeId)?.goalId ?? (store.goals.some((g) => g.id === nodeId) ? nodeId : null)
+    return goalTabsOf(owners, tabs, goalOfNode, activeGoal.id).length > 0
+  }, [activeGoal, store, tabs])
+  const topbarGoalQuestion = hasTargetTabs ? (activeGoal?.title || activeGoal?.question || '') : ''
 
   /*
    * 记忆的写入口（见 learn/memory）：**目标由调用方给**——工作记忆落进哪个目标，
