@@ -307,7 +307,12 @@ export function examReadPayload(input: {
       points: q.points,
       ...(attempt
         ? {
-            userAnswer: { value: a?.value ?? [], text: a?.text ?? '' },
+            userAnswer: {
+              value: a?.value ?? [],
+              text: a?.text ?? '',
+              ...(a?.image ? { image: a.image } : {}),
+              ...(a?.rawImage ? { rawImage: a.rawImage } : {}),
+            },
             systemGraded: r ? { correct: r.correct, score: r.score } : undefined,
             needYourGrading: r ? r.correct === null : isAutoGradable(q) === false,
             ...(attempt.inputs.some((x) => x.questionId === q.id && x.overtime)
@@ -361,6 +366,7 @@ export function examReadPayload(input: {
           }
         : {}),
       totalPapers: exams.length,
+      ...(attempt?.handwrittenImages?.length ? { handwrittenImages: attempt.handwrittenImages } : {}),
       questions,
       history,
       childNodes,
@@ -377,6 +383,9 @@ export function examReadPayload(input: {
       ...(status === 'submitted'
         ? {
             gradingNote:
+              (attempt?.handwrittenImages?.length || paper.questions.some((q) => attempt?.answers.some((x) => x.questionId === q.id && x.image))
+                ? '📷 学习者提交了手机拍摄的手写答案图片（见题目 userAnswer.image 或 handwrittenImages）。请审阅手写答案进行判分，并使用 api.exam.cropAnswer({ questionId, box: [ymin, xmin, ymax, xmax] }) 裁出各题作答区域贴到试卷上。\n\n'
+                : '') +
               '学习者已交卷，请**两步走完这一次**：\n' +
               '① 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment }] })。' +
               '每一道答错的题都要给 comment（单选/多选/对错/填空也一样，不能只讲简答题），系统已判好的客观题也请补上讲解。\n' +

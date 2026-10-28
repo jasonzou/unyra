@@ -2,17 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Award,
+  Camera,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
   Flag,
+  ImagePlus,
+  Loader2,
   Play,
   ShieldCheck,
   Timer,
+  Trash2,
   X,
 } from 'lucide-react'
+import LanButton from '../lan/LanButton'
+import LanConnectDialog from '../lan/LanConnectDialog'
+import { requestDeviceFile, useLanServer } from '../../lib/lanSync'
+import HandwrittenImagePreview from './HandwrittenImagePreview'
+import ImageLightboxModal from './ImageLightboxModal'
 import { native } from '../../lib/native'
 import { renderInline } from '../../lib/markdown'
 import Switch from '../Switch'
@@ -50,9 +59,11 @@ const EMPTY_QUESTIONS: ExamQuestion[] = []
 interface Draft {
   value: string[]
   text: string
+  image?: string
+  rawImage?: string
 }
 
-const emptyDraft: Draft = { value: [], text: '' }
+const emptyDraft: Draft = { value: [], text: '', image: undefined, rawImage: undefined }
 
 const TYPE_THEMES: Record<string, { cls: string }> = {
   single: { cls: 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300' },
@@ -78,6 +89,8 @@ export default function ExamWindow() {
   const [confirm, setConfirm] = useState<null | 'submit' | 'abandon'>(null)
   const [localStart, setLocalStart] = useState<number | null>(null)
   const [stripOpen, setStripOpen] = useState(false)
+  const [lanOpen, setLanOpen] = useState(false)
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const itemRefs = useRef(new Map<string, HTMLDivElement>())
@@ -106,7 +119,7 @@ export default function ExamWindow() {
         setAnswers((prev) => {
           if (Object.keys(prev).length) return prev
           const out: Record<string, Draft> = {}
-          for (const a of next.attempt!.answers) out[a.questionId] = { value: a.value ?? [], text: a.text ?? '' }
+          for (const a of next.attempt!.answers) out[a.questionId] = { value: a.value ?? [], text: a.text ?? '', image: a.image, rawImage: a.rawImage }
           return out
         })
       }
@@ -199,6 +212,8 @@ export default function ExamWindow() {
         questionId: q.id,
         value: next.value,
         ...(next.text ? { text: next.text } : {}),
+        ...(next.image ? { image: next.image } : {}),
+        ...(next.rawImage ? { rawImage: next.rawImage } : {}),
         at: Date.now(),
       })
       if (!advance) return
@@ -351,6 +366,7 @@ export default function ExamWindow() {
         <div className="flex shrink-0 items-center gap-1.5">
           {running && (
             <>
+              <LanButton onOpen={() => setLanOpen(true)} />
               <div className="flex items-center gap-1 rounded border border-line bg-paper/60 px-2 py-0.5 text-[11px] tabular-nums text-ink-soft">
                 <span>{t('已答 {0}/{1}', answeredCount, questions.length)}</span>
                 <span className="text-[10px] text-ink-faint">({answeredPercent}%)</span>
@@ -428,6 +444,8 @@ export default function ExamWindow() {
                     else itemRefs.current.delete(q.id)
                   }}
                   onChange={(next, advance) => setAnswer(q, next, advance)}
+                  onOpenLan={() => setLanOpen(true)}
+                  onPreviewImage={setPreviewImage}
                 />
               ))}
             </div>
@@ -512,6 +530,13 @@ export default function ExamWindow() {
       )}
 
       {/* 确认弹窗 */}
+      <LanConnectDialog open={lanOpen} onClose={() => setLanOpen(false)} />
+      <ImageLightboxModal
+        src={previewImage}
+        title={t('手写答案预览')}
+        onClose={() => setPreviewImage(null)}
+      />
+
       {confirm && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
           <div className="moji-dialog-in w-[380px] rounded-xl border border-line-strong bg-card p-4 shadow-xl">
@@ -580,6 +605,7 @@ export default function ExamWindow() {
 
 function isBlank(q: ExamQuestion, draft: Draft | undefined): boolean {
   if (!draft) return true
+  if (draft.image) return false
   if (q.type === 'fill' || q.type === 'short') return !draft.text.trim()
   return draft.value.length === 0
 }
@@ -706,6 +732,8 @@ function QuestionBlock({
   current,
   onChange,
   register,
+  onOpenLan,
+  onPreviewImage,
 }: {
   index: number
   question: ExamQuestion
@@ -713,7 +741,44 @@ function QuestionBlock({
   current: boolean
   onChange: (next: Draft, advance?: boolean) => void
   register: (el: HTMLDivElement | null) => void
+  onOpenLan: () => void
+  onPreviewImage: (src: string) => void
 }) {
+  const { status } = useLanServer()
+  const [snapping, setSnapping] = useState(false)
+
+  const handleSnap = async () => {
+    if (!status.running || status.devices.length === 0) {
+      onOpenLan()
+      return
+    }
+    setSnapping(true)
+    try {
+      const res = await requestDeviceFile({
+        prompt: t('请拍摄第 {0} 题的手写答案', index),
+        accept: 'image/*',
+      })
+      if (res.ok && res.file) {
+        onChange({ ...draft, image: res.file.path, rawImage: res.file.path })
+      } else if (res.error && res.error.includes('没有手机设备连接')) {
+        onOpenLan()
+      }
+    } finally {
+      setSnapping(false)
+    }
+  }
+
+  const onLocalFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      onChange({ ...draft, image: dataUrl, rawImage: dataUrl })
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
   const stemHtml = useMemo(() => renderInline(question.stem), [question.stem])
   const isJudgement = question.type === 'truefalse'
   const options = isJudgement
@@ -725,11 +790,11 @@ function QuestionBlock({
 
   const toggle = (id: string): void => {
     if (question.type === 'single' || question.type === 'truefalse') {
-      onChange({ value: [id], text: '' }, true)
+      onChange({ ...draft, value: [id], text: '' }, true)
       return
     }
     const has = draft.value.includes(id)
-    onChange({ value: has ? draft.value.filter((x) => x !== id) : [...draft.value, id], text: '' }, false)
+    onChange({ ...draft, value: has ? draft.value.filter((x) => x !== id) : [...draft.value, id], text: '' }, false)
   }
 
   const isDone = !isBlank(question, draft)
@@ -800,7 +865,7 @@ function QuestionBlock({
         <div className="mt-3">
           <input
             value={draft.text}
-            onChange={(e) => onChange({ value: [], text: e.target.value })}
+            onChange={(e) => onChange({ ...draft, value: [], text: e.target.value })}
             placeholder={t('在这里填写答案')}
             spellCheck={false}
             className="w-full rounded border border-line bg-paper/40 px-3 py-1.5 text-[13px] text-ink outline-none transition placeholder:text-ink-faint focus:border-seal/60 focus:bg-card focus:ring-1 focus:ring-seal/15"
@@ -810,7 +875,7 @@ function QuestionBlock({
         <div className="mt-3">
           <textarea
             value={draft.text}
-            onChange={(e) => onChange({ value: [], text: e.target.value })}
+            onChange={(e) => onChange({ ...draft, value: [], text: e.target.value })}
             rows={3}
             placeholder={t('在这里作答（可写推导过程）')}
             spellCheck={false}
@@ -885,6 +950,83 @@ function QuestionBlock({
           })}
         </div>
       )}
+
+      {/* 手写拍照作答附件区 */}
+      <div className="mt-3 pt-2.5 border-t border-line/40">
+        {draft.image ? (
+          <div className="flex flex-col gap-1.5 rounded-lg border border-seal/30 bg-seal/[0.03] p-2.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="flex items-center gap-1 font-semibold text-seal-deep">
+                <Camera size={12} />
+                <span>{t('已附加手写答案')}</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSnap}
+                  disabled={snapping}
+                  className="flex items-center gap-1 text-[11px] text-ink-soft hover:text-ink transition cursor-pointer"
+                >
+                  <Camera size={11} />
+                  <span>{snapping ? t('拍摄中…') : t('重新拍摄')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChange({ ...draft, image: undefined, rawImage: undefined })}
+                  className="flex items-center gap-1 text-[11px] text-rose-600 hover:text-rose-700 transition cursor-pointer"
+                >
+                  <Trash2 size={11} />
+                  <span>{t('移除')}</span>
+                </button>
+              </div>
+            </div>
+            <div className="flex justify-center p-1 bg-paper/60 rounded border border-line/50">
+              <HandwrittenImagePreview
+                src={draft.image}
+                alt={t('第 {0} 题手写答案', index)}
+                className="max-h-[220px] max-w-full rounded object-contain shadow-2xs cursor-zoom-in"
+                onClick={() => onPreviewImage(draft.image!)}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleSnap}
+                disabled={snapping}
+                className="flex items-center gap-1.5 rounded border border-dashed border-line-strong hover:border-seal/60 bg-paper/40 px-2.5 py-1 text-[11.5px] font-medium text-ink-soft hover:text-seal-deep hover:bg-seal/[0.04] transition cursor-pointer disabled:opacity-50"
+              >
+                {snapping ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin text-seal" />
+                    <span>{t('等待手机拍照上传…')}</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera size={12} className="text-seal" />
+                    <span>{t('手机拍照手写答案')}</span>
+                  </>
+                )}
+              </button>
+              <label className="flex items-center gap-1 rounded border border-dashed border-line/60 hover:border-line bg-paper/20 px-2 py-1 text-[11px] text-ink-faint hover:text-ink cursor-pointer transition">
+                <ImagePlus size={11} />
+                <span>{t('本地图片')}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={onLocalFilePicked}
+                />
+              </label>
+            </div>
+            <span className="text-[10px] text-ink-faint">
+              {t('交卷后 Agent 自动判分并裁切贴题')}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -24,6 +24,7 @@ import type {
   BaseFileStatResult, BaseFileWriteResult, BaseProcessCreateOpts, BaseProcessCreateResult, BaseProcessDeleteResult, BaseProcessGetResult,
   BaseProcessInfo, BaseProcessListResult, BaseProcessOutputResult, BaseProcessStartResult, BaseProcessStatusResult,
   BaseProcessStopResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
+  CropBoxInput, CropImageResult,
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
   PluginEntry, PluginListResult, PluginSettingsResult,
   PluginSourceResult, PluginTogglesResult, SaveFilter, SilentMark, StorageEntry, StorageFail,
@@ -54,6 +55,7 @@ export type {
   VoiceTranscribeResult, WebDomOpResult,
   WebFetchResult, WebBinaryFetchResult, WebPointResult, WebReadHtmlResult, WebSnapshotResult,
   LanDeviceInfo, LanRequestFileOptions, LanRequestFileResult, LanServerStatus, LanUploadedFile,
+  CropBoxInput, CropImageResult,
 }
 
 /* ---------- 只在 preload 这一侧用到的形状 ---------- */
@@ -558,6 +560,8 @@ const api = {
      * 窗口就没了的情况。
      */
     allowClose: (): void => ipcRenderer.send('exam:allowClose'),
+    cropImage: (payload: { imagePath: string; box: CropBoxInput }): Promise<CropImageResult> =>
+      ipcRenderer.invoke('exam:cropImage', payload),
   },
 
   /**

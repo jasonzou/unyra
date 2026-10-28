@@ -265,6 +265,7 @@ exam.* 只管**作答侧**：交卷后 exam.read() 看作答，exam.grade(...) �
     [
       a('read', 'exam.read(attemptId?)', '读试卷与作答', '不给 attemptId 读最新一份；回题目、历次 attempts、判分与讲解状态。没有卷子也是一种答案（不是失败）。', `const paper = await api.exam.read()`),
       a('grade', 'exam.grade({ attemptId?, passed?, summary?, results })', '判分并落账', 'results 每项 { questionId, correct, score, maxScore, comment, by }；passed 决定节点是否标记已掌握。只改评价层，不改用户作答事实。', `await api.exam.grade({ passed: true, summary: '基础题全对，放缩方向还需巩固。', results: [{ questionId: 'q1', correct: true, score: 1, maxScore: 1, comment: '正确', by: 'agent' }] })`),
+      a('cropAnswer', 'exam.cropAnswer({ questionId, box, sourceImage?, attemptId? })', '裁切手写答案并贴在对应题目上', '将手机拍摄答卷中的特定题目手写区域裁切下来，贴在对应题目上回看。box 为 [ymin, xmin, ymax, xmax]（0~1000 范围，如 [120, 50, 480, 950]）或 { x, y, width, height }。', `await api.exam.cropAnswer({ questionId: 'q1', box: [100, 50, 450, 950] })`),
       a('explain', 'exam.explain({ content, attemptId? })', '写错题讲解', '判分之后的第二步，落在同一次考试上；content 是 Markdown 讲解，写完自动打开试卷副本。', `await api.exam.explain({ content: '## 错题解析\\n\\n第 2 题错在……' })`),
       a('delete', 'exam.delete({ id? })', '删一份没考过的卷子', '考过的卷子是学习记录，agent 删不掉；只清理空卷/废稿。', `await api.exam.delete({ id: 'ex_xxx' })`),
     ],

@@ -52,6 +52,20 @@ export function makeExamTool(deps: ExamToolDeps): NonNullable<SandboxOptions['ex
       const r = deps.gradeExam(payload)
       return { ok: r.ok, content: r.message }
     },
+    cropAnswer: async (payload) => {
+      if (!allow.includes('cropAnswer')) {
+        return {
+          ok: false,
+          content: '现在不能裁切答案：只有交卷待批改时才能裁切手写答案。',
+        }
+      }
+      if (!deps.cropAnswer) {
+        return { ok: false, content: '当前环境未提供裁切答案能力。' }
+      }
+      const r = await deps.cropAnswer(payload)
+      return { ok: r.ok, content: r.message }
+      return { ok: r.ok, content: r.message }
+    },
     explain: (payload) => {
       if (!allow.includes('explain')) {
         return {

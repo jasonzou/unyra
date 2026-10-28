@@ -138,7 +138,13 @@ export function abandonAttempt(store: LearnStore, examId: string, attemptId: str
 
 /** Agent 返回的阅卷结果 */
 export interface GradePayload {
-  results?: Array<{ questionId?: string; correct?: boolean; score?: number; comment?: string }>
+  results?: Array<{
+    questionId?: string
+    correct?: boolean
+    score?: number
+    comment?: string
+    croppedAnswerImage?: string
+  }>
   summary?: string
   passed?: boolean
 }
@@ -173,10 +179,17 @@ export function applyGradeResult(
     if (idx < 0) continue
     const q = exam.questions[idx]
     const comment = typeof item.comment === 'string' ? unescapeNewlines(item.comment) : undefined
+    const croppedAnswerImage = typeof item.croppedAnswerImage === 'string' ? item.croppedAnswerImage : undefined
     if (isAutoGradable(q)) {
       // 客观题的分数以系统为准（不采信 Agent 给的对错/分数），
       // 但 Agent 为错题补的讲解要收下——否则客观题将没有任何错题讲解。
-      if (comment) results[idx] = { ...results[idx], comment }
+      if (comment || croppedAnswerImage) {
+        results[idx] = {
+          ...results[idx],
+          ...(comment ? { comment } : {}),
+          ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
+        }
+      }
       continue
     }
     const score =
@@ -192,6 +205,7 @@ export function applyGradeResult(
       maxScore: q.points,
       comment,
       by: 'agent',
+      ...(croppedAnswerImage ? { croppedAnswerImage } : {}),
     }
   }
 
@@ -262,5 +276,55 @@ export function applyExplanation(
 function unescapeNewlines(s: string): string {
   if (s.includes('\n')) return s
   return s.replace(/\\r\\n|\\n/g, '\n').replace(/\\"/g, '"')
+}
+
+/** 将 Agent 裁切出的手写答案图片绑定到对应题目的结果与答案上 */
+export function attachCroppedAnswerImage(
+  store: LearnStore,
+  examId: string,
+  attemptId: string,
+  questionId: string,
+  croppedImagePath: string,
+): LearnStore {
+  const exam = store.exams.find((e) => e.id === examId)
+  const attempt = exam?.attempts.find((a) => a.id === attemptId)
+  if (!exam || !attempt) return store
+
+  const results = (attempt.results ?? []).map((r) =>
+    r.questionId === questionId ? { ...r, croppedAnswerImage: croppedImagePath } : r,
+  )
+
+  const answers = attempt.answers.map((ans) =>
+    ans.questionId === questionId ? { ...ans, image: croppedImagePath } : ans,
+  )
+  if (!answers.some((ans) => ans.questionId === questionId)) {
+    answers.push({ questionId, value: [], image: croppedImagePath })
+  }
+
+  return upsertAttempt(store, examId, {
+    ...attempt,
+    results,
+    answers,
+  })
+}
+
+/** 为一次考试追加手写原图 */
+export function attachHandwrittenImages(
+  store: LearnStore,
+  examId: string,
+  attemptId: string,
+  imagePaths: string[],
+): LearnStore {
+  const exam = store.exams.find((e) => e.id === examId)
+  const attempt = exam?.attempts.find((a) => a.id === attemptId)
+  if (!exam || !attempt) return store
+
+  const existing = attempt.handwrittenImages ?? []
+  const handwrittenImages = Array.from(new Set([...existing, ...imagePaths]))
+
+  return upsertAttempt(store, examId, {
+    ...attempt,
+    handwrittenImages,
+  })
 }
 

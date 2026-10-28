@@ -73,6 +73,8 @@ export {
   abandonAttempt,
   applyExplanation,
   applyGradeResult,
+  attachCroppedAnswerImage,
+  attachHandwrittenImages,
   examsOfNode,
   findAttempt,
   latestExam,

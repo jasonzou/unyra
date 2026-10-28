@@ -11,6 +11,7 @@ import { startupBackground } from '../storage'
 import { DEV_SERVER_URL, isDev } from './startup'
 import { appIcon } from './icon'
 import { attachConsoleForwarding, hardenLinks } from './windows'
+import { cropExamAnswerImage, type CropBoxInput } from '../exam/imageCrop'
 
 /* ---------- 考试窗口 ---------- */
 
@@ -245,4 +246,15 @@ export function registerExamIpc(): void {
     if (!examWindow || examWindow.isDestroyed()) return
     examWindow.setFullScreen(on === true)
   })
+
+  // 裁切手写答案图片
+  ipcMain.handle(
+    'exam:cropImage',
+    async (_event, payload: { imagePath: string; box: CropBoxInput }) => {
+      if (!payload || !payload.imagePath || !payload.box) {
+        return { ok: false, error: '缺少 imagePath 或 box 参数' }
+      }
+      return await cropExamAnswerImage(payload.imagePath, payload.box)
+    },
+  )
 }

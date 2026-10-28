@@ -561,6 +561,18 @@ export interface ExamOpenResult {
  *  preload 的 examHost.onClosed，渲染层 src/learn/useExamBridge.ts。 */
 export type ExamCloseReason = 'host' | 'quit' | 'closed'
 
+export type CropBoxInput =
+  | [number, number, number, number]
+  | { x: number; y: number; width: number; height: number }
+  | { ymin: number; xmin: number; ymax: number; xmax: number }
+
+export interface CropImageResult {
+  ok: boolean
+  croppedPath?: string
+  dataUrl?: string
+  error?: string
+}
+
 /* ---------- 附件 / 抓网页 ---------- */
 
 /**

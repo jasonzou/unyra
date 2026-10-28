@@ -25,6 +25,7 @@ import {
 import {
   applyExplanation,
   applyGradeResult,
+  attachCroppedAnswerImage,
   examsOfNode,
   findAttempt,
   latestExam,
@@ -38,6 +39,7 @@ import {
 import type { CreateExamPayload, ExamToolDeps } from '../../../agent/tools'
 import { t } from '../../../i18n'
 import { figureSelfCheckNote, hasExamFigures, selfCheckExamFigures } from './examImageCheck'
+import { native, type CropBoxInput } from '../../../lib/native'
 
 /** 宿主交给考试工具的能力（见 LearnWorkspace 里 openTabRef 为什么是 ref 而不是函数） */
 export interface ExamToolHost {
@@ -241,6 +243,71 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
      * 写错题讲解：判分之后的第二步，落在同一次考试上。
      * 副标题允许几种写法（content / markdown / text），因为模型对字段名的猜测从来不止一种。
      */
+    /**
+     * 裁切手写答案：将整张答卷或草稿纸照片中的对应解答区域裁切下来，贴在对应题目上
+     */
+    cropAnswer: async (payload: unknown) => {
+      const p = (payload && typeof payload === 'object' ? payload : {}) as {
+        attemptId?: string
+        questionId?: string
+        sourceImage?: string
+        box?: CropBoxInput
+      }
+      if (!p.questionId) {
+        return { ok: false, message: '必须指定题目 id (questionId)' }
+      }
+      if (!p.box) {
+        return {
+          ok: false,
+          message: '必须指定裁切区域 box: [ymin, xmin, ymax, xmax]（0~1000 范围）或 { x, y, width, height }',
+        }
+      }
+
+      const s = getLatest()
+      const found = pick(s, p.attemptId)
+      if (!found) {
+        return { ok: false, message: '找不到对应的考试记录' }
+      }
+
+      let src = p.sourceImage
+      if (!src) {
+        const ans = found.attempt.answers.find((a) => a.questionId === p.questionId)
+        src = ans?.rawImage || ans?.image || found.attempt.handwrittenImages?.[0]
+      }
+      if (!src) {
+        return {
+          ok: false,
+          message: '未找到手写原图，请确认学习者已上传答题图片，或在 sourceImage 中指定图片路径',
+        }
+      }
+
+      const bridge = native().examHost
+      if (!bridge?.cropImage) {
+        return { ok: false, message: '当前运行环境不支持图片裁剪功能' }
+      }
+
+      const res = await bridge.cropImage({ imagePath: src, box: p.box })
+      if (!res.ok || !res.croppedPath) {
+        return { ok: false, message: '裁切失败: ' + (res.error || '未知错误') }
+      }
+
+      const nextStore = attachCroppedAnswerImage(
+        getLatest(),
+        found.exam.id,
+        found.attempt.id,
+        p.questionId,
+        res.croppedPath,
+      )
+      set(nextStore)
+      onToast(t('已为题目裁切出手写答案并贴在试卷上'))
+
+      return {
+        ok: true,
+        message: '已成功裁切出答案部分并贴在题目 ' + p.questionId + ' 上。',
+        croppedPath: res.croppedPath,
+      }
+    },
+
     explainExam: (payload: unknown) => {
       const p = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
       const raw = typeof p.content === 'string' ? p.content : typeof p.markdown === 'string' ? p.markdown : typeof p.text === 'string' ? p.text : ''

@@ -48,7 +48,7 @@ export type ExamWindowEvent =
   /** 界面挂好了：请把当前状态推过来（open 的载荷不保证送达，见 lib/native 的说明） */
   | { type: 'ready' }
   | { type: 'start'; at: number; forceSubmit: boolean }
-  | { type: 'input'; questionId: string; value: string[]; text?: string; at: number }
+  | { type: 'input'; questionId: string; value: string[]; text?: string; image?: string; rawImage?: string; at: number }
   | { type: 'blurStart'; at: number }
   | { type: 'blurEnd'; at: number }
   /** 交卷（含「到点强制交卷」那一次） */
@@ -200,6 +200,8 @@ export function useExamBridge(opts: {
                 questionId: ev.questionId,
                 value: ev.value,
                 text: ev.text,
+                image: ev.image,
+                rawImage: ev.rawImage,
                 at: ev.at,
               }),
             ),
