@@ -346,6 +346,7 @@ export default function LearnWorkspace({
   onToast,
   onOpenUpdate,
   onOpenNotice,
+  onOpenLan,
 }: Props) {
   const { store, set, getLatest, patchQuiet, flush } = useLearnStore()
   /*
@@ -5416,6 +5417,7 @@ export default function LearnWorkspace({
             onOpenUsage={onOpenUsage}
             onOpenUpdate={onOpenUpdate}
             onOpenNotice={onOpenNotice}
+            onOpenLan={onOpenLan}
             onToast={onToast}
             /* 专注模式是「自给自足的小块」：守卫状态只在这一块里更新，
                不会把整个学习区（正文 + 对话栏）一起带上 */

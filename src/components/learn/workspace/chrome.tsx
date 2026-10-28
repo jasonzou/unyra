@@ -33,6 +33,7 @@ import type { User } from '../../../user/types'
 import UserMenu from '../../user/UserMenu'
 import UpdateButton from '../../update/UpdateButton'
 import NoticeButton from '../../notice/NoticeButton'
+import LanButton from '../../lan/LanButton'
 import WindowControls from '../../WindowControls'
 import Bullseye from '../../Bullseye'
 import Logo from '../../Logo'
@@ -60,6 +61,7 @@ export function Topbar({
   onOpenUsage,
   onOpenUpdate,
   onOpenNotice,
+  onOpenLan,
   onToast: _onToast,
   focus,
   reading,
@@ -99,6 +101,8 @@ export function Topbar({
   onOpenUpdate: () => void
   /** 打开公告弹窗（弹窗由 App 渲染，理由见 components/notice/NoticeDialog） */
   onOpenNotice: () => void
+  /** 打开局域网互联传输弹窗 */
+  onOpenLan?: () => void
   /** 顶栏那几个「还没做好」的按钮据此说明一句，而不是点了没反应 */
   onToast: (msg: string) => void
 }) {
@@ -267,6 +271,9 @@ export function Topbar({
         {/* 公告：这里原先占位的是「文档」按钮（那个入口一直没做，现在整颗删掉，
             位置让给公告）。按钮自己订阅公告状态、自己画那颗未读红点（见
             components/notice/NoticeButton）——顶栏这一层保持纯展示。 */}
+        {/* 局域网互联传输：手机扫码直连与意图文件传输 */}
+        <LanButton onOpen={onOpenLan || (() => {})} />
+
         <NoticeButton onOpen={onOpenNotice} />
 
 

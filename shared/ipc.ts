@@ -864,3 +864,7 @@ export type VideoApiFetchResult =
 export type VideoStreamOpenResult =
   | { ok: true; relayUrl: string }
   | { ok: false; error: string }
+
+/* ---------- 局域网互联与文件传输服务 ---------- */
+export * from './lan'
+

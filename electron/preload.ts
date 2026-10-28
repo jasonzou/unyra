@@ -34,6 +34,7 @@ import type {
   WebFetchResult, WebBinaryFetchResult, WebLogDetailResult, WebLogsOpts, WebLogsResult, WebPageFetchReq,
   WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult, WebScrollReq,
   WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
+  LanDeviceInfo, LanRequestFileOptions, LanRequestFileResult, LanServerStatus, LanUploadedFile,
 } from '../shared/ipc'
 
 // 这些契约形状统一在 shared/ipc.ts（渲染层与主进程共用一份，见该文件顶部）：
@@ -52,6 +53,7 @@ export type {
   VoiceDownloadResult, VoiceModelProgress, VoiceModelStatus, VoiceTranscribeRequest,
   VoiceTranscribeResult, WebDomOpResult,
   WebFetchResult, WebBinaryFetchResult, WebPointResult, WebReadHtmlResult, WebSnapshotResult,
+  LanDeviceInfo, LanRequestFileOptions, LanRequestFileResult, LanServerStatus, LanUploadedFile,
 }
 
 /* ---------- 只在 preload 这一侧用到的形状 ---------- */
@@ -819,6 +821,40 @@ const api = {
     },
     syncPermissions: (dirs: string[]): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('base:permissions:sync', dirs),
+  },
+  /** 局域网互联服务器与移动端文件传输 */
+  lan: {
+    startServer: (port?: number): Promise<LanServerStatus> =>
+      ipcRenderer.invoke('lan:start', port),
+    stopServer: (): Promise<boolean> =>
+      ipcRenderer.invoke('lan:stop'),
+    getStatus: (): Promise<LanServerStatus> =>
+      ipcRenderer.invoke('lan:status'),
+    setSelectedIp: (ip: string): Promise<LanServerStatus> =>
+      ipcRenderer.invoke('lan:select-ip', ip),
+    getQrDataUrl: (ip?: string): Promise<string> =>
+      ipcRenderer.invoke('lan:get-qr', ip),
+    requestDeviceFile: (options?: LanRequestFileOptions): Promise<LanRequestFileResult> =>
+      ipcRenderer.invoke('lan:request-file', options),
+    openFile: (filePath: string): Promise<void> =>
+      ipcRenderer.invoke('lan:open-file', filePath),
+    showInFolder: (filePath: string): Promise<void> =>
+      ipcRenderer.invoke('lan:show-in-folder', filePath),
+    onStatusChange: (cb: (status: LanServerStatus) => void): (() => void) => {
+      const handler = (_: unknown, s: LanServerStatus) => cb(s)
+      ipcRenderer.on('lan:status-changed', handler)
+      return () => { ipcRenderer.removeListener('lan:status-changed', handler) }
+    },
+    onFileReceived: (cb: (file: LanUploadedFile) => void): (() => void) => {
+      const handler = (_: unknown, f: LanUploadedFile) => cb(f)
+      ipcRenderer.on('lan:file-received', handler)
+      return () => { ipcRenderer.removeListener('lan:file-received', handler) }
+    },
+    onDevicesChange: (cb: (devices: LanDeviceInfo[]) => void): (() => void) => {
+      const handler = (_: unknown, d: LanDeviceInfo[]) => cb(d)
+      ipcRenderer.on('lan:devices-changed', handler)
+      return () => { ipcRenderer.removeListener('lan:devices-changed', handler) }
+    },
   },
 }
 

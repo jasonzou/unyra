@@ -22,6 +22,7 @@ import type {
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
   WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
+  LanDeviceInfo, LanRequestFileOptions, LanRequestFileResult, LanServerStatus, LanUploadedFile,
 } from '../../shared/ipc'
 
 // 这些契约形状统一在 shared/ipc.ts（与 electron/preload.ts 共用一份，见该文件顶部）：
@@ -37,6 +38,7 @@ export type {
   WebLogsOpts, WebLogsResult,
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
   WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
+  LanDeviceInfo, LanRequestFileOptions, LanRequestFileResult, LanServerStatus, LanUploadedFile,
 }
 
 export type PluginList =
@@ -497,6 +499,19 @@ export interface NativeBridge {
       delete(process_id: string): Promise<BaseProcessDeleteResult>
     }
     syncPermissions(allowedDirs: string[]): Promise<{ ok: boolean }>
+  }
+  lan?: {
+    startServer(port?: number): Promise<LanServerStatus>
+    stopServer(): Promise<boolean>
+    getStatus(): Promise<LanServerStatus>
+    setSelectedIp(ip: string): Promise<LanServerStatus>
+    getQrDataUrl(ip?: string): Promise<string>
+    requestDeviceFile(options?: LanRequestFileOptions): Promise<LanRequestFileResult>
+    openFile(filePath: string): Promise<void>
+    showInFolder(filePath: string): Promise<void>
+    onStatusChange(cb: (status: LanServerStatus) => void): () => void
+    onFileReceived(cb: (file: LanUploadedFile) => void): () => void
+    onDevicesChange(cb: (devices: LanDeviceInfo[]) => void): () => void
   }
 }
 
