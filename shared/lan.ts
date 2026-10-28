@@ -44,6 +44,8 @@ export interface LanRequestFileOptions {
   deviceId?: string
   /** 超时毫秒数，默认 180000 (3分钟) */
   timeoutMs?: number
+  /** 若当前没有设备连接，是否先保留请求待设备连接后自动发出，默认 false */
+  waitForDevice?: boolean
 }
 
 export interface LanRequestFileResult {

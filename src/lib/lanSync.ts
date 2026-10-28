@@ -88,58 +88,18 @@ export async function requestDeviceFile(
   const hasConnectedDevice = !!(currentStatus && currentStatus.devices && currentStatus.devices.length > 0)
 
   if (!hasConnectedDevice) {
-    // 没有连接设备，弹出二维码窗口，等待连接建立
-    const connected = await new Promise<boolean>((resolve) => {
-      let resolved = false
-      let unDevices: (() => void) | null = null
-
-      const onUserCancel = () => {
-        finish(false)
-      }
-
-      const finish = (result: boolean) => {
-        if (resolved) return
-        resolved = true
-        lanModalCancelCallbacks.delete(onUserCancel)
-        if (unDevices) {
-          unDevices()
-          unDevices = null
-        }
-        resolve(result)
-      }
-
-      // 打开扫码弹窗，若用户关闭则触发取消
-      openLanQrModal(onUserCancel)
-
-      // 监听设备列表变更
-      unDevices = bridge.onDevicesChange((devices) => {
-        if (devices.length > 0) {
-          // 延时让用户看到连接成功的勾选动画，随后自动关闭窗口
-          setTimeout(() => {
-            closeLanQrModal(false)
-          }, 350)
-          finish(true)
-        }
-      })
-
-      // 双重检查防竞争
-      void bridge.getStatus().then((s) => {
-        if (s && s.devices && s.devices.length > 0) {
-          setTimeout(() => {
-            closeLanQrModal(false)
-          }, 350)
-          finish(true)
-        }
-      })
+    // 未连接移动设备：先保留请求并弹出二维码窗口，若用户主动关闭弹窗则取消保留的请求
+    openLanQrModal(() => {
+      void bridge.cancelRequests?.('用户关闭了扫码连接窗口')
     })
-
-    if (!connected) {
-      return { ok: false, error: '未连接移动设备，操作已取消' }
-    }
   }
 
-  // 3. 已有连接设备，发送意图并等待手机端回传文件
-  return await bridge.requestDeviceFile(options)
+  // 无论是已有连接设备，还是未连接时保留请求，统一通过 waitForDevice: true 提交给服务端；
+  // 服务端在无设备时会保留此请求；移动端设备扫码连接后，服务端会自动将保留的请求发出！
+  return await bridge.requestDeviceFile({
+    ...options,
+    waitForDevice: true,
+  })
 }
 
 export async function startLanServer(port?: number): Promise<LanServerStatus | null> {

@@ -15,7 +15,8 @@ import {
   X,
 } from 'lucide-react'
 import LanButton from '../lan/LanButton'
-import { openLanQrModal } from '../../lib/lanSync'
+import LanConnectDialog from '../lan/LanConnectDialog'
+import { subscribeLanQrModal, openLanQrModal } from '../../lib/lanSync'
 import ImageLightboxModal from './ImageLightboxModal'
 import UnifiedHandwrittenSheetsCard from './UnifiedHandwrittenSheetsCard'
 import { native } from '../../lib/native'
@@ -85,6 +86,14 @@ export default function ExamWindow() {
   const [confirm, setConfirm] = useState<null | 'submit' | 'abandon'>(null)
   const [localStart, setLocalStart] = useState<number | null>(null)
   const [stripOpen, setStripOpen] = useState(false)
+  const [lanOpen, setLanOpen] = useState(false)
+
+  // 监听局域网互联弹窗（API 意图自动弹出或顶栏按钮）
+  useEffect(() => {
+    return subscribeLanQrModal((open) => {
+      setLanOpen(open)
+    })
+  }, [])
 
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [handwrittenImages, setHandwrittenImages] = useState<string[]>([])
@@ -587,6 +596,9 @@ export default function ExamWindow() {
       )}
 
       {/* 确认弹窗 */}
+
+      {/* 局域网扫码直连弹窗 */}
+      {lanOpen && <LanConnectDialog open={lanOpen} onClose={() => setLanOpen(false)} />}
 
       <ImageLightboxModal
         src={previewImage}

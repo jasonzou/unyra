@@ -230,6 +230,38 @@ class LanTransferServer {
     return true
   }
 
+  /** 自动向新连接的设备发出之前保留的意图请求 */
+  private dispatchRetainedRequests(deviceId: string): void {
+    const client = this.devices.get(deviceId)
+    if (!client || client.ws.readyState !== WebSocket.OPEN) return
+
+    for (const [requestId, pending] of this.pendingRequests.entries()) {
+      if (pending.options.deviceId && pending.options.deviceId !== deviceId) {
+        continue
+      }
+      const msg: LanWsServerMessage = {
+        type: 'request_file',
+        requestId,
+        prompt: pending.options.prompt,
+        accept: pending.options.accept,
+      }
+      try {
+        client.ws.send(JSON.stringify(msg))
+      } catch (err) {
+        console.error('[LanServer] 发送保留意图失败:', err)
+      }
+    }
+  }
+
+  /** 取消所有保留/等待中的意图请求 */
+  public cancelPendingRequests(reason = '用户已取消请求'): void {
+    for (const [, pending] of this.pendingRequests.entries()) {
+      clearTimeout(pending.timer)
+      pending.resolve({ ok: false, error: reason })
+    }
+    this.pendingRequests.clear()
+  }
+
   /** 核心 API：向连接的设备发布获取文件的意图 */
   public async requestDeviceFile(options: LanRequestFileOptions = {}): Promise<LanRequestFileResult> {
     // 确保服务在运行
@@ -238,7 +270,7 @@ class LanTransferServer {
     }
 
     const onlineDevices = Array.from(this.devices.values())
-    if (onlineDevices.length === 0) {
+    if (onlineDevices.length === 0 && !options.waitForDevice) {
       return { ok: false, error: '当前没有手机设备连接，请先用手机扫码连接' }
     }
 
@@ -277,7 +309,7 @@ class LanTransferServer {
         }
       }
 
-      if (sentCount === 0) {
+      if (sentCount === 0 && !options.waitForDevice) {
         clearTimeout(timer)
         this.pendingRequests.delete(requestId)
         resolve({ ok: false, error: '目标设备未在线或无法发送消息' })
@@ -454,6 +486,9 @@ class LanTransferServer {
               deviceId: msg.deviceId,
             }
             ws.send(JSON.stringify(welcome))
+
+            // 自动向新连接的设备发出之前保留的意图请求
+            this.dispatchRetainedRequests(msg.deviceId)
           } else if (msg.type === 'pong') {
             if (currentDeviceId && this.devices.has(currentDeviceId)) {
               this.devices.get(currentDeviceId)!.info.lastSeenAt = Date.now()

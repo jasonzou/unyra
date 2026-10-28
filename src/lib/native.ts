@@ -541,6 +541,7 @@ export interface NativeBridge {
     setSelectedIp(ip: string): Promise<LanServerStatus>
     getQrDataUrl(ip?: string): Promise<string>
     requestDeviceFile(options?: LanRequestFileOptions): Promise<LanRequestFileResult>
+    cancelRequests?(reason?: string): Promise<void>
     openFile(filePath: string): Promise<void>
     showInFolder(filePath: string): Promise<void>
     onStatusChange(cb: (status: LanServerStatus) => void): () => void

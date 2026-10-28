@@ -176,4 +176,68 @@ describe('局域网服务器与文件传输系统', () => {
     } catch {}
     ws.close()
   })
+  it('未连接设备时先保留请求，连接后自动发出保留的请求', async () => {
+    const status = await lanServer.start(59003)
+    const port = status.port
+
+    // 1. 无设备时发起 waitForDevice 的请求，此时应当保留在 pendingRequests 中
+    const reqPromise = lanServer.requestDeviceFile({
+      prompt: '考试手写答卷',
+      accept: 'image/*',
+      waitForDevice: true,
+      timeoutMs: 5000,
+    })
+
+    // 2. 模拟随后手机扫码接入
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    let receivedPrompt = ''
+    let receivedRequestId = ''
+
+    ws.on('open', () => {
+      ws.send(
+        JSON.stringify({
+          type: 'device_join',
+          deviceId: 'dev_mock_exam_phone',
+          deviceName: 'Xiaomi 14',
+        }),
+      )
+    })
+
+    ws.on('message', (msg) => {
+      const data = JSON.parse(msg.toString())
+      if (data.type === 'request_file') {
+        receivedPrompt = data.prompt
+        receivedRequestId = data.requestId
+
+        // 模拟手机上传
+        const testUpload = 'Exam Answer Sheet Bytes'
+        const req = http.request(
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: `/api/upload?filename=exam_sheet.jpg&requestId=${receivedRequestId}&deviceId=dev_mock_exam_phone`,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'image/jpeg',
+              'Content-Length': Buffer.byteLength(testUpload),
+            },
+          },
+          (res) => res.resume(),
+        )
+        req.write(testUpload)
+        req.end()
+      }
+    })
+
+    const result = await reqPromise
+    expect(result.ok).toBe(true)
+    expect(result.file).toBeDefined()
+    expect(result.file?.name).toContain('exam_sheet')
+    expect(receivedPrompt).toBe('考试手写答卷')
+
+    try {
+      if (result.file?.path) fs.unlinkSync(result.file.path)
+    } catch {}
+    ws.close()
+  })
 })
