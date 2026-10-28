@@ -681,7 +681,8 @@
     transform: none;
   }
 }
-
+
+
 
 
 /* ---------- 视频播放器：中心播放/暂停气泡、全屏切换过渡 ---------- */
@@ -711,9 +712,23 @@
   animation: moji-fs-in 300ms ease-out;
 }
 
+/* 思考档位滑块：能量液管微粒微浮漂动 */
+@keyframes moji-energy-bubble {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(0.6px, -1.2px) scale(1.12);
+  }
+}
+.moji-energy-bubble {
+  animation: moji-energy-bubble 2.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .moji-center-pop,
-  .moji-fs-in {
+  .moji-fs-in,
+  .moji-energy-bubble {
     animation: none;
   }
 }
