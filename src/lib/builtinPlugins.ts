@@ -13,6 +13,7 @@ import { hydrateCodeBlocks } from './codeHighlight'
 import { hydrateCodeRun } from './codeBlockMenu'
 import { hydratePlots } from './plot'
 import { MERMAID_LANG, mermaidBlock, hydrateMermaid } from './mermaid'
+import { videosBlock, hydrateVideos } from './videosBlock'
 import { registerRenderPlugin, type PluginRenderContext } from './renderPlugins'
 import { languageCount } from '../syntax/LanguageAliases'
 
@@ -97,6 +98,15 @@ registerRenderPlugin({
   fences: [MERMAID_LANG],
   render: (source: string, ctx: PluginRenderContext) => mermaidBlock(source, ctx),
   hydrate: (root: HTMLElement) => hydrateMermaid(root),
+})
+
+registerRenderPlugin({
+  id: 'videos',
+  name: '视频选集链路',
+  builtin: true,
+  fences: ['videos'],
+  render: (source: string, ctx: PluginRenderContext) => videosBlock(source, ctx),
+  hydrate: (root: HTMLElement) => hydrateVideos(root),
 })
 
 /**

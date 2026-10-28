@@ -63,8 +63,6 @@ function readGoalLedgers(
     outlinesByGoal: Record<string, { outlines: unknown[]; edges: Array<Record<string, unknown>> }>
     /** 视频节点（目标 × 视频的绑定），目标目录的 video-nodes.json */
     videoNodesByGoal: Record<string, unknown[]>
-    /** 资源归纳节点（终端实体），目标目录的 resource-nodes.json */
-    resourceNodesByGoal: Record<string, unknown[]>
   },
 ): void {
   const convs = parseJson<{ conversations?: unknown[] }>(files.get(`${goalDir}/chat.json`))
@@ -133,12 +131,6 @@ function readGoalLedgers(
   if (Array.isArray(videoNodesFile?.nodes) && videoNodesFile.nodes.length) {
     out.videoNodesByGoal[goalId] = videoNodesFile.nodes
   }
-
-  // 资源归纳节点（终端实体）
-  const resourceNodesFile = parseJson<{ nodes?: unknown[] }>(files.get(`${goalDir}/resource-nodes.json`))
-  if (Array.isArray(resourceNodesFile?.nodes) && resourceNodesFile.nodes.length) {
-    out.resourceNodesByGoal[goalId] = resourceNodesFile.nodes
-  }
 }
 
 /** 用户级（state.json）那一半：与布局无关，v2/v3 共用 */
@@ -204,7 +196,6 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
     resources: {} as Record<string, StaticResource[]>,
     outlinesByGoal: {} as Record<string, { outlines: unknown[]; edges: Array<Record<string, unknown>> }>,
     videoNodesByGoal: {} as Record<string, unknown[]>,
-    resourceNodesByGoal: {} as Record<string, unknown[]>,
   }
 
   for (const [dir, { file }] of nodeFiles) {
@@ -276,9 +267,6 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
   // 视频节点（目标 × 视频的绑定）并进总账
   const videoNodes: unknown[] = []
   for (const led of Object.values(ledgers.videoNodesByGoal)) videoNodes.push(...led)
-  // 资源归纳节点（终端实体）并进总账
-  const resourceNodes: unknown[] = []
-  for (const led of Object.values(ledgers.resourceNodesByGoal)) resourceNodes.push(...led)
 
   return normalizeLearnStore({
     version: 2,
@@ -287,7 +275,6 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
     goals,
     ...(freeOutlines.length ? { outlines: freeOutlines } : {}),
     ...(videoNodes.length ? { videoNodes } : {}),
-    ...(resourceNodes.length ? { resourceNodes } : {}),
     conversations: ledgers.conversations,
     exams,
     tmp,
@@ -365,7 +352,6 @@ export function parseDocsV2(files: Map<string, string>, state: unknown): LearnSt
     resources: {} as Record<string, StaticResource[]>,
     outlinesByGoal: {} as Record<string, { outlines: unknown[]; edges: Array<Record<string, unknown>> }>,
     videoNodesByGoal: {} as Record<string, unknown[]>,
-    resourceNodesByGoal: {} as Record<string, unknown[]>,
   }
 
   // 目标目录必须是顶层（docs/{seg}）且自己那份 meta 在：结构不完整就整棵树跳过

@@ -26,7 +26,7 @@ import { normalizeFocus } from '../../focus'
 import { normalizeSchedule } from '../../schedule'
 import { normalizeStructureBook } from '../../structure'
 import { normalizeOutlineEntities } from '../../outline'
-import type { ResourceNodeEntity, VideoChapter, VideoRecap, VideoResource } from '../../types'
+import type { VideoChapter, VideoRecap, VideoResource } from '../../types'
 import { normalizeVideoNodes, withVideoMirror } from '../../video/nodes'
 import { normalizeMemoryStore } from '../../memory'
 import { normalizeResourceList, retargetStaticRefs, type StaticResource } from '../../static'
@@ -90,37 +90,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
     const videos = normalizeVideos(d.videos)
     const videoIds = new Set(videos.map((v) => v.id))
     const videoNodes = normalizeVideoNodes(d.videoNodes, goalIds, videoIds)
-
-    // 资源归纳节点先归一（终端实体）：树边可能有连向它的边（to = res:uuid）
-    const rawResourceNodes: unknown[] = Array.isArray(d.resourceNodes) ? d.resourceNodes : []
-    const resourceNodes: ResourceNodeEntity[] = []
-    for (const raw of rawResourceNodes) {
-      if (!raw || typeof raw !== 'object') continue
-      const r = raw as Record<string, unknown>
-      if (typeof r.id !== 'string' || typeof r.goalId !== 'string' || !goalIds.has(r.goalId)) continue
-      const items = Array.isArray(r.items)
-        ? (r.items as unknown[]).map((it, idx) => {
-            const itemObj = (it && typeof it === 'object' ? it : {}) as Record<string, unknown>
-            return {
-              key: typeof itemObj.key === 'string' && itemObj.key ? itemObj.key : `k-${idx + 1}`,
-              title: typeof itemObj.title === 'string' ? itemObj.title : `选集 ${idx + 1}`,
-              kind: (itemObj.kind === 'doc' || itemObj.kind === 'link' || itemObj.kind === 'video' ? itemObj.kind : 'video') as 'video' | 'doc' | 'link',
-              target: typeof itemObj.target === 'string' ? itemObj.target : undefined,
-              data: itemObj.data && typeof itemObj.data === 'object' ? (itemObj.data as Record<string, unknown>) : undefined,
-            }
-          })
-        : []
-      resourceNodes.push({
-        id: r.id,
-        goalId: r.goalId,
-        title: typeof r.title === 'string' ? r.title : '资源归纳',
-        intro: typeof r.intro === 'string' ? r.intro : '',
-        items,
-        createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(),
-        updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : Date.now(),
-      })
-    }
-    const resIds = new Set(resourceNodes.map((r) => r.id))
+    const videoNodeIds = new Set(videoNodes.map((v) => v.id))
 
     const rawEdges: unknown[] = Array.isArray(d.edges) ? d.edges : []
     const edges: DependencyEdge[] = []
@@ -134,8 +104,8 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       const memberOk = (m: string): boolean =>
         !!m && (
           ids.has(m) ||
-          (m.startsWith('o:') && (ids.has(m.slice(2)) || freeIds.has(m.slice(2)))) ||
-          (m.startsWith('res:') && resIds.has(m.slice(4)))
+          videoNodeIds.has(m) ||
+          (m.startsWith('o:') && (ids.has(m.slice(2)) || freeIds.has(m.slice(2))))
         )
       if (!from || !to || from === to || !memberOk(from) || !memberOk(to)) continue
       const portKey = typeof r.portKey === 'string' && r.portKey ? r.portKey : undefined
@@ -361,7 +331,6 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       // 视频节点（目标 × 视频的绑定）：目标没了的行丢掉、指向不存在视频的绑定摘掉
       ...(videoNodes.length ? { videoNodes } : {}),
       // 资源归纳节点（终端实体）：目标没了的行丢掉
-      ...(resourceNodes.length ? { resourceNodes } : {}),
       /*
        * 结构图（见 learn/structure）：按目标存的节点表与连线。逐张过一遍——
        * 坏坐标、认不出的类型、违规的边都在 normalizeStructure 里丢掉，

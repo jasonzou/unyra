@@ -202,11 +202,6 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
       if (goalVideoNodes.length) {
         files.set(`${path}/video-nodes.json`, jsonText({ version: 1, nodes: goalVideoNodes }))
       }
-      /** 资源归纳节点（终端实体）：一枚都没有就不写 */
-      const goalResourceNodes = (store.resourceNodes ?? []).filter((r) => r.goalId === goal.id)
-      if (goalResourceNodes.length) {
-        files.set(`${path}/resource-nodes.json`, jsonText({ version: 1, nodes: goalResourceNodes }))
-      }
     }
 
     /**

@@ -86,7 +86,8 @@ export function bindVideoNode(
 /** 删掉一枚视频节点（视频资源不动，镜像重建） */
 export function deleteVideoNode(store: LearnStore, nodeId: string): LearnStore | null {
   if (!videoNodeById(store, nodeId)) return null
-  return withVideoMirror({ ...store, videoNodes: (store.videoNodes ?? []).filter((v) => v.id !== nodeId) })
+  const edges = store.edges.filter((e) => e.from !== nodeId && e.to !== nodeId)
+  return withVideoMirror({ ...store, edges, videoNodes: (store.videoNodes ?? []).filter((v) => v.id !== nodeId) })
 }
 
 /**

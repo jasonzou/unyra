@@ -174,6 +174,7 @@ export class DocGNode extends GNode {
 
   onUpstream(node: GNode): ConnectFilter {
     if (node.kind === 'entry') return '入口与根文档的连线由目标绑定自动生成，不能手工连'
+    if (node.kind === 'video') return true
     if (node.kind !== 'outline') {
       return '文档的上游只能是大纲（o: 前缀的对象）——要挂在哪份大纲下，就取那份大纲再由它发起 connect'
     }

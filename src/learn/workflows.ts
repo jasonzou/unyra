@@ -102,9 +102,9 @@ const OUTLINE_INSTRUCTION = ['## 使用「生成大纲」工作流。', '- 目�
 const PREREQ_OUTLINE_INSTRUCTION = ['## 使用「前置知识大纲」工作流。', '- 目标节点: {{target}}'].join('\n')
 
 /**
- * 「视频大纲」：分析视频选集结构并规划语义大纲（终端只能为资源归纳节点）。
+ * 「视频总览」：分析视频选集结构并规划语义分类总览文档（挂在视频节点子级）。
  */
-const VIDEO_OUTLINE_INSTRUCTION = ['## 使用「视频大纲」工作流。', '- 目标节点: {{target}}', '- 视频资源: {{videoId}}'].join('\n')
+const VIDEO_OVERVIEW_INSTRUCTION = ['## 使用「视频总览」工作流。', '- 目标节点: {{target}}', '- 视频资源: {{videoId}}'].join('\n')
 
 /**
  * 「出卷」：类型与难度由 Agent 问用户，出题后直接保存试卷文件。
@@ -225,11 +225,11 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 前置的取舍与顺序同样要全局权衡，与「生成大纲」同档
   },
   {
-    id: 'video-outline',
-    name: '视频大纲',
-    description: '分析视频选集结构并规划语义大纲（终端只能为资源归纳节点）',
-    instruction: VIDEO_OUTLINE_INSTRUCTION,
-    promptModule: 'video-outline',
+    id: 'video-overview',
+    name: '视频总览',
+    description: '分析视频选集结构并规划语义分类总览文档（挂在视频节点子级）',
+    instruction: VIDEO_OVERVIEW_INSTRUCTION,
+    promptModule: 'video-overview',
     params: ['target', 'videoId'],
     prep: 'show',
     runnable: false,
