@@ -84,11 +84,11 @@ function createInitialParticles(count: number, width: number): FlowParticle[] {
   return Array.from({ length: count }, (_, i) => ({
     // 初始位置均匀交错散布在流体内部
     x: (i / count) * Math.max(width, 100) + (Math.random() - 0.5) * 20,
-    baseYRatio: 0.2 + Math.random() * 0.6,
-    radius: 1.0 + Math.random() * 1.5, // 半径 1.0 ~ 2.5px（直径 2 ~ 5px）
+    baseYRatio: 0.22 + Math.random() * 0.56,
+    radius: 0.65 + Math.random() * 0.75, // 直径 1.3 ~ 2.8px 的微气泡
     speedMult: 0.85 + Math.random() * 0.3,
-    baseAlpha: 0.4 + Math.random() * 0.35,
-    waveAmp: 0.6 + Math.random() * 1.0, // 柔和起伏幅度
+    baseAlpha: 0.16 + Math.random() * 0.2, // 细腻微光不透明度（0.16 ~ 0.36）
+    waveAmp: 0.5 + Math.random() * 0.8, // 柔和起伏幅度
     waveFreq: 0.0008 + Math.random() * 0.001, // 慢速呼吸微波周期
     wavePhase: Math.random() * Math.PI * 2,
   }))
@@ -153,7 +153,7 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
     // 初始化粒子群
     if (particlesRef.current.length === 0) {
       const initialW = canvas.parentElement?.clientWidth || 260
-      particlesRef.current = createInitialParticles(18, initialW)
+      particlesRef.current = createInitialParticles(10, initialW)
     }
 
     // 缩放适配 DPR
@@ -217,7 +217,7 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
           ctx.globalAlpha = alpha
           ctx.fillStyle = '#ffffff'
           ctx.shadowColor = visual.particleGlow
-          ctx.shadowBlur = p.radius > 1.8 ? 5 : 3
+          ctx.shadowBlur = p.radius > 1.1 ? 3 : 1.5
           ctx.beginPath()
           ctx.arc(p.x, y, p.radius, 0, Math.PI * 2)
           ctx.fill()
