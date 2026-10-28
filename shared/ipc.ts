@@ -573,6 +573,22 @@ export interface CropImageResult {
   error?: string
 }
 
+export interface PreviewCropResult {
+  ok: boolean
+  previewPath?: string
+  dataUrl?: string
+  rect?: { x: number; y: number; width: number; height: number }
+  box?: [number, number, number, number]
+  error?: string
+}
+
+export interface RotateImageResult {
+  ok: boolean
+  rotatedPath?: string
+  dataUrl?: string
+  error?: string
+}
+
 /* ---------- 附件 / 抓网页 ---------- */
 
 /**

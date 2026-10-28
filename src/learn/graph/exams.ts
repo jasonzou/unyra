@@ -417,3 +417,46 @@ export function attachHandwrittenImages(
   })
 }
 
+/** 替换或更新一次考试中特定索引处的手写答卷图片（如顺时针旋转修正后） */
+export function updateHandwrittenImage(
+  store: LearnStore,
+  examId: string,
+  attemptId: string,
+  index: number,
+  newImagePath: string,
+): LearnStore {
+  const exam = store.exams.find((e) => e.id === examId)
+  const attempt = exam?.attempts.find((a) => a.id === attemptId)
+  if (!exam || !attempt) return store
+
+  const list = (attempt.handwrittenImages ?? []).slice()
+  if (index < 0 || index >= list.length) {
+    if (list.length === 0 && index === 0) {
+      list.push(newImagePath)
+    } else {
+      return store
+    }
+  } else {
+    const oldPath = list[index]
+    list[index] = newImagePath
+    // 若 answers 中有题目的 rawImage 指向旧图，同步更新
+    const answers = attempt.answers.map((ans) => {
+      if (ans.rawImage === oldPath) {
+        return { ...ans, rawImage: newImagePath }
+      }
+      return ans
+    })
+    return upsertAttempt(store, examId, {
+      ...attempt,
+      handwrittenImages: list,
+      answers,
+    })
+  }
+
+  return upsertAttempt(store, examId, {
+    ...attempt,
+    handwrittenImages: list,
+  })
+}
+
+

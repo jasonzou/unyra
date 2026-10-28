@@ -75,6 +75,7 @@ export {
   applyGradeResult,
   attachCroppedAnswerImage,
   attachHandwrittenImages,
+  updateHandwrittenImage,
   examsOfNode,
   findAttempt,
   latestExam,

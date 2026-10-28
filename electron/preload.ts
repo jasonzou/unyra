@@ -24,7 +24,7 @@ import type {
   BaseFileStatResult, BaseFileWriteResult, BaseProcessCreateOpts, BaseProcessCreateResult, BaseProcessDeleteResult, BaseProcessGetResult,
   BaseProcessInfo, BaseProcessListResult, BaseProcessOutputResult, BaseProcessStartResult, BaseProcessStatusResult,
   BaseProcessStopResult, CloseAction, CloseBehavior, CodeArtifact, ExamCloseReason,
-  CropBoxInput, CropImageResult,
+  CropBoxInput, CropImageResult, PreviewCropResult, RotateImageResult,
   ExamOpenResult, ExportPdfPayload, ExportPdfResult, FlushItem, McpStdioCallResult, McpStdioServerPayload, McpStdioToolsResult,
   PluginEntry, PluginListResult, PluginSettingsResult,
   PluginSourceResult, PluginTogglesResult, SaveFilter, SilentMark, StorageEntry, StorageFail,
@@ -55,7 +55,7 @@ export type {
   VoiceTranscribeResult, WebDomOpResult,
   WebFetchResult, WebBinaryFetchResult, WebPointResult, WebReadHtmlResult, WebSnapshotResult,
   LanDeviceInfo, LanRequestFileOptions, LanRequestFileResult, LanServerStatus, LanUploadedFile,
-  CropBoxInput, CropImageResult,
+  CropBoxInput, CropImageResult, PreviewCropResult, RotateImageResult,
 }
 
 /* ---------- 只在 preload 这一侧用到的形状 ---------- */
@@ -521,8 +521,24 @@ const api = {
     },
 
     /** 裁切手写答案图片（由 Agent 阅卷工具或考试回看调用） */
-    cropImage: (payload: { imagePath: string; box: CropBoxInput; rotate?: number }): Promise<CropImageResult> =>
-      ipcRenderer.invoke('exam:cropImage', payload),
+    cropImage: (payload: {
+      imagePath: string
+      box: CropBoxInput
+      rotate?: number
+      sheetRotate?: number
+    }): Promise<CropImageResult> => ipcRenderer.invoke('exam:cropImage', payload),
+
+    /** 裁切预检：绘制红框回传供模型审查 */
+    previewCrop: (payload: {
+      imagePath: string
+      box: CropBoxInput
+      rotate?: number
+      sheetRotate?: number
+    }): Promise<PreviewCropResult> => ipcRenderer.invoke('exam:previewCrop', payload),
+
+    /** 顺时针旋转手写答卷 */
+    rotateSheet: (payload: { imagePath: string; degrees: number }): Promise<RotateImageResult> =>
+      ipcRenderer.invoke('exam:rotateSheet', payload),
   },
 
   /**
@@ -564,8 +580,22 @@ const api = {
      * 窗口就没了的情况。
      */
     allowClose: (): void => ipcRenderer.send('exam:allowClose'),
-    cropImage: (payload: { imagePath: string; box: CropBoxInput }): Promise<CropImageResult> =>
-      ipcRenderer.invoke('exam:cropImage', payload),
+    cropImage: (payload: {
+      imagePath: string
+      box: CropBoxInput
+      rotate?: number
+      sheetRotate?: number
+    }): Promise<CropImageResult> => ipcRenderer.invoke('exam:cropImage', payload),
+
+    previewCrop: (payload: {
+      imagePath: string
+      box: CropBoxInput
+      rotate?: number
+      sheetRotate?: number
+    }): Promise<PreviewCropResult> => ipcRenderer.invoke('exam:previewCrop', payload),
+
+    rotateSheet: (payload: { imagePath: string; degrees: number }): Promise<RotateImageResult> =>
+      ipcRenderer.invoke('exam:rotateSheet', payload),
   },
 
   /**

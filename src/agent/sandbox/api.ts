@@ -149,6 +149,8 @@ export function buildApi(
     // exam.* 只留作答侧：读卷、判分、讲解与删卷
     wrapApi(api, 'exam.read', (args) => exam.read(asText(args[0]).trim() || undefined), log)
     wrapApi(api, 'exam.grade', (args) => exam.grade(asRecord(args[0])), log)
+    wrapApi(api, 'exam.rotateSheet', (args) => exam.rotateSheet(asRecord(args[0])), log)
+    wrapApi(api, 'exam.previewCrop', (args) => exam.previewCrop(asRecord(args[0])), log)
     wrapApi(api, 'exam.cropAnswer', (args) => exam.cropAnswer(asRecord(args[0])), log)
     wrapApi(api, 'exam.explain', (args) => exam.explain(asRecord(args[0])), log)
     wrapApi(api, 'exam.delete', (args) => exam.remove(asRecord(args[0])), log)

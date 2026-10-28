@@ -386,7 +386,10 @@ export function examReadPayload(input: {
               (attempt?.handwrittenImages?.length || paper.questions.some((q) => attempt?.answers.some((x) => x.questionId === q.id && x.image))
                 ? '📷 学习者提交了手机拍摄的手写答案图片（共 ' + (attempt?.handwrittenImages?.length ?? 1) + ' 份，见 handwrittenImages）。' +
                   '请完成阅卷：\n' +
-                  '① 裁切贴题：针对每道作答题目调用 api.exam.cropAnswer({ questionId, box: [ymin, xmin, ymax, xmax], sourceImage: 0, rotate: 0 }) 将对应手写答案裁切贴在试卷副本对应题目上（若答卷方向倒置或倾斜，可用 rotate: 90/180/270 顺时针旋转修正）。\n' +
+                  '① 方向转正与裁切贴题：\n' +
+                  '   - 若拍照方向横置或颠倒，先调 api.exam.rotateSheet({ sheetIndex: 0, degrees: 90 }) 顺时针转正，转正后你将在下一跳直接收到正向图片；\n' +
+                  '   - 裁切前调用 api.exam.previewCrop({ questionId, box: [ymin, xmin, ymax, xmax], sourceImage: 0 }) 审查红框，确认文字未被截断、未多截邻题；若有偏差微调坐标再次 previewCrop；\n' +
+                  '   - 确认无误后调用 api.exam.cropAnswer({ questionId, box, sourceImage: 0 }) 正式裁切并贴在试卷副本对应题目上。\n' +
                   '② 逐题判分：api.exam.grade({ attemptId: "' + (attempt?.id ?? '') + '", passed, summary, results: [{ questionId, correct, score, comment, userAnswer }] })。全部题目（含单选/多选/对错/填空/简答）由你根据手写内容亲自审阅判分，识别到的手写答案填入 userAnswer。\n' +
                   '③ 错题讲解：api.exam.explain({ content: "…markdown…", attemptId: "' + (attempt?.id ?? '') + '" })。\n\n'
                 : '学习者已交卷，请**两步走完这一次**：\n' +

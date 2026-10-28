@@ -23,7 +23,7 @@ import type {
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
   WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
   LanDeviceInfo, LanRequestFileOptions, LanRequestFileResult, LanServerStatus, LanUploadedFile,
-  CropBoxInput, CropImageResult,
+  CropBoxInput, CropImageResult, PreviewCropResult, RotateImageResult,
 } from '../../shared/ipc'
 
 // 这些契约形状统一在 shared/ipc.ts（与 electron/preload.ts 共用一份，见该文件顶部）：
@@ -40,7 +40,7 @@ export type {
   WebPageFetchReq, WebPageFetchResult, WebPointResult, WebReadHtmlResult, WebRecordResult,
   WebScrollReq, WebScrollResult, WebSnapshotResult, WebTextResult, WebTextTarget, WebTranslatePayload, WebWaitReq, WebWaitResult,
   LanDeviceInfo, LanRequestFileOptions, LanRequestFileResult, LanServerStatus, LanUploadedFile,
-  CropBoxInput, CropImageResult,
+  CropBoxInput, CropImageResult, PreviewCropResult, RotateImageResult,
 }
 
 export type PluginList =
@@ -290,7 +290,21 @@ export interface NativeBridge {
     /** 订阅「考试窗口关掉了」（任何原因）；返回取消订阅函数 */
     onClosed(cb: (info: { reason: string }) => void): () => void
     /** 裁切手写答案图片（支持顺时针旋转修正） */
-    cropImage?(payload: { imagePath: string; box: CropBoxInput; rotate?: number }): Promise<CropImageResult>
+    cropImage?(payload: {
+      imagePath: string
+      box: CropBoxInput
+      rotate?: number
+      sheetRotate?: number
+    }): Promise<CropImageResult>
+    /** 裁切预检（在原图上画红框并回传） */
+    previewCrop?(payload: {
+      imagePath: string
+      box: CropBoxInput
+      rotate?: number
+      sheetRotate?: number
+    }): Promise<PreviewCropResult>
+    /** 顺时针旋转整张手写答卷 */
+    rotateSheet?(payload: { imagePath: string; degrees: number }): Promise<RotateImageResult>
   }
   /**
    * 考试窗口的**考试窗口那一侧**：只能发事件、收状态、要求全屏、放行关闭，
@@ -311,7 +325,21 @@ export interface NativeBridge {
     /** 「确认放弃 / 已交卷」之后放行关闭；之后由界面自己调 window.close() */
     allowClose(): void
     /** 裁切手写答案图片（支持顺时针旋转修正） */
-    cropImage?(payload: { imagePath: string; box: CropBoxInput; rotate?: number }): Promise<CropImageResult>
+    cropImage?(payload: {
+      imagePath: string
+      box: CropBoxInput
+      rotate?: number
+      sheetRotate?: number
+    }): Promise<CropImageResult>
+    /** 裁切预检（在原图上画红框并回传） */
+    previewCrop?(payload: {
+      imagePath: string
+      box: CropBoxInput
+      rotate?: number
+      sheetRotate?: number
+    }): Promise<PreviewCropResult>
+    /** 顺时针旋转整张手写答卷 */
+    rotateSheet?(payload: { imagePath: string; degrees: number }): Promise<RotateImageResult>
   }
   /**
    * 上下文轨迹窗口（第三个 BrowserWindow，`?contextTrace=1` 分支）的**主窗口那一侧**。

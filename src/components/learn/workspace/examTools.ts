@@ -26,6 +26,7 @@ import {
   applyExplanation,
   applyGradeResult,
   attachCroppedAnswerImage,
+  updateHandwrittenImage,
   examsOfNode,
   findAttempt,
   latestExam,
@@ -37,6 +38,8 @@ import {
   type GradePayload,
 } from '../../../learn/graph'
 import type { CreateExamPayload, ExamToolDeps } from '../../../agent/tools'
+import type { MessageImage } from '../../../agent/types'
+import { rememberImage } from '../../../learn/images'
 import { t } from '../../../i18n'
 import { figureSelfCheckNote, hasExamFigures, selfCheckExamFigures } from './examImageCheck'
 import { native, type CropBoxInput } from '../../../lib/native'
@@ -244,6 +247,180 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
      * 副标题允许几种写法（content / markdown / text），因为模型对字段名的猜测从来不止一种。
      */
     /**
+     * 顺时针旋转整张手写答卷：若拍摄角度横置或颠倒，在裁切前将其转正
+     */
+    rotateSheet: async (payload: unknown) => {
+      const p = (payload && typeof payload === 'object' ? payload : {}) as {
+        attemptId?: string
+        sheetIndex?: number
+        degrees?: number
+      }
+      const sheetIndex = typeof p.sheetIndex === 'number' ? Math.max(0, Math.floor(p.sheetIndex)) : 0
+      const degrees = typeof p.degrees === 'number' ? p.degrees : 90
+
+      const s = getLatest()
+      const found = pick(s, p.attemptId)
+      if (!found) {
+        return { ok: false, message: '找不到对应的考试记录' }
+      }
+
+      const images = found.attempt.handwrittenImages ?? []
+      if (!images.length || sheetIndex >= images.length) {
+        return {
+          ok: false,
+          message: `未找到第 ${sheetIndex + 1} 张手写答卷（当前共有 ${images.length} 张）`,
+        }
+      }
+
+      const src = images[sheetIndex]
+      const bridge = native().examHost
+      if (!bridge?.rotateSheet) {
+        return { ok: false, message: '当前运行环境不支持图片旋转功能' }
+      }
+
+      const res = await bridge.rotateSheet({ imagePath: src, degrees })
+      if (!res.ok || (!res.rotatedPath && !res.dataUrl)) {
+        return { ok: false, message: '旋转答卷失败: ' + (res.error || '未知错误') }
+      }
+
+      const newSrc = res.rotatedPath || res.dataUrl!
+      const nextStore = updateHandwrittenImage(
+        getLatest(),
+        found.exam.id,
+        found.attempt.id,
+        sheetIndex,
+        newSrc,
+      )
+      set(nextStore)
+      onToast(t('已顺时针旋转第 {0} 页答卷 {1}°', sheetIndex + 1, degrees))
+
+      // 注册到 MessageImage 缓存，以便作为视觉附件返回给模型
+      const imgId = 'rotated_sheet_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+      const rel = `exam-crops/${imgId}.png`
+      if (res.dataUrl) {
+        const comma = res.dataUrl.indexOf(',')
+        rememberImage(rel, {
+          mime: 'image/png',
+          data: res.dataUrl.slice(comma + 1),
+          url: res.dataUrl,
+        })
+      }
+
+      const messageImage: MessageImage = {
+        id: imgId,
+        rel,
+        name: `rotated_sheet_${sheetIndex + 1}.png`,
+        mime: 'image/png',
+        bytes: res.dataUrl ? Math.round(res.dataUrl.length * 0.75) : 1024,
+      }
+
+      return {
+        ok: true,
+        message: `已成功将第 ${sheetIndex + 1} 张答卷顺时针旋转 ${degrees}° 并保存。转正后的答卷已附带在下方，请确认方向是否摆正。`,
+        sheetIndex,
+        degrees,
+        images: [messageImage],
+      }
+    },
+
+    /**
+     * 裁切定位预检：在答卷上绘制红框并回传给模型审查，以验证裁切范围是否精准
+     */
+    previewCrop: async (payload: unknown) => {
+      const p = (payload && typeof payload === 'object' ? payload : {}) as {
+        attemptId?: string
+        questionId?: string
+        sourceImage?: string | number
+        box?: CropBoxInput
+        rotate?: number
+        sheetRotate?: number
+      }
+      if (!p.questionId) {
+        return { ok: false, message: '必须指定题目 id (questionId)' }
+      }
+      if (!p.box) {
+        return {
+          ok: false,
+          message: '必须指定拟裁切区域 box: [ymin, xmin, ymax, xmax]（0~1000 范围，如 [120, 50, 480, 950]）',
+        }
+      }
+
+      const s = getLatest()
+      const found = pick(s, p.attemptId)
+      if (!found) {
+        return { ok: false, message: '找不到对应的考试记录' }
+      }
+
+      let src: string | undefined
+      if (typeof p.sourceImage === 'number') {
+        src = found.attempt.handwrittenImages?.[p.sourceImage]
+      } else if (typeof p.sourceImage === 'string') {
+        src = p.sourceImage
+      }
+      if (!src) {
+        const ans = found.attempt.answers.find((a) => a.questionId === p.questionId)
+        src = ans?.rawImage || ans?.image || found.attempt.handwrittenImages?.[0]
+      }
+      if (!src) {
+        return {
+          ok: false,
+          message: '未找到手写原图，请确认学习者已上传答题图片，或在 sourceImage 中指定图片路径',
+        }
+      }
+
+      const bridge = native().examHost
+      if (!bridge?.previewCrop) {
+        return { ok: false, message: '当前运行环境不支持裁切预检功能' }
+      }
+
+      const res = await bridge.previewCrop({
+        imagePath: src,
+        box: p.box,
+        rotate: p.rotate,
+        sheetRotate: p.sheetRotate,
+      })
+      if (!res.ok || (!res.previewPath && !res.dataUrl)) {
+        return { ok: false, message: '生成裁切预检图失败: ' + (res.error || '未知错误') }
+      }
+
+      // 注册到 MessageImage 缓存，附带交回给模型进行视觉审查
+      const imgId = 'preview_crop_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+      const rel = `exam-crops/${imgId}.png`
+      if (res.dataUrl) {
+        const comma = res.dataUrl.indexOf(',')
+        rememberImage(rel, {
+          mime: 'image/png',
+          data: res.dataUrl.slice(comma + 1),
+          url: res.dataUrl,
+        })
+      }
+
+      const messageImage: MessageImage = {
+        id: imgId,
+        rel,
+        name: `preview_crop_${p.questionId}.png`,
+        mime: 'image/png',
+        bytes: res.dataUrl ? Math.round(res.dataUrl.length * 0.75) : 1024,
+      }
+
+      return {
+        ok: true,
+        message:
+          `已为题目 ${p.questionId} 生成红框裁切预检图（当前 box: ${JSON.stringify(res.box ?? p.box)}）。\n` +
+          '【视觉审查要点】：请仔细审查附带的红框预检图：\n' +
+          '1. 该题目的解答是否被完整框在红框内部？\n' +
+          '2. 上/下/左/右是否有手写公式、文字被红框截断？\n' +
+          '3. 是否多截了上一题或下一题的无关内容？\n' +
+          '👉 若存在截断或偏差，请调整 box 的 [ymin, xmin, ymax, xmax] 坐标并再次调用 previewCrop；\n' +
+          '👉 若范围完美无误，请调用 api.exam.cropAnswer 正式裁切并贴在试卷上。',
+        questionId: p.questionId,
+        box: res.box,
+        rect: res.rect,
+        images: [messageImage],
+      }
+    },
+
+    /**
      * 裁切手写答案：将整张答卷或草稿纸照片中的对应解答区域裁切下来，贴在对应题目上
      */
     cropAnswer: async (payload: unknown) => {
@@ -253,6 +430,7 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
         sourceImage?: string | number
         box?: CropBoxInput
         rotate?: number
+        sheetRotate?: number
       }
       if (!p.questionId) {
         return { ok: false, message: '必须指定题目 id (questionId)' }
@@ -292,7 +470,12 @@ export function makeExamDeps(host: ExamToolHost, nodeId: string): ExamToolDeps {
         return { ok: false, message: '当前运行环境不支持图片裁剪功能' }
       }
 
-      const res = await bridge.cropImage({ imagePath: src, box: p.box, rotate: p.rotate })
+      const res = await bridge.cropImage({
+        imagePath: src,
+        box: p.box,
+        rotate: p.rotate,
+        sheetRotate: p.sheetRotate,
+      })
       if (!res.ok || !res.croppedPath) {
         return { ok: false, message: '裁切失败: ' + (res.error || '未知错误') }
       }

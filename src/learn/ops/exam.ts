@@ -52,6 +52,32 @@ export function makeExamTool(deps: ExamToolDeps): NonNullable<SandboxOptions['ex
       const r = deps.gradeExam(payload)
       return { ok: r.ok, content: r.message }
     },
+    rotateSheet: async (payload) => {
+      if (!allow.includes('rotateSheet')) {
+        return {
+          ok: false,
+          content: '现在不能旋转答卷：只有在交卷阅卷阶段才能旋转手写答卷。',
+        }
+      }
+      if (!deps.rotateSheet) {
+        return { ok: false, content: '当前环境未提供旋转答卷能力。' }
+      }
+      const r = (await deps.rotateSheet(payload)) as { ok: boolean; message: string; images?: unknown }
+      return { ok: r.ok, content: r.message, ...(Array.isArray(r.images) ? { images: r.images } : {}) }
+    },
+    previewCrop: async (payload) => {
+      if (!allow.includes('previewCrop')) {
+        return {
+          ok: false,
+          content: '现在不能进行裁切预检：只有在交卷阅卷阶段才能预检手写答案裁切范围。',
+        }
+      }
+      if (!deps.previewCrop) {
+        return { ok: false, content: '当前环境未提供裁切预检能力。' }
+      }
+      const r = (await deps.previewCrop(payload)) as { ok: boolean; message: string; images?: unknown }
+      return { ok: r.ok, content: r.message, ...(Array.isArray(r.images) ? { images: r.images } : {}) }
+    },
     cropAnswer: async (payload) => {
       if (!allow.includes('cropAnswer')) {
         return {
@@ -63,7 +89,6 @@ export function makeExamTool(deps: ExamToolDeps): NonNullable<SandboxOptions['ex
         return { ok: false, content: '当前环境未提供裁切答案能力。' }
       }
       const r = await deps.cropAnswer(payload)
-      return { ok: r.ok, content: r.message }
       return { ok: r.ok, content: r.message }
     },
     explain: (payload) => {

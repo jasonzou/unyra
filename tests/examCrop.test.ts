@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeCropRect, rotateBitmap } from '../electron/exam/imageCrop'
+import { normalizeCropRect, rotateBitmap, drawBoundingBoxBitmap } from '../electron/exam/imageCrop'
 import { hasAnswerValue } from '../src/learn/exam/grade'
 import { recordInput, newAttempt } from '../src/learn/examRecords'
 import {
   attachCroppedAnswerImage,
   attachHandwrittenImages,
+  updateHandwrittenImage,
   applyGradeResult,
   submitAttempt,
   upsertAttempt,
@@ -380,5 +381,98 @@ describe('Agent 裁切工具与试卷回看贴题关联 (attachCroppedAnswerImag
     expect(res.ok).toBe(true)
     const graded = res.store.exams[0].attempts[0]
     expect(graded.results?.[0].croppedAnswerImage).toBe('C:/crops/q1.png')
+  })
+
+  it('drawBoundingBoxBitmap 绘制醒目红框用于大模型裁切预检', () => {
+    // 创建一个 10x10 的全黑测试图像（RGBA 格式）
+    const width = 10
+    const height = 10
+    const buf = Buffer.alloc(width * height * 4, 0)
+    // 全部设为不透明黑色 (R:0, G:0, B:0, A:255)
+    for (let i = 0; i < width * height; i++) {
+      buf[i * 4 + 3] = 255
+    }
+
+    // 在 x:2, y:2, width:6, height:6 绘制红框，线宽 1，指定 RGBA 模式
+    const marked = drawBoundingBoxBitmap(
+      buf,
+      width,
+      height,
+      { x: 2, y: 2, width: 6, height: 6 },
+      {
+        borderWidth: 1,
+        borderColor: { r: 255, g: 0, b: 50, a: 255 },
+        fillColor: { r: 255, g: 0, b: 0, a: 51 }, // 20%
+        isBgra: false,
+      },
+    )
+
+    // 1. 矩形外边的像素应该保持纯黑 (0,0)
+    const outPixel = (y: number, x: number) => {
+      const idx = (y * width + x) * 4
+      return [marked[idx], marked[idx + 1], marked[idx + 2], marked[idx + 3]]
+    }
+
+    expect(outPixel(0, 0)).toEqual([0, 0, 0, 255])
+    expect(outPixel(1, 1)).toEqual([0, 0, 0, 255])
+    expect(outPixel(8, 8)).toEqual([0, 0, 0, 255])
+
+    // 2. 边框上的像素应该是纯红 (255, 0, 50, 255)
+    // 上边框 (y:2, x:2..7)
+    expect(outPixel(2, 2)).toEqual([255, 0, 50, 255])
+    expect(outPixel(2, 5)).toEqual([255, 0, 50, 255])
+    expect(outPixel(2, 7)).toEqual([255, 0, 50, 255])
+    // 下边框 (y:7, x:2..7)
+    expect(outPixel(7, 2)).toEqual([255, 0, 50, 255])
+    expect(outPixel(7, 7)).toEqual([255, 0, 50, 255])
+    // 左边框 (y:4, x:2)
+    expect(outPixel(4, 2)).toEqual([255, 0, 50, 255])
+    // 右边框 (y:4, x:7)
+    expect(outPixel(4, 7)).toEqual([255, 0, 50, 255])
+
+    // 3. 内部像素应该有半透明红底填充 (alpha blend: 0 * 0.8 + 255 * 0.2 = 51)
+    const inner = outPixel(4, 4)
+    expect(inner[0]).toBe(51) // R blended
+    expect(inner[1]).toBe(0) // G
+    expect(inner[2]).toBe(0) // B
+    expect(inner[3]).toBe(255) // A
+  })
+
+  it('updateHandwrittenImage 顺时针旋转答卷后更新 store 中的手写图片与答案引用', () => {
+    let store = makeInitialStore()
+    const attempt: ExamAttempt = {
+      ...newAttempt('att_rotate_test', T0, false),
+      status: 'submitted',
+      answers: [
+        {
+          questionId: 'q1',
+          value: ['微积分'],
+          rawImage: 'C:/photos/orig_sheet1.jpg',
+        },
+        {
+          questionId: 'q2',
+          value: ['变化率'],
+          rawImage: 'C:/photos/sheet2.jpg',
+        },
+      ],
+      handwrittenImages: ['C:/photos/orig_sheet1.jpg', 'C:/photos/sheet2.jpg'],
+    }
+    store = upsertAttempt(store, mockExam.id, attempt)
+
+    // 顺时针旋转第 0 页后，调用 updateHandwrittenImage
+    const updated = updateHandwrittenImage(
+      store,
+      mockExam.id,
+      'att_rotate_test',
+      0,
+      'C:/photos/rotated_sheet1.png',
+    )
+
+    const att = updated.exams[0].attempts.find((a) => a.id === 'att_rotate_test')!
+    expect(att.handwrittenImages).toEqual(['C:/photos/rotated_sheet1.png', 'C:/photos/sheet2.jpg'])
+    // 题目 q1 的 rawImage 应该同步更新为旋转后的新图
+    expect(att.answers[0].rawImage).toBe('C:/photos/rotated_sheet1.png')
+    // 题目 q2 的 rawImage 应该保持不变
+    expect(att.answers[1].rawImage).toBe('C:/photos/sheet2.jpg')
   })
 })

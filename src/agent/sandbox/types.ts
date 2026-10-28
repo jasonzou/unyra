@@ -47,6 +47,10 @@ export interface ExamToolDeps {
   /** 读卷；给 attemptId 就读那一次考试（判分与讲解时要看某一次的历史记录） */
   readExam: (attemptId?: string) => string
   gradeExam: (payload: unknown) => { ok: boolean; message: string }
+  /** 顺时针旋转整张手写答卷 */
+  rotateSheet?: (payload: unknown) => Promise<unknown>
+  /** 裁切手写答案定位红框预检 */
+  previewCrop?: (payload: unknown) => Promise<unknown>
   /** 裁切手写答案图片并贴在对应题目上 */
   cropAnswer?: (payload: unknown) => Promise<{ ok: boolean; message: string; croppedPath?: string }>
   /** 写错题讲解：判分之后的第二步，落在同一次考试上（显示在试卷副本页签里） */
@@ -55,7 +59,7 @@ export interface ExamToolDeps {
   deleteExam: (examId?: string) => { ok: boolean; message: string }
 }
 
-export type ExamAction = 'create' | 'grade' | 'cropAnswer' | 'explain' | 'delete'
+export type ExamAction = 'create' | 'grade' | 'cropAnswer' | 'previewCrop' | 'rotateSheet' | 'explain' | 'delete'
 
 /**
  * 阶段只约束**写**（出题 / 判分 / 作废）：有卷待阅时不能再出卷，反之亦然，
@@ -69,8 +73,8 @@ export type ExamAction = 'create' | 'grade' | 'cropAnswer' | 'explain' | 'delete
 export const EXAM_ACTIONS: Record<'idle' | 'grading', ExamAction[]> = {
   idle: ['create', 'delete'],
   // 判分与讲解是一套工作流的两步，必须同一阶段都放行；第二步在第一次调用之后仍是 grading
-  // 判分、裁切手写答案与讲解是一套工作流的环节，同一阶段都放行
-  grading: ['grade', 'cropAnswer', 'explain'],
+  // 判分、手写答卷旋转、红框预检、裁切贴题与讲解是一套工作流的环节，同一阶段都放行
+  grading: ['grade', 'rotateSheet', 'previewCrop', 'cropAnswer', 'explain'],
 }
 
 
@@ -129,6 +133,8 @@ export interface SandboxOptions {
     /** 读卷：给了 attemptId 就读那一次考试（判分与讲解都要看某一次的历史记录） */
     read: (attemptId?: string) => AgentToolResult
     grade: (payload: Record<string, unknown>) => AgentToolResult
+    rotateSheet: (payload: Record<string, unknown>) => Promise<AgentToolResult> | AgentToolResult
+    previewCrop: (payload: Record<string, unknown>) => Promise<AgentToolResult> | AgentToolResult
     cropAnswer: (payload: Record<string, unknown>) => Promise<AgentToolResult> | AgentToolResult
     explain: (payload: Record<string, unknown>) => AgentToolResult
     remove: (payload: Record<string, unknown>) => AgentToolResult

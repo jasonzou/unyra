@@ -186,9 +186,12 @@ export const PROMPT_MODULES: PromptModule[] = [
 - 收尾：对话里告诉用户试卷已生成并列出名称与题量，请用户开始作答。
 
 四、「阅卷」流程（「阅卷」工作流的执行规程；一次 execute 连着做完，不分两轮）
-- 第零步：await api.exam.__help() 把 grade / cropAnswer / explain 的参数查清楚再动手。
+- 第零步：await api.exam.__help() 把 grade / rotateSheet / previewCrop / cropAnswer / explain 的参数查清楚再动手。
 - 读卷：api.exam.read() 读当前节点的试卷与 attempts（给了「作答记录」attemptId 就读那一次，否则取最新）。**用户的 answers / inputs / dwell / blurs 是客观事实，严禁修改篡改任何字符**。
-- 手写答卷裁切贴题：若 attempt 中包含手写照片（handwrittenImages 或 answers[].image），**必须调用 api.exam.cropAnswer({ questionId, box: [ymin, xmin, ymax, xmax], sourceImage: 0, rotate: 0 })** 将各题手写区域裁切并贴在试卷对应题目上（若答卷方向存在旋转、颠倒，可传 rotate: 90 / 180 / 270 进行顺时针角度旋转修正）。
+- 手写答卷方向转正与裁切贴题（若 attempt 中包含手写照片 handwrittenImages 或 answers[].image）：
+  ① **方向转正**：若用户拍摄角度横置或颠倒，**必须先调用 api.exam.rotateSheet({ sheetIndex: 0, degrees: 90 })** 将其顺时针旋转转正！转正后你将直接在下一跳收到正向图片；
+  ② **红框防截断预检**：为防止裁切偏差或文字被边缘截断，正式裁切前**必须先调用 api.exam.previewCrop({ questionId, box: [ymin, xmin, ymax, xmax], sourceImage: 0 })** 在图像上标出醒目红框。仔细审查返回的红框预检图：确保完整框入该题解答，且未截断公式、未包含邻题。若不理想，微调坐标再次 previewCrop 审查；
+  ③ **正式裁切贴题**：确认预检红框无误后，调用 **api.exam.cropAnswer({ questionId, box: [ymin, xmin, ymax, xmax], sourceImage: 0 })** 将各题手写区域正式裁切并贴在试卷对应题目上。
 - 判分：若有手写答卷，客观题与主观题均以手写内容为准由你亲自判阅，严禁机械判分；并将识别到的选项/手写文字填入 userAnswer，**一条 api.exam.grade({ attemptId, passed, summary, results }) 落账**（results = [{ questionId, correct, score, maxScore, comment, userAnswer, by: "agent" }]）。不要手写数据文件。
 - 讲解：api.exam.explain({ content, attemptId }) 写详尽的步骤推导解析（Markdown），它自动打开试卷副本。
 - 收尾：const n = await api.node.get(目标节点uuid)；const c = await n.content; c.status = passed ? "mastered" : "learning"; await n.editContent(c) 修正掌握状态；高频薄弱错法用 api.state.mistake(目标节点uuid, { pattern, cause }) 记进错误记忆。

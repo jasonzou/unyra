@@ -11,7 +11,12 @@ import { startupBackground } from '../storage'
 import { DEV_SERVER_URL, isDev } from './startup'
 import { appIcon } from './icon'
 import { attachConsoleForwarding, hardenLinks } from './windows'
-import { cropExamAnswerImage, type CropBoxInput } from '../exam/imageCrop'
+import {
+  cropExamAnswerImage,
+  previewExamCropBox,
+  rotateExamSheet,
+  type CropBoxInput,
+} from '../exam/imageCrop'
 
 /* ---------- 考试窗口 ---------- */
 
@@ -250,11 +255,44 @@ export function registerExamIpc(): void {
   // 裁切手写答案图片
   ipcMain.handle(
     'exam:cropImage',
-    async (_event, payload: { imagePath: string; box: CropBoxInput; rotate?: number }) => {
+    async (
+      _event,
+      payload: { imagePath: string; box: CropBoxInput; rotate?: number; sheetRotate?: number },
+    ) => {
       if (!payload || !payload.imagePath || !payload.box) {
         return { ok: false, error: '缺少 imagePath 或 box 参数' }
       }
-      return await cropExamAnswerImage(payload.imagePath, payload.box, payload.rotate)
+      return await cropExamAnswerImage(payload.imagePath, payload.box, payload.rotate, {
+        sheetRotate: payload.sheetRotate,
+      })
+    },
+  )
+
+  // 裁切预检红框标绘
+  ipcMain.handle(
+    'exam:previewCrop',
+    async (
+      _event,
+      payload: { imagePath: string; box: CropBoxInput; rotate?: number; sheetRotate?: number },
+    ) => {
+      if (!payload || !payload.imagePath || !payload.box) {
+        return { ok: false, error: '缺少 imagePath 或 box 参数' }
+      }
+      return await previewExamCropBox(payload.imagePath, payload.box, {
+        rotate: payload.rotate,
+        sheetRotate: payload.sheetRotate,
+      })
+    },
+  )
+
+  // 顺时针旋转整张答卷
+  ipcMain.handle(
+    'exam:rotateSheet',
+    async (_event, payload: { imagePath: string; degrees: number }) => {
+      if (!payload || !payload.imagePath) {
+        return { ok: false, error: '缺少 imagePath 参数' }
+      }
+      return await rotateExamSheet(payload.imagePath, payload.degrees ?? 90)
     },
   )
 }
