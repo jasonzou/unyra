@@ -466,7 +466,7 @@ export const StructureCanvas = memo(function StructureCanvas({
     if (paletteKind) {
       const wants: GNodeKind[] =
         paletteKind === 'doc'
-          ? ['outline']
+          ? ['outline', 'video']
           : paletteKind === 'outline'
             ? ['doc', 'outline']
             : paletteKind === 'video'
@@ -477,7 +477,13 @@ export const StructureCanvas = memo(function StructureCanvas({
     const g = gestureRef.current
     if (g?.mode === 'link') {
       const wants: GNodeKind[] | null =
-        g.fromKind === 'outline' ? ['doc', 'outline'] : g.fromKind === 'doc' ? ['outline'] : null
+        g.fromKind === 'outline'
+          ? ['doc', 'outline']
+          : g.fromKind === 'video'
+            ? ['doc']
+            : g.fromKind === 'doc'
+              ? ['outline', 'video']
+              : null
       // 从大纲拉到大纲：自己那张不算落点（连自己没有意义）
       return wants
         ? new Set(cards.filter((c) => wants.includes(c.kind) && c.uuid !== g.from).map((c) => c.uuid))
@@ -1218,6 +1224,10 @@ export const StructureCanvas = memo(function StructureCanvas({
             const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
             // 从目标项圆点拖出来的线 = 认领那个口（与点目标项建文档同一口径）；反方向拖没有口可指
             tryConnect(outline, doc, fromCard?.kind === 'outline' ? g.slotKey : undefined)
+          } else if (isPair('video', 'doc')) {
+            const video = fromCard?.kind === 'video' ? g.from : target.uuid
+            const doc = fromCard?.kind === 'doc' ? g.from : target.uuid
+            tryConnect(video, doc)
           } else if (isPair('outline', 'outline')) {
             /*
              * 大纲连大纲 = 落点的大纲之下再开一层（上层当分类、下层当指导）。
@@ -1321,8 +1331,8 @@ export const StructureCanvas = memo(function StructureCanvas({
           let under: string | null = null
           if (target) {
             if (g.kind === 'doc') {
-              // 文档只能挂进大纲之下（与发光的候选同一口径，见 candidateIds）
-              under = target.kind === 'outline' ? target.uuid : null
+              // 文档能挂进大纲之下，也能挂在视频节点之下（与发光的候选同一口径，见 candidateIds）
+              under = target.kind === 'outline' || target.kind === 'video' ? target.uuid : null
             } else if (g.kind === 'outline') {
               // 大纲拖到文档上 = 给它补一份大纲（附身，node.outline）
               under = target.kind === 'doc' ? target.uuid : null
@@ -2019,7 +2029,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                 出线把手（右）只长在 doc 上：大纲的出线全走目标项的菱形口（从口上拖出去
                 才会认领），挂件与入口没有出线。
               */}
-              {card.kind === 'doc' && (
+              {(card.kind === 'doc' || card.kind === 'video') && (
                 <div
                   data-link-handle={card.uuid}
                   title={t('拖出去连到另一个节点')}
@@ -2027,9 +2037,8 @@ export const StructureCanvas = memo(function StructureCanvas({
                   style={{ top: EDGE_ANCHOR_Y }}
                 />
               )}
-              {/* 进线接口（左）：实心、不透明。入口不画——没有任何类型能把线连进入口；
-                  入口就是根文档自己（card.entry），它同样不该有进线点 */}
-              {card.kind !== 'entry' && !card.entry && (
+              {/* 进线接口（左）：实心、不透明。入口不画；视频卡为顶层资源无上游，不该有进线点 */}
+              {card.kind !== 'entry' && !card.entry && card.kind !== 'video' && (
                 <div
                   className="pointer-events-none absolute -left-[7.5px] h-3.5 w-3.5 -translate-y-1/2 rounded-full border-2 border-card bg-seal"
                   style={{ top: EDGE_ANCHOR_Y }}

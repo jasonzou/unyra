@@ -203,10 +203,24 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
           }),
         )
       }
-      /** 视频节点（目标 × 视频的绑定，见 learn/video/nodes）：一枚都没有就不写 */
+      /** 视频节点（目标 × 视频的绑定，见 learn/video/nodes）与其树边：一枚都没有就不写 */
       const goalVideoNodes = (store.videoNodes ?? []).filter((v) => v.goalId === goal.id)
-      if (goalVideoNodes.length) {
-        files.set(`${path}/video-nodes.json`, jsonText({ version: 1, nodes: goalVideoNodes }))
+      const goalVideoNodeIds = new Set(goalVideoNodes.map((v) => v.id))
+      const videoEdges = store.edges.filter((e) => goalVideoNodeIds.has(e.from))
+      if (goalVideoNodes.length || videoEdges.length) {
+        files.set(
+          `${path}/video-nodes.json`,
+          jsonText({
+            version: 1,
+            nodes: goalVideoNodes,
+            edges: videoEdges.map((e) => ({
+              from: e.from,
+              to: e.to,
+              createdAt: e.createdAt,
+              ...(e.portKey ? { portKey: e.portKey } : {}),
+            })),
+          }),
+        )
       }
     }
 

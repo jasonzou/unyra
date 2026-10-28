@@ -116,6 +116,29 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       edges.push({ from, to, createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(), ...(portKey ? { portKey } : {}) })
     }
 
+    // 自动修补：若文档正文中包含 ```videos 代码块且当前没有上游连线，自动恢复其到对应视频节点的连线
+    for (const node of nodes) {
+      if (!node.docs?.teaching?.includes('```videos')) continue
+      const hasUpstream = edges.some((e) => e.to === node.id)
+      if (hasUpstream) continue
+      const vMatch = /```videos\s*[\r\n]+([^\r\n]+)/.exec(node.docs.teaching)
+      let targetVNodeId = vMatch ? vMatch[1].trim().replace(/^\{\{\s*|\s*\}\}$/g, '').replace(/^(?:uuid|videoNodeUUID)\s*[:：]\s*/i, '').trim() : ''
+      if (targetVNodeId.toLowerCase() === 'videonodeuuid') targetVNodeId = ''
+
+      let matchedVNode = targetVNodeId ? videoNodes.find((vn) => vn.id === targetVNodeId || vn.videoId === targetVNodeId) : undefined
+      if (!matchedVNode && node.goalId) {
+        const goalVNodes = videoNodes.filter((vn) => vn.goalId === node.goalId)
+        if (goalVNodes.length === 1) matchedVNode = goalVNodes[0]
+      }
+      if (matchedVNode) {
+        const edgeKey = `${matchedVNode.id}>${node.id}`
+        if (!edgeSeen.has(edgeKey)) {
+          edgeSeen.add(edgeKey)
+          edges.push({ from: matchedVNode.id, to: node.id, createdAt: Date.now() })
+        }
+      }
+    }
+
     // 无归属的节点（旧数据）挂到第一个目标上，避免丢失
     const fallbackGoal = goals[0]?.id ?? ''
     const fixedNodes = nodes.map((n) =>

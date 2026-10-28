@@ -360,6 +360,7 @@ const root = await api.node.get(根uuid)；const c = await root.content。c.titl
     under: target, // 视频节点的 UUID，让总览文档直接作为视频节点的子级
   })
   \`\`\`
+  注意：under: target 会自动为文档节点与视频节点建立父子连线。若总览文档此前已存在，create 也会自动补全这根连线。
 
 三、内容分类与标题层级规范（标题最少一层，最多三层）
 根据对视频标题语义的归纳分类来编排正文结构：

@@ -279,13 +279,22 @@ export class NodeService {
     if (kind === 'doc') {
       const docTitle = title || '新文档'
       if (videoUnder) {
-        const added = addNode(store, { title: docTitle, goalId, origin: 'ai', ...(typeof input.description === 'string' ? { description: input.description } : {}) })
+        const vGoalId = videoUnder.goalId || goalId
+        const added = addNode(store, { title: docTitle, goalId: vGoalId, origin: 'ai', ...(typeof input.description === 'string' ? { description: input.description } : {}) })
         if (!added.created) {
-          return { error: '本目标里已经有「' + added.node.title + '」这个文档（' + added.node.id + '），没有另建一份' }
+          const edgeRes = addEdge(store, videoUnder.id, added.node.id)
+          if (edgeRes.added) this.deps.set(edgeRes.store)
+          return {
+            ok: true,
+            uuid: added.node.id,
+            title: added.node.title,
+            created: false,
+            note: '本目标里已有该文档，已将其连线挂到视频节点之下',
+          }
         }
-        const r = addEdge(added.store, videoUnder.id, added.node.id)
-        if (!r.added) return { error: r.reason ?? '这份文档没能挂到视频节点之下' }
-        this.deps.set(r.store)
+        const edgeRes = addEdge(added.store, videoUnder.id, added.node.id)
+        if (!edgeRes.added) return { error: edgeRes.reason ?? '这份文档没能挂到视频节点之下' }
+        this.deps.set(edgeRes.store)
         return {
           ok: true,
           uuid: added.node.id,

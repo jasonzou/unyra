@@ -51,10 +51,11 @@ export class DocGNode extends GNode {
     if (this.isRoot) {
       out.push({ id: entryUuid(this.uuid), type: 'up' })
     } else {
-      // 上游大纲的认领记在树边上（下游侧有效）：哪条边把我挂进来，就带上那条边的 portKey
+      // 上游大纲或视频节点的认领记在树边上（下游侧有效）
       for (const e of s.edges) {
         if (e.to !== this.uuid) continue
-        out.push({ id: outlineUuid(e.from), type: 'up', ...(e.portKey ? { portKey: e.portKey } : {}) })
+        const isVideo = (s.videoNodes ?? []).some((v) => v.id === e.from)
+        out.push({ id: isVideo ? e.from : outlineUuid(e.from), type: 'up', ...(e.portKey ? { portKey: e.portKey } : {}) })
       }
     }
     // 下级文档也在下游（树边 from 我）：画布在枢纽不在时按 doc→doc 画那条线，两端都要能摘
@@ -234,6 +235,14 @@ export class DocGNode extends GNode {
       if (upEdge) {
         this.ctx.commit(removeEdge(this.ctx.store(), upEdge.from, this.uuid))
         return { ok: true, note: '已把「' + this.title + '」从「' + target.title + '」之下摘出来（它变成没有上游的独立文档，内容原样，认领随线解除）' }
+      }
+    }
+    // 上游视频节点（上游树边）：摘线 = 拆那条树边
+    if (target.kind === 'video') {
+      const upEdge = this.ctx.store().edges.find((e) => e.to === this.uuid && e.from === target.uuid)
+      if (upEdge) {
+        this.ctx.commit(removeEdge(this.ctx.store(), target.uuid, this.uuid))
+        return { ok: true, note: '已把「' + this.title + '」从「' + target.title + '」之下摘出来' }
       }
     }
     // 下级文档（下游树边，画布枢纽不在时的 doc→doc 那条线）：摘线 = 拆边，对方变游离
