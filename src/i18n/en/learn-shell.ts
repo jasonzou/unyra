@@ -101,6 +101,8 @@ const dict: Record<string, string> = {
   '双链速记与知识批注': 'Bi-directional notes & annotations',
   '新建学习目标': 'New learning goal',
   'AI 生成体系化知识树': 'AI generated knowledge tree',
+  '创建学习体系与节点宇宙': 'Build a knowledge network & node universe',
+  '推荐首选': 'Recommended first',
   '切换目标页签组': 'Switch goal tab group',
   '目标页签组（点一行切过去）': 'Goal tab groups (click to switch)',
   '还没有存活的页签组：切到某个目标，开一份文档就会出现在这里': 'No live tab groups yet — open a document in a goal and it will appear here',

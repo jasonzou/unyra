@@ -225,9 +225,12 @@ const dict: Record<string, string> = {
   '回到最新消息（恢复自动滚动）': 'Back to the latest message (resume auto-scroll)',
 
   /* ---------- 空状态（useMessageList） ---------- */
-  '让 AI 把这一概念讲清楚。': 'Have the AI explain this concept clearly.',
-  '它会把讲解直接写进左侧的教学文档。选中文档里的陌生词汇就能创建下级节点继续深入；想要一份自己的笔记，直接说「把刚才讲的要点整理进我的笔记」。': 'The explanation goes straight into the lesson document on the left. Select an unfamiliar word there to create a child node and dig deeper; for your own notes, just say "organize the key points into my notes".',
-  '试试：「用直觉解释这个概念」「给我一个具体例子」「我卡在这里了，帮我拆开」': 'Try: "Explain this concept intuitively", "Give me a concrete example", "I am stuck here — help me break it down"',
+  '超级导师已就绪': 'Super Tutor is ready',
+  '针对当前知识点随思提问、拆解推导或生成笔记': 'Ask questions, unpack concepts, or take notes for the current topic',
+  '可以这样对我说：': 'You can ask me things like:',
+  '用直白的例子解释这个概念': 'Explain this concept with intuitive examples',
+  '帮我梳理要点并整理进笔记': 'Summarize key takeaways into my notes',
+  '针对难点出一道随堂小测验': 'Generate a quick quiz on key difficulties',
 
   /* ---------- CompactionDivider ---------- */
   '收起摘要': 'Hide summary',

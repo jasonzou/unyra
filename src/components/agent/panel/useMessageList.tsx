@@ -13,6 +13,7 @@
  */
 
 import { useMemo } from 'react'
+import { Sparkles } from 'lucide-react'
 import WaveBars from '../../WaveBars'
 import { CompactionDivider } from './CompactionDivider'
 import { HiddenDivider, MessageRow, Parts } from './MessageBubble'
@@ -95,6 +96,7 @@ export function useMessageList({
   onResumeNotice,
   setBubblePreview,
   onOpenFile,
+  onSelectPrompt,
 }: MessageListProps) {
   /*
    * 分段只在 messages 变了之后重算：流式写作时 messages 身份不变（正在长的那一段
@@ -102,17 +104,43 @@ export function useMessageList({
    * 不会因为每个 chunk 重渲染一次而被打掉。
    */
   const { segments, pending } = useMemo(() => toSegments(messages), [messages])
+  const suggestions = useMemo(
+    () => [
+      t('用直白的例子解释这个概念'),
+      t('帮我梳理要点并整理进笔记'),
+      t('针对难点出一道随堂小测验'),
+    ],
+    [],
+  )
+
   return (
     <>
       {messages.length === 0 && !streaming && (
-        <div className="mt-6 rounded-lg border border-dashed border-line bg-card/60 px-3.5 py-4 text-[13.5px] leading-relaxed text-ink-soft">
-          <p className="font-medium text-ink">{t('让 AI 把这一概念讲清楚。')}</p>
-          <p className="mt-1 text-ink-faint">
-            {t('它会把讲解直接写进左侧的教学文档。选中文档里的陌生词汇就能创建下级节点继续深入；想要一份自己的笔记，直接说「把刚才讲的要点整理进我的笔记」。')}
+        <div className="my-auto flex flex-col items-center justify-center px-4 py-8 text-center select-none animate-in fade-in duration-300">
+          <div className="flex h-11 w-11 items-center justify-center text-seal/80">
+            <Sparkles size={26} className="stroke-[1.6]" />
+          </div>
+          <h4 className="mt-2 text-[14.5px] font-medium tracking-wide text-ink-strong">
+            {t('超级导师已就绪')}
+          </h4>
+          <p className="mt-1 max-w-[280px] text-[12px] leading-relaxed text-ink-soft">
+            {t('针对当前知识点随思提问、拆解推导或生成笔记')}
           </p>
-          <p className="mt-2 text-[12.5px] text-ink-faint">
-            {t('试试：「用直觉解释这个概念」「给我一个具体例子」「我卡在这里了，帮我拆开」')}
-          </p>
+          <div className="mt-5 flex flex-col items-center gap-2 text-[11.5px] text-ink-faint">
+            <span className="text-[11px] text-ink-faint/70">{t('可以这样对我说：')}</span>
+            <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-[340px]">
+              {suggestions.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => onSelectPrompt?.(item)}
+                  className="rounded-full px-2.5 py-1 text-[11.5px] text-ink-soft transition-colors duration-150 hover:text-seal cursor-pointer"
+                >
+                  “{item}”
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

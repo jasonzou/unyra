@@ -495,6 +495,7 @@ export function EmptyDoc({
   onPickLocal,
   onOpenWeb,
   onNewGoal,
+  hasGoals = true,
   favorites = [],
   favoriteTitleOf,
   onOpenFavorite,
@@ -506,6 +507,8 @@ export function EmptyDoc({
   onPickLocal: () => void
   onOpenWeb?: () => void
   onNewGoal?: () => void
+  /** 是否已有目标：没有时高亮新建目标入口，引导用户创建首个目标 */
+  hasGoals?: boolean
   /** 收藏栏的数据：store.favorites（按收藏时间倒序展示，见下） */
   favorites?: FavoriteItem[]
   /** 收藏行的标题（节点名 / 考试名要现查，与侧栏收藏区共用一份） */
@@ -544,7 +547,8 @@ export function EmptyDoc({
             <QuickEntry
               icon={<Compass size={22} className="stroke-[1.75]" />}
               label={t('新建目标')}
-              hint={t('AI 生成体系化知识树')}
+              hint={t('创建学习体系与节点宇宙')}
+              highlighted={!hasGoals}
               onClick={onNewGoal}
             />
           )}
@@ -619,16 +623,45 @@ export function EmptyDoc({
 }
 
 /** 空白页上的快捷入口：图标加大、无边框无底色，悬停时图标与文字一起染上印章色 */
-function QuickEntry({ icon, label, hint, onClick }: { icon: ReactNode; label: string; hint: string; onClick: () => void }) {
+function QuickEntry({
+  icon,
+  label,
+  hint,
+  highlighted = false,
+  onClick,
+}: {
+  icon: ReactNode
+  label: string
+  hint: string
+  highlighted?: boolean
+  onClick: () => void
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group flex flex-col items-center gap-2 rounded-xl px-2.5 py-3.5 transition-colors duration-200 hover:bg-line/40 focus-visible:ring-2 focus-visible:ring-seal/50"
+      className={`group relative flex flex-col items-center gap-2 rounded-xl px-2.5 py-3.5 transition-all duration-300 focus-visible:ring-2 focus-visible:ring-seal/50 cursor-pointer ${
+        highlighted
+          ? 'border border-seal/50 bg-seal/[0.08] shadow-[0_0_24px_rgba(168,67,47,0.25)] ring-1 ring-seal/40 animate-[pulse_2.2s_ease-in-out_infinite] hover:bg-seal/[0.14] hover:shadow-[0_0_32px_rgba(168,67,47,0.38)] hover:scale-[1.03]'
+          : 'hover:bg-line/40'
+      }`}
     >
-      <span className="text-ink-soft transition-colors group-hover:text-seal">{icon}</span>
-      <span className="text-[12.5px] font-medium text-ink transition-colors group-hover:text-seal-deep">{label}</span>
-      <span className="text-[10.5px] text-ink-faint">{hint}</span>
+      {highlighted && (
+        <span className="absolute -top-2.5 rounded-full bg-seal px-2 py-0.5 text-[9.5px] font-medium tracking-wider text-white shadow-sm">
+          {t('推荐首选')}
+        </span>
+      )}
+      <span className={`transition-colors ${highlighted ? 'text-seal' : 'text-ink-soft group-hover:text-seal'}`}>
+        {icon}
+      </span>
+      <span
+        className={`text-[12.5px] font-medium transition-colors ${
+          highlighted ? 'font-semibold text-seal-deep' : 'text-ink group-hover:text-seal-deep'
+        }`}
+      >
+        {label}
+      </span>
+      <span className={`text-[10.5px] ${highlighted ? 'text-seal/80' : 'text-ink-faint'}`}>{hint}</span>
     </button>
   )
 }

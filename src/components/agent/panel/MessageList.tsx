@@ -39,4 +39,6 @@ export interface MessageListProps {
   setBubblePreview: React.Dispatch<React.SetStateAction<MessageImage | null>>
   /** 点击文件附件时在标签页中打开 */
   onOpenFile?: (pathOrRel: string, title?: string) => void
+  /** 点击空态预设建议提问词时填入输入框 */
+  onSelectPrompt?: (text: string) => void
 }

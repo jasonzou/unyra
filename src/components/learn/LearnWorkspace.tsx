@@ -4717,6 +4717,7 @@ export default function LearnWorkspace({
                 onPickLocal={() => void pickLocalInPlace(groupId, gTab.id)}
                 onOpenWeb={isWeb() ? undefined : () => openWebInPlace(groupId, gTab.id)}
                 onNewGoal={() => openNewGoalInPlace(groupId, gTab.id)}
+                hasGoals={(store.goals ?? []).length > 0}
                 // 收藏 / 最近打开两栏（原侧栏的「最近打开」区挪到这里，见 EmptyDoc）
                 favorites={store.favorites ?? []}
                 favoriteTitleOf={favoriteTitleOf}
@@ -4983,9 +4984,11 @@ export default function LearnWorkspace({
               ) : null /* 预览那一份由下面的常驻列表渲染（见 DocPane） */
             ) : (
               <EmptyDoc
+                onNewFile={() => openNewFileInPlace(groupId, gTabId)}
                 onPickLocal={() => void pickLocalInPlace(groupId, gTabId)}
                 onOpenWeb={isWeb() ? undefined : () => openWebInPlace(groupId, gTabId)}
                 onNewGoal={() => openNewGoalInPlace(groupId, gTabId)}
+                hasGoals={(store.goals ?? []).length > 0}
                 favorites={store.favorites ?? []}
                 favoriteTitleOf={favoriteTitleOf}
                 onOpenFavorite={openFavorite}

@@ -35,6 +35,7 @@ import { useMsgRail } from './panel/useMsgRail'
 import { useScrollFollow } from './panel/useScrollFollow'
 import { fadeMask, useScrollEdges } from '../../lib/scrollFade'
 import { t, useLocale } from '../../i18n'
+import { focusAgentInput } from '../../lib/agentFocus'
 
 /**
  * AI Agent 面板：按顺序呈现「思考过程 → 工具调用 → 回复正文」。
@@ -476,6 +477,14 @@ export default function AgentPanel({
           : t('导师正在准备')
         : t('思考中…')
 
+  const handleSelectPrompt = useCallback(
+    (prompt: string) => {
+      composer.setValue(prompt)
+      focusAgentInput()
+    },
+    [composer],
+  )
+
   // 消息列表那一段 JSX：状态与回调都在上面，这里只负责把它渲染出来
   const messageList = useMessageList({
     messages: viewMessages,
@@ -496,6 +505,7 @@ export default function AgentPanel({
     onResumeNotice: resumeInterrupted,
     setBubblePreview,
     onOpenFile,
+    onSelectPrompt: handleSelectPrompt,
   })
 
   return (
@@ -534,7 +544,15 @@ export default function AgentPanel({
             className="moji-scroll-none moji-selectable h-full overflow-y-auto pb-3 pl-3.5 pr-9"
           >
             {/* 字号系数挂在这一层、而不是滚动容器上：滚动条与内边距不该跟着缩放（上边距 20px：列表内容与页签栏之间留一口呼吸） */}
-            <div ref={contentRef} className="pt-5" style={{ zoom: chatScale } as CSSProperties}>
+            <div
+              ref={contentRef}
+              className={`pt-5 ${
+                viewMessages.length === 0 && !viewStreaming
+                  ? 'flex min-h-[calc(100%-1.25rem)] flex-col justify-center pb-8'
+                  : ''
+              }`}
+              style={{ zoom: chatScale } as CSSProperties}
+            >
               {messageList}
             </div>
           </div>
