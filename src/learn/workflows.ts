@@ -79,7 +79,6 @@ const TEACH_NODE_INSTRUCTION = ['## 使用「开讲」工作流。', '- 目标�
  *
  * 学习型的交付物仍是大纲页（路线住在大纲文件里，教学文档只写总述）。
  */
-const GOAL_OUTLINE_INSTRUCTION = ['## 使用「学习大纲」工作流。'].join('\n')
 
 /**
  * 「生成大纲」：给任意一个节点规划或重写它这一层的大纲（手动触发——大纲页上的
@@ -99,7 +98,6 @@ const OUTLINE_INSTRUCTION = ['## 使用「生成大纲」工作流。', '- 目�
  * 这条给**还没拆过的文档**定「学它之前要先会什么」。写法的通用规矩在「大纲编写」
  * 提示词模块里（随本工作流注入），指令只写本轮特有的任务与边界。
  */
-const PREREQ_OUTLINE_INSTRUCTION = ['## 使用「前置知识大纲」工作流。', '- 目标节点: {{target}}'].join('\n')
 
 /**
  * 「视频总览」：分析视频选集结构并规划语义分类总览文档（挂在视频节点子级）。
@@ -192,15 +190,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 核心交付物是教学文档：要深，但 max 的等待不值
   },
   {
-    id: 'goal-outline',
-    name: '学习大纲',
-    description: '先分清长期学习还是一次性任务：学习型规划大纲树与讲义，任务型只写根节点导读文档',
-    instruction: GOAL_OUTLINE_INSTRUCTION,
-    // 同「开讲」：总述也是讲义，排版配方要先于动笔在场
-    promptModule: 'goal-outline doc-html',
-    // 标题 / 描述 / 大纲决定后续学习路径，值得想透；规程整篇在「学习大纲」模块里
-  },
-  {
     id: 'outline',
     name: '生成大纲',
     description: '为当前知识点规划或重写大纲（只列直接子层级一层）',
@@ -211,18 +200,6 @@ const BUILTIN_DEFS: BuiltinDef[] = [  {
     // 交付物长在大纲页里（用户多半正盯着它）：只响一声铃、不抢主位
     prep: 'show',
     // 大纲规划要全局权衡层级
-  },
-  {
-    id: 'prereq-outline',
-    name: '前置知识大纲',
-    description: '读当前节点的文档，把「先要学会什么」提炼成大纲目标项（文档卡右键菜单触发）',
-    instruction: PREREQ_OUTLINE_INSTRUCTION,
-    // 与「生成大纲」共用同一份大纲写法声明；前置的差异在自己那份模块里
-    promptModule: 'outline-method prereq-outline',
-    params: ['target'],
-    // 交付物同在大纲页里：只响一声铃、不抢主位
-    prep: 'show',
-    // 前置的取舍与顺序同样要全局权衡，与「生成大纲」同档
   },
   {
     id: 'video-overview',

@@ -463,6 +463,7 @@ export interface DependencyEdge {
 
 export interface LearningGoal {
   id: string
+  title?: string
   rootNodeId: string
   question: string
   createdAt: number
@@ -494,7 +495,7 @@ export type TabRef =
    * 某个目标的大纲页（交互页面，见 OutlineDoc）。它不是源码/预览那种文档视图——
    * 渲染层见到它就走大纲自己的组件，不进 DocPane。
    */
-  | { kind: 'outline'; nodeId: string }
+  | { kind: 'outline'; nodeId: string; goalId?: string }
   /** 磁盘上的外部文件（绝对路径） */
   | { kind: 'local'; path: string; title?: string }
   /**
@@ -570,8 +571,6 @@ export type TabRef =
    * components/agent/AgentSettingsPanel）。同样全局一枚，与全局设置是两份数据。
    */
   | { kind: 'agentSettings' }
-  /** 目标创建页：创建新学习目标，创建完成后自动关闭 */
-  | { kind: 'newGoal' }
   /** 空白页签（底页）：显示无页签引导卡片，用于快捷新建或作为保底页签 */
   | { kind: 'blank'; key: string }
   /**
@@ -673,7 +672,7 @@ export type FavoriteRef =
   /** 某一次考试的只读副本（认考试，与页签同一口径） */
   | { kind: 'exam'; nodeId: string; examId: string; attemptId: string }
   /** 某个目标的大纲页 */
-  | { kind: 'outline'; nodeId: string }
+  | { kind: 'outline'; nodeId: string; goalId?: string }
   /** 磁盘上的外部文件（绝对路径） */
   | { kind: 'local'; path: string; title?: string }
   /**

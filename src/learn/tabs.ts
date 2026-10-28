@@ -80,7 +80,6 @@ export function tabKey(ref: TabRef): string {
   // 超级导师设置全局一份；记忆按目标归档，页签也一枚目标一份
   if (ref.kind === 'mind') return 'm:' + ref.goalId
   if (ref.kind === 'agentSettings') return 'set:agent'
-  if (ref.kind === 'newGoal') return 'goal:new'
   if (ref.kind === 'blank') return 'b:' + ref.key
   // 新建文件页签：还没有落点，身份只能是开签那一刻的随机后缀
   if (ref.kind === 'draft') return 'd:' + ref.key
@@ -143,7 +142,6 @@ export function tabNodeId(ref: TabRef): string | null {
     ref.kind === 'schedule' ||
     ref.kind === 'mind' ||
     ref.kind === 'agentSettings' ||
-    ref.kind === 'newGoal' ||
     ref.kind === 'blank' ||
     // 新建文件页签还没有落点：保存那一刻才知道它属于哪儿（见 types 的 draft 分支）
     ref.kind === 'draft'
@@ -190,12 +188,13 @@ export function tabTitle(
   examTitle?: (examId: string, attemptId: string) => string | undefined,
   /** 绑定视频的标题（来自视频资源；创建态没有） */
   videoTitle?: (videoId: string) => string | undefined,
+  goalTitle?: (goalId: string) => string | undefined,
 ): string {
   if (ref.kind === 'teach') return nodeTitle(ref.nodeId) ?? t('已删除的节点')
   if (ref.kind === 'note') return ref.note
   if (ref.kind === 'super') return ref.name
   if (ref.kind === 'exam') return examTitle?.(ref.examId, ref.attemptId) ?? t('试卷副本')
-  if (ref.kind === 'outline') return (nodeTitle(ref.nodeId) ?? t('已删除的节点')) + t(' · 结构')
+  if (ref.kind === 'outline') return (nodeTitle(ref.nodeId) ?? goalTitle?.(ref.nodeId) ?? t('已删除的节点')) + t(' · 结构')
   if (ref.kind === 'web') {
     // 页面的真标题是活信息（见 types 的 WebTabMeta），这里只能兜底出域名；起始页没有域名
     if (!ref.url) return t('新网页页签')
@@ -216,7 +215,6 @@ export function tabTitle(
   if (ref.kind === 'schedule') return t('日程安排')
   if (ref.kind === 'mind') return t('记忆管理')
   if (ref.kind === 'agentSettings') return t('超级导师设置')
-  if (ref.kind === 'newGoal') return t('新建目标')
   if (ref.kind === 'blank') return t('新页签')
   // 新建文件页签：还没有文件名，就叫「未命名」——保存之后它变成 local 页签，显示真实文件名
   if (ref.kind === 'draft') return t('未命名')
@@ -252,7 +250,6 @@ export function tabTrail(
     ref.kind === 'usage' ||
     ref.kind === 'schedule' ||
     ref.kind === 'agentSettings' ||
-    ref.kind === 'newGoal' ||
     ref.kind === 'blank' ||
     ref.kind === 'draft'
   )

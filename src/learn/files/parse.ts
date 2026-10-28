@@ -162,8 +162,6 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
     if (!file || typeof file.id !== 'string' || !file.id) continue
     nodeFiles.set(parts.slice(0, -1).join('/'), { base, file })
   }
-  if (!nodeFiles.size) return null
-
   const nodes: Array<Record<string, unknown>> = []
   const goals: Array<Record<string, unknown>> = []
   const edges: Array<Record<string, unknown>> = []
@@ -171,9 +169,41 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
   const tmp: Record<string, Record<string, TmpEntry>> = {}
   const goalOfDir = new Map<string, string>()
 
-  // 目标目录必须是顶层（docs/{目标}）且自己的节点文件里带着 goal 块
+  // 扫描所有顶层目标目录：docs/{目标}
+  const topGoalDirs = new Set<string>()
+  for (const p of files.keys()) {
+    if (!p.startsWith('docs/')) continue
+    const segs = p.split('/')
+    if (segs.length >= 2) topGoalDirs.add(`docs/${segs[1]}`)
+  }
+
+  // 1. 优先从 docs/{目标}/goal.json 读目标元数据
+  for (const goalDir of topGoalDirs) {
+    const gJson = parseJson<{
+      id?: string
+      title?: string
+      question?: string
+      rootNodeId?: string | null
+      createdAt?: number
+      updatedAt?: number
+    }>(files.get(`${goalDir}/goal.json`))
+    if (gJson && typeof gJson.id === 'string' && gJson.id) {
+      goals.push({
+        id: gJson.id,
+        title: typeof gJson.title === 'string' ? gJson.title : (gJson.question ?? ''),
+        question: typeof gJson.question === 'string' ? gJson.question : '',
+        rootNodeId: typeof gJson.rootNodeId === 'string' ? gJson.rootNodeId : '',
+        createdAt: typeof gJson.createdAt === 'number' ? gJson.createdAt : Date.now(),
+        updatedAt: typeof gJson.updatedAt === 'number' ? gJson.updatedAt : Date.now(),
+      })
+      goalOfDir.set(goalDir, gJson.id)
+    }
+  }
+
+  // 2. 兼容旧格式：自己的节点文件里带着 goal 块的根节点
   for (const [dir, { file }] of nodeFiles) {
     if (dir.split('/').length !== 2) continue
+    if (goalOfDir.has(dir)) continue
     if (!file.goal || typeof file.goal.id !== 'string' || !file.goal.id) continue
     goals.push({
       id: file.goal.id,
@@ -247,8 +277,11 @@ export function parseDocsV3(files: Map<string, string>, state: unknown): LearnSt
     const tmpFile = parseJson<{ entries?: Record<string, TmpEntry> }>(files.get(`${dir}/tmp.json`))
     if (tmpFile?.entries && typeof tmpFile.entries === 'object') tmp[file.id] = tmpFile.entries
 
-    // 目标级账本只从目标目录读一次
-    if (dir.split('/').length === 2) readGoalLedgers(files, dir, goalId, ledgers)
+
+  }
+
+  for (const [goalDir, goalId] of goalOfDir.entries()) {
+    readGoalLedgers(files, goalDir, goalId, ledgers)
   }
 
   // 读回根级 exams/*.json（兜底：节点已经不在的试卷）

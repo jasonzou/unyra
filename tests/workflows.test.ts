@@ -46,13 +46,11 @@ const store = (workflows?: LearnStore['workflows']): LearnStore => ({
 })
 
 describe('内置工作流', () => {
-  it('十四个内置都在：开讲、学习大纲、生成大纲、前置知识大纲、视频总览、出卷、阅卷、了解、超级实验室、伪编译、修复函数图像、压缩上下文、浏览器操作、随笔整理', () => {
+  it('十二个内置都在：开讲、生成大纲、视频总览、出卷、阅卷、了解、超级实验室、伪编译、修复函数图像、压缩上下文、浏览器操作、随笔整理', () => {
     const rows = builtinWorkflowRows()
     expect(rows.map((r) => r.id)).toEqual([
       'teach-node',
-      'goal-outline',
       'outline',
-      'prereq-outline',
       'video-overview',
       'exam',
       'exam-grade',
@@ -70,33 +68,18 @@ describe('内置工作流', () => {
     }
   })
 
-  it('学习大纲：指令是标准函数调用，规程整篇在「学习大纲」模块里', () => {
-    const row = builtinWorkflowRows().find((r) => r.id === 'goal-outline')
+  it('生成大纲：指令是标准函数调用，规程在「生成大纲」模块里', () => {
+    const row = builtinWorkflowRows().find((r) => r.id === 'outline')
     expect(row).toBeTruthy()
-    // 形态不靠用户勾选，也没有占位参数要补（目标上下文就是会话本身）
-    expect(row?.params).toBeUndefined()
+    expect(row?.params).toEqual(['target'])
 
-    // 指令 = 标准函数调用：只有名字，不带规程
-    const text = row!.instruction
-    expect(text).toBe('## 使用「学习大纲」工作流。')
+    const text = renderWorkflowInstruction(row!.instruction, { target: '极限的定义' })
+    expect(text).toBe('## 使用「生成大纲」工作流。\n- 目标节点: 极限的定义')
 
-    // 规程在模块里：判断依据写死在那里（先看制品、再看长期意图、都没有按任务型）
-    const mod = promptModuleByKey('goal-outline')
+    const mod = promptModuleByKey('outline-method')
     expect(mod).toBeTruthy()
     const spec = mod!.text
-    expect(spec).toContain('先看有没有具体制品')
-    expect(spec).toContain('再看有没有长期意图')
-    expect(spec).toContain('按**任务型**处理')
-    // 询问是最后手段：只有一种情况才问
-    expect(spec).toContain('只有一种情况值得问')
-    expect(spec).toContain('除此之外不要问')
-    // 任务型分支明确禁止建树、禁止写大纲，并要求先打开文档
-    expect(spec).toContain('不要**用 api.node.create 建任何子节点')
-    expect(spec).toContain('写根节点的大纲')
-    expect(spec).toContain('先把文档打开')
-    // 学习型分支仍按创建模式走
-    expect(spec).toContain('选择目标创建模式')
-    expect(spec).toContain('api.node.create')
+    expect(spec).toContain('大纲编写')
   })
 
   it('问询类（开讲/出卷/超级实验室）触发前响铃；阅卷不能从列表直接跑', () => {
@@ -138,7 +121,6 @@ describe('内置工作流', () => {
     expect(beeping).toEqual([
       'teach-node',
       'outline',
-      'prereq-outline',
       'video-overview',
       'exam',
       'explain',
@@ -337,21 +319,15 @@ describe('思考档位唯一性（三态配置已删）', () => {
     for (const r of builtinWorkflowRows()) expect('effort' in r).toBe(false)
     expect(buildState(store()).workflows).toBeUndefined()
   })
-  it('写教学文档的两条内置工作流，配方在动笔之前就注入（doc-html）', () => {
+  it('写教学文档的内置工作流，配方在动笔之前就注入（doc-html）', () => {
     const rows = builtinWorkflowRows()
-    // 「开讲」与新目标的「学习大纲」是仅有的两条会写教学文档的内置工作流。
-    // 它们必须带 doc-html：靠写入触发只会晚一轮，第一份文档就永远是纯 HTML 草稿。
-    // 开讲还带教学方法规程（teach-method），也在动笔之前一起注入。
     const teach = rows.find((r) => r.id === 'teach-node')!
     expect(teach.promptModule).toBe('teach-method doc-html')
     expect(workflowModules(teach).map((m) => m.key)).toEqual(['teach-method', 'doc-html'])
-    const goal = rows.find((r) => r.id === 'goal-outline')!
-    expect(goal.promptModule).toBe('goal-outline doc-html')
-    expect(workflowModules(goal).map((m) => m.key)).toEqual(['goal-outline', 'doc-html'])
     // 每条工作流的规程都在自己那份模块里（「了解」的注解写法、修复图像的验收标准）
     const explain = rows.find((r) => r.id === 'explain')!
     expect(workflowModules(explain).map((m) => m.key)).toEqual(['explain'])
-    // 「生成大纲」「前置知识大纲」带大纲编写规程（outline-method）
+    // 「生成大纲」带大纲编写规程（outline-method）
     const outline = rows.find((r) => r.id === 'outline')!
     expect(workflowModules(outline).map((m) => m.key)).toEqual(['outline-method'])
   })

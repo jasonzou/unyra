@@ -451,7 +451,6 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
         tab.ref.kind === 'schedule' ||
         tab.ref.kind === 'mind' ||
         tab.ref.kind === 'agentSettings' ||
-        tab.ref.kind === 'newGoal' ||
         tab.ref.kind === 'blank'
       )
         return { ok: true }

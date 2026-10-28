@@ -1671,11 +1671,11 @@ export function useAgent(opts: {
   const autoTeach = useCallback(
     (
       target: AgentRunTarget,
-      goal = false,
+      _goal = false,
       extra?: string,
       attachments?: { images?: PendingImage[]; files?: PendingFile[] },
     ) => {
-      runWorkflow(goal ? 'goal-outline' : 'teach-node', {
+      runWorkflow('teach-node', {
         target,
         hint: extra,
         params: { target: target.nodeId },

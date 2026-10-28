@@ -2404,12 +2404,12 @@ export const StructureCanvas = memo(function StructureCanvas({
                   type="button"
                   className="flex w-full items-center rounded px-2 py-1.5 text-left hover:bg-line/60"
                   onClick={() => {
-                    // 前置知识大纲：读这份文档，把「学它之前要先会什么」铺成它的大纲
+                    // 生成大纲：读这份文档，规划子层级目标项
                     onGenerateOutline?.(menuCard.uuid)
                     setMenu(null)
                   }}
                 >
-                  {t('生成前置知识大纲')}
+                  {t('生成大纲')}
                 </button>
               )}
               {menuCard.kind === 'video' && (

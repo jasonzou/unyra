@@ -2,9 +2,10 @@
 
 /* ---------- 内存 → 磁盘 ---------- */
 
-import type { DependencyEdge, DocKind, LearnStore } from '../types'
+import type { DependencyEdge, DocKind, KnowledgeNode, LearnStore } from '../types'
 import type { Exam } from '../exam'
 import { DOCS_DIR, MANIFEST_FILE, STATIC_DIR, nodeLayout } from '../layout'
+import { sanitizeSegment } from '../segments'
 import { manifestText } from '../static/manifest'
 import { CHAT_VERSION, TMP_VERSION, jsonText, tmpText } from './meta'
 import { NODE_FILE_SUFFIX, NODE_FILE_VERSION, partsOfNode, type NodeFile } from './nodeFile'
@@ -57,6 +58,107 @@ function cacheReusable(
  * 它是**生成器**：每处理完一个节点就 `yield` 一次，由调用方决定要不要真的把主线程
  * 让出去（见下面的 buildDocs / buildDocsChunked）。
  */
+function writeGoalFiles(goal: LearnStore['goals'][number], store: LearnStore, files: Map<string, string>, byId: Map<string, KnowledgeNode>): void {
+  const root = goal.rootNodeId ? byId.get(goal.rootNodeId) : undefined
+  const goalSeg = sanitizeSegment(root?.title || goal.title || goal.question || '未命名目标')
+  const path = `${DOCS_DIR}/${goalSeg}`
+
+  files.set(
+    `${path}/goal.json`,
+    jsonText({
+      version: 1,
+      id: goal.id,
+      title: goal.title || goal.question,
+      question: goal.question,
+      rootNodeId: goal.rootNodeId || '',
+      createdAt: goal.createdAt,
+      updatedAt: goal.updatedAt,
+    }),
+  )
+
+  const conversations = store.conversations.filter((c) => c.goalId === goal.id)
+  files.set(`${path}/chat.json`, jsonText({ version: CHAT_VERSION, conversations }))
+
+  const resources = store.resources?.[goal.id] ?? []
+  if (resources.length) {
+    files.set(`${path}/${STATIC_DIR}/${MANIFEST_FILE}`, manifestText(resources))
+  }
+
+  const workMemory = store.memory?.work?.[goal.id] ?? []
+  if (workMemory.length) {
+    files.set(`${path}/mind.json`, jsonText({ version: 2, work: workMemory }))
+  }
+
+  const methods = store.methods?.[goal.id] ?? []
+  if (methods.length) {
+    files.set(`${path}/method.json`, jsonText({ version: 1, methods }))
+  }
+
+  const goalWorkflows = store.workflows?.byGoal?.[goal.id] ?? []
+  if (goalWorkflows.length) {
+    files.set(`${path}/workflow.json`, jsonText({ version: 1, workflows: goalWorkflows }))
+  }
+
+  const goalReading = store.reading?.byGoal?.[goal.id]
+  if (goalReading && (goalReading.sessions.length || Object.keys(goalReading.days).length)) {
+    files.set(`${path}/reading.json`, jsonText(goalReading))
+  }
+
+  const goalEssays = store.essays?.[goal.id] ?? []
+  const goalCommits = store.essayCommits?.[goal.id] ?? []
+  if (goalEssays.length || goalCommits.length) {
+    files.set(`${path}/essay.json`, jsonText({ version: 2, essays: goalEssays, commits: goalCommits }))
+  }
+
+  const structure = store.structure?.[goal.id]
+  if (structure && Object.keys(structure.positions).length) {
+    files.set(`${path}/structure.json`, jsonText(structure))
+  }
+
+  const goalDetached = store.detached?.[goal.id]
+  if (goalDetached && (goalDetached.notes.length || goalDetached.superdocs.length)) {
+    files.set(`${path}/detached.json`, jsonText({ version: 1, notes: goalDetached.notes, superdocs: goalDetached.superdocs }))
+  }
+
+  const freeOutlines = (store.outlines ?? []).filter((o) => o.goalId === goal.id)
+  const freeOutlineIds = new Set(freeOutlines.map((o) => o.id))
+  const goalDocIds = new Set(store.nodes.filter((n) => n.goalId === goal.id).map((n) => n.id))
+  const freeEdges = store.edges.filter((e) => {
+    if (!e.from.startsWith('o:')) return false
+    const raw = e.from.slice(2)
+    return freeOutlineIds.has(raw) || goalDocIds.has(raw)
+  })
+  if (freeOutlines.length || freeEdges.length) {
+    files.set(
+      `${path}/outlines.json`,
+      jsonText({
+        version: 1,
+        outlines: freeOutlines,
+        edges: freeEdges.map((e) => ({ from: e.from, to: e.to, createdAt: e.createdAt, ...(e.portKey ? { portKey: e.portKey } : {}) })),
+      }),
+    )
+  }
+
+  const goalVideoNodes = (store.videoNodes ?? []).filter((v) => v.goalId === goal.id)
+  const goalVideoNodeIds = new Set(goalVideoNodes.map((v) => v.id))
+  const videoEdges = store.edges.filter((e) => goalVideoNodeIds.has(e.from))
+  if (goalVideoNodes.length || videoEdges.length) {
+    files.set(
+      `${path}/video-nodes.json`,
+      jsonText({
+        version: 1,
+        nodes: goalVideoNodes,
+        edges: videoEdges.map((e) => ({
+          from: e.from,
+          to: e.to,
+          createdAt: e.createdAt,
+          ...(e.portKey ? { portKey: e.portKey } : {}),
+        })),
+      }),
+    )
+  }
+}
+
 function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>, void> {
   const files = new Map<string, string>()
   const byId = new Map(store.nodes.map((n) => [n.id, n]))
@@ -81,6 +183,10 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
 
   /** 这一轮还要复用的文件文本；循环结束后整张换上去（见 NodeFileCacheEntry） */
   const nextCache = new Map<string, NodeFileCacheEntry>()
+
+  for (const goal of store.goals) {
+    writeGoalFiles(goal, store, files, byId)
+  }
 
   for (const [id, { dir, base }] of nodeLayout(store)) {
     const node = byId.get(id)
@@ -137,92 +243,7 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
      * 目标级账本写在**目标目录**里（一个目标一份上下文）。目标目录同时就是根节点的目录，
      * 所以判据是「这个节点是不是根」而不是「这个节点有没有对话」。
      */
-    if (goal && id === goal.rootNodeId) {
-      const conversations = store.conversations.filter((c) => c.goalId === goal.id)
-      files.set(`${path}/chat.json`, jsonText({ version: CHAT_VERSION, conversations }))
-      /** 资源清单写在目标目录的资源目录里（见 learn/static）。没有资源就不写这个文件 */
-      const resources = store.resources?.[goal.id] ?? []
-      if (resources.length) {
-        files.set(`${path}/${STATIC_DIR}/${MANIFEST_FILE}`, manifestText(resources))
-      }
-      /** 工作记忆（memory.work）写在目标目录里；没有记忆就不写文件 */
-      const workMemory = store.memory?.work?.[goal.id] ?? []
-      if (workMemory.length) {
-        files.set(`${path}/mind.json`, jsonText({ version: 2, work: workMemory }))
-      }
-      /** 目标级持久化函数（method）：没有就不写 */
-      const methods = store.methods?.[goal.id] ?? []
-      if (methods.length) {
-        files.set(`${path}/method.json`, jsonText({ version: 1, methods }))
-      }
-      /** 目标级工作流：没有登记过就不写 */
-      const goalWorkflows = store.workflows?.byGoal?.[goal.id] ?? []
-      if (goalWorkflows.length) {
-        files.set(`${path}/workflow.json`, jsonText({ version: 1, workflows: goalWorkflows }))
-      }
-      /** 有效阅读：这个目标没有记录就不写 */
-      const goalReading = store.reading?.byGoal?.[goal.id]
-      if (goalReading && (goalReading.sessions.length || Object.keys(goalReading.days).length)) {
-        files.set(`${path}/reading.json`, jsonText(goalReading))
-      }
-      /** 随笔与提交记录：一条都没有就不写 */
-      const goalEssays = store.essays?.[goal.id] ?? []
-      const goalCommits = store.essayCommits?.[goal.id] ?? []
-      if (goalEssays.length || goalCommits.length) {
-        files.set(`${path}/essay.json`, jsonText({ version: 2, essays: goalEssays, commits: goalCommits }))
-      }
-      /** 结构图：v2 只有坐标表。一张坐标都没有时不写文件（等于「还没拖过」）。 */
-      const structure = store.structure?.[goal.id]
-      if (structure && Object.keys(structure.positions).length) {
-        files.set(`${path}/structure.json`, jsonText(structure))
-      }
-      /** 游离挂件池（剪了线 / 没绑过的笔记与超级文档）：一个都没有就不写 */
-      const goalDetached = store.detached?.[goal.id]
-      if (goalDetached && (goalDetached.notes.length || goalDetached.superdocs.length)) {
-        files.set(`${path}/detached.json`, jsonText({ version: 1, notes: goalDetached.notes, superdocs: goalDetached.superdocs }))
-      }
-      /**
-       * 游离大纲池：不依附文档的计划实体 + 以它们为起点（from = o:uuid）的树边。
-       * 附身大纲仍住在节点文件里（与宿主文档配对），两类大纲各回各家；一张都没有不写。
-       */
-      const freeOutlines = (store.outlines ?? []).filter((o) => o.goalId === goal.id)
-      const freeOutlineIds = new Set(freeOutlines.map((o) => o.id))
-      const goalDocIds = new Set(store.nodes.filter((n) => n.goalId === goal.id).map((n) => n.id))
-      const freeEdges = store.edges.filter((e) => {
-        if (!e.from.startsWith('o:')) return false
-        const raw = e.from.slice(2)
-        return freeOutlineIds.has(raw) || goalDocIds.has(raw)
-      })
-      if (freeOutlines.length || freeEdges.length) {
-        files.set(
-          `${path}/outlines.json`,
-          jsonText({
-            version: 1,
-            outlines: freeOutlines,
-            edges: freeEdges.map((e) => ({ from: e.from, to: e.to, createdAt: e.createdAt, ...(e.portKey ? { portKey: e.portKey } : {}) })),
-          }),
-        )
-      }
-      /** 视频节点（目标 × 视频的绑定，见 learn/video/nodes）与其树边：一枚都没有就不写 */
-      const goalVideoNodes = (store.videoNodes ?? []).filter((v) => v.goalId === goal.id)
-      const goalVideoNodeIds = new Set(goalVideoNodes.map((v) => v.id))
-      const videoEdges = store.edges.filter((e) => goalVideoNodeIds.has(e.from))
-      if (goalVideoNodes.length || videoEdges.length) {
-        files.set(
-          `${path}/video-nodes.json`,
-          jsonText({
-            version: 1,
-            nodes: goalVideoNodes,
-            edges: videoEdges.map((e) => ({
-              from: e.from,
-              to: e.to,
-              createdAt: e.createdAt,
-              ...(e.portKey ? { portKey: e.portKey } : {}),
-            })),
-          }),
-        )
-      }
-    }
+
 
     /**
      * 临时变量（Agent 的大块中间数据）仍是**一个节点一个文件**：
