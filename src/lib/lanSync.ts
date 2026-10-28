@@ -16,9 +16,51 @@ export type {
   LanUploadedFile,
 }
 
+type LanQrModalCallback = (open: boolean) => void
+const lanModalListeners = new Set<LanQrModalCallback>()
+const lanModalCancelCallbacks = new Set<() => void>()
+
+/**
+ * 弹出局域网扫码连接窗口。
+ * @param onCancel 若用户主动关闭弹窗（未扫码连接）时的回调
+ */
+export function openLanQrModal(onCancel?: () => void): void {
+  if (onCancel) lanModalCancelCallbacks.add(onCancel)
+  for (const cb of lanModalListeners) {
+    try { cb(true) } catch {}
+  }
+}
+
+/**
+ * 关闭局域网扫码连接窗口。
+ * @param isUserCancel 是否为用户主动点击关闭（若为主动关闭且有等待连接的请求，将触发取消）
+ */
+export function closeLanQrModal(isUserCancel = false): void {
+  if (isUserCancel) {
+    for (const cb of lanModalCancelCallbacks) {
+      try { cb() } catch {}
+    }
+  }
+  lanModalCancelCallbacks.clear()
+  for (const cb of lanModalListeners) {
+    try { cb(false) } catch {}
+  }
+}
+
+/**
+ * 订阅扫码弹窗的打开/关闭事件（用于驱动全局弹窗渲染）
+ */
+export function subscribeLanQrModal(cb: LanQrModalCallback): () => void {
+  lanModalListeners.add(cb)
+  return () => {
+    lanModalListeners.delete(cb)
+  }
+}
+
 /**
  * 软件内部核心 API：向连接的局域网移动设备发布获取文件的意图。
- * 手机端收到意图提示并完成文件上传后，该 Promise 返回上传的文件信息。
+ * 如果调用时没有建立连接，自动启动服务并弹出二维码窗口；
+ * 手机扫码连接成功后，二维码窗口自动关闭，无缝继续发送意图并等待回传文件。
  *
  * @example
  * ```ts
@@ -35,6 +77,68 @@ export async function requestDeviceFile(
   if (!bridge) {
     return { ok: false, error: '当前环境不支持局域网服务' }
   }
+
+  // 1. 确保局域网服务已启动
+  let currentStatus = await bridge.getStatus()
+  if (!currentStatus || !currentStatus.running) {
+    currentStatus = await bridge.startServer()
+  }
+
+  // 2. 检查是否有在线移动设备
+  const hasConnectedDevice = !!(currentStatus && currentStatus.devices && currentStatus.devices.length > 0)
+
+  if (!hasConnectedDevice) {
+    // 没有连接设备，弹出二维码窗口，等待连接建立
+    const connected = await new Promise<boolean>((resolve) => {
+      let resolved = false
+      let unDevices: (() => void) | null = null
+
+      const onUserCancel = () => {
+        finish(false)
+      }
+
+      const finish = (result: boolean) => {
+        if (resolved) return
+        resolved = true
+        lanModalCancelCallbacks.delete(onUserCancel)
+        if (unDevices) {
+          unDevices()
+          unDevices = null
+        }
+        resolve(result)
+      }
+
+      // 打开扫码弹窗，若用户关闭则触发取消
+      openLanQrModal(onUserCancel)
+
+      // 监听设备列表变更
+      unDevices = bridge.onDevicesChange((devices) => {
+        if (devices.length > 0) {
+          // 延时让用户看到连接成功的勾选动画，随后自动关闭窗口
+          setTimeout(() => {
+            closeLanQrModal(false)
+          }, 350)
+          finish(true)
+        }
+      })
+
+      // 双重检查防竞争
+      void bridge.getStatus().then((s) => {
+        if (s && s.devices && s.devices.length > 0) {
+          setTimeout(() => {
+            closeLanQrModal(false)
+          }, 350)
+          finish(true)
+        }
+      })
+    })
+
+    if (!connected) {
+      return { ok: false, error: '未连接移动设备，操作已取消' }
+    }
+  }
+
+  // 3. 已有连接设备，发送意图并等待手机端回传文件
   return await bridge.requestDeviceFile(options)
 }
 

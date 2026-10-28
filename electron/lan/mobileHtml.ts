@@ -12,7 +12,7 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
   <style>
     :root {
       --bg: #0f172a;
-      --card-bg: rgba(30, 41, 59, 0.7);
+      --card-bg: rgba(30, 41, 59, 0.75);
       --card-border: rgba(255, 255, 255, 0.1);
       --primary: #38bdf8;
       --primary-hover: #0ea5e9;
@@ -21,7 +21,7 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
       --danger: #f87171;
       --text: #f8fafc;
       --text-muted: #94a3b8;
-      --radius: 16px;
+      --radius: 20px;
     }
     * {
       box-sizing: border-box;
@@ -32,7 +32,7 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
     }
     body {
       background: var(--bg);
-      background-image: radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.12) 0px, transparent 50%),
+      background-image: radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.14) 0px, transparent 50%),
                         radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.12) 0px, transparent 50%);
       color: var(--text);
       min-height: 100vh;
@@ -46,7 +46,7 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 20px;
+      margin-bottom: 24px;
     }
     .brand {
       display: flex;
@@ -66,7 +66,7 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
       color: #0f172a;
     }
     .brand-title {
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 600;
       letter-spacing: -0.02em;
     }
@@ -100,90 +100,167 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
       border: 1px solid var(--card-border);
       backdrop-filter: blur(16px);
       border-radius: var(--radius);
-      padding: 24px 20px;
+      padding: 32px 20px;
       margin-bottom: 20px;
       text-align: center;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+      transition: all 0.3s ease;
     }
 
-    .upload-zone {
-      border: 2px dashed rgba(56, 189, 248, 0.35);
-      border-radius: 12px;
-      padding: 32px 16px;
-      background: rgba(56, 189, 248, 0.04);
-      cursor: pointer;
-      transition: all 0.2s ease;
+    /* 默认等待状态：暂未收到服务端资源请求 */
+    .idle-view {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 12px;
+      justify-content: center;
+      padding: 24px 8px;
     }
-    .upload-zone:active {
-      background: rgba(56, 189, 248, 0.1);
-      border-color: var(--primary);
-      transform: scale(0.99);
+    .radar-wrapper {
+      position: relative;
+      width: 100px;
+      height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
     }
-    .upload-icon {
-      width: 48px;
-      height: 48px;
+    .radar-ripple {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 1.5px solid rgba(56, 189, 248, 0.4);
+      animation: radarPing 2.5s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+    }
+    .radar-ripple:nth-child(2) {
+      animation-delay: 1.25s;
+    }
+    @keyframes radarPing {
+      0% {
+        transform: scale(0.6);
+        opacity: 0.8;
+      }
+      100% {
+        transform: scale(1.4);
+        opacity: 0;
+      }
+    }
+    .idle-center-icon {
+      position: relative;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
       color: var(--primary);
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
     }
-    .upload-zone h3 {
-      font-size: 16px;
+    .idle-title {
+      font-size: 18px;
       font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--text);
     }
-    .upload-zone p {
-      font-size: 12px;
+    .idle-desc {
+      font-size: 13px;
+      line-height: 1.6;
       color: var(--text-muted);
+      max-width: 290px;
     }
 
-    .action-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 16px;
+    /* 服务端发来意图请求时的上传卡片 */
+    .request-view {
+      display: none;
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .req-header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 14px;
+    }
+    .req-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .prompt-box {
+      font-size: 14px;
+      color: #f1f5f9;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 20px;
+      line-height: 1.55;
+      text-align: left;
+    }
+    .action-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
     .btn {
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      padding: 12px 16px;
-      border-radius: 10px;
+      padding: 14px 18px;
+      border-radius: 12px;
       border: 1px solid var(--card-border);
-      background: rgba(255, 255, 255, 0.06);
+      background: rgba(255, 255, 255, 0.07);
       color: var(--text);
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 500;
       cursor: pointer;
       transition: all 0.15s ease;
     }
     .btn:active {
-      background: rgba(255, 255, 255, 0.12);
       transform: scale(0.98);
+      background: rgba(255, 255, 255, 0.14);
     }
     .btn-primary {
       background: var(--primary);
       color: #0f172a;
       font-weight: 600;
       border: none;
-      box-shadow: 0 4px 14px var(--primary-glow);
+      box-shadow: 0 4px 16px var(--primary-glow);
     }
     .btn-primary:active {
       background: var(--primary-hover);
     }
     .btn-danger {
-      background: rgba(248, 113, 113, 0.15);
+      background: transparent;
+      color: var(--text-muted);
+      border: none;
+      padding: 10px;
+      font-size: 13px;
+    }
+    .btn-danger:active {
       color: var(--danger);
-      border-color: rgba(248, 113, 113, 0.3);
+      background: rgba(248, 113, 113, 0.1);
     }
 
     /* 上传进度 */
     .progress-box {
       margin-top: 16px;
-      padding: 12px;
-      border-radius: 8px;
-      background: rgba(0, 0, 0, 0.25);
+      padding: 14px;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.3);
       display: none;
       text-align: left;
     }
@@ -194,7 +271,7 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
       display: flex;
       justify-content: space-between;
       font-size: 12px;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
       color: var(--text-muted);
     }
     .progress-bar-bg {
@@ -210,23 +287,23 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
       transition: width 0.15s ease;
     }
 
-    /* 历史列表 */
+    /* 历史记录卡片（有记录时才展示，无记录时默认隐藏以消除视觉噪声） */
     .history-card {
-      flex: 1;
+      display: none;
       background: var(--card-bg);
       border: 1px solid var(--card-border);
       backdrop-filter: blur(16px);
       border-radius: var(--radius);
-      padding: 18px 16px;
-      display: flex;
+      padding: 16px;
       flex-direction: column;
       overflow: hidden;
+      margin-top: 16px;
     }
     .history-title {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 600;
       color: var(--text-muted);
-      margin-bottom: 12px;
+      margin-bottom: 10px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -261,82 +338,6 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
       color: var(--text-muted);
     }
 
-    /* 意图请求弹窗 (Intent Modal) */
-    .modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(8px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      z-index: 1000;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.25s ease;
-    }
-    .modal-overlay.active {
-      opacity: 1;
-      pointer-events: auto;
-    }
-    .modal-card {
-      background: #1e293b;
-      border: 1px solid rgba(56, 189, 248, 0.4);
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 24px var(--primary-glow);
-      border-radius: 20px;
-      padding: 24px;
-      width: 100%;
-      max-width: 360px;
-      text-align: center;
-      transform: translateY(20px) scale(0.95);
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .modal-overlay.active .modal-card {
-      transform: translateY(0) scale(1);
-    }
-    .modal-header-icon {
-      width: 52px;
-      height: 52px;
-      border-radius: 50%;
-      background: rgba(56, 189, 248, 0.15);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--primary);
-      margin-bottom: 12px;
-      animation: pulse 1.8s infinite;
-    }
-    @keyframes pulse {
-      0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.4); }
-      70% { box-shadow: 0 0 0 14px rgba(56, 189, 248, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
-    }
-    .modal-title {
-      font-size: 17px;
-      font-weight: 600;
-      margin-bottom: 6px;
-    }
-    .modal-prompt {
-      font-size: 14px;
-      color: #e2e8f0;
-      background: rgba(0, 0, 0, 0.25);
-      border-radius: 10px;
-      padding: 12px;
-      margin: 14px 0 20px;
-      line-height: 1.5;
-      text-align: left;
-    }
-    .modal-actions {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
     input[type="file"] {
       display: none;
     }
@@ -355,72 +356,62 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
   </header>
 
   <div class="main-card">
-    <div class="upload-zone" id="uploadZone">
-      <svg class="upload-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-      </svg>
-      <h3>点击选择或拖入文件</h3>
-      <p>支持照片、视频、音频、PDF 与文档</p>
-    </div>
-
-    <div class="action-grid">
-      <button class="btn" id="btnCamera">
-        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        拍照/相册
-      </button>
-      <button class="btn" id="btnBrowse">
-        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-        浏览文件
-      </button>
-    </div>
-
-    <div class="progress-box" id="progressBox">
-      <div class="progress-info">
-        <span id="progressName">准备上传...</span>
-        <span id="progressPercent">0%</span>
+    <!-- 默认视图：暂未收到服务端资源请求 -->
+    <div class="idle-view" id="idleView">
+      <div class="radar-wrapper">
+        <div class="radar-ripple"></div>
+        <div class="radar-ripple"></div>
+        <div class="idle-center-icon">
+          <svg width="28" height="28" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v7.5a3 3 0 0 1-3 3Z" />
+          </svg>
+        </div>
       </div>
-      <div class="progress-bar-bg">
-        <div class="progress-bar-fill" id="progressBar"></div>
+      <h3 class="idle-title">暂未收到服务端资源请求</h3>
+      <p class="idle-desc">设备已与电脑成功连接。<br>需要等服务端发送资源请求才能上传文件。</p>
+    </div>
+
+    <!-- 收到请求时的上传操作视图 -->
+    <div class="request-view" id="requestView">
+      <div class="req-header-badge">
+        <span>⚡ 资源请求</span>
+      </div>
+      <h3 class="req-title">电脑端请求上传文件</h3>
+      <div class="prompt-box" id="intentPrompt">请拍摄或选取文件</div>
+
+      <div class="action-group" id="actionGroup">
+        <button class="btn btn-primary" id="btnIntentCamera">📷 拍照 / 相册</button>
+        <button class="btn" id="btnIntentFile">📁 选择文件</button>
+        <button class="btn btn-danger" id="btnIntentReject">暂不上传</button>
+      </div>
+
+      <div class="progress-box" id="progressBox">
+        <div class="progress-info">
+          <span id="progressName">准备上传...</span>
+          <span id="progressPercent">0%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progressBar"></div>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="history-card">
+  <div class="history-card" id="historyCard">
     <div class="history-title">
       <span>传输记录</span>
       <span id="historyCount">0 项</span>
     </div>
     <ul class="history-list" id="historyList">
-      <li style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px 0;">暂无上传记录</li>
     </ul>
   </div>
 
-  <!-- 电脑端意图请求弹窗 -->
-  <div class="modal-overlay" id="intentModal">
-    <div class="modal-card">
-      <div class="modal-header-icon">
-        <svg width="26" height="26" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-        </svg>
-      </div>
-      <div class="modal-title">电脑端请求上传文件</div>
-      <div class="modal-prompt" id="intentPrompt">电脑端正在等待您上传一份文件</div>
-      <div class="modal-actions">
-        <button class="btn btn-primary" id="btnIntentCamera">📷 拍照 / 相册</button>
-        <button class="btn" id="btnIntentFile">📁 选择文档文件</button>
-        <button class="btn btn-danger" id="btnIntentReject">暂不上传</button>
-      </div>
-    </div>
-  </div>
-
   <!-- 隐藏的文件选择器 -->
-  <input type="file" id="generalFileInput" multiple>
   <input type="file" id="cameraFileInput" accept="image/*" capture="environment">
   <input type="file" id="intentFileInput">
 
   <script>
     (function() {
-      // 生成或恢复本地设备标识
       let deviceId = localStorage.getItem('unyra_device_id');
       if (!deviceId) {
         deviceId = 'dev_' + Math.random().toString(36).slice(2, 9);
@@ -439,24 +430,21 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
 
       const statusDot = document.getElementById('statusDot');
       const statusText = document.getElementById('statusText');
-      const uploadZone = document.getElementById('uploadZone');
-      const btnCamera = document.getElementById('btnCamera');
-      const btnBrowse = document.getElementById('btnBrowse');
-      const generalFileInput = document.getElementById('generalFileInput');
+      const idleView = document.getElementById('idleView');
+      const requestView = document.getElementById('requestView');
+      const intentPrompt = document.getElementById('intentPrompt');
+      const btnIntentCamera = document.getElementById('btnIntentCamera');
+      const btnIntentFile = document.getElementById('btnIntentFile');
+      const btnIntentReject = document.getElementById('btnIntentReject');
       const cameraFileInput = document.getElementById('cameraFileInput');
       const intentFileInput = document.getElementById('intentFileInput');
       const progressBox = document.getElementById('progressBox');
       const progressName = document.getElementById('progressName');
       const progressPercent = document.getElementById('progressPercent');
       const progressBar = document.getElementById('progressBar');
+      const historyCard = document.getElementById('historyCard');
       const historyList = document.getElementById('historyList');
       const historyCount = document.getElementById('historyCount');
-
-      const intentModal = document.getElementById('intentModal');
-      const intentPrompt = document.getElementById('intentPrompt');
-      const btnIntentCamera = document.getElementById('btnIntentCamera');
-      const btnIntentFile = document.getElementById('btnIntentFile');
-      const btnIntentReject = document.getElementById('btnIntentReject');
 
       let currentIntent = null;
       let historyItems = [];
@@ -470,6 +458,36 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
         } else {
           statusDot.className = 'status-dot offline';
           statusText.textContent = '连接中断，重连中...';
+        }
+      }
+
+      function showIdle() {
+        requestView.style.display = 'none';
+        idleView.style.display = 'flex';
+        currentIntent = null;
+      }
+
+      function showRequest(req) {
+        currentIntent = req;
+        intentPrompt.textContent = req.prompt || '电脑端请求您上传一份文件';
+
+        if (req.accept) {
+          intentFileInput.accept = req.accept;
+          cameraFileInput.accept = req.accept;
+          if (req.accept.includes('image')) {
+            btnIntentCamera.style.display = 'flex';
+          }
+        } else {
+          intentFileInput.removeAttribute('accept');
+          cameraFileInput.accept = 'image/*';
+          btnIntentCamera.style.display = 'flex';
+        }
+
+        idleView.style.display = 'none';
+        requestView.style.display = 'block';
+
+        if (navigator.vibrate) {
+          try { navigator.vibrate([100, 60, 100]); } catch (e) {}
         }
       }
 
@@ -494,9 +512,7 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
               if (msg.type === 'ping') {
                 ws.send(JSON.stringify({ type: 'pong' }));
               } else if (msg.type === 'request_file') {
-                handleIntentRequest(msg);
-              } else if (msg.type === 'file_ack') {
-                // 文件已被服务端确认
+                showRequest(msg);
               }
             } catch (err) {
               console.error('WS parse error', err);
@@ -524,26 +540,6 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
         }, 2000);
       }
 
-      // 响应电脑端的意图请求
-      function handleIntentRequest(req) {
-        currentIntent = req;
-        intentPrompt.textContent = req.prompt || '电脑端请求您上传一份文件';
-        if (req.accept) {
-          intentFileInput.accept = req.accept;
-          cameraFileInput.accept = req.accept;
-        } else {
-          intentFileInput.removeAttribute('accept');
-          cameraFileInput.accept = 'image/*';
-        }
-
-        // 震动提醒
-        if (navigator.vibrate) {
-          try { navigator.vibrate([100, 60, 100]); } catch (e) {}
-        }
-
-        intentModal.classList.add('active');
-      }
-
       btnIntentReject.addEventListener('click', function() {
         if (currentIntent && ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
@@ -552,8 +548,7 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
             reason: '用户在移动端取消了上传'
           }));
         }
-        currentIntent = null;
-        intentModal.classList.remove('active');
+        showIdle();
       });
 
       btnIntentCamera.addEventListener('click', function() {
@@ -564,26 +559,10 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
         intentFileInput.click();
       });
 
-      // 绑定上传事件
-      uploadZone.addEventListener('click', () => generalFileInput.click());
-      btnCamera.addEventListener('click', () => cameraFileInput.click());
-      btnBrowse.addEventListener('click', () => generalFileInput.click());
-
-      generalFileInput.addEventListener('change', function() {
-        if (this.files && this.files.length) {
-          uploadFiles(Array.from(this.files));
-          this.value = '';
-        }
-      });
-
       cameraFileInput.addEventListener('change', function() {
         if (this.files && this.files.length) {
           const reqId = currentIntent ? currentIntent.requestId : undefined;
           uploadFiles(Array.from(this.files), reqId);
-          if (currentIntent) {
-            currentIntent = null;
-            intentModal.classList.remove('active');
-          }
           this.value = '';
         }
       });
@@ -592,20 +571,7 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
         if (this.files && this.files.length) {
           const reqId = currentIntent ? currentIntent.requestId : undefined;
           uploadFiles(Array.from(this.files), reqId);
-          if (currentIntent) {
-            currentIntent = null;
-            intentModal.classList.remove('active');
-          }
           this.value = '';
-        }
-      });
-
-      // 拖拽支持
-      uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); });
-      uploadZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        if (e.dataTransfer && e.dataTransfer.files) {
-          uploadFiles(Array.from(e.dataTransfer.files));
         }
       });
 
@@ -621,11 +587,14 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
       }
 
       function renderHistory() {
+        if (!historyCard) return;
         historyCount.textContent = historyItems.length + ' 项';
         if (historyItems.length === 0) {
-          historyList.innerHTML = '<li style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px 0;">暂无上传记录</li>';
+          historyCard.style.display = 'none';
+          historyList.innerHTML = '';
           return;
         }
+        historyCard.style.display = 'flex';
         historyList.innerHTML = historyItems.map(function(item) {
           const time = new Date(item.uploadTime || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
           return '<li class="history-item">' +
@@ -643,66 +612,68 @@ export function getMobileHtml(serverName = '归一 Unyra'): string {
           if (index >= files.length) {
             setTimeout(function() {
               progressBox.classList.remove('show');
+              // 上传完毕后切回默认等待状态
+              showIdle();
             }, 1200);
             return;
           }
           const file = files[index];
           index++;
-          uploadSingle(file, requestId, next);
+
+          progressBox.classList.add('show');
+          progressName.textContent = '正在上传：' + file.name;
+          progressPercent.textContent = '0%';
+          progressBar.style.width = '0%';
+
+          const xhr = new XMLHttpRequest();
+          const query = [
+            'filename=' + encodeURIComponent(file.name),
+            'deviceId=' + encodeURIComponent(deviceId),
+            'deviceName=' + encodeURIComponent(getDeviceName())
+          ];
+          if (requestId) query.push('requestId=' + encodeURIComponent(requestId));
+
+          xhr.open('POST', '/api/upload?' + query.join('&'), true);
+          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+
+          xhr.upload.onprogress = function(e) {
+            if (e.lengthComputable) {
+              const p = Math.round((e.loaded / e.total) * 100);
+              progressPercent.textContent = p + '%';
+              progressBar.style.width = p + '%';
+            }
+          };
+
+          xhr.onload = function() {
+            if (xhr.status === 200) {
+              try {
+                const res = JSON.parse(xhr.responseText);
+                if (res.ok && res.file) {
+                  addHistory(res.file);
+                }
+              } catch (e) {}
+              progressPercent.textContent = '100% 完成';
+              progressBar.style.width = '100%';
+              next();
+            } else {
+              alert('上传失败，状态码：' + xhr.status);
+              progressBox.classList.remove('show');
+              showIdle();
+            }
+          };
+
+          xhr.onerror = function() {
+            alert('上传遇到网络错误');
+            progressBox.classList.remove('show');
+            showIdle();
+          };
+
+          xhr.send(file);
         }
 
-        progressBox.classList.add('show');
         next();
       }
 
-      function uploadSingle(file, requestId, onDone) {
-        progressName.textContent = '正在上传: ' + file.name;
-        progressBar.style.width = '0%';
-        progressPercent.textContent = '0%';
-
-        const xhr = new XMLHttpRequest();
-        let uploadUrl = '/api/upload?filename=' + encodeURIComponent(file.name) +
-          '&deviceId=' + encodeURIComponent(deviceId) +
-          '&deviceName=' + encodeURIComponent(getDeviceName());
-        if (requestId) {
-          uploadUrl += '&requestId=' + encodeURIComponent(requestId);
-        }
-
-        xhr.upload.onprogress = function(e) {
-          if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            progressBar.style.width = pct + '%';
-            progressPercent.textContent = pct + '%';
-          }
-        };
-
-        xhr.onload = function() {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            progressBar.style.width = '100%';
-            progressPercent.textContent = '完成';
-            try {
-              const res = JSON.parse(xhr.responseText);
-              if (res.ok && res.file) {
-                addHistory(res.file);
-              }
-            } catch (err) {}
-          } else {
-            progressPercent.textContent = '失败';
-          }
-          setTimeout(onDone, 300);
-        };
-
-        xhr.onerror = function() {
-          progressPercent.textContent = '网络错误';
-          setTimeout(onDone, 500);
-        };
-
-        xhr.open('POST', uploadUrl, true);
-        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-        xhr.send(file);
-      }
-
-      // 启动 WebSocket 连接
       connectWs();
     })();
   </script>

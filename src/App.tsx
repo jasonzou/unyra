@@ -9,6 +9,7 @@ import LoginPage from './components/user/LoginPage'
 import UpdateDialog from './components/update/UpdateDialog'
 import NoticeDialog from './components/notice/NoticeDialog'
 import LanConnectDialog from './components/lan/LanConnectDialog'
+import { subscribeLanQrModal } from './lib/lanSync'
 import { bootstrapNotice, startNoticePolling } from './lib/notice'
 import { startupMark } from './lib/startupTrace'
 import { userRepo } from './user/api'
@@ -88,6 +89,13 @@ export default function App({ boot }: Props) {
   const [closeAsk, setCloseAsk] = useState(false)
   // 启动打点：App 的第一次提交（此刻界面的骨架已经在 DOM 里了）
   useEffect(() => startupMark('r:app-commit'), [])
+
+  // 监听局域网互联弹窗事件（由 API 意图触发或顶栏触发）
+  useEffect(() => {
+    return subscribeLanQrModal((open) => {
+      setLanOpen(open)
+    })
+  }, [])
 
   /**
    * 公告：启动时读本机状态、取一次远程公告，再决定要不要**自动弹出**；
