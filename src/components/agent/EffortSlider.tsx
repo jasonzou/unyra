@@ -1,11 +1,11 @@
 /**
- * 思考档位调节器（Codex 风格能量微粒滑块）：
+ * 思考档位调节器（Codex 风格能量流体微粒滑块）：
  * 沿圆角胶囊能量管以 5 档推理强度（无 / 低 / 中 / 高 / 最大）切换，
- * 内部带有微粒气泡浮动效果与能量渐变，随档位动态切换主题色：
+ * 内部带有自主横向流动的气泡微粒（Fluid Bubble Stream），随档位动态切换主题色：
  * 无档中性灰、低档薄荷绿、中档琥珀金、高档紫罗兰、最大档印章红。
  * 纯白圆钮随档位平滑吸附，支持拖拽、点击与方向键调节。
  */
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import {
   REASONING_EFFORTS,
   REASONING_HINT,
@@ -57,33 +57,39 @@ const EFFORT_VISUALS: Record<ReasoningEffort, EffortVisual> = {
   },
 }
 
-interface Particle {
-  id: number
-  x: number // 百分比 0 ~ 100
-  y: number // 百分比 15 ~ 85
-  size: number // 直径 px
-  opacity: number
-  duration: number // 浮动周期秒数
-  delay: number // 延迟秒数
+/** 档位对应的能量液微粒流动速度（像素/帧） */
+const FLOW_SPEEDS: Record<ReasoningEffort, number> = {
+  none: 0,
+  low: 0.75,
+  medium: 1.25,
+  high: 1.95,
+  max: 2.85,
 }
 
-/** 能量液管内部分布的气泡微粒（与参考设计同构的有机分布） */
-const PARTICLES: Particle[] = [
-  { id: 1, x: 6, y: 55, size: 2.2, opacity: 0.45, duration: 2.6, delay: 0 },
-  { id: 2, x: 11, y: 28, size: 3.4, opacity: 0.7, duration: 3.1, delay: 0.4 },
-  { id: 3, x: 16, y: 68, size: 2.4, opacity: 0.55, duration: 2.8, delay: 0.8 },
-  { id: 4, x: 26, y: 38, size: 3.8, opacity: 0.65, duration: 3.4, delay: 0.2 },
-  { id: 5, x: 33, y: 72, size: 2.2, opacity: 0.45, duration: 2.5, delay: 1.1 },
-  { id: 6, x: 44, y: 30, size: 3.0, opacity: 0.7, duration: 3.0, delay: 0.6 },
-  { id: 7, x: 49, y: 22, size: 2.4, opacity: 0.5, duration: 2.7, delay: 1.4 },
-  { id: 8, x: 50, y: 45, size: 3.6, opacity: 0.75, duration: 3.2, delay: 0.3 },
-  { id: 9, x: 52, y: 76, size: 3.2, opacity: 0.6, duration: 2.9, delay: 0.9 },
-  { id: 10, x: 65, y: 48, size: 4.0, opacity: 0.7, duration: 3.3, delay: 0.5 },
-  { id: 11, x: 74, y: 26, size: 3.4, opacity: 0.65, duration: 2.8, delay: 1.2 },
-  { id: 12, x: 78, y: 64, size: 2.4, opacity: 0.5, duration: 3.0, delay: 0.7 },
-  { id: 13, x: 84, y: 42, size: 3.6, opacity: 0.7, duration: 2.6, delay: 1.5 },
-  { id: 14, x: 92, y: 34, size: 2.8, opacity: 0.65, duration: 3.5, delay: 0.1 },
-]
+interface FlowParticle {
+  x: number
+  baseYRatio: number
+  radius: number
+  speedMult: number
+  baseAlpha: number
+  waveAmp: number
+  waveFreq: number
+  wavePhase: number
+}
+
+function createInitialParticles(count: number, width: number): FlowParticle[] {
+  return Array.from({ length: count }, (_, i) => ({
+    // 初始位置均匀交错散布在流体内部
+    x: (i / count) * Math.max(width, 100) + (Math.random() - 0.5) * 20,
+    baseYRatio: 0.2 + Math.random() * 0.6,
+    radius: 1.0 + Math.random() * 1.5, // 半径 1.0 ~ 2.5px（直径 2 ~ 5px）
+    speedMult: 0.8 + Math.random() * 0.45,
+    baseAlpha: 0.45 + Math.random() * 0.35,
+    waveAmp: 0.8 + Math.random() * 1.4,
+    waveFreq: 0.0025 + Math.random() * 0.003,
+    wavePhase: Math.random() * Math.PI * 2,
+  }))
+}
 
 interface Props {
   value: ReasoningEffort
@@ -95,10 +101,23 @@ interface Props {
 
 export default function EffortSlider({ value, onChange, compact = false, className = '' }: Props) {
   const ref = useRef<HTMLDivElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const particlesRef = useRef<FlowParticle[]>([])
   const levels = REASONING_EFFORTS
   const n = levels.length
   const index = Math.max(0, levels.indexOf(value))
   const visual = EFFORT_VISUALS[value]
+  const baseSpeed = FLOW_SPEEDS[value]
+
+  // 当前进度百分比 0 ~ 100%
+  const pct = (index / (n - 1)) * 100
+
+  // 滑块圆钮直径（像素）：根据紧凑态适配
+  const thumbSize = compact ? 18 : 22
+  // 滑块圆钮左侧位移（确保 0% 靠齐最左端、100% 靠齐最右端，无任何溢出或挤压）
+  const thumbLeft = `calc(${pct}% - ${(pct / 100) * thumbSize}px)`
+  // 填充条宽度（与滑块右边界完全契合连接）
+  const fillWidth = `calc(${pct}% + ${(1 - pct / 100) * thumbSize}px)`
 
   /** 指针拖拽或点击：按百分比吸附到最接近的刻度档位 */
   const pickAt = (clientX: number) => {
@@ -117,15 +136,108 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
     if (next && next !== value) onChange(next)
   }
 
-  // 当前进度百分比 0 ~ 100%
-  const pct = (index / (n - 1)) * 100
+  // 流动气泡 Canvas 动画渲染循环
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
 
-  // 滑块圆钮直径（像素）：根据紧凑态适配
-  const thumbSize = compact ? 18 : 22
-  // 滑块圆钮左侧位移（确保 0% 靠齐最左端、100% 靠齐最右端，无任何溢出或挤压）
-  const thumbLeft = `calc(${pct}% - ${(pct / 100) * thumbSize}px)`
-  // 填充条宽度（与滑块右边界完全契合连接）
-  const fillWidth = `calc(${pct}% + ${(1 - pct / 100) * thumbSize}px)`
+    let rafId: number
+    let running = true
+
+    // 初始化粒子群
+    if (particlesRef.current.length === 0) {
+      const initialW = canvas.parentElement?.clientWidth || 260
+      particlesRef.current = createInitialParticles(18, initialW)
+    }
+
+    // 缩放适配 DPR
+    const updateSize = () => {
+      if (!canvas || !canvas.parentElement) return
+      const rect = canvas.parentElement.getBoundingClientRect()
+      const dpr = window.devicePixelRatio || 1
+      if (rect.width > 0 && rect.height > 0) {
+        canvas.width = Math.round(rect.width * dpr)
+        canvas.height = Math.round(rect.height * dpr)
+        ctx.resetTransform?.()
+        ctx.scale(dpr, dpr)
+      }
+    }
+
+    updateSize()
+    const ro = new ResizeObserver(updateSize)
+    if (canvas.parentElement) ro.observe(canvas.parentElement)
+
+    const render = (time: number) => {
+      if (!running) return
+
+      const w = canvas.width / (window.devicePixelRatio || 1)
+      const h = canvas.height / (window.devicePixelRatio || 1)
+
+      ctx.clearRect(0, 0, w, h)
+
+      // 计算当前档位下的流体实际右边界（px）
+      const fillPx = (pct / 100) * (w - thumbSize) + thumbSize
+
+      if (fillPx > 0 && baseSpeed > 0) {
+        const particles = particlesRef.current
+
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i]
+          // 沿水平方向向前流动
+          p.x += baseSpeed * p.speedMult
+
+          // 当气泡流至流体右边界（接近白圆钮）时，循环至最左端重新生成
+          if (p.x > fillPx + 4) {
+            p.x = -p.radius * 2 - Math.random() * 14
+            p.baseYRatio = 0.2 + Math.random() * 0.6
+          }
+
+          // 进场（左侧淡入）与出场（右侧临近圆钮淡出）平滑淡化，绝无突兀闪烁
+          const fadeIn = Math.max(0, Math.min(1, (p.x + p.radius * 2) / 16))
+          const fadeOut = Math.max(0, Math.min(1, (fillPx - p.x) / 18))
+          const alpha = p.baseAlpha * fadeIn * fadeOut
+
+          if (alpha <= 0.02) continue
+
+          // 微波上下浮动
+          const y = p.baseYRatio * h + Math.sin(time * p.waveFreq + p.wavePhase) * p.waveAmp
+
+          ctx.save()
+          ctx.globalAlpha = alpha
+          ctx.fillStyle = '#ffffff'
+          ctx.shadowColor = visual.particleGlow
+          ctx.shadowBlur = p.radius > 1.8 ? 5 : 3
+          ctx.beginPath()
+          ctx.arc(p.x, y, p.radius, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.restore()
+        }
+      }
+
+      rafId = requestAnimationFrame(render)
+    }
+
+    rafId = requestAnimationFrame(render)
+
+    // 页面切到后台时暂停动画节省电量
+    const onVisChange = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(rafId)
+      } else {
+        rafId = requestAnimationFrame(render)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisChange)
+
+    return () => {
+      running = false
+      cancelAnimationFrame(rafId)
+      ro.disconnect()
+      document.removeEventListener('visibilitychange', onVisChange)
+    }
+  }, [pct, baseSpeed, visual.particleGlow, thumbSize])
 
   return (
     <div className={`flex flex-col ${compact ? 'gap-1.5' : 'gap-2'} select-none ${className}`}>
@@ -161,7 +273,7 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
           compact ? 'h-[18px]' : 'h-[22px]'
         }`}
       >
-        {/* 内部能量液与气泡粒子层：保持全轨连续性，通过 clip-path 随滑块平滑展开 */}
+        {/* 内部能量液层：通过 clip-path 随滑块平滑展开 */}
         <div
           className="absolute inset-0 rounded-full transition-all duration-200 ease-out overflow-hidden"
           style={{
@@ -170,23 +282,8 @@ export default function EffortSlider({ value, onChange, compact = false, classNa
             clipPath: `inset(0 calc(100% - ${fillWidth}) 0 0 round 9999px)`,
           }}
         >
-          {PARTICLES.map((p) => (
-            <span
-              key={p.id}
-              className="moji-energy-bubble absolute rounded-full pointer-events-none"
-              style={{
-                left: `${p.x}%`,
-                top: `${p.y}%`,
-                width: `${compact ? Math.max(1.5, p.size * 0.8) : p.size}px`,
-                height: `${compact ? Math.max(1.5, p.size * 0.8) : p.size}px`,
-                backgroundColor: '#ffffff',
-                opacity: p.opacity,
-                boxShadow: `0 0 3px ${visual.particleGlow}`,
-                animationDuration: `${p.duration}s`,
-                animationDelay: `${p.delay}s`,
-              }}
-            />
-          ))}
+          {/* 流动气泡微粒画布 Canvas：气泡随流体流向白钮，活灵活现 */}
+          <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
         </div>
 
         {/* 纯白滑块圆钮 Thumb（微宝石质感纯白圆球，带立体阴影） */}
