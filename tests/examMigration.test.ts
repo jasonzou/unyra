@@ -122,4 +122,58 @@ describe('旧格式迁移', () => {
     expect(normalizeExam({ hello: 'world' })).toBeNull()
     expect(normalizeExam(legacy({ nodeId: '' }))).toBeNull()
   })
+
+  it('手写答卷图片（handwrittenImages）与题目裁切贴图（croppedAnswerImage）持久化反序列化完整保留', () => {
+    const exam = normalizeExam({
+      ...legacy(),
+      attempts: [
+        {
+          id: 'att_images',
+          startedAt: AT,
+          status: 'graded',
+          handwrittenImages: ['C:/photos/sheet1.jpg', 'C:/photos/sheet2.jpg'],
+          answers: [
+            {
+              questionId: 'q1',
+              value: ['答案A'],
+              image: 'C:/crops/q1.png',
+              rawImage: 'C:/photos/sheet1.jpg',
+            },
+          ],
+          inputs: [
+            {
+              questionId: 'q1',
+              value: ['答案A'],
+              image: 'C:/crops/q1.png',
+              rawImage: 'C:/photos/sheet1.jpg',
+              at: AT + 100,
+            },
+          ],
+          results: [
+            {
+              questionId: 'q1',
+              correct: true,
+              score: 2,
+              maxScore: 2,
+              by: 'agent',
+              comment: '回答完整准确',
+              croppedAnswerImage: 'C:/crops/q1.png',
+            },
+          ],
+          dwell: {},
+          blurs: [],
+          forceSubmit: false,
+        },
+      ],
+    })!
+
+    expect(exam).toBeTruthy()
+    const attempt = exam.attempts[0]
+    expect(attempt.handwrittenImages).toEqual(['C:/photos/sheet1.jpg', 'C:/photos/sheet2.jpg'])
+    expect(attempt.answers[0].image).toBe('C:/crops/q1.png')
+    expect(attempt.answers[0].rawImage).toBe('C:/photos/sheet1.jpg')
+    expect(attempt.inputs[0].image).toBe('C:/crops/q1.png')
+    expect(attempt.inputs[0].rawImage).toBe('C:/photos/sheet1.jpg')
+    expect(attempt.results?.[0].croppedAnswerImage).toBe('C:/crops/q1.png')
+  })
 })
