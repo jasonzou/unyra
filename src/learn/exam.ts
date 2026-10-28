@@ -72,5 +72,3 @@ export {
   wrongQuestions,
 } from './exam/view'
 
-export type { OmissionCheckResult } from './exam/omissionCheck'
-export { checkExamOmissions } from './exam/omissionCheck'

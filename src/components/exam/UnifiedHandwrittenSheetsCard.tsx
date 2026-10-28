@@ -55,7 +55,7 @@ async function rotateImage90(src: string): Promise<string> {
 /**
  * 统一手写答卷上传卡片：
  * 位于卷面首部，支持手机扫码拍照与本地选择多张答题卷/答题卡照片，
- * 支持顺时针旋转修正方向，交卷时由【检题助手】统一审阅与裁切贴题。
+ * 支持顺时针旋转修正方向，交卷后由 AI 导师亲自审阅与裁切贴题。
  */
 const UnifiedHandwrittenSheetsCard = forwardRef<HTMLDivElement, Props>(function UnifiedHandwrittenSheetsCard(
   { images, onAddImage, onUpdateImage, onRemoveImage, onPreviewImage, onOpenLan },
@@ -229,7 +229,7 @@ const UnifiedHandwrittenSheetsCard = forwardRef<HTMLDivElement, Props>(function 
             <Smartphone size={11} className="text-seal" />
             <span>
               {t(
-                '已上传 {0} 份答卷照片。若照片角度倾斜可点 ↻ 旋转；交卷时将由【检题助手】进行漏题预检，交卷后 AI 导师亲自审卷判分并裁切贴题。',
+                '已上传 {0} 份答卷照片。若照片角度倾斜可点 ↻ 旋转；交卷后 AI 导师将亲自审卷判分并裁切贴题，请在交卷前自行检查确认作答完整。',
                 images.length,
               )}
             </span>

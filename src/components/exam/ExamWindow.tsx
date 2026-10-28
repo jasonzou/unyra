@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Clock,
   Flag,
-  Loader2,
   Play,
   ShieldCheck,
   Timer,
@@ -19,7 +18,6 @@ import LanButton from '../lan/LanButton'
 import LanConnectDialog from '../lan/LanConnectDialog'
 import ImageLightboxModal from './ImageLightboxModal'
 import UnifiedHandwrittenSheetsCard from './UnifiedHandwrittenSheetsCard'
-import { checkExamOmissions, type OmissionCheckResult } from '../../learn/exam'
 import { native } from '../../lib/native'
 import { renderInline } from '../../lib/markdown'
 import Switch from '../Switch'
@@ -90,8 +88,6 @@ export default function ExamWindow() {
   const [lanOpen, setLanOpen] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [handwrittenImages, setHandwrittenImages] = useState<string[]>([])
-  const [checkingOmissions, setCheckingOmissions] = useState(false)
-  const [omissionWarning, setOmissionWarning] = useState<OmissionCheckResult | null>(null)
   const sheetsRef = useRef<HTMLDivElement | null>(null)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -255,27 +251,10 @@ export default function ExamWindow() {
     })
   }, [guest])
 
-  const handleRequestSubmit = useCallback(async () => {
+  const handleRequestSubmit = useCallback(() => {
     if (submittedRef.current) return
-    if (handwrittenImages.length > 0 && state) {
-      setCheckingOmissions(true)
-      try {
-        const res = await checkExamOmissions({
-          exam: state,
-          images: handwrittenImages,
-        })
-        if (res.hasOmissions) {
-          setOmissionWarning(res)
-          return
-        }
-      } catch {
-        // 预检降级
-      } finally {
-        setCheckingOmissions(false)
-      }
-    }
     setConfirm('submit')
-  }, [handwrittenImages, state])
+  }, [])
 
   const submit = useCallback(
     (kind: 'submit' | 'abandon') => {
@@ -615,78 +594,6 @@ export default function ExamWindow() {
         onClose={() => setPreviewImage(null)}
       />
 
-      {/* 检题助手 漏题预检中动画 */}
-      {checkingOmissions && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
-          <div className="moji-dialog-in flex items-center gap-3 rounded-xl border border-line-strong bg-card px-5 py-4 shadow-xl">
-            <Loader2 size={18} className="animate-spin text-seal" />
-            <div className="flex flex-col">
-              <span className="text-[13px] font-semibold text-ink-strong">{t('【检题助手】正在预检手写答卷…')}</span>
-              <span className="text-[11px] text-ink-faint">{t('正在检查手写答卷是否存在遗漏未写题目，请稍候')}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 漏题预检警告弹窗 */}
-      {omissionWarning && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
-          <div className="moji-dialog-in w-[420px] rounded-xl border border-amber-500/40 bg-card p-4 shadow-xl">
-            <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-amber-500/10 text-amber-600">
-                <AlertTriangle size={15} />
-              </div>
-              <h3 className="text-[14px] font-bold text-ink-strong">{t('【检题助手】提醒：疑似存在未作答题目')}</h3>
-            </div>
-
-            <div className="mt-3 text-[12px] leading-relaxed text-ink-soft">
-              <p>{t('检题助手快速预检发现，以下题目在上传的手写答卷中尚未找到作答痕迹：')}</p>
-              <div className="my-2.5 flex flex-wrap gap-1.5">
-                {omissionWarning.missingQuestions.map((qNum) => (
-                  <span
-                    key={qNum}
-                    className="rounded border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[11.5px] font-bold text-amber-800 dark:text-amber-300"
-                  >
-                    {t('第 {0} 题', qNum)}
-                  </span>
-                ))}
-              </div>
-              {omissionWarning.reason && (
-                <p className="rounded bg-paper/60 p-2 text-[11px] text-ink-faint border border-line/60">
-                  {omissionWarning.reason}
-                </p>
-              )}
-              <p className="mt-2 text-[11px] text-ink-faint">
-                {t('你可以返回补充作答并拍照重新上传，也可以选择强行交卷（未作答题目将由导师按 0 分计算）。')}
-              </p>
-            </div>
-
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setOmissionWarning(null)
-                  sheetsRef.current?.scrollIntoView({ behavior: 'smooth' })
-                }}
-                className="rounded border border-line bg-paper/60 px-3 py-1.5 text-[11.5px] font-medium text-ink transition hover:bg-line/60 cursor-pointer"
-              >
-                {t('返回补充作答 / 拍照')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setOmissionWarning(null)
-                  submit('submit')
-                }}
-                className="rounded bg-seal px-3.5 py-1.5 text-[11.5px] font-semibold text-paper shadow-2xs hover:bg-seal-deep transition cursor-pointer"
-              >
-                {t('仍然强行交卷')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {confirm && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 backdrop-blur-[2px]">
           <div className="moji-dialog-in w-[380px] rounded-xl border border-line-strong bg-card p-4 shadow-xl">
@@ -708,7 +615,17 @@ export default function ExamWindow() {
               {confirm === 'submit' ? (
                 <>
                   <p>{t('交卷后导师会判分并写错题讲解。')}</p>
-                  {answeredCount < questions.length ? (
+                  {handwrittenImages.length > 0 ? (
+                    <div className="mt-2 flex items-start gap-1.5 rounded border border-seal/30 bg-seal/10 p-2 text-seal-deep text-[11.5px]">
+                      <Camera size={13} className="mt-0.5 shrink-0 text-seal" />
+                      <span>
+                        {t(
+                          '已上传 {0} 份手写答卷照片。导师将根据手写内容审阅判分并裁切贴题，请自行检查确认作答完整。',
+                          handwrittenImages.length,
+                        )}
+                      </span>
+                    </div>
+                  ) : answeredCount < questions.length ? (
                     <div className="mt-2 flex items-start gap-1.5 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-amber-800 dark:text-amber-300 text-[11.5px]">
                       <AlertTriangle size={13} className="mt-0.5 shrink-0" />
                       <span>{t('还有 {0} 题没作答，它们会记 0 分。', questions.length - answeredCount)}</span>
