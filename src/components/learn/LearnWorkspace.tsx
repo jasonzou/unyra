@@ -556,12 +556,15 @@ export default function LearnWorkspace({
     () =>
       activeGoal
         ? tabs.some(
-            (t) => t.ref.kind === 'outline' && t.ref.nodeId === activeGoal.rootNodeId,
+            (t) =>
+              t.ref.kind === 'outline' &&
+              (t.ref.nodeId === (activeGoal.rootNodeId || activeGoal.id) ||
+                (t.ref as { goalId?: string }).goalId === activeGoal.id),
           )
         : false,
     [activeGoal, tabs],
   )
-  const topbarGoalQuestion = hasTargetOutline ? (activeGoal?.question ?? '') : ''
+  const topbarGoalQuestion = hasTargetOutline ? (activeGoal?.title || activeGoal?.question || '') : ''
 
   /*
    * 记忆的写入口（见 learn/memory）：**目标由调用方给**——工作记忆落进哪个目标，
@@ -1491,40 +1494,72 @@ export default function LearnWorkspace({
     (s: LearnStore, goalId: string, toOutline = false): LearnStore => {
       const goal = s.goals.find((x) => x.id === goalId)
       if (!goal) return s
-      const rootRef: TabRef & { kind: 'outline' } = { kind: 'outline', nodeId: goal.rootNodeId }
+      const anchorNodeId = goal.rootNodeId || goal.id
+      const rootRef: TabRef & { kind: 'outline' } = { kind: 'outline', nodeId: anchorNodeId, goalId: goal.id }
       const rootId = tabKey(rootRef)
       const owners = s.docArea.tabOwners ?? {}
-      // 已经开着（哪怕在别格）就沿用那一枚；没有才在焦点格里开。
-      // 开的是**组锚**（见 groups/tabs 的 openAnchorOutline）：上次关锚卸载掉的那组
-      // 页签若在停靠场里，随这一下原样归队
       const home = groupIdOfTab(s.docArea, rootId)
+      const goalOf = (id: string) => nodeById(s, id)?.goalId ?? (s.goals.some((g) => g.id === id) ? id : null)
       let docArea = home
         ? s.docArea
-        : openAnchorOutline(s.docArea, s.docArea.focus, rootRef, (id) => nodeById(s, id)?.goalId ?? null, Date.now())
+        : openAnchorOutline(s.docArea, s.docArea.focus, rootRef, goalOf, Date.now())
       if (toOutline) {
         const at = groupIdOfTab(docArea, rootId)
-        // activateIn 顺带把焦点挪到那一格：大纲在右格，就该看到右格那一张
         if (at) docArea = activateIn(docArea, at, rootId)
       } else {
-        /*
-         * 别处切过来的（点链接、改落点）只在「焦点格此刻看的不是本目标的东西」时才切：
-         * 若停在上一个目标的教学文档上不动，用户只会觉得「点了没反应」；
-         * 但同一个目标里点来点去（点教学文档、点笔记）时不该被打回大纲。
-         */
         const focusGroup = focusedGroup(docArea)
         const activeOwner = focusGroup?.active ? ownerOfTabId(s, focusGroup.active, owners) : goalId
         if (focusGroup && focusGroup.active !== rootId && activeOwner !== goalId) {
           docArea = activateIn(docArea, focusGroup.id, rootId)
         }
       }
-      /*
-       * 归属登记在**操作之后**的表上算：openAnchorOutline 归队停靠组时也登记了那几枚
-       * （见 restoreParkedTabs），拿操作前那份 claimed 盖回去会把它们全抹掉——
-       * 归队的页签从此在归属表里查无此人，切一次目标就跟着「没登记过的」到处飘。
-       */
       return { ...s, docArea: withOwners(docArea, claimTab(docArea.tabOwners, goalId, rootId)) }
     },
     [],
+  )
+
+  const retargetGoal = useCallback(
+    (s: LearnStore, goalId: string): LearnStore => {
+      const goal = s.goals.find((g) => g.id === goalId)
+      if (!goal) return s
+      const convId =
+        s.activeConversationId &&
+        s.conversations.some((c) => c.id === s.activeConversationId && c.goalId === goalId)
+          ? s.activeConversationId
+          : (resolveDisplayedConversation(s, goalId) ?? null)
+      const tabbed0 = upsertAgentTab(
+        s.agentTabs ?? [],
+        s.agentActiveTab ?? null,
+        { kind: 'goal', goalId, conversationId: convId },
+        true,
+      )
+      const tabbed = withAgentTabs(s, tabbed0.tabs, tabbed0.active)
+      const conv = tabbed.activeConversationId
+        ? tabbed.conversations.find((c) => c.id === tabbed.activeConversationId)
+        : undefined
+      const goalChanged = s.activeGoalId !== goalId
+      const withGoalTabs = (next: LearnStore): LearnStore =>
+        goalChanged ? goalTabGroup(next, goalId) : next
+      if (conv && conv.goalId === goalId) {
+        if (tabbed.activeGoalId === goalId && tabbed.activeNodeId === null) return withGoalTabs(tabbed)
+        return withGoalTabs({ ...tabbed, activeGoalId: goalId, activeNodeId: null })
+      }
+      const ensured = ensureConversation(tabbed, goalId)
+      const retabbed0 = upsertAgentTab(
+        ensured.store.agentTabs ?? [],
+        ensured.store.agentActiveTab ?? null,
+        { kind: 'goal', goalId, conversationId: ensured.conversationId },
+        true,
+      )
+      const retabbed = withAgentTabs(ensured.store, retabbed0.tabs, retabbed0.active)
+      return withGoalTabs({
+        ...retabbed,
+        activeGoalId: goalId,
+        activeNodeId: null,
+        activeConversationId: ensured.conversationId,
+      })
+    },
+    [goalTabGroup],
   )
 
   const retargetNode = useCallback(
@@ -1611,19 +1646,43 @@ export default function LearnWorkspace({
       const freeNote = ref.kind === 'note' ? noteEntityOf(s, ref) : null
       const initialNodeId = tabNodeId(ref)
       const initialNode = initialNodeId ? nodeById(s, initialNodeId) : undefined
-      if (initialNodeId && !initialNode && !freeNote) return
-      if (ref.kind === 'outline' && initialNode) {
-        const goal = s.goals.find((g) => g.id === initialNode.goalId)
-        if (goal && ref.nodeId !== goal.rootNodeId) {
-          setOutlineFocus({ nodeId: ref.nodeId, nonce: Date.now() })
-          ref = { kind: 'outline', nodeId: goal.rootNodeId }
+      const isGoalOutline =
+        ref.kind === 'outline' &&
+        s.goals.some(
+          (g) =>
+            g.id === initialNodeId ||
+            g.id === (ref as { goalId?: string }).goalId ||
+            g.rootNodeId === initialNodeId,
+        )
+      if (initialNodeId && !initialNode && !freeNote && !isGoalOutline) return
+      let targetGoalId: string | null = null
+      if (ref.kind === 'outline') {
+        const goal =
+          (initialNode ? s.goals.find((g) => g.id === initialNode.goalId) : null) ??
+          s.goals.find(
+            (g) =>
+              g.id === initialNodeId ||
+              g.id === (ref as { goalId?: string }).goalId ||
+              g.rootNodeId === initialNodeId,
+          )
+        if (goal) {
+          targetGoalId = goal.id
+          const anchorNodeId = goal.rootNodeId || goal.id
+          if (initialNode && ref.nodeId !== anchorNodeId) {
+            setOutlineFocus({ nodeId: ref.nodeId, nonce: Date.now() })
+          }
+          ref = { kind: 'outline', nodeId: anchorNodeId, goalId: goal.id }
         }
       }
       const nodeId = tabNodeId(ref)
       const node = nodeId ? nodeById(s, nodeId) : undefined
-      if (nodeId && !node && !freeNote) return
+      if (nodeId && !node && !freeNote && !isGoalOutline) return
       const wasActive = focusedTab(s.docArea)?.id === tabKey(ref)
-      const base = node ? touchNode(retargetNode(s, node.id), node.id) : s
+      const base = node
+        ? touchNode(retargetNode(s, node.id), node.id)
+        : isGoalOutline && targetGoalId
+          ? retargetGoal(s, targetGoalId)
+          : s
       /*
        * 绑定的视频页签：打开它 = 把它所属目标的页签组一并打开（goalTabGroup 会开组锚、
        * 让停靠的整组归队），视频页签落进焦点格并登记在该目标名下，目标随之切过去——
@@ -1645,7 +1704,7 @@ export default function LearnWorkspace({
            */
           const remembered = goalFocusByGoal.get(boundGoal.id)
           const focusId = remembered && nodeById(base, remembered) ? remembered : boundGoal.rootNodeId
-          const retargeted = retargetNode(base, focusId)
+          const retargeted = focusId ? retargetNode(base, focusId) : retargetGoal(base, boundGoal.id)
           const grouped = goalTabGroup(retargeted, boundGoal.id)
           const openedV = openInGroup(
             grouped.docArea,
@@ -1670,7 +1729,7 @@ export default function LearnWorkspace({
        */
       const startView: DocView | undefined =
         ref.kind === 'note' && emptyNote(s, makeTab(ref, 0)) ? 'source' : undefined
-      const goalOf = (id: string) => nodeById(base, id)?.goalId ?? null
+      const goalOf = (id: string) => nodeById(base, id)?.goalId ?? (base.goals.some((g) => g.id === id) ? id : null)
       /** 「目标 → 根节点」：组锚判据的第二跳（见 groups/tabs 的 isAnchorOutline） */
       const rootOf = (goalId: string) => base.goals.find((g) => g.id === goalId)?.rootNodeId ?? null
       /*
@@ -1694,12 +1753,12 @@ export default function LearnWorkspace({
        * 于是切到那个目标时它就出现在栏上、切走时跟着收起来——「所有这个目标下任何层级
        * 的文档打开都会被 tab 组记录」正是这一行。
        */
-      const owner = refOwner(ref, (id) => nodeById(base, id)?.goalId ?? null) ?? freeNote?.goalId ?? null
+      const owner = (ref as { goalId?: string }).goalId ?? refOwner(ref, goalOf) ?? freeNote?.goalId ?? null
       set({ ...base, docArea: withOwners(opened, claimTab(opened.tabOwners, owner, tabKey(ref))) })
       if (wasActive) requestReveal()
       setSidebarOpen(false)
     },
-    [getLatest, retargetNode, goalTabGroup, set],
+    [getLatest, retargetNode, retargetGoal, goalTabGroup, set],
   )
   // 回填放在 effect 里（渲染期不许写 ref）：openTab 的身份随依赖变，每次渲染后换成最新的一份
   useEffect(() => {
@@ -1720,11 +1779,11 @@ export default function LearnWorkspace({
   const aliveGoalTabGroups = useMemo(() => {
     const owners = store.docArea.tabOwners
     const all = allStoredTabs(store.docArea)
-    const goalOfNode = (nodeId: string) => nodeById(store, nodeId)?.goalId ?? null
+    const goalOfNode = (nodeId: string) => nodeById(store, nodeId)?.goalId ?? (store.goals.some((g) => g.id === nodeId) ? nodeId : null)
     return store.goals
       .map((g) => ({
         goalId: g.id,
-        title: g.question,
+        title: g.title || g.question,
         count: goalTabsOf(owners, all, goalOfNode, g.id).length,
         current: g.id === store.activeGoalId,
       }))
@@ -1743,12 +1802,13 @@ export default function LearnWorkspace({
       const s = getLatest()
       const goal = s.goals.find((g) => g.id === goalId)
       if (!goal) return
-      const base = touchNode(retargetNode(s, goal.rootNodeId), goal.rootNodeId)
+      const node = goal.rootNodeId ? nodeById(s, goal.rootNodeId) : null
+      const base = node ? touchNode(retargetNode(s, node.id), node.id) : retargetGoal(s, goalId)
       const next = goalTabGroup(base, goalId)
       set(next)
       if (focusedTab(s.docArea)?.id === focusedTab(next.docArea)?.id) requestReveal()
     },
-    [getLatest, retargetNode, goalTabGroup, set],
+    [getLatest, retargetNode, retargetGoal, goalTabGroup, set],
   )
 
   /**
@@ -1801,17 +1861,21 @@ export default function LearnWorkspace({
    *    目标自己的页签在这个目标下都还在，切回来时原样可见。
    */
   const openGoalGroup = useCallback(
-    (nodeId: string) => {
+    (targetId: string) => {
       const s = getLatest()
-      const node = nodeById(s, nodeId)
-      if (!node) return
-      const base = touchNode(retargetNode(s, node.id), node.id)
-      const next = goalTabGroup(base, node.goalId, true)
+      const goal =
+        s.goals.find((g) => g.id === targetId) ??
+        (nodeById(s, targetId)?.goalId ? s.goals.find((g) => g.id === nodeById(s, targetId)!.goalId) : null)
+      if (!goal) return
+      const goalId = goal.id
+      const node = nodeById(s, targetId) ?? (goal.rootNodeId ? nodeById(s, goal.rootNodeId) : null)
+      const base = node ? touchNode(retargetNode(s, node.id), node.id) : retargetGoal(s, goalId)
+      const next = goalTabGroup(base, goalId, true)
       set(next)
       if (focusedTab(s.docArea)?.id === focusedTab(next.docArea)?.id) requestReveal()
       setSidebarOpen(false)
     },
-    [getLatest, retargetNode, goalTabGroup, set],
+    [getLatest, retargetNode, retargetGoal, goalTabGroup, set],
   )
 
   /**
@@ -5268,7 +5332,10 @@ export default function LearnWorkspace({
   const explorerDocs = useMemo<NodeDocActions>(
     () => ({
       onOpenTeach: (nodeId) => selectNode(nodeId),
-      onOpenOutline: (nodeId) => openTab({ kind: 'outline', nodeId }),
+      onOpenOutline: (nodeId) => {
+        const g = store.goals.find((x) => x.id === nodeId || x.rootNodeId === nodeId)
+        openTab({ kind: 'outline', nodeId, ...(g ? { goalId: g.id } : {}) })
+      },
       onNewNote: (nodeId) => createNodeNote(nodeId),
       onNewProject: (nodeId) => newProject(nodeId),
       onNewExam: (nodeId) => newExam(nodeId),

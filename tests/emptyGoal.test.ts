@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { buildDocs, parseDocsV3 } from '../src/learn/files'
-import { emptyDocs } from '../src/learn/groups'
+import {
+  FIRST_GROUP,
+  allTabs,
+  closeIn,
+  emptyDocs,
+  isAnchorOutline,
+  openAnchorOutline,
+  unloadAnchoredGroups,
+} from '../src/learn/groups'
+import { tabKey } from '../src/learn/tabs'
 import { deriveCanvas } from '../src/components/learn/structure/structureView'
-import type { LearnStore } from '../src/learn/types'
+import type { LearnStore, TabRef } from '../src/learn/types'
 
 describe('空学习目标持久化与画布派生', () => {
   it('新建无根节点的空目标可完整落盘并解析读回', () => {
@@ -94,5 +103,33 @@ describe('空学习目标持久化与画布派生', () => {
     const canvas = deriveCanvas(store, goalId, undefined)
     expect(canvas.cards).toEqual([])
     expect(canvas.edges).toEqual([])
+  })
+
+  it('空目标的结构Tab关闭后进入停靠场，再次打开能正确恢复', () => {
+    const goalId = 'goal-empty-x'
+    const goalOfNode = (id: string) => (id === goalId ? goalId : null)
+    const rootOf = (gid: string) => (gid === goalId ? '' : null)
+
+    const outlineRef: TabRef & { kind: 'outline' } = { kind: 'outline', nodeId: goalId, goalId }
+    expect(isAnchorOutline(outlineRef, goalOfNode, rootOf)).toBe(true)
+
+    // 1. 打开结构Tab
+    let docs = openAnchorOutline(emptyDocs(), FIRST_GROUP, outlineRef, goalOfNode, 1)
+    expect(allTabs(docs).some((t) => t.id === tabKey(outlineRef))).toBe(true)
+
+    // 2. 关闭结构Tab
+    const before = allTabs(docs)
+    const closed = closeIn(docs, FIRST_GROUP, tabKey(outlineRef), 'self')
+    const settled = unloadAnchoredGroups(closed, before, goalOfNode, rootOf)
+
+    // 结构Tab已被关闭移出
+    expect(allTabs(settled).some((t) => t.id === tabKey(outlineRef))).toBe(false)
+    // 停靠场中应该保留占位
+    expect(settled.parkedTabs?.[goalId]).toBeDefined()
+
+    // 3. 再次重新打开结构Tab（如在资源管理器中点击目标）
+    const restored = openAnchorOutline(settled, FIRST_GROUP, outlineRef, goalOfNode, 2)
+    expect(allTabs(restored).some((t) => t.id === tabKey(outlineRef))).toBe(true)
+    expect(restored.parkedTabs?.[goalId]).toBeUndefined()
   })
 })
