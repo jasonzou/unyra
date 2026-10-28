@@ -204,6 +204,14 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
   }
 
   const edges: CanvasEdge[] = []
+  const edgeSeen = new Set<string>()
+  const pushEdge = (from: string, to: string): boolean => {
+    const k = `${from}>${to}`
+    if (edgeSeen.has(k)) return false
+    edgeSeen.add(k)
+    edges.push({ from, to })
+    return true
+  }
   const byUuid = new Map<string, Pending>()
 
   const add = (p: Pending): void => {
@@ -369,16 +377,16 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     const fromCard = fromCardOf(e.from)
     const toCard = outlinePending.get(e.to) ?? docPending.get(e.to)
     if (!fromCard || !toCard) continue
+    if (!pushEdge(fromCard.card.uuid, toCard.card.uuid)) continue
     // 深度按成员算：父成员的卡 + 1（附身大纲那一对的「右侧」即大纲卡本身）
     toCard.depth = Math.max(toCard.depth, fromCard.depth + 1)
     toCard.parent ??= fromCard
-    fromCard.next.push(toCard)
+    if (!fromCard.next.includes(toCard)) fromCard.next.push(toCard)
     // 认领了接口的子级记下行号：自动铺排的顺序与锚点都按目标项来（见下面的排序与 place）
     if (fromCard.card.kind === 'outline') {
       const idx = fromCard.card.slots?.findIndex((s) => s.childId === toCard.card.uuid) ?? -1
       if (idx >= 0) toCard.slotAnchor = { parent: fromCard.card.uuid, index: idx }
     }
-    edges.push({ from: fromCard.card.uuid, to: toCard.card.uuid })
   }
 
   // 附身大纲与它的文档配成一对：归属边「文档 → 它的大纲」（交替链画法）；嵌套接入时反过来以大纲为入口
@@ -397,7 +405,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
       o.parent = doc
       doc.next.push(o)
     }
-    edges.push({ from: node.id, to: o.card.uuid })
+    pushEdge(node.id, o.card.uuid)
   }
 
   /*
@@ -434,7 +442,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
         parent: doc,
       }
       add(p)
-      edges.push({ from: node.id, to: note.id })
+      pushEdge(node.id, note.id)
       doc.next.push(p)
     }
     for (const exam of examsOfNode(store, node.id)) {
@@ -454,7 +462,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
         parent: doc,
       }
       add(p)
-      edges.push({ from: node.id, to: exam.id })
+      pushEdge(node.id, exam.id)
       doc.next.push(p)
     }
     for (const sdoc of superDocsOf(node)) {
@@ -472,7 +480,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
         parent: doc,
       }
       add(p)
-      edges.push({ from: node.id, to: sdoc.id })
+      pushEdge(node.id, sdoc.id)
       doc.next.push(p)
     }
   }

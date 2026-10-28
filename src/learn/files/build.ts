@@ -186,7 +186,13 @@ function* buildDocsSteps(store: LearnStore): Generator<void, Map<string, string>
        * 附身大纲仍住在节点文件里（与宿主文档配对），两类大纲各回各家；一张都没有不写。
        */
       const freeOutlines = (store.outlines ?? []).filter((o) => o.goalId === goal.id)
-      const freeEdges = store.edges.filter((e) => e.from.startsWith('o:'))
+      const freeOutlineIds = new Set(freeOutlines.map((o) => o.id))
+      const goalDocIds = new Set(store.nodes.filter((n) => n.goalId === goal.id).map((n) => n.id))
+      const freeEdges = store.edges.filter((e) => {
+        if (!e.from.startsWith('o:')) return false
+        const raw = e.from.slice(2)
+        return freeOutlineIds.has(raw) || goalDocIds.has(raw)
+      })
       if (freeOutlines.length || freeEdges.length) {
         files.set(
           `${path}/outlines.json`,

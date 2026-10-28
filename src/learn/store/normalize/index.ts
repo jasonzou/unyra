@@ -94,6 +94,7 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
 
     const rawEdges: unknown[] = Array.isArray(d.edges) ? d.edges : []
     const edges: DependencyEdge[] = []
+    const edgeSeen = new Set<string>()
     for (const rawEdge of rawEdges) {
       if (!rawEdge || typeof rawEdge !== 'object') continue
       const r = rawEdge as Record<string, unknown>
@@ -108,6 +109,9 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
           (m.startsWith('o:') && (ids.has(m.slice(2)) || freeIds.has(m.slice(2))))
         )
       if (!from || !to || from === to || !memberOk(from) || !memberOk(to)) continue
+      const edgeKey = `${from}>${to}`
+      if (edgeSeen.has(edgeKey)) continue
+      edgeSeen.add(edgeKey)
       const portKey = typeof r.portKey === 'string' && r.portKey ? r.portKey : undefined
       edges.push({ from, to, createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(), ...(portKey ? { portKey } : {}) })
     }

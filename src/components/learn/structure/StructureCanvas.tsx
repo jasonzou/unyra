@@ -1611,7 +1611,7 @@ export const StructureCanvas = memo(function StructureCanvas({
             width={edgeSize.width}
             height={edgeSize.height}
           >
-            {edges.map((edge) => {
+            {edges.map((edge, idx) => {
               const from = byId.get(edge.from)
               const to = byId.get(edge.to)
               if (!from || !to) return null
@@ -1630,7 +1630,7 @@ export const StructureCanvas = memo(function StructureCanvas({
                 (hoverEdge?.from === edge.from && hoverEdge?.to === edge.to) || isSelected || glow
               const showDots = hoverEdge?.from === edge.from && hoverEdge?.to === edge.to
               return (
-                <g key={`${edge.from}>${edge.to}`}>
+                <g key={`${edge.from}>${edge.to}-${idx}`}>
                   <path
                     d={edgePathD(points, edgeStyle)}
                     fill="none"
@@ -2096,7 +2096,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               「这是一张卡」；连线照抄主画布的路径点。所有描边挂 non-scaling-stroke：
               粗细永远按屏幕像素算。
             */}
-            {edges.map((edge) => {
+            {edges.map((edge, idx) => {
               const from = byId.get(edge.from)
               const to = byId.get(edge.to)
               if (!from || !to) return null
@@ -2105,7 +2105,7 @@ export const StructureCanvas = memo(function StructureCanvas({
               const accent = from.kind === 'outline' && to.kind === 'doc'
               return (
                 <path
-                  key={`${edge.from}>${edge.to}`}
+                  key={`${edge.from}>${edge.to}-${idx}`}
                   d={edgePathD(path, edgeStyle)}
                   fill="none"
                   stroke={accent ? SLOT_ACCENT : 'currentColor'}
