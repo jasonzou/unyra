@@ -226,6 +226,8 @@ import VideoTabLayer, { type VideoTab } from '../video/VideoTabLayer'
 import type { VideoCreateDraft } from '../video/VideoStudyTab'
 import PluginDoc from '../plugins/PluginDoc'
 import { setPluginDocOpener } from '../../lib/pluginDoc'
+import { resolveVideoSource } from '../../lib/videoPlugins'
+import { setVideoBlockHost, cleanVideoNodeUuid, type VideoBlockData, type VideoEpisodeItem } from '../../lib/videosBlock'
 import { focusWebAddress } from './web/addressFocus'
 import FindBar from './FindBar'
 import SuperDocView from './SuperDocView'
@@ -3483,6 +3485,119 @@ export default function LearnWorkspace({
     setPluginDocOpener(() => openTab({ kind: 'pluginDoc' }))
     return () => setPluginDocOpener(null)
   }, [openTab])
+
+  // 视频代码块（```videos）的选集数据拉取与点播跳转：注册宿主接口
+  useEffect(() => {
+    setVideoBlockHost({
+      getVideoData: async (videoNodeUuid: string): Promise<VideoBlockData | null> => {
+        const s = getLatest()
+        const raw = cleanVideoNodeUuid(videoNodeUuid)
+        // 1. 优先按 videoNode.id 查找
+        let vNode = (s.videoNodes ?? []).find((vn) => vn.id === raw)
+        // 2. 次优先按 videoId 查找
+        if (!vNode) vNode = (s.videoNodes ?? []).find((vn) => vn.videoId === raw)
+        // 3. 兜底：从当前激活文档节点的上游连接查找视频节点
+        if (!vNode && s.activeNodeId) {
+          const upEdges = s.edges.filter((e) => e.to === s.activeNodeId)
+          for (const e of upEdges) {
+            const upV = (s.videoNodes ?? []).find((vn) => vn.id === e.from)
+            if (upV) {
+              vNode = upV
+              break
+            }
+          }
+        }
+        // 4. 兜底：若该目标下只有一个视频节点，直接匹配它
+        if (!vNode && s.activeGoalId) {
+          const goalVNodes = (s.videoNodes ?? []).filter((vn) => vn.goalId === s.activeGoalId)
+          if (goalVNodes.length === 1) vNode = goalVNodes[0]
+        }
+        // 5. 兜底：全局若只有一个视频节点
+        if (!vNode && (s.videoNodes ?? []).length === 1) {
+          vNode = s.videoNodes![0]
+        }
+
+        const videoId = vNode?.videoId ?? raw
+        let video = (s.videos ?? []).find((v) => v.id === videoId)
+        if (!video && !vNode && (s.videos ?? []).length === 1) {
+          video = (s.videos ?? [])[0]
+        }
+        if (!video) return null
+
+        try {
+          const src = await resolveVideoSource(video.selection?.source ?? video.input, video.fields)
+          let episodes: VideoEpisodeItem[] = []
+          if (src.pages && src.pages.length > 0) {
+            episodes = src.pages.map((p, idx) => ({
+              page: typeof p.page === 'number' && p.page > 0 ? p.page : idx + 1,
+              title: p.title,
+              source: p.source,
+              durationMs: p.durationMs,
+            }))
+          } else if (src.collection?.items && src.collection.items.length > 0) {
+            episodes = src.collection.items.map((it, idx) => ({
+              page: idx + 1,
+              title: it.title,
+              source: it.source,
+              durationMs: it.durationMs,
+            }))
+          }
+          return {
+            videoTitle: src.title || video.title,
+            pluginName: video.pluginName ?? video.pluginId,
+            episodes,
+          }
+        } catch (err) {
+          console.warn('[videosBlock] 解析视频选集失败', err)
+          return null
+        }
+      },
+      onOpenEpisode: (videoNodeUuid: string, episode: VideoEpisodeItem) => {
+        const s = getLatest()
+        const raw = cleanVideoNodeUuid(videoNodeUuid)
+        let vNode = (s.videoNodes ?? []).find((vn) => vn.id === raw)
+        if (!vNode) vNode = (s.videoNodes ?? []).find((vn) => vn.videoId === raw)
+        if (!vNode && s.activeNodeId) {
+          const upEdges = s.edges.filter((e) => e.to === s.activeNodeId)
+          for (const e of upEdges) {
+            const upV = (s.videoNodes ?? []).find((vn) => vn.id === e.from)
+            if (upV) {
+              vNode = upV
+              break
+            }
+          }
+        }
+        if (!vNode && s.activeGoalId) {
+          const goalVNodes = (s.videoNodes ?? []).filter((vn) => vn.goalId === s.activeGoalId)
+          if (goalVNodes.length === 1) vNode = goalVNodes[0]
+        }
+        if (!vNode && (s.videoNodes ?? []).length === 1) {
+          vNode = s.videoNodes![0]
+        }
+
+        const videoId = vNode?.videoId ?? raw
+        const video =
+          (s.videos ?? []).find((v) => v.id === videoId) ?? ((s.videos ?? []).length === 1 ? s.videos![0] : undefined)
+        if (!video) return
+
+        const nextSource = episode.source
+        if (nextSource && nextSource !== (video.selection?.source ?? video.input)) {
+          const updatedVideos = (s.videos ?? []).map((v) =>
+            v.id === video.id
+              ? {
+                  ...v,
+                  selection: { source: nextSource, title: episode.title },
+                  progress: { source: nextSource, positionMs: 0, updatedAt: Date.now() },
+                }
+              : v,
+          )
+          set({ ...s, videos: updatedVideos })
+        }
+        openTab({ kind: 'video', videoId: video.id })
+      },
+    })
+    return () => setVideoBlockHost(null)
+  }, [getLatest, set, openTab])
 
   /*
     plot 错误卡片上的「让导师修复」：以**工作流**（learn/workflows 的 plot-fix）注入——

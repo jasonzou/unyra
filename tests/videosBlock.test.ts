@@ -6,10 +6,24 @@ import {
   videosBlock,
   hydrateVideos,
   setVideoBlockHost,
+  cleanVideoNodeUuid,
+  cleanRangeText,
   type VideoBlockHost,
 } from '../src/lib/videosBlock'
 
 describe('videosBlock 选集链路解析与渲染', () => {
+  describe('cleanVideoNodeUuid & cleanRangeText', () => {
+    it('去除模板插值符号与属性前缀', () => {
+      expect(cleanVideoNodeUuid('{{videoNodeUUID}}')).toBe('')
+      expect(cleanVideoNodeUuid('{{ node-12345 }}')).toBe('node-12345')
+      expect(cleanVideoNodeUuid('uuid: node-12345')).toBe('node-12345')
+      expect(cleanVideoNodeUuid('"node-12345"')).toBe('node-12345')
+
+      expect(cleanRangeText('{{ 1-20 }}')).toBe('1-20')
+      expect(cleanRangeText('range: 1-20')).toBe('1-20')
+      expect(cleanRangeText('选集: 1-10')).toBe('1-10')
+    })
+  })
   describe('parseEpisodeRange', () => {
     it('正确解析混合区间与单集：1-20, 23, 29-30', () => {
       const res = parseEpisodeRange('1-20, 23, 29-30')
@@ -119,6 +133,40 @@ describe('videosBlock 选集链路解析与渲染', () => {
         source: 'src-1',
       })
 
+      setVideoBlockHost(null)
+    })
+
+    it('宿主未注入时先挂起，注入后响应式重新水合渲染', async () => {
+      setVideoBlockHost(null)
+
+      const container = document.createElement('div')
+      container.innerHTML = `
+        <div class="moji-videos-block" data-video-node="late-node-9" data-range="1">
+          <div class="placeholder">loading</div>
+        </div>
+      `
+
+      // 首次水合时没有 host
+      const cleanup = hydrateVideos(container)
+      expect(container.querySelectorAll('button').length).toBe(0)
+
+      // 稍后宿主注入
+      const mockHost: VideoBlockHost = {
+        getVideoData: vi.fn().mockResolvedValue({
+          videoTitle: '延后课程',
+          episodes: [{ page: 1, title: '延后第一讲', source: 'src-late' }],
+        }),
+        onOpenEpisode: vi.fn(),
+      }
+      setVideoBlockHost(mockHost)
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      expect(mockHost.getVideoData).toHaveBeenCalledWith('late-node-9')
+      expect(container.querySelectorAll('button').length).toBe(1)
+      expect(container.querySelector('button')?.textContent).toContain('延后第一讲')
+
+      cleanup()
       setVideoBlockHost(null)
     })
   })
