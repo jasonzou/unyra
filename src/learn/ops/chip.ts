@@ -103,25 +103,33 @@ export function createChipOps(deps: AgentOpsDeps) {
         const examId = str('examId')
         const attemptId = str('attemptId')
         let exam = examId ? store.exams.find((e) => e.id === examId) : undefined
+        if (!exam && attemptId) {
+          exam = store.exams.find((e) => e.attempts.some((a) => a.id === attemptId))
+        }
         if (!exam && !examId) {
           // 没指名试卷：当前节点最新的一份（出卷 / 阅卷都作用在当前节点上，同一条口径）
           const current = deps.nodeId()
           exam = current
             ? store.exams.filter((e) => e.nodeId === current).sort((a, b) => b.createdAt - a.createdAt)[0]
             : undefined
-          if (!exam) return { ok: false, problem: '当前节点还没有试卷；要引用别处的试卷就带 examId' }
+          if (!exam) return { ok: false, problem: '当前节点还没有试卷；要引用别处的试卷就带 examId 或 attemptId' }
         }
         if (!exam) return { ok: false, problem: '没有这份试卷（examId 从 exam.read 的回执里抄）' }
+
+        const resolvedAttemptId = attemptId ?? (type === 'attempt' && exam.attempts.length > 0 ? exam.attempts[exam.attempts.length - 1].id : undefined)
+
         if (type === 'attempt') {
-          if (!attemptId) return { ok: false, problem: 'attempt 型要带 attemptId（exam.read 的 history 里每条考试的 id）' }
-          if (!exam.attempts.some((a) => a.id === attemptId)) {
+          if (!resolvedAttemptId) return { ok: false, problem: '这份试卷还没有任何考试记录；考过之后才能引用作答记录' }
+          if (!exam.attempts.some((a) => a.id === resolvedAttemptId)) {
             return { ok: false, problem: '这份试卷里没有这一次考试（attemptId 从 exam.read 的 history 里抄）' }
           }
         }
+        const effectiveType: ChipPayload['type'] = resolvedAttemptId ? 'attempt' : 'exam'
         return finish({
-          type,
+          type: effectiveType,
           examId: exam.id,
-          ...(type === 'attempt' && attemptId ? { attemptId } : {}),
+          nodeId: exam.nodeId,
+          ...(resolvedAttemptId ? { attemptId: resolvedAttemptId } : {}),
           ...(title ? { title } : { title: exam.title }),
         })
       }

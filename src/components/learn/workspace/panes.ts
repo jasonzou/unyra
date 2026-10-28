@@ -171,7 +171,6 @@ export function paneInfo(
     previewable:
       !!tab &&
       tab.ref.kind !== 'web' &&
-      tab.ref.kind !== 'newGoal' &&
       tab.ref.kind !== 'blank' &&
       tab.ref.kind !== 'draft' &&
       !empty &&

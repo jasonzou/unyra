@@ -1,5 +1,4 @@
 import { AppWindow, Bot, BookOpen, Brain, CalendarClock, ChartColumn, FileClock, FilePlus, Folder, FolderOpen, Globe, GraduationCap, HardDrive, ListTree, Loader2, MonitorPlay, NotebookPen, Package, Puzzle, Settings2, ShieldCheck } from 'lucide-react'
-import Bullseye from '../Bullseye'
 
 /**
  * 文档类型的**视觉身份**：一种类型一个图标、一个颜色。
@@ -28,7 +27,6 @@ export type DocKindKey =
   | 'schedule'
   | 'mind'
   | 'agentSettings'
-  | 'newGoal'
   | 'blank'
   | 'draft'
 
@@ -50,7 +48,6 @@ const DOC_TYPE_COLOR: Record<DocKindKey, string> = {
   schedule: '#c47a3d', // 陶土橙：日程表（时间与约定，与朱红的试卷、琥珀的笔记都不撞）
   mind: '#7c8698', // 蓝灰：系统页（记忆管理），系统页同族
   agentSettings: '#7c8698', // 蓝灰：系统页（超级导师设置），系统页同族
-  newGoal: '#a8432f', // 赭红：目标创建页（与 Bullseye 靶心同色）
   blank: '#8c8c8c', // 浅中性灰：空白页签
   draft: '#6f8fb0', // 雾蓝：新建文件（还没落定的那一份，与「外部文件的灰」分开）
 }
@@ -125,10 +122,7 @@ export function DocTypeIcon({ kind, size = 11 }: { kind: DocKindKey; size?: numb
     ) : kind === 'mind' ? (
       <Brain size={size} />
     ) : kind === 'agentSettings' ? (
-      <Bot size={size} />
-    ) : kind === 'newGoal' ? (
-      <Bullseye size={size} />
-    ) : kind === 'blank' ? (
+      <Bot size={size} />) : kind === 'blank' ? (
       <BlankPageGlyph size={size} />
     ) : kind === 'draft' ? (
       <FilePlus size={size} />

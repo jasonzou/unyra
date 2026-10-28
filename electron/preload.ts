@@ -874,6 +874,8 @@ const api = {
       ipcRenderer.invoke('lan:get-qr', ip),
     requestDeviceFile: (options?: LanRequestFileOptions): Promise<LanRequestFileResult> =>
       ipcRenderer.invoke('lan:request-file', options),
+    cancelRequests: (reason?: string): Promise<void> =>
+      ipcRenderer.invoke('lan:cancel-requests', reason),
     openFile: (filePath: string): Promise<void> =>
       ipcRenderer.invoke('lan:open-file', filePath),
     showInFolder: (filePath: string): Promise<void> =>

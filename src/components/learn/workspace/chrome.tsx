@@ -8,17 +8,14 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, Check, ChevronDown, Compass, FilePlus, FolderOpen, Globe, History, Loader2, Menu, Paperclip, Sparkles, Star, X } from 'lucide-react'
-import type { PendingFile } from '../../../agent/types'
+import { Check, ChevronDown, Compass, FilePlus, FolderOpen, Globe, History, Menu, Sparkles, Star, X } from 'lucide-react'
 import type { FavoriteItem, FavoriteRef, KnowledgeNode, LearnStore } from '../../../learn/types'
 import { favoriteKey } from '../../../learn/favorites'
 import type { RecentOpen } from '../../../learn/recents'
 import { useClock } from '../../../lib/clock'
 import { nodeById, pathToRoot } from '../../../learn/graph'
 import { plainSnippet } from '../../../learn/text'
-import { pendingFromFile, pendingFromRead } from '../../../learn/attachments'
-import { isElectron, isMac, native } from '../../../lib/native'
-import { NO_AUTOFILL } from '../../../lib/autofill'
+import { isElectron, isMac } from '../../../lib/native'
 import { useClampToViewport, useDismissOn } from '../../../lib/useDismiss'
 import {
   THEME_LABEL,
@@ -37,9 +34,6 @@ import LanButton from '../../lan/LanButton'
 import WindowControls from '../../WindowControls'
 import Bullseye from '../../Bullseye'
 import Logo from '../../Logo'
-import GoalParticles from '../GoalParticles'
-import ModelPicker from '../../agent/ModelPicker'
-import { FileChip } from '../../agent/panel/Images'
 import { RecentRow } from '../explorer/sections'
 import { DocTypeIcon, WebTabTypeIcon } from '../docTypes'
 import TopBarTipCarousel from './TopBarTipCarousel'
@@ -501,6 +495,7 @@ export function EmptyDoc({
   onPickLocal,
   onOpenWeb,
   onNewGoal,
+  hasGoals = true,
   favorites = [],
   favoriteTitleOf,
   onOpenFavorite,
@@ -512,6 +507,8 @@ export function EmptyDoc({
   onPickLocal: () => void
   onOpenWeb?: () => void
   onNewGoal?: () => void
+  /** 是否已有目标：没有时高亮新建目标入口，引导用户创建首个目标 */
+  hasGoals?: boolean
   /** 收藏栏的数据：store.favorites（按收藏时间倒序展示，见下） */
   favorites?: FavoriteItem[]
   /** 收藏行的标题（节点名 / 考试名要现查，与侧栏收藏区共用一份） */
@@ -550,7 +547,8 @@ export function EmptyDoc({
             <QuickEntry
               icon={<Compass size={22} className="stroke-[1.75]" />}
               label={t('新建目标')}
-              hint={t('AI 生成体系化知识树')}
+              hint={t('创建学习体系与节点宇宙')}
+              highlighted={!hasGoals}
               onClick={onNewGoal}
             />
           )}
@@ -625,16 +623,45 @@ export function EmptyDoc({
 }
 
 /** 空白页上的快捷入口：图标加大、无边框无底色，悬停时图标与文字一起染上印章色 */
-function QuickEntry({ icon, label, hint, onClick }: { icon: ReactNode; label: string; hint: string; onClick: () => void }) {
+function QuickEntry({
+  icon,
+  label,
+  hint,
+  highlighted = false,
+  onClick,
+}: {
+  icon: ReactNode
+  label: string
+  hint: string
+  highlighted?: boolean
+  onClick: () => void
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group flex flex-col items-center gap-2 rounded-xl px-2.5 py-3.5 transition-colors duration-200 hover:bg-line/40 focus-visible:ring-2 focus-visible:ring-seal/50"
+      className={`group relative flex flex-col items-center gap-2 rounded-xl px-2.5 py-3.5 transition-all duration-300 focus-visible:ring-2 focus-visible:ring-seal/50 cursor-pointer ${
+        highlighted
+          ? 'border border-seal/50 bg-seal/[0.08] shadow-[0_0_24px_rgba(168,67,47,0.25)] ring-1 ring-seal/40 animate-[pulse_2.2s_ease-in-out_infinite] hover:bg-seal/[0.14] hover:shadow-[0_0_32px_rgba(168,67,47,0.38)] hover:scale-[1.03]'
+          : 'hover:bg-line/40'
+      }`}
     >
-      <span className="text-ink-soft transition-colors group-hover:text-seal">{icon}</span>
-      <span className="text-[12.5px] font-medium text-ink transition-colors group-hover:text-seal-deep">{label}</span>
-      <span className="text-[10.5px] text-ink-faint">{hint}</span>
+      {highlighted && (
+        <span className="absolute -top-2.5 rounded-full bg-seal px-2 py-0.5 text-[9.5px] font-medium tracking-wider text-white shadow-sm">
+          {t('推荐首选')}
+        </span>
+      )}
+      <span className={`transition-colors ${highlighted ? 'text-seal' : 'text-ink-soft group-hover:text-seal'}`}>
+        {icon}
+      </span>
+      <span
+        className={`text-[12.5px] font-medium transition-colors ${
+          highlighted ? 'font-semibold text-seal-deep' : 'text-ink group-hover:text-seal-deep'
+        }`}
+      >
+        {label}
+      </span>
+      <span className={`text-[10.5px] ${highlighted ? 'text-seal/80' : 'text-ink-faint'}`}>{hint}</span>
     </button>
   )
 }
@@ -778,236 +805,6 @@ export function NodeTrail({
           {t('目标')}
         </span>
       )}
-    </div>
-  )
-}
-
-/* ---------- 初始页 ---------- */
-
-export function GoalInput({
-  busy,
-  hasGoals,
-  onSubmit,
-  onModelChanged,
-}: {
-  busy: boolean
-  hasGoals: boolean
-  onSubmit: (q: string, files?: PendingFile[]) => void
-  /** 模型选择器改了全局默认后的回调（外层据此刷新 hasKey 等派生状态） */
-  onModelChanged: () => void
-}) {
-  const [value, setValue] = useState('')
-  const [files, setFiles] = useState<PendingFile[]>([])
-  const [isDraggingOver, setIsDraggingOver] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-
-  const addFiles = (newFiles: PendingFile[]) => {
-    if (!newFiles.length) return
-    setFiles((prev) => {
-      const existing = new Set(prev.map((f) => f.name + '_' + f.bytes))
-      const toAdd = newFiles.filter((f) => !existing.has(f.name + '_' + f.bytes))
-      return [...prev, ...toAdd]
-    })
-  }
-
-  const handlePickAttach = async () => {
-    // 桌面端环境：统一走 Electron 原生文件选择对话框，绝不触发 input.click 导致弹出双窗口
-    if (isElectron()) {
-      try {
-        const res = await native().local.pickAttach()
-        if (!res || !res.ok || !res.paths?.length) return
-        const picked: PendingFile[] = []
-        for (const p of res.paths) {
-          const read = await native().local.readAttach(p)
-          if (read.ok) {
-            const item = pendingFromRead(read, p)
-            if (item) picked.push(item)
-          }
-        }
-        if (picked.length > 0) {
-          addFiles(picked)
-        }
-      } catch (err) {
-        console.error('Electron pickAttach failed:', err)
-      }
-      return
-    }
-
-    // 纯 Web 环境：走浏览器 input 元素
-    fileInputRef.current?.click()
-  }
-
-  const onFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const list = e.target.files
-    if (!list || !list.length) return
-    const picked: PendingFile[] = []
-    for (let i = 0; i < list.length; i++) {
-      picked.push(await pendingFromFile(list[i]))
-    }
-    addFiles(picked)
-    e.target.value = ''
-  }
-
-  const removeFile = (id: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id))
-  }
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDraggingOver(false)
-    const droppedFiles = e.dataTransfer.files
-    if (!droppedFiles || !droppedFiles.length) return
-    const picked: PendingFile[] = []
-    for (let i = 0; i < droppedFiles.length; i++) {
-      picked.push(await pendingFromFile(droppedFiles[i]))
-    }
-    addFiles(picked)
-  }
-
-  const handlePaste = async (e: React.ClipboardEvent) => {
-    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
-      e.preventDefault()
-      const pasted: PendingFile[] = []
-      for (let i = 0; i < e.clipboardData.files.length; i++) {
-        pasted.push(await pendingFromFile(e.clipboardData.files[i]))
-      }
-      addFiles(pasted)
-    }
-  }
-
-  const submit = () => {
-    const text = value.trim()
-    if ((!text && files.length === 0) || busy) return
-    onSubmit(text, files.length > 0 ? files : undefined)
-  }
-
-  return (
-    <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto bg-card px-6 py-10">
-      {/* 背景粒子与“归一”回溯心流动画 */}
-      <GoalParticles />
-
-      {/* 加宽到 860px：输入框更接近参考图那种「一横条」的观感 */}
-      <div className="relative my-auto w-full max-w-[860px]">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-12 w-12 select-none items-center justify-center rounded-xl bg-seal/10 text-seal">
-            <Bullseye size={26} />
-          </div>
-          <div>
-            <h1 className="text-[20px] font-semibold text-ink-strong">
-              {hasGoals ? t('开始一个新的学习目标') : t('从一个目标开始')}
-            </h1>
-            <p className="mt-0.5 text-[12.5px] text-ink-soft">
-              {t('写下想弄懂的问题或上传参考资料，超级导师会陪你从基础逐层逆向拆解并回溯归一')}
-            </p>
-          </div>
-        </div>
-
-        {/*
-          输入区卡片：参照 Agent 栏 Composer 结构与视觉风格，
-          附件栏置顶横向排列、无斜杠菜单、左下角为上传附件按钮
-        */}
-        <div
-          onDragOver={(e) => {
-            e.preventDefault()
-            setIsDraggingOver(true)
-          }}
-          onDragLeave={() => setIsDraggingOver(false)}
-          onDrop={handleDrop}
-          onPaste={handlePaste}
-          className={`mt-5 rounded-2xl border bg-transparent backdrop-blur-[2px] transition ${
-            isDraggingOver
-              ? 'border-seal/60 ring-2 ring-seal/20'
-              : 'border-line/80 focus-within:border-seal/50 focus-within:ring-2 focus-within:ring-seal/10'
-          }`}
-        >
-          {/* 待发送附件列表：与 Agent 栏 Composer 一致置于文字区上方 */}
-          {files.length > 0 && (
-            <div className="flex items-center gap-2 border-b border-line/60 px-2.5 py-2">
-              <div className="moji-scroll-x flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-                {files.map((file) => (
-                  <FileChip key={file.id} file={file} onRemove={() => removeFile(file.id)} />
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={() => setFiles([])}
-                title={t('移除全部附件')}
-                className="shrink-0 rounded-md px-1.5 py-1 text-[10.5px] text-ink-faint transition hover:bg-line/60 hover:text-ink"
-              >
-                {t('清空')}
-              </button>
-            </div>
-          )}
-
-          <div className="relative">
-            <textarea
-              value={value}
-              autoFocus
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => {
-                // 直接 Enter 就开讲（Shift+Enter 换行）；输入法组字期间不拦
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault()
-                  submit()
-                }
-              }}
-              rows={files.length > 0 ? 3 : 4}
-              placeholder={
-                files.length > 0
-                  ? t('已添加附件。可在输入框补充说明（例如：根据附件资料制定学习计划），直接回车亦可开始…')
-                  : t('例如：为什么 Transformer 能处理长距离依赖？')
-              }
-              className="block min-h-[80px] w-full resize-none rounded-t-2xl bg-transparent px-3.5 pt-3 pb-2 text-[13.5px] leading-relaxed text-ink outline-none placeholder:text-ink-faint"
-              {...NO_AUTOFILL}
-            />
-          </div>
-
-          <div className="flex items-center gap-2 rounded-b-2xl px-2.5 py-2">
-            {/* 左侧：原 Composer 更多菜单位置，替换为上传附件按钮 */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={onFileInputChange}
-            />
-            <button
-              type="button"
-              onClick={handlePickAttach}
-              title={t('上传附件（支持图片、Markdown、TXT、代码等）')}
-              aria-label={t('上传附件')}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-soft transition hover:bg-line/60 hover:text-ink"
-            >
-              <Paperclip size={16} />
-            </button>
-            {isDraggingOver && (
-              <span className="text-[11.5px] font-medium text-seal animate-pulse">
-                {t('松开鼠标放入文件')}
-              </span>
-            )}
-
-            {/* 右侧：提供商/模型选择 + 开始学习按钮 */}
-            <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              <ModelPicker onChanged={onModelChanged} />
-              <button
-                type="button"
-                onClick={submit}
-                disabled={(!value.trim() && files.length === 0) || busy}
-                title={t('开始学习（Enter）')}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-paper shadow-sm transition hover:bg-ink-strong disabled:pointer-events-none disabled:opacity-35"
-              >
-                {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={15} />}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 底部快捷键与拖拽说明 */}
-        <div className="mt-3 flex items-center justify-between text-[11px] text-ink-faint">
-          <span>{t('支持点击添加、拖入或粘贴文件作为目标参考')}</span>
-          <span>{t('Enter 开始 · Shift + Enter 换行')}</span>
-        </div>
-      </div>
     </div>
   )
 }

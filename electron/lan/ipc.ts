@@ -53,6 +53,10 @@ export function registerLanIpc(): void {
     return await lanServer.requestDeviceFile(options)
   })
 
+  ipcMain.handle('lan:cancel-requests', (_event, reason?: string) => {
+    lanServer.cancelPendingRequests(reason)
+  })
+
   ipcMain.handle('lan:open-file', async (_event, filePath: string) => {
     if (typeof filePath === 'string' && filePath) {
       await shell.openPath(filePath)

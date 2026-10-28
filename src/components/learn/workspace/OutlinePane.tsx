@@ -18,7 +18,8 @@ export interface OutlinePaneProps {
   active: boolean
   tabId: string
   store: LearnStore
-  node: KnowledgeNode
+  node?: KnowledgeNode | null
+  goalId: string
   onChangeStructure: (goalId: string, next: StructureMap) => void
   docs: NodeDocActions
   exams: ExamActions
@@ -30,6 +31,7 @@ export interface OutlinePaneProps {
 }
 
 function sameOutlinePane(prev: OutlinePaneProps, next: OutlinePaneProps): boolean {
+  if (prev.goalId !== next.goalId) return false
   // 激活状态变化（显示/隐藏切换）：必须重渲染以切换 className 和 hidden 属性
   if (prev.active !== next.active || prev.tabId !== next.tabId) return false
 
@@ -56,6 +58,7 @@ export const OutlinePane = memo(function OutlinePane({
   tabId: _tabId,
   store,
   node,
+  goalId,
   onChangeStructure,
   docs,
   exams,
@@ -73,6 +76,7 @@ export const OutlinePane = memo(function OutlinePane({
       <OutlineView
         store={store}
         node={node}
+        goalId={goalId}
         onChangeStructure={onChangeStructure}
         docs={docs}
         exams={exams}

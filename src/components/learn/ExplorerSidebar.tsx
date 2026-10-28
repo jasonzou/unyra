@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, memo } from 'react'
 import type { FavoriteRef, KnowledgeNode, LearnStore, TabRef, VideoResource } from '../../learn/types'
-import { nodeById } from '../../learn/graph'
+import { nodeById, normalizeKey } from '../../learn/graph'
 import { EXPLORER_WIDTH_MAX, EXPLORER_WIDTH_MIN } from '../../lib/appearance'
 import { userAbsPrefix } from '../../lib/storage'
 import Logo from '../Logo'
@@ -236,10 +236,27 @@ function ExplorerSidebarComponent({
     revealRow(asideRef.current, req.keys)
   }, [activeTab, pure, store, browseNonce, asideRef])
 
-  const roots = useMemo(
-    () => store.goals.map((g) => nodeById(store, g.rootNodeId)).filter((n): n is KnowledgeNode => !!n),
-    [store],
-  )
+  const roots = useMemo(() => {
+    return store.goals.map((g) => {
+      const root = g.rootNodeId ? nodeById(store, g.rootNodeId) : null
+      if (root) return root
+      const placeholder: KnowledgeNode = {
+        id: g.id,
+        title: g.title || g.question || t('未命名目标'),
+        key: normalizeKey(g.title || g.question || 'goal'),
+        description: '',
+        docs: { teaching: '' },
+        notes: [],
+        annotations: [],
+        status: 'learning',
+        origin: 'user',
+        goalId: g.id,
+        createdAt: g.createdAt,
+        updatedAt: g.updatedAt,
+      }
+      return placeholder
+    })
+  }, [store])
   const locals = store.localFiles ?? []
   const openMenu = (x: number, y: number, target: MenuTarget) => setMenu({ x, y, target })
 

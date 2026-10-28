@@ -45,8 +45,9 @@ import type {
   LearnTab,
   TabRef,
   WebTabMeta,
+  LearningGoal,
 } from '../../learn/types'
-import { emptyDocs, emptyOutline, notesOf } from '../../learn/types'
+import { notesOf } from '../../learn/types'
 import {
   favoriteKey,
   favoriteKeyOfTab,
@@ -115,7 +116,6 @@ import {
   resolveDisplayedConversation,
   nodeById,
   nodeStructure,
-  normalizeKey,
   removeExam,
   touchNode,
   updateMessageText,
@@ -150,7 +150,7 @@ import {
   readingOfGoal,
   withGoalReading,
 } from '../../learn/reading'
-import { makeConversation, makeGoal, nodeDocRel } from '../../learn/store'
+import { makeConversation, nodeDocRel } from '../../learn/store'
 import { loadAgentSettings, saveAgentSettings, subscribeAgentSettings } from '../../agent/settings'
 import { subscribeDrops } from '../../agent/contextDebug'
 import { personaOf } from '../../agent/persona'
@@ -281,8 +281,7 @@ import { publishReadingDay } from '../../lib/readingPulse'
 import { readRecentTabs, residentIds } from '../../learn/resident'
 import type { UiPointRequest } from '../../agent/tools'
 import type { AskAnswers } from '../../agent/tools'
-import type { Conversation, ConversationMessage, MessageFile, MessageImage, PendingFile, PendingImage } from '../../agent/types'
-import { transferPendingFiles, transferPendingImages } from '../../learn/agent/transfer'
+import type { Conversation, PendingFile, PendingImage } from '../../agent/types'
 import type { Props } from './workspace/constants'
 import { SRC_SCROLL_SUFFIX, SIDE_ANIM_MS } from './workspace/constants'
 import { ZONE_BOX } from './workspace/drag'
@@ -290,7 +289,8 @@ import { examDeleteWarn } from './workspace/labels'
 import { conceptKeysOf, emptyNote, examCopyOf, paneInfo, paneOf } from './workspace/panes'
 import { DocPane } from './workspace/DocPane'
 import { FocusDock, ReadingDock, ScheduleDock } from './workspace/docks'
-import { EmptyDoc, GoalInput, Topbar } from './workspace/chrome'
+import { EmptyDoc, Topbar } from './workspace/chrome'
+import { CreateGoalDialog } from './workspace/CreateGoalDialog'
 import { useSideColumns } from './workspace/useSideColumns'
 import SplitRow from './workspace/SplitRow'
 import { useDocSaveFlow } from './workspace/useDocSaveFlow'
@@ -414,7 +414,7 @@ export default function LearnWorkspace({
    * 在独立窗口里改了之后宿主这边的快照要能跟着变——订阅是唯一能拿到那次通知的口子。
    */
   const agentSettings = useSyncExternalStore(subscribeAgentSettings, loadAgentSettings)
-  const [creatingGoalBusy, setCreatingGoalBusy] = useState(false)
+  const [createGoalOpen, setCreateGoalOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   /*
@@ -521,7 +521,10 @@ export default function LearnWorkspace({
 
   const activeNodeId = store.activeNodeId
   const activeNode = activeNodeId ? (nodeById(store, activeNodeId) ?? null) : null
-  const activeGoal = activeNode ? (store.goals.find((g) => g.id === activeNode.goalId) ?? null) : null
+  const activeGoal =
+    store.goals.find((g) => g.id === store.activeGoalId) ??
+    store.goals.find((g) => g.id === activeNode?.goalId) ??
+    null
   const activeGoalId = activeGoal?.id ?? null
 
   /*
@@ -552,16 +555,14 @@ export default function LearnWorkspace({
    * 顶栏标题只在文档区确实存在目标根大纲时显示。activeNodeId 是导师上下文，关闭文档后
    * 可能仍然保留；如果不加这道门，文档区已经空了，Topbar 却会继续显示旧目标标题。
    */
-  const hasTargetOutline = useMemo(
-    () =>
-      activeGoal
-        ? tabs.some(
-            (t) => t.ref.kind === 'outline' && t.ref.nodeId === activeGoal.rootNodeId,
-          )
-        : false,
-    [activeGoal, tabs],
-  )
-  const topbarGoalQuestion = hasTargetOutline ? (activeGoal?.question ?? '') : ''
+  const hasTargetTabs = useMemo(() => {
+    if (!activeGoal) return false
+    const owners = store.docArea.tabOwners
+    const goalOfNode = (nodeId: string) =>
+      nodeById(store, nodeId)?.goalId ?? (store.goals.some((g) => g.id === nodeId) ? nodeId : null)
+    return goalTabsOf(owners, tabs, goalOfNode, activeGoal.id).length > 0
+  }, [activeGoal, store, tabs])
+  const topbarGoalQuestion = hasTargetTabs ? (activeGoal?.title || activeGoal?.question || '') : ''
 
   /*
    * 记忆的写入口（见 learn/memory）：**目标由调用方给**——工作记忆落进哪个目标，
@@ -766,7 +767,6 @@ export default function LearnWorkspace({
       ref.kind === 'schedule' ||
       ref.kind === 'mind' ||
       ref.kind === 'agentSettings' ||
-      ref.kind === 'newGoal' ||
       ref.kind === 'blank' ||
       ref.kind === 'draft'
     )
@@ -1083,21 +1083,10 @@ export default function LearnWorkspace({
    */
   const openSettingsRef = useRef<() => void>(() => {})
   const onOpenSettings = useCallback(() => openSettingsRef.current(), [])
-  /** 兼容外部调用（makeExamDeps / useConceptActions / useWorkflowStarters）：创建页现已改为 tab 页 */
-  const setCreating = useCallback(
-    (v: boolean) => {
-      if (v) {
-        openTabRef.current({ kind: 'newGoal' })
-      } else {
-        const s = getLatest()
-        const newGoalIds = allTabs(s.docArea).filter((t) => t.ref.kind === 'newGoal').map((t) => t.id)
-        if (newGoalIds.length > 0) {
-          set({ ...s, docArea: closeIds(s.docArea, newGoalIds) })
-        }
-      }
-    },
-    [getLatest, set],
-  )
+  /** 兼容外部调用（makeExamDeps / useConceptActions / useWorkflowStarters）：打开「新建目标」弹窗 */
+  const setCreating = useCallback((v: boolean) => {
+    setCreateGoalOpen(v)
+  }, [])
   /** browser.* 的宿主依赖槽：真正的值在 web 块里（openWebTab / webMeta 声明靠后），effect 里回填 */
   const browserDepsRef = useRef<BrowserDeps | null>(null)
 
@@ -1503,40 +1492,72 @@ export default function LearnWorkspace({
     (s: LearnStore, goalId: string, toOutline = false): LearnStore => {
       const goal = s.goals.find((x) => x.id === goalId)
       if (!goal) return s
-      const rootRef: TabRef & { kind: 'outline' } = { kind: 'outline', nodeId: goal.rootNodeId }
+      const anchorNodeId = goal.rootNodeId || goal.id
+      const rootRef: TabRef & { kind: 'outline' } = { kind: 'outline', nodeId: anchorNodeId, goalId: goal.id }
       const rootId = tabKey(rootRef)
       const owners = s.docArea.tabOwners ?? {}
-      // 已经开着（哪怕在别格）就沿用那一枚；没有才在焦点格里开。
-      // 开的是**组锚**（见 groups/tabs 的 openAnchorOutline）：上次关锚卸载掉的那组
-      // 页签若在停靠场里，随这一下原样归队
       const home = groupIdOfTab(s.docArea, rootId)
+      const goalOf = (id: string) => nodeById(s, id)?.goalId ?? (s.goals.some((g) => g.id === id) ? id : null)
       let docArea = home
         ? s.docArea
-        : openAnchorOutline(s.docArea, s.docArea.focus, rootRef, (id) => nodeById(s, id)?.goalId ?? null, Date.now())
+        : openAnchorOutline(s.docArea, s.docArea.focus, rootRef, goalOf, Date.now())
       if (toOutline) {
         const at = groupIdOfTab(docArea, rootId)
-        // activateIn 顺带把焦点挪到那一格：大纲在右格，就该看到右格那一张
         if (at) docArea = activateIn(docArea, at, rootId)
       } else {
-        /*
-         * 别处切过来的（点链接、改落点）只在「焦点格此刻看的不是本目标的东西」时才切：
-         * 若停在上一个目标的教学文档上不动，用户只会觉得「点了没反应」；
-         * 但同一个目标里点来点去（点教学文档、点笔记）时不该被打回大纲。
-         */
         const focusGroup = focusedGroup(docArea)
         const activeOwner = focusGroup?.active ? ownerOfTabId(s, focusGroup.active, owners) : goalId
         if (focusGroup && focusGroup.active !== rootId && activeOwner !== goalId) {
           docArea = activateIn(docArea, focusGroup.id, rootId)
         }
       }
-      /*
-       * 归属登记在**操作之后**的表上算：openAnchorOutline 归队停靠组时也登记了那几枚
-       * （见 restoreParkedTabs），拿操作前那份 claimed 盖回去会把它们全抹掉——
-       * 归队的页签从此在归属表里查无此人，切一次目标就跟着「没登记过的」到处飘。
-       */
       return { ...s, docArea: withOwners(docArea, claimTab(docArea.tabOwners, goalId, rootId)) }
     },
     [],
+  )
+
+  const retargetGoal = useCallback(
+    (s: LearnStore, goalId: string): LearnStore => {
+      const goal = s.goals.find((g) => g.id === goalId)
+      if (!goal) return s
+      const convId =
+        s.activeConversationId &&
+        s.conversations.some((c) => c.id === s.activeConversationId && c.goalId === goalId)
+          ? s.activeConversationId
+          : (resolveDisplayedConversation(s, goalId) ?? null)
+      const tabbed0 = upsertAgentTab(
+        s.agentTabs ?? [],
+        s.agentActiveTab ?? null,
+        { kind: 'goal', goalId, conversationId: convId },
+        true,
+      )
+      const tabbed = withAgentTabs(s, tabbed0.tabs, tabbed0.active)
+      const conv = tabbed.activeConversationId
+        ? tabbed.conversations.find((c) => c.id === tabbed.activeConversationId)
+        : undefined
+      const goalChanged = s.activeGoalId !== goalId
+      const withGoalTabs = (next: LearnStore): LearnStore =>
+        goalChanged ? goalTabGroup(next, goalId) : next
+      if (conv && conv.goalId === goalId) {
+        if (tabbed.activeGoalId === goalId && tabbed.activeNodeId === null) return withGoalTabs(tabbed)
+        return withGoalTabs({ ...tabbed, activeGoalId: goalId, activeNodeId: null })
+      }
+      const ensured = ensureConversation(tabbed, goalId)
+      const retabbed0 = upsertAgentTab(
+        ensured.store.agentTabs ?? [],
+        ensured.store.agentActiveTab ?? null,
+        { kind: 'goal', goalId, conversationId: ensured.conversationId },
+        true,
+      )
+      const retabbed = withAgentTabs(ensured.store, retabbed0.tabs, retabbed0.active)
+      return withGoalTabs({
+        ...retabbed,
+        activeGoalId: goalId,
+        activeNodeId: null,
+        activeConversationId: ensured.conversationId,
+      })
+    },
+    [goalTabGroup],
   )
 
   const retargetNode = useCallback(
@@ -1623,19 +1644,43 @@ export default function LearnWorkspace({
       const freeNote = ref.kind === 'note' ? noteEntityOf(s, ref) : null
       const initialNodeId = tabNodeId(ref)
       const initialNode = initialNodeId ? nodeById(s, initialNodeId) : undefined
-      if (initialNodeId && !initialNode && !freeNote) return
-      if (ref.kind === 'outline' && initialNode) {
-        const goal = s.goals.find((g) => g.id === initialNode.goalId)
-        if (goal && ref.nodeId !== goal.rootNodeId) {
-          setOutlineFocus({ nodeId: ref.nodeId, nonce: Date.now() })
-          ref = { kind: 'outline', nodeId: goal.rootNodeId }
+      const isGoalOutline =
+        ref.kind === 'outline' &&
+        s.goals.some(
+          (g) =>
+            g.id === initialNodeId ||
+            g.id === (ref as { goalId?: string }).goalId ||
+            g.rootNodeId === initialNodeId,
+        )
+      if (initialNodeId && !initialNode && !freeNote && !isGoalOutline) return
+      let targetGoalId: string | null = null
+      if (ref.kind === 'outline') {
+        const goal =
+          (initialNode ? s.goals.find((g) => g.id === initialNode.goalId) : null) ??
+          s.goals.find(
+            (g) =>
+              g.id === initialNodeId ||
+              g.id === (ref as { goalId?: string }).goalId ||
+              g.rootNodeId === initialNodeId,
+          )
+        if (goal) {
+          targetGoalId = goal.id
+          const anchorNodeId = goal.rootNodeId || goal.id
+          if (initialNode && ref.nodeId !== anchorNodeId) {
+            setOutlineFocus({ nodeId: ref.nodeId, nonce: Date.now() })
+          }
+          ref = { kind: 'outline', nodeId: anchorNodeId, goalId: goal.id }
         }
       }
       const nodeId = tabNodeId(ref)
       const node = nodeId ? nodeById(s, nodeId) : undefined
-      if (nodeId && !node && !freeNote) return
+      if (nodeId && !node && !freeNote && !isGoalOutline) return
       const wasActive = focusedTab(s.docArea)?.id === tabKey(ref)
-      const base = node ? touchNode(retargetNode(s, node.id), node.id) : s
+      const base = node
+        ? touchNode(retargetNode(s, node.id), node.id)
+        : isGoalOutline && targetGoalId
+          ? retargetGoal(s, targetGoalId)
+          : s
       /*
        * 绑定的视频页签：打开它 = 把它所属目标的页签组一并打开（goalTabGroup 会开组锚、
        * 让停靠的整组归队），视频页签落进焦点格并登记在该目标名下，目标随之切过去——
@@ -1657,7 +1702,7 @@ export default function LearnWorkspace({
            */
           const remembered = goalFocusByGoal.get(boundGoal.id)
           const focusId = remembered && nodeById(base, remembered) ? remembered : boundGoal.rootNodeId
-          const retargeted = retargetNode(base, focusId)
+          const retargeted = focusId ? retargetNode(base, focusId) : retargetGoal(base, boundGoal.id)
           const grouped = goalTabGroup(retargeted, boundGoal.id)
           const openedV = openInGroup(
             grouped.docArea,
@@ -1682,7 +1727,7 @@ export default function LearnWorkspace({
        */
       const startView: DocView | undefined =
         ref.kind === 'note' && emptyNote(s, makeTab(ref, 0)) ? 'source' : undefined
-      const goalOf = (id: string) => nodeById(base, id)?.goalId ?? null
+      const goalOf = (id: string) => nodeById(base, id)?.goalId ?? (base.goals.some((g) => g.id === id) ? id : null)
       /** 「目标 → 根节点」：组锚判据的第二跳（见 groups/tabs 的 isAnchorOutline） */
       const rootOf = (goalId: string) => base.goals.find((g) => g.id === goalId)?.rootNodeId ?? null
       /*
@@ -1706,12 +1751,12 @@ export default function LearnWorkspace({
        * 于是切到那个目标时它就出现在栏上、切走时跟着收起来——「所有这个目标下任何层级
        * 的文档打开都会被 tab 组记录」正是这一行。
        */
-      const owner = refOwner(ref, (id) => nodeById(base, id)?.goalId ?? null) ?? freeNote?.goalId ?? null
+      const owner = (ref as { goalId?: string }).goalId ?? refOwner(ref, goalOf) ?? freeNote?.goalId ?? null
       set({ ...base, docArea: withOwners(opened, claimTab(opened.tabOwners, owner, tabKey(ref))) })
       if (wasActive) requestReveal()
       setSidebarOpen(false)
     },
-    [getLatest, retargetNode, goalTabGroup, set],
+    [getLatest, retargetNode, retargetGoal, goalTabGroup, set],
   )
   // 回填放在 effect 里（渲染期不许写 ref）：openTab 的身份随依赖变，每次渲染后换成最新的一份
   useEffect(() => {
@@ -1722,17 +1767,7 @@ export default function LearnWorkspace({
   /**
    * 目标库为空（初次使用或删光所有目标）且没有打开任何页签时，自动开启「新建目标」页签。
    */
-  const initialGoalChecked = useRef(false)
-  useEffect(() => {
-    if (!initialGoalChecked.current) {
-      initialGoalChecked.current = true
-      if (store.goals.length === 0 && allTabs(store.docArea).length === 0) {
-        queueMicrotask(() => {
-          openTab({ kind: 'newGoal' })
-        })
-      }
-    }
-  }, [store.goals.length, store.docArea, openTab])
+
 
   /**
    * 存活的 tab 组（顶栏目标名的下拉菜单，见 Topbar 的 tabGroups）：某个目标名下还有
@@ -1742,11 +1777,11 @@ export default function LearnWorkspace({
   const aliveGoalTabGroups = useMemo(() => {
     const owners = store.docArea.tabOwners
     const all = allStoredTabs(store.docArea)
-    const goalOfNode = (nodeId: string) => nodeById(store, nodeId)?.goalId ?? null
+    const goalOfNode = (nodeId: string) => nodeById(store, nodeId)?.goalId ?? (store.goals.some((g) => g.id === nodeId) ? nodeId : null)
     return store.goals
       .map((g) => ({
         goalId: g.id,
-        title: g.question,
+        title: g.title || g.question,
         count: goalTabsOf(owners, all, goalOfNode, g.id).length,
         current: g.id === store.activeGoalId,
       }))
@@ -1765,12 +1800,13 @@ export default function LearnWorkspace({
       const s = getLatest()
       const goal = s.goals.find((g) => g.id === goalId)
       if (!goal) return
-      const base = touchNode(retargetNode(s, goal.rootNodeId), goal.rootNodeId)
+      const node = goal.rootNodeId ? nodeById(s, goal.rootNodeId) : null
+      const base = node ? touchNode(retargetNode(s, node.id), node.id) : retargetGoal(s, goalId)
       const next = goalTabGroup(base, goalId)
       set(next)
       if (focusedTab(s.docArea)?.id === focusedTab(next.docArea)?.id) requestReveal()
     },
-    [getLatest, retargetNode, goalTabGroup, set],
+    [getLatest, retargetNode, retargetGoal, goalTabGroup, set],
   )
 
   /**
@@ -1823,17 +1859,21 @@ export default function LearnWorkspace({
    *    目标自己的页签在这个目标下都还在，切回来时原样可见。
    */
   const openGoalGroup = useCallback(
-    (nodeId: string) => {
+    (targetId: string) => {
       const s = getLatest()
-      const node = nodeById(s, nodeId)
-      if (!node) return
-      const base = touchNode(retargetNode(s, node.id), node.id)
-      const next = goalTabGroup(base, node.goalId, true)
+      const goal =
+        s.goals.find((g) => g.id === targetId) ??
+        (nodeById(s, targetId)?.goalId ? s.goals.find((g) => g.id === nodeById(s, targetId)!.goalId) : null)
+      if (!goal) return
+      const goalId = goal.id
+      const node = nodeById(s, targetId) ?? (goal.rootNodeId ? nodeById(s, goal.rootNodeId) : null)
+      const base = node ? touchNode(retargetNode(s, node.id), node.id) : retargetGoal(s, goalId)
+      const next = goalTabGroup(base, goalId, true)
       set(next)
       if (focusedTab(s.docArea)?.id === focusedTab(next.docArea)?.id) requestReveal()
       setSidebarOpen(false)
     },
-    [getLatest, retargetNode, goalTabGroup, set],
+    [getLatest, retargetNode, retargetGoal, goalTabGroup, set],
   )
 
   /**
@@ -2582,9 +2622,9 @@ export default function LearnWorkspace({
     pickLocal,
   } = useLibraryActions({ getLatest, set, flush, onToast, openTab, pushUndo })
 
-  /** 打开「新建目标」页 */
+  /** 打开「新建目标」弹窗 */
   const startCreatingGoal = () => {
-    openTab({ kind: 'newGoal' })
+    setCreateGoalOpen(true)
     setSidebarOpen(false)
   }
 
@@ -2702,134 +2742,72 @@ export default function LearnWorkspace({
 
   /* ---------- 新建学习目标 ---------- */
 
-  const startGoal = async (raw: string, files?: PendingFile[]) => {
-    const q = raw.trim()
-    if (!q && (!files || !files.length)) return
-    // 未配置 API Key 就不创建目标：没有超级导师，目标只剩一个空节点，
-    // 既无大纲也开不了讲。这里现读一次设置（而非用渲染时的 hasKey），
-    // 保证用户刚在设置里填完 Key 回来点「开始学习」能立刻通过。
-    if (!hasApiKey()) {
-      onToast(t('创建失败：请先配置「{0}」的 API Key', activeLabel()))
-      onOpenSettings()
-      return
-    }
+  const createGoal = useCallback(
+    (name: string) => {
+      const trimmed = name.trim()
+      if (!trimmed) return
 
-    setCreatingGoalBusy(true)
-    try {
       const goalId = crypto.randomUUID()
       const now = Date.now()
 
-      const effectiveTitle = q || (files && files[0] ? files[0].name.replace(/\.[^.]+$/, '') : t('未命名目标'))
-      /**
-       * 根节点先拿用户原话当临时标题占位，立刻建出来；正式标题与描述都交给 Agent
-       * （见内置工作流「学习大纲」的「三件事」，learn/workflows）。
-       *
-       * 这样点「开始学习」当场就有节点、有侧栏条目、有对话开始跑，用户马上看到东西在动；
-       * 旧流程要先等一次「生成描述」的模型往返，那几秒里界面是空的。标题随后会被
-       * 改标题（节点 editContent 的 title）改掉，数据目录名跟着变（改标题＝目录改名，早已支持）。
-       */
-      const rootNode: KnowledgeNode = {
-        id: crypto.randomUUID(),
-        title: effectiveTitle,
-        key: normalizeKey(effectiveTitle),
-        description: '',
-        docs: emptyDocs(),
-        notes: [],
-        annotations: [],
-        status: 'learning',
-        origin: 'user',
-        goalId,
-        // 大纲与教学文档创建时同时成形（与 addNode 的脚手架同一口径；根节点是手工建的，这里补上）。
-        // 建不建树由导师在「学习大纲」工作流里判断（见 learn/workflows），这一层不做取舍：
-        // 脚手架先备好，判成任务型时它保持空白即可。
-        outline: { ...emptyOutline(), updatedAt: now },
+      const goal: LearningGoal = {
+        id: goalId,
+        title: trimmed,
+        question: trimmed,
+        rootNodeId: '',
         createdAt: now,
         updatedAt: now,
       }
-      const goal = makeGoal(rootNode.id, effectiveTitle, goalId)
 
-      // 先把目标与根节点注入 store，以便随后 transferPendingFiles / transferPendingImages
-      // 能正常解析出目标的数据目录（docs/{目标}/static/），避免找不到目录导致附件转存失败
-      const curStore = getLatest()
-      const baseStore: LearnStore = {
-        ...curStore,
-        nodes: [...curStore.nodes, rootNode],
-        goals: [goal, ...curStore.goals],
-      }
-      set(baseStore)
-
-      // 存在附件时转存进新目标的资源库，并备好消息中的 MessageFile / MessageImage
-      const imageFiles: PendingImage[] = (files ?? [])
-        .filter((x) => x.image)
-        .map((x) => ({ id: x.id, name: x.name, bytes: x.bytes, file: x.image as File, previewUrl: '' }))
-      const attachedImages = imageFiles.length
-        ? await transferPendingImages(getLatest, set, goalId, imageFiles)
-        : { images: [] as MessageImage[] }
-      if (attachedImages.error) onToast(attachedImages.error)
-
-      const docFiles = (files ?? []).filter((x) => !x.image)
-      const attachedFiles = docFiles.length
-        ? await transferPendingFiles(getLatest, set, goalId, docFiles)
-        : { files: [] as MessageFile[] }
-      if (attachedFiles.error) onToast(attachedFiles.error)
-
-      // 将用户的问题与上传的附件记录在首条用户消息中，回显给用户并在模型上下文生效
-      const initialUserMsg: ConversationMessage = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        parts: [{ type: 'text', text: q || t('请参考上传的附件资料，为我制定体系化的阶段目标与学习大纲。') }],
-        ts: now,
-        ...(attachedImages.images.length ? { images: attachedImages.images } : {}),
-        ...(attachedFiles.files.length ? { files: attachedFiles.files } : {}),
-      }
-
+      // 创建一个空的 Agent 会话（无首发消息，不主动调用模型）
       const conversation: Conversation = {
         ...makeConversation(goalId),
-        messages: [initialUserMsg],
+        messages: [],
         updatedAt: now,
       }
 
-      const latest = getLatest()
-      // agent 栏的导师页签当场开好并置前：这一轮大纲工作流的交付物要有一个看得见的地方
+      const curStore = getLatest()
+
+      // 打开 Agent 导师页签置前
       const tab0 = upsertAgentTab(
-        latest.agentTabs ?? [],
-        latest.agentActiveTab ?? null,
+        curStore.agentTabs ?? [],
+        curStore.agentActiveTab ?? null,
         { kind: 'goal', goalId, conversationId: conversation.id },
         true,
       )
-      // 新目标当场把**大纲页**开成页签：学习型这一轮的交付物就是它（「学习大纲」工作流往里写），
-      // 用户点完「开始学习」就该看见路线逐条长出来，教学文档从大纲页里点进去；
-      // 判成任务型时导师会 api.ui.point() 把根节点文档切到前面（指令里要求先打开再写）。
-      // 两种情况都要把目标创建页签（ref.kind === 'newGoal'）自动关掉。
-      const rootRef: TabRef & { kind: 'outline' } = { kind: 'outline', nodeId: rootNode.id }
-      const newGoalTabIds = allTabs(latest.docArea).filter((t) => t.ref.kind === 'newGoal').map((t) => t.id)
-      const docAreaAfterClose = newGoalTabIds.length > 0 ? closeIds(latest.docArea, newGoalTabIds) : latest.docArea
-      const next: LearnStore = {
-        ...latest,
-        ...withAgentTabs(latest, tab0.tabs, tab0.active),
-        conversations: [...latest.conversations, conversation],
-        activeGoalId: goalId,
-        activeNodeId: rootNode.id,
-        activeConversationId: conversation.id,
-        // 开的是**组锚**（见 groups/tabs 的 openAnchorOutline）：新目标没有停靠组，
-        // 走这条路的实际作用是「开大纲 + 当场登记归属」——归属漏登记的话，
-        // 用户一关大纲它就会在归属表里查无此人，切目标时到处飘
-        docArea: openAnchorOutline(docAreaAfterClose, docAreaAfterClose.focus, rootRef, (id) => nodeById(latest, id)?.goalId ?? null, now),
-      }
-      set(next)
-      setSidebarOpen(false)
 
-      // Key 已在上面校验过，此处可直接进入 AI 流程；将附件同时透传给大纲生成工作流
-      agent.autoTeach(
-        { goalId, nodeId: rootNode.id, conversationId: conversation.id },
-        true,
-        undefined,
-        { images: imageFiles, files: docFiles },
+      // 结构页签（节点宇宙），以目标 id 为锚
+      const rootRef: TabRef & { kind: 'outline' } = { kind: 'outline', nodeId: goalId, goalId }
+      const rootId = tabKey(rootRef)
+
+      const docAreaWithAnchor = openAnchorOutline(
+        curStore.docArea,
+        curStore.docArea.focus,
+        rootRef,
+        (id) => (id === goalId ? goalId : (nodeById(curStore, id)?.goalId ?? null)),
+        now,
       )
-    } finally {
-      setCreatingGoalBusy(false)
-    }
-  }
+
+      const docArea = activateIn(docAreaWithAnchor, docAreaWithAnchor.focus, rootId)
+      const claimedOwners = claimTab(docArea.tabOwners, goalId, rootId)
+
+      const nextStore: LearnStore = {
+        ...curStore,
+        ...withAgentTabs(curStore, tab0.tabs, tab0.active),
+        goals: [goal, ...curStore.goals],
+        conversations: [...curStore.conversations, conversation],
+        activeGoalId: goalId,
+        activeNodeId: null,
+        activeConversationId: conversation.id,
+        docArea: withOwners(docArea, claimedOwners),
+      }
+
+      set(nextStore)
+      setSidebarOpen(false)
+      onToast(t('已创建目标「{0}」，可在节点宇宙中自由添加内容', trimmed))
+    },
+    [getLatest, set, onToast],
+  )
 
   /*
    * 选区上的动作（学习 / 了解 / 注解 / 询问）整体在 useConceptActions（workspace/），
@@ -2868,13 +2846,18 @@ export default function LearnWorkspace({
      * 没配 Key 时**不吞掉这次交卷**：卷子照样收下、成绩照旧是系统的客观分，
      * 只是判分与讲解要等用户把 Key 填上——那时再点一次「阅卷」即可（列表里有入口）。
      */
-    onSubmitted: () => {
+    onSubmitted: (examId: string, attemptId: string) => {
       if (!hasKey) {
         onToast(t('已交卷。判分与错题讲解需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
         onOpenSettings()
         return
       }
-      agent.runWorkflow('exam-grade')
+      const st = getLatest()
+      const ex = st.exams.find((e) => e.id === examId)
+      agent.runWorkflow('exam-grade', {
+        nodeId: ex?.nodeId,
+        params: { target: ex?.nodeId ?? '', examId, attemptId },
+      })
     },
   })
 
@@ -3449,7 +3432,7 @@ export default function LearnWorkspace({
         点击时跑一次无所谓）。解析到了就打开它的教学文档。
       */
       if (p.type === 'doc' && p.path) {
-        const wanted = p.path.replace(/\/(教学|讲义|笔记|大纲|试卷)$/, '')
+        const wanted = p.path.replace(/\/(教学|讲义|笔记|大纲|试卷|考试|试卷记录|作答记录)$/, '')
         const norm = (v: string): string => v.replace(/\\/g, '/').trim().replace(/\/+$/, '')
         // 先按「节点树路径原样」对一次：api.node.list 回的就是这种，模型多半直接抄
         const exact = s.nodes.find(
@@ -3467,6 +3450,14 @@ export default function LearnWorkspace({
             return
           }
         }
+      }
+      if (p.type === 'attempt') {
+        onToast(t('这次考试记录已经不在了'))
+        return
+      }
+      if (p.type === 'exam') {
+        onToast(t('这场试卷已经不在了'))
+        return
       }
       onToast(t('这条引用对应的文档已经不在了'))
       return
@@ -4433,10 +4424,10 @@ export default function LearnWorkspace({
   )
 
   const openNewGoalInPlace = useCallback(
-    (groupId: string, currentTabId: string) => {
-      openInPlace(groupId, currentTabId, { kind: 'newGoal' })
+    (_groupId: string, _currentTabId: string) => {
+      setCreateGoalOpen(true)
     },
-    [openInPlace],
+    [],
   )
 
   /**
@@ -4517,7 +4508,9 @@ export default function LearnWorkspace({
     /** 这一格挂着的视频页签（含创建态）：VideoTabLayer 常驻，切页签只藏不卸（用户定的 keepalive） */
     const gVideoTabs = (g.group?.tabs ?? []).filter((x): x is VideoTab => x.ref.kind === 'video')
     /** 这一格挂着的大纲页签：keepalive 常驻，切页签只藏不卸，切回时保留导图相机视角与选中状态 */
-    const gOutlineTabs = (g.group?.tabs ?? []).filter((x) => x.ref.kind === 'outline')
+    const gOutlineTabs = (g.group?.tabs ?? []).filter(
+      (x): x is LearnTab & { ref: { kind: 'outline'; nodeId: string; goalId?: string } } => x.ref.kind === 'outline',
+    )
     /** 这一格的正文层：切页签的过场、查找条与数据属性都挂在它身上 */
     const boxProps = {
       'data-doc-area': groupId,
@@ -4724,6 +4717,7 @@ export default function LearnWorkspace({
                 onPickLocal={() => void pickLocalInPlace(groupId, gTab.id)}
                 onOpenWeb={isWeb() ? undefined : () => openWebInPlace(groupId, gTab.id)}
                 onNewGoal={() => openNewGoalInPlace(groupId, gTab.id)}
+                hasGoals={(store.goals ?? []).length > 0}
                 // 收藏 / 最近打开两栏（原侧栏的「最近打开」区挪到这里，见 EmptyDoc）
                 favorites={store.favorites ?? []}
                 favoriteTitleOf={favoriteTitleOf}
@@ -4731,16 +4725,7 @@ export default function LearnWorkspace({
                 recents={blankRecents}
                 onOpenRecent={openRecent}
               />
-            ) : gTab?.ref.kind === 'newGoal' ? (
-              /*
-                目标创建页：创建新学习目标，创建完成后自动关闭。
-              */
-              <GoalInput
-                busy={creatingGoalBusy}
-                hasGoals={store.goals.length > 0}
-                onModelChanged={() => setSettingsEpoch((n) => n + 1)}
-                onSubmit={startGoal}
-              />
+
             ) : gTab?.ref.kind === 'schedule' ? (
               /*
                 日程安排页：用户级的一张提醒清单（见 learn/schedule）。全局一枚页签，
@@ -4999,9 +4984,11 @@ export default function LearnWorkspace({
               ) : null /* 预览那一份由下面的常驻列表渲染（见 DocPane） */
             ) : (
               <EmptyDoc
+                onNewFile={() => openNewFileInPlace(groupId, gTabId)}
                 onPickLocal={() => void pickLocalInPlace(groupId, gTabId)}
                 onOpenWeb={isWeb() ? undefined : () => openWebInPlace(groupId, gTabId)}
                 onNewGoal={() => openNewGoalInPlace(groupId, gTabId)}
+                hasGoals={(store.goals ?? []).length > 0}
                 favorites={store.favorites ?? []}
                 favoriteTitleOf={favoriteTitleOf}
                 onOpenFavorite={openFavorite}
@@ -5053,8 +5040,9 @@ export default function LearnWorkspace({
               切去其它页签时仅藏不卸，切回时零延迟复原导图相机与选中状态。
             */}
             {gOutlineTabs.map((tab) => {
+              const goal = store.goals.find((g) => g.id === tab.ref.nodeId || g.rootNodeId === tab.ref.nodeId)
               const oNode = tab.ref.kind === 'outline' ? nodeById(store, tab.ref.nodeId) : null
-              if (!oNode) return null
+              if (!oNode && !goal) return null
               const isActive = gTab?.id === tab.id
               return (
                 <OutlinePane
@@ -5062,7 +5050,8 @@ export default function LearnWorkspace({
                   tabId={tab.id}
                   active={isActive}
                   store={store}
-                  node={oNode}
+                  node={oNode ?? undefined}
+                  goalId={goal?.id ?? oNode?.goalId ?? ''}
                   onChangeStructure={updateStructure}
                   docs={explorerDocs}
                   exams={explorerExams}
@@ -5227,7 +5216,6 @@ export default function LearnWorkspace({
             gTab.ref.kind !== 'mind' &&
             gTab.ref.kind !== 'agentSettings' &&
             gTab.ref.kind !== 'outline' &&
-            gTab.ref.kind !== 'newGoal' &&
             gTab.ref.kind !== 'draft' &&
             // 视频学习页（实验）也不画：大纲/视图切换对播放器没有意义，纯净阅读
             // 仍可用 F11（用户定的：这一页右上角不要按钮组）
@@ -5358,7 +5346,10 @@ export default function LearnWorkspace({
   const explorerDocs = useMemo<NodeDocActions>(
     () => ({
       onOpenTeach: (nodeId) => selectNode(nodeId),
-      onOpenOutline: (nodeId) => openTab({ kind: 'outline', nodeId }),
+      onOpenOutline: (nodeId) => {
+        const g = store.goals.find((x) => x.id === nodeId || x.rootNodeId === nodeId)
+        openTab({ kind: 'outline', nodeId, ...(g ? { goalId: g.id } : {}) })
+      },
       onNewNote: (nodeId) => createNodeNote(nodeId),
       onNewProject: (nodeId) => newProject(nodeId),
       onNewExam: (nodeId) => newExam(nodeId),
@@ -5874,6 +5865,13 @@ export default function LearnWorkspace({
           onCancel={() => setGuardFuse(null)}
         />
       )}
+
+      {/* 新建目标弹窗 */}
+      <CreateGoalDialog
+        open={createGoalOpen}
+        onClose={() => setCreateGoalOpen(false)}
+        onCreate={createGoal}
+      />
 
       {/* 节点宇宙浮层：Tab 弹出/收回（见上面的 toggleStructOverlay）；画布与大纲页签同一套通道 */}
       {structOverlayGoal && (

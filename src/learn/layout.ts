@@ -55,9 +55,32 @@ export function nodeLayout(store: LearnStore): Map<string, NodeLayout> {
   }
 
   for (const goal of store.goals) {
-    const root = byId.get(goal.rootNodeId)
-    if (!root) continue
-    const goalSeg = sanitizeSegment(root.title || goal.question)
+    const root = goal.rootNodeId ? byId.get(goal.rootNodeId) : undefined
+    const goalSeg = sanitizeSegment(root?.title || goal.title || goal.question || '未命名目标')
+    const goalNodes = store.nodes.filter((n) => n.goalId === goal.id)
+    if (!goalNodes.length) continue
+
+    if (!root) {
+      const used = new Set<string>([
+        goalSeg.toLowerCase(),
+        `${goalSeg.toLowerCase()}.node.json`,
+        'chat.json',
+        'goal.json',
+        'tmp.json',
+        'reading.json',
+        'essay.json',
+        'mind.json',
+        'method.json',
+        'workflow.json',
+        'structure.json',
+        ...ASSET_DIRS,
+      ])
+      for (const node of goalNodes) {
+        const seg = allocate(node.title, used)
+        layout.set(node.id, { dir: [goalSeg, seg], base: seg, goalId: goal.id })
+      }
+      continue
+    }
 
     // 从根沿前置边 BFS：先到先得，多父节点取最短的那条路径
     const parentOf = new Map<string, string>()

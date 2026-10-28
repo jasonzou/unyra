@@ -16,9 +16,51 @@ export type {
   LanUploadedFile,
 }
 
+type LanQrModalCallback = (open: boolean) => void
+const lanModalListeners = new Set<LanQrModalCallback>()
+const lanModalCancelCallbacks = new Set<() => void>()
+
+/**
+ * 弹出局域网扫码连接窗口。
+ * @param onCancel 若用户主动关闭弹窗（未扫码连接）时的回调
+ */
+export function openLanQrModal(onCancel?: () => void): void {
+  if (onCancel) lanModalCancelCallbacks.add(onCancel)
+  for (const cb of lanModalListeners) {
+    try { cb(true) } catch {}
+  }
+}
+
+/**
+ * 关闭局域网扫码连接窗口。
+ * @param isUserCancel 是否为用户主动点击关闭（若为主动关闭且有等待连接的请求，将触发取消）
+ */
+export function closeLanQrModal(isUserCancel = false): void {
+  if (isUserCancel) {
+    for (const cb of lanModalCancelCallbacks) {
+      try { cb() } catch {}
+    }
+  }
+  lanModalCancelCallbacks.clear()
+  for (const cb of lanModalListeners) {
+    try { cb(false) } catch {}
+  }
+}
+
+/**
+ * 订阅扫码弹窗的打开/关闭事件（用于驱动全局弹窗渲染）
+ */
+export function subscribeLanQrModal(cb: LanQrModalCallback): () => void {
+  lanModalListeners.add(cb)
+  return () => {
+    lanModalListeners.delete(cb)
+  }
+}
+
 /**
  * 软件内部核心 API：向连接的局域网移动设备发布获取文件的意图。
- * 手机端收到意图提示并完成文件上传后，该 Promise 返回上传的文件信息。
+ * 如果调用时没有建立连接，自动启动服务并弹出二维码窗口；
+ * 手机扫码连接成功后，二维码窗口自动关闭，无缝继续发送意图并等待回传文件。
  *
  * @example
  * ```ts
@@ -35,7 +77,29 @@ export async function requestDeviceFile(
   if (!bridge) {
     return { ok: false, error: '当前环境不支持局域网服务' }
   }
-  return await bridge.requestDeviceFile(options)
+
+  // 1. 确保局域网服务已启动
+  let currentStatus = await bridge.getStatus()
+  if (!currentStatus || !currentStatus.running) {
+    currentStatus = await bridge.startServer()
+  }
+
+  // 2. 检查是否有在线移动设备
+  const hasConnectedDevice = !!(currentStatus && currentStatus.devices && currentStatus.devices.length > 0)
+
+  if (!hasConnectedDevice) {
+    // 未连接移动设备：先保留请求并弹出二维码窗口，若用户主动关闭弹窗则取消保留的请求
+    openLanQrModal(() => {
+      void bridge.cancelRequests?.('用户关闭了扫码连接窗口')
+    })
+  }
+
+  // 无论是已有连接设备，还是未连接时保留请求，统一通过 waitForDevice: true 提交给服务端；
+  // 服务端在无设备时会保留此请求；移动端设备扫码连接后，服务端会自动将保留的请求发出！
+  return await bridge.requestDeviceFile({
+    ...options,
+    waitForDevice: true,
+  })
 }
 
 export async function startLanServer(port?: number): Promise<LanServerStatus | null> {

@@ -195,7 +195,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
    * ownerNodeId 收两种：文档 id 或 `o:` 大纲 uuid（工作流的 target 参数原样带着，
    * 会话一律锚在一个真实文档上——游离大纲那层锚到目标的根文档）。
    */
-  const startPrereqOutline = (nodeId?: string) => {
+  const startGenerateOutline = (nodeId?: string) => {
     if (!hasKey) {
       onToast(t('生成大纲需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
       onOpenSettings()
@@ -206,7 +206,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
       if (found?.kind === 'free') {
         const rootId = getLatest().goals.find((g) => g.id === found.entity.goalId)?.rootNodeId ?? activeNode?.id
         if (!rootId) return
-        agent.runWorkflow('prereq-outline', { nodeId: rootId, params: { target: nodeId } })
+        agent.runWorkflow('outline', { nodeId: rootId, params: { target: nodeId } })
         onToast(t('已请导师规划「{0}」这一层的大纲，大纲页会随写入更新', found.entity.title))
         return
       }
@@ -215,9 +215,10 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     }
     const target = nodeId ? nodeById(getLatest(), nodeId) : activeNode
     if (!target) return
-    agent.runWorkflow('prereq-outline', { nodeId: target.id, params: { target: target.id } })
-    onToast(t('已请导师规划「{0}」的前置知识大纲，大纲页会随写入更新', target.title))
+    agent.runWorkflow('outline', { nodeId: target.id, params: { target: target.id } })
+    onToast(t('已请导师规划「{0}」的大纲，大纲页会随写入更新', target.title))
   }
+  const startPrereqOutline = startGenerateOutline
 
   /**
    * 视频总览：为绑定的视频规划语义分类结构并生成总览文档（挂在视频节点子级）。
@@ -323,6 +324,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     startSuperLab,
     startBrowserUse,
     startOutline,
+    startGenerateOutline,
     startPrereqOutline,
     startVideoOverview,
     workflowRows,

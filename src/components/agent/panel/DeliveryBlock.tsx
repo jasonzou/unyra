@@ -48,7 +48,7 @@ function hostOf(url: string): string {
  * 自己拼「/教学」「/讲义」。这类后缀不是路径的一部分，剥掉再找节点；规则已经写进
  * 提示词，新数据不该再出现。
  */
-const DOC_KIND_SUFFIX = /\/(教学|讲义|笔记|大纲|试卷)$/
+const DOC_KIND_SUFFIX = /\/(教学|讲义|笔记|大纲|试卷|考试|试卷记录|作答记录)$/
 
 function openDelivered(path: string, onOpenFile?: (pathOrRel: string, title?: string) => void) {
   const p = path.replace(/\\/g, '/').trim()
@@ -56,6 +56,11 @@ function openDelivered(path: string, onOpenFile?: (pathOrRel: string, title?: st
   const last = p.split('/').pop() ?? ''
   if (/\.[a-z0-9]{1,8}$/i.test(last)) {
     onOpenFile?.(p, p)
+    return
+  }
+  const isExam = /\/(试卷|考试|试卷记录|作答记录)$/.test(p)
+  if (isExam) {
+    openChipRef({ type: 'attempt', path: p.replace(DOC_KIND_SUFFIX, '') })
     return
   }
   openChipRef({ type: 'doc', path: p.replace(DOC_KIND_SUFFIX, '') })

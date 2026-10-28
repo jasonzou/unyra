@@ -34,7 +34,8 @@ export type CanvasChannelProps = Pick<
 export interface OutlineViewProps {
   store: LearnStore
   /** 这一页属于哪个节点（页签绑定的那个）；图本身按 goalId 取 */
-  node: KnowledgeNode
+  node?: KnowledgeNode | null
+  goalId?: string
   /** 坐标表变了：上层写进 store 并落盘（goalId 由这里补上，调用方只认坐标表） */
   onChangeStructure: (goalId: string, next: StructureMap) => void
   /** 文档那一侧的动作（点标题打开教学文档 / 笔记 / 超级文档） */
@@ -50,6 +51,7 @@ export interface OutlineViewProps {
 }
 
 function sameOutlineView(prev: OutlineViewProps, next: OutlineViewProps): boolean {
+  if (prev.goalId !== next.goalId) return false
   if (prev.node !== next.node) return false
   if (prev.store.structure !== next.store.structure) return false
   if (prev.store.nodes !== next.store.nodes || prev.store.exams !== next.store.exams) return false
@@ -65,6 +67,7 @@ function sameOutlineView(prev: OutlineViewProps, next: OutlineViewProps): boolea
 export default memo(function OutlineView({
   store,
   node,
+  goalId: propGoalId,
   onChangeStructure,
   docs,
   exams,
@@ -73,7 +76,7 @@ export default memo(function OutlineView({
   onFocusHandled,
   channel,
 }: OutlineViewProps) {
-  const goalId = node.goalId
+  const goalId = propGoalId || node?.goalId || ''
   const change = useCallback((next: StructureMap) => onChangeStructure(goalId, next), [onChangeStructure, goalId])
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-paper dark:bg-card/30">

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import LanButton from '../lan/LanButton'
 import LanConnectDialog from '../lan/LanConnectDialog'
+import { subscribeLanQrModal, openLanQrModal } from '../../lib/lanSync'
 import ImageLightboxModal from './ImageLightboxModal'
 import UnifiedHandwrittenSheetsCard from './UnifiedHandwrittenSheetsCard'
 import { native } from '../../lib/native'
@@ -86,6 +87,14 @@ export default function ExamWindow() {
   const [localStart, setLocalStart] = useState<number | null>(null)
   const [stripOpen, setStripOpen] = useState(false)
   const [lanOpen, setLanOpen] = useState(false)
+
+  // 监听局域网互联弹窗（API 意图自动弹出或顶栏按钮）
+  useEffect(() => {
+    return subscribeLanQrModal((open) => {
+      setLanOpen(open)
+    })
+  }, [])
+
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [handwrittenImages, setHandwrittenImages] = useState<string[]>([])
   const sheetsRef = useRef<HTMLDivElement | null>(null)
@@ -416,7 +425,7 @@ export default function ExamWindow() {
                   </span>
                 )}
               </button>
-              <LanButton onOpen={() => setLanOpen(true)} />
+              <LanButton onOpen={() => openLanQrModal()} />
               <div className="flex items-center gap-1 rounded border border-line bg-paper/60 px-2 py-0.5 text-[11px] tabular-nums text-ink-soft">
                 <span>{t('已答 {0}/{1}', answeredCount, questions.length)}</span>
                 <span className="text-[10px] text-ink-faint">({answeredPercent}%)</span>
@@ -489,7 +498,7 @@ export default function ExamWindow() {
                 onUpdateImage={updateHandwrittenImage}
                 onRemoveImage={removeHandwrittenImage}
                 onPreviewImage={setPreviewImage}
-                onOpenLan={() => setLanOpen(true)}
+                onOpenLan={() => openLanQrModal()}
               />
               {questions.map((q, i) => (
                 <QuestionBlock
@@ -587,7 +596,10 @@ export default function ExamWindow() {
       )}
 
       {/* 确认弹窗 */}
-      <LanConnectDialog open={lanOpen} onClose={() => setLanOpen(false)} />
+
+      {/* 局域网扫码直连弹窗 */}
+      {lanOpen && <LanConnectDialog open={lanOpen} onClose={() => setLanOpen(false)} />}
+
       <ImageLightboxModal
         src={previewImage}
         title={t('手写答卷原图预览')}

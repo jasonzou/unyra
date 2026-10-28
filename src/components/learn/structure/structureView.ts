@@ -186,7 +186,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
   const docs = store.nodes.filter((n) => n.goalId === goalId)
   const positions: Record<string, CardPos> = saved?.positions ?? {}
 
-  if (!goal || !docs.length) return { cards: [], edges: [], heightOf: defaultHeight }
+  if (!goal) return { cards: [], edges: [], heightOf: defaultHeight }
 
   /* 1. 卡片清单（先不带坐标）与连线 */
 
@@ -596,7 +596,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
   }
   // 读图起点 = 根文档（入口徽章在它身上）；没连进树的（游离文档——摘了线或删了上游）
   // 也要出现在画布上：按各自深度补铺
-  const rootPending = docPending.get(goal.rootNodeId)
+  const rootPending = goal.rootNodeId ? docPending.get(goal.rootNodeId) : undefined
   if (rootPending) place(rootPending)
   for (const p of byUuid.values()) {
     if (!p.placed) place(p)

@@ -124,26 +124,6 @@ export function createWorkflowOps(deps: AgentOpsDeps): WorkflowOps {
       if (!hit) {
         return { error: '没有叫「' + (ref || '（空）') + '」的工作流。可调 api.wf.list() 核对 id 或名字，或查看当前目标的 workflow.json。' }
       }
-      /*
-       * 「学习大纲」的重复规划守卫：它只在目标首次创建时该跑一次（触发方是创建流程）。
-       * 模型在新对话里看不到旧对话里的那次规划（指令消息留在原地，压缩后还会被折掉），
-       * 容易得出「目标还没规划」的结论把它再调一遍——那会把学习者已经摆好的结构
-       * 推倒重来。根大纲已存在时不再排队，说明现状并指给模型正确的调整动作。
-       */
-      if (hit.id === 'goal-outline') {
-        const s = store0()
-        const g = s.goals.find((x) => x.id === goal())
-        const root = g ? s.nodes.find((n) => n.id === g.rootNodeId) : null
-        if (root?.outline?.children.length) {
-          return {
-            ok: false,
-            error:
-              '这个目标的大纲已经创建好了（根大纲 ' + root.outline.children.length + ' 条目标项，共 ' +
-              s.nodes.filter((n) => n.goalId === goal()).length + ' 个节点）。「' + hit.name +
-              '」只在目标首次创建时规划一次，不要重复规划。要调整结构：用大纲节点整份重写对应节点的大纲（api.node.get("o:"+节点id) 后 editContent），拿不准就先向学习者确认。',
-          }
-        }
-      }
       const run = deps.invokeWorkflow
       if (!run) {
         return { error: '这个执行环境里触发不了工作流：只有导师自己的一轮对话里可以（超级文档的桥里不行）。' }

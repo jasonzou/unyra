@@ -99,7 +99,12 @@ export function splitDocPath(path: string | undefined): SplitDocPath {
 
 function goalRoot(store: LearnStore, goalId: string): KnowledgeNode | undefined {
   const goal = store.goals.find((g) => g.id === goalId)
-  return goal ? nodeById(store, goal.rootNodeId) : undefined
+  if (!goal) return undefined
+  if (goal.rootNodeId) {
+    const root = nodeById(store, goal.rootNodeId)
+    if (root) return root
+  }
+  return store.nodes.find((n) => n.goalId === goalId)
 }
 
 /** 按「id（# 前缀）」或「标题（目标内唯一）」找节点，兼容长标题截断名与前缀模糊匹配 */
@@ -218,6 +223,8 @@ export function resolveNode(
     cursor = goalRoot(store, scope.goalId)
   }
   if (!cursor) {
+    const fallback = findNodeByRef(store, scope.goalId, segments[segments.length - 1])
+    if (fallback) return { ok: true, value: fallback }
     return {
       ok: false,
       message: '路径「' + segments.join('/') + '」的起点找不到。' + candidatesText(store, scope.goalId, undefined),

@@ -426,8 +426,10 @@ export function isAnchorOutline(
   rootOf: (goalId: string) => string | null,
 ): boolean {
   if (ref.kind !== 'outline') return false
-  const gid = goalOfNode(ref.nodeId)
-  return !!gid && rootOf(gid) === ref.nodeId
+  const gid = (ref as { goalId?: string }).goalId ?? goalOfNode(ref.nodeId)
+  if (!gid) return false
+  const root = rootOf(gid)
+  return root ? root === ref.nodeId : ref.nodeId === gid || (ref as { goalId?: string }).goalId === gid
 }
 
 /**
@@ -443,7 +445,7 @@ export function openOutlineTab(
   at: number,
 ): DocWorkspace {
   const opened = openInGroup(docs, groupId, ref, at, undefined, goalOfNode)
-  const gid = goalOfNode(ref.nodeId)
+  const gid = (ref as { goalId?: string }).goalId ?? goalOfNode(ref.nodeId)
   if (!gid) return opened
   return withOwners(opened, claimTab(opened.tabOwners, gid, tabKey(ref)))
 }
@@ -463,7 +465,7 @@ export function openAnchorOutline(
   at: number,
 ): DocWorkspace {
   const opened = openOutlineTab(docs, groupId, ref, goalOfNode, at)
-  const gid = goalOfNode(ref.nodeId)
+  const gid = (ref as { goalId?: string }).goalId ?? goalOfNode(ref.nodeId)
   if (!gid) return opened
   const restored = restoreParkedTabs(opened, gid, goalOfNode)
   if (restored === opened) return opened
@@ -494,7 +496,7 @@ export function unloadAnchoredGroups(
   const parkedIds: string[] = []
   for (const dead of beforeTabs) {
     if (live.has(dead.id) || dead.ref.kind !== 'outline' || !isAnchorOutline(dead.ref, goalOfNode, rootOf)) continue
-    const deadGoal = goalOfNode(dead.ref.nodeId)
+    const deadGoal = (dead.ref as { goalId?: string }).goalId ?? goalOfNode(dead.ref.nodeId)
     if (!deadGoal) continue
     const victims = goalTabsOf(next.tabOwners, allTabs(next), goalOfNode, deadGoal)
     // 即使 victims 为空（该目标名下除根大纲外没有打开其他文档），也保留 dead 作为停靠场占位，

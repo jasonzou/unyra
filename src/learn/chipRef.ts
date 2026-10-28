@@ -10,12 +10,14 @@
 
 import type { ChipPayload } from '../lib/chipSyntax'
 import { nodeDocPath } from './files/build'
+import { nodePathOf } from './paths'
 import { DOCS_DIR, WORKSPACE_DIR } from './layout'
 import { nodeById } from './graph/lookup'
 import { normalizeKey, prereqIds } from './graph'
 import { newWebKey } from './tabs'
 import { wsJoin, wsRefOfRel, wsRelOf } from './workspace'
 import { notesOf, type KnowledgeNode, type LearnStore, type TabRef } from './types'
+import type { Exam, ExamAttempt } from './exam'
 
 /** 规整外来路径：反斜杠 → 斜杠、去掉开头的 ./（导师与文件管理器给的写法不统一） */
 function normPath(p: string): string {
@@ -82,6 +84,33 @@ function wsChipRel(store: LearnStore, raw: string): string | null {
   return wsJoin(base, rest)
 }
 
+export function findExamFromChip(store: LearnStore, p: ChipPayload): Exam | undefined {
+  if (p.examId) {
+    const found = store.exams.find((e) => e.id === p.examId)
+    if (found) return found
+  }
+  if (p.attemptId) {
+    const found = store.exams.find((e) => e.attempts.some((a: ExamAttempt) => a.id === p.attemptId))
+    if (found) return found
+  }
+  if (p.nodeId) {
+    const found = store.exams.filter((e) => e.nodeId === p.nodeId).sort((a, b) => b.createdAt - a.createdAt)[0]
+    if (found) return found
+  }
+  if (p.path) {
+    const wanted = p.path.replace(/\/(教学|讲义|笔记|大纲|试卷|考试|考试记录|试卷记录)$/, '').replace(/\\/g, '/').trim().replace(/\/+$/, '')
+    const targetNode =
+      store.nodes.find((n) => !!n.goalId && nodePathOf(store, n.goalId, n.id).toLowerCase() === wanted.toLowerCase()) ??
+      store.nodes.find((n) => n.title.toLowerCase() === wanted.toLowerCase() || n.key === normalizeKey(wanted)) ??
+      store.nodes.find((n) => wanted.toLowerCase().endsWith(n.title.toLowerCase()))
+    if (targetNode) {
+      const found = store.exams.filter((e) => e.nodeId === targetNode.id).sort((a, b) => b.createdAt - a.createdAt)[0]
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
 export function tabRefFromChip(store: LearnStore, p: ChipPayload): TabRef | null {
   // 网页：网址就是身份，现场开一枚新页签（key 是开签那一刻的身份，见 learn/tabs）
   if (p.type === 'web') return p.url ? { kind: 'web', url: p.url, key: newWebKey() } : null
@@ -100,10 +129,17 @@ export function tabRefFromChip(store: LearnStore, p: ChipPayload): TabRef | null
   // 放过去只会开出一张「这份试卷已经被删了」的空页签，宁可打不开。
   // 原件（exam 不带 attemptId）返回 null，opener 分流到考试窗口。
   if (p.type === 'exam' || p.type === 'attempt') {
-    const exam = p.examId ? store.exams.find((e) => e.id === p.examId) : undefined
-    if (!exam || !p.attemptId) return null
-    if (!exam.attempts.some((a) => a.id === p.attemptId)) return null
-    return { kind: 'exam', nodeId: exam.nodeId, examId: exam.id, attemptId: p.attemptId }
+    const exam = findExamFromChip(store, p)
+    if (!exam) return null
+    const attemptId = p.attemptId ?? (p.type === 'attempt' && exam.attempts.length > 0 ? exam.attempts[exam.attempts.length - 1].id : undefined)
+    if (!attemptId) return null
+    if (!exam.attempts.some((a) => a.id === attemptId)) return null
+    return {
+      kind: 'exam',
+      nodeId: exam.nodeId,
+      examId: exam.id,
+      attemptId,
+      }
   }
 
   const want = p.path ? normPath(p.path) : null
@@ -177,11 +213,12 @@ export function chipResolveProblem(store: LearnStore, p: ChipPayload): string | 
       : '工作区路径定位不到（path 要用 workspace api 回执里的 rel，原样抄）'
   }
   if (p.type === 'exam' || p.type === 'attempt') {
-    const exam = p.examId ? store.exams.find((e) => e.id === p.examId) : undefined
-    if (!exam) return '没有这份试卷（examId 要从 exam.read 的回执里抄）'
+    const exam = findExamFromChip(store, p)
+    if (!exam) return '没有这份试卷（examId 要从 exam.read 的回执里抄，或带 attemptId）'
     if (p.type === 'attempt') {
-      if (!p.attemptId) return 'attempt 型要带 attemptId'
-      if (!exam.attempts.some((a) => a.id === p.attemptId)) {
+      const attemptId = p.attemptId ?? (exam.attempts.length > 0 ? exam.attempts[exam.attempts.length - 1].id : undefined)
+      if (!attemptId) return '这份试卷还没有任何考试记录'
+      if (!exam.attempts.some((a: ExamAttempt) => a.id === attemptId)) {
         return '这份试卷里没有这一次考试（attemptId 从 exam.read 的 history 里抄）'
       }
     }

@@ -70,10 +70,11 @@ export function normalizeLearnStore(data: unknown): LearnStore | null {
       if (!rawGoal || typeof rawGoal !== 'object') continue
       const r = rawGoal as Record<string, unknown>
       const id = typeof r.id === 'string' ? r.id : ''
-      const rootNodeId = typeof r.rootNodeId === 'string' ? r.rootNodeId : ''
-      if (!id || !rootNodeId || !ids.has(rootNodeId)) continue
+      const rootNodeId = typeof r.rootNodeId === 'string' && ids.has(r.rootNodeId) ? r.rootNodeId : ''
+      if (!id) continue
       goals.push({
         id,
+        title: typeof r.title === 'string' ? r.title : (typeof r.question === 'string' ? r.question : ''),
         rootNodeId,
         question: typeof r.question === 'string' ? r.question : '',
         createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(),

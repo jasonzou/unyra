@@ -207,11 +207,13 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
       const s = getLatest()
       const beforeGroup = groupOf(s.docArea, group)
       const beforeTabs = allTabs(s.docArea)
-      const goalOfNode = (nodeId: string) => nodeById(s, nodeId)?.goalId ?? null
+      const goalOfNode = (nodeId: string) => nodeById(s, nodeId)?.goalId ?? (s.goals.some((g) => g.id === nodeId) ? nodeId : null)
       /** 「目标 → 根节点」：组锚判据的第二跳（见 groups/tabs 的 isAnchorOutline） */
       const rootOf = (goalId: string) => s.goals.find((g) => g.id === goalId)?.rootNodeId ?? null
       const goalOfTab = (tab: LearnTab): string | null => {
         if (tab.ref.kind === 'mind') return tab.ref.goalId
+        if (tab.ref.kind === 'outline' && (tab.ref as { goalId?: string }).goalId) return (tab.ref as { goalId?: string }).goalId!
+        if (tab.ref.kind === 'video' && tab.ref.goalId) return tab.ref.goalId
         const nodeId = tabNodeId(tab.ref)
         return nodeId ? goalOfNode(nodeId) : null
       }
@@ -451,7 +453,6 @@ export function useDocSaveFlow(deps: DocSaveFlowDeps) {
         tab.ref.kind === 'schedule' ||
         tab.ref.kind === 'mind' ||
         tab.ref.kind === 'agentSettings' ||
-        tab.ref.kind === 'newGoal' ||
         tab.ref.kind === 'blank'
       )
         return { ok: true }

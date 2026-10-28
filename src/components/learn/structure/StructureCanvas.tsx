@@ -50,7 +50,9 @@ import {
 } from '../../../learn/structure'
 import { nodeById } from '../../../learn/graph'
 import { t } from '../../../i18n'
+export const TOUR_SEEN_KEY = 'moji:structure:tour-seen'
 import { StructureTour } from './StructureTour'
+import { getTourMockCanvas, getTourCamera } from './tourMockData'
 import {
   CARD_PAD_B,
   DOC_LINES,
@@ -340,8 +342,14 @@ export const StructureCanvas = memo(function StructureCanvas({
    * 图是**算出来的**（deriveCanvas）：卡片就是节点、连线全部派生、
    * 没存过坐标的卡自动铺排。没有对账，也没有「首帧铺一张」的 effect。
    */
+  /** 新手教学开着没有（入口在右下角工具组的问号按钮，见 StructureTour） */
+  const [tourOpen, setTourOpen] = useState(false)
+  const savedCameraRef = useRef<{ x: number; y: number; zoom: number } | null>(null)
+
   const saved = store.structure?.[goalId]
-  const canvas = useMemo(() => deriveCanvas(store, goalId, saved), [store, goalId, saved])
+  const realCanvas = useMemo(() => deriveCanvas(store, goalId, saved), [store, goalId, saved])
+  // 教学模式开始时清空真实面板数据，使用教学假数据展示全貌；退出后立即恢复真实数据
+  const canvas = useMemo(() => (tourOpen ? getTourMockCanvas() : realCanvas), [tourOpen, realCanvas])
   const cards = canvas.cards
   const edges = canvas.edges
   const height = canvas.heightOf
@@ -371,6 +379,51 @@ export const StructureCanvas = memo(function StructureCanvas({
   const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   /** 指针停在哪个节点上（高亮用） */
   const [hoverId, setHoverId] = useState<string | null>(null)
+
+  const autoTourCheckedRef = useRef(false)
+
+  const handleOpenTour = useCallback(() => {
+    try {
+      localStorage.setItem(TOUR_SEEN_KEY, '1')
+    } catch {
+      // ignore
+    }
+    savedCameraRef.current = camera
+    const tourCam = getTourCamera(view.width, view.height)
+    setCamera(tourCam)
+    setSelectedId(null)
+    setMultiIds(null)
+    setHoverId(null)
+    setTourOpen(true)
+  }, [camera, view.width, view.height])
+
+  const handleCloseTour = useCallback(() => {
+    try {
+      localStorage.setItem(TOUR_SEEN_KEY, '1')
+    } catch {
+      // ignore
+    }
+    setTourOpen(false)
+    if (savedCameraRef.current) {
+      setCamera(savedCameraRef.current)
+      savedCameraRef.current = null
+    }
+  }, [])
+
+  // 首次进入节点宇宙时检测是否看过教程，若未看过则自动开启
+  useEffect(() => {
+    if (autoTourCheckedRef.current) return
+    if (view.width <= 0 || view.height <= 0) return
+    autoTourCheckedRef.current = true
+    try {
+      const seen = localStorage.getItem(TOUR_SEEN_KEY)
+      if (!seen) {
+        handleOpenTour()
+      }
+    } catch {
+      // ignore
+    }
+  }, [view.width, view.height, handleOpenTour])
   /** 指针停在哪条连线附近（小圆点只在此时出现） */
   const [hoverEdge, setHoverEdge] = useState<CanvasEdge | null>(null)
   /** 指针正压在某个小圆点上（换成手型光标） */
@@ -406,8 +459,7 @@ export const StructureCanvas = memo(function StructureCanvas({
   const flashTimer = useRef<number | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [menuText, setMenuText] = useState('')
-  /** 新手教学开着没有（入口在右下角工具组的问号按钮，见 StructureTour） */
-  const [tourOpen, setTourOpen] = useState(false)
+
 
   /** 空格按住时左键也能拖画布（见 onPointerDown） */
   const spaceRef = useRef(false)
@@ -939,6 +991,7 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      if (tourOpen) return
       const target = e.target as HTMLElement
       const el = containerRef.current
       if (!el) return
@@ -1406,6 +1459,7 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   const onContextMenu = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (tourOpen) return
       const target = (e.target as HTMLElement).closest<HTMLElement>('[data-node-id]')
       if (!target) return
       const uuid = target.dataset.nodeId as string
@@ -1425,6 +1479,7 @@ export const StructureCanvas = memo(function StructureCanvas({
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (tourOpen) return
       if (e.key === 'Escape') {
         setMenu(null)
         setMultiIds(null)
@@ -1743,6 +1798,19 @@ export const StructureCanvas = memo(function StructureCanvas({
             <Fragment key={card.uuid}>
             <div
               data-node-id={card.uuid}
+              {...(card.uuid === 'tour-mock-entry-doc'
+                ? { 'data-tour-node': 'entry-doc' }
+                : card.uuid === 'tour-mock-outline'
+                  ? { 'data-tour-node': 'outline' }
+                  : card.uuid === 'tour-mock-video'
+                    ? { 'data-tour-node': 'video' }
+                    : card.uuid === 'tour-mock-exam'
+                      ? { 'data-tour-node': 'exam' }
+                      : card.uuid === 'tour-mock-note'
+                        ? { 'data-tour-node': 'note' }
+                        : card.uuid === 'tour-mock-superdoc'
+                          ? { 'data-tour-node': 'superdoc' }
+                          : {})}
               className={`absolute flex flex-col border ${KIND_TONE[card.kind]} ${
                 card.blank || unassigned ? 'border-dashed' : ''
               } ${unassigned ? 'opacity-70' : ''} ${
@@ -2316,7 +2384,7 @@ export const StructureCanvas = memo(function StructureCanvas({
           </svg>
         </ControlButton>
         <span className="mx-0.5 h-3.5 w-px bg-line" />
-        <ControlButton label={t('新手教学')} onClick={() => setTourOpen(true)}>
+        <ControlButton label={t('新手教学')} onClick={handleOpenTour}>
           <svg {...ICON_STROKE}>
             <circle cx="12" cy="12" r="10" />
             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
@@ -2339,7 +2407,7 @@ export const StructureCanvas = memo(function StructureCanvas({
       )}
 
       {/* 新手教学：全屏遮罩挖洞、逐步指路，随时可退（见 StructureTour） */}
-      {tourOpen && <StructureTour onClose={() => setTourOpen(false)} />}
+      {tourOpen && <StructureTour onClose={handleCloseTour} />}
 
       {/* 节点右键菜单 / 视频卡的下拉 */}
       {menu && menuCard && (
@@ -2404,12 +2472,12 @@ export const StructureCanvas = memo(function StructureCanvas({
                   type="button"
                   className="flex w-full items-center rounded px-2 py-1.5 text-left hover:bg-line/60"
                   onClick={() => {
-                    // 前置知识大纲：读这份文档，把「学它之前要先会什么」铺成它的大纲
+                    // 生成大纲：读这份文档，规划子层级目标项
                     onGenerateOutline?.(menuCard.uuid)
                     setMenu(null)
                   }}
                 >
-                  {t('生成前置知识大纲')}
+                  {t('生成大纲')}
                 </button>
               )}
               {menuCard.kind === 'video' && (

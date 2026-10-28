@@ -9,7 +9,7 @@ import {
   Trash2,
   ZoomIn,
 } from 'lucide-react'
-import { requestDeviceFile, useLanServer } from '../../lib/lanSync'
+import { requestDeviceFile } from '../../lib/lanSync'
 import { readLocalImage } from '../../lib/localFiles'
 import HandwrittenImagePreview from './HandwrittenImagePreview'
 import { t } from '../../i18n'
@@ -20,7 +20,7 @@ interface Props {
   onUpdateImage: (index: number, newImg: string) => void
   onRemoveImage: (index: number) => void
   onPreviewImage: (src: string) => void
-  onOpenLan: () => void
+  onOpenLan?: () => void
 }
 
 /**
@@ -58,19 +58,13 @@ async function rotateImage90(src: string): Promise<string> {
  * 支持顺时针旋转修正方向，交卷后由 AI 导师亲自审阅与裁切贴题。
  */
 const UnifiedHandwrittenSheetsCard = forwardRef<HTMLDivElement, Props>(function UnifiedHandwrittenSheetsCard(
-  { images, onAddImage, onUpdateImage, onRemoveImage, onPreviewImage, onOpenLan },
+  { images, onAddImage, onUpdateImage, onRemoveImage, onPreviewImage, onOpenLan: _onOpenLan },
   ref,
 ) {
-  const { status } = useLanServer()
   const [snapping, setSnapping] = useState(false)
   const [rotatingIndex, setRotatingIndex] = useState<number | null>(null)
 
   const handleMobileSnap = async () => {
-    if (!status.running || status.devices.length === 0) {
-      onOpenLan()
-      return
-    }
-
     setSnapping(true)
     try {
       const res = await requestDeviceFile({
@@ -79,8 +73,6 @@ const UnifiedHandwrittenSheetsCard = forwardRef<HTMLDivElement, Props>(function 
       })
       if (res.ok && res.file) {
         onAddImage(res.file.path)
-      } else if (res.error && res.error.includes('没有手机设备连接')) {
-        onOpenLan()
       }
     } finally {
       setSnapping(false)

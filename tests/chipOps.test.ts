@@ -220,4 +220,53 @@ describe('chip 点击打开：attempt 型还原成考试副本页签', () => {
     // 试卷原件（不带 attemptId）没有页签形态：opener 对它走考试窗口
     expect(tabRefFromChip(store, { type: 'exam', examId: 'ex1' })).toBeNull()
   })
+
+  it('attempt 型宽容解析：省略 examId/attemptId 或按节点/路径反查试卷记录', () => {
+    const store = fixture()
+    // 1. 仅传 attemptId，能全局反查出 exam
+    expect(tabRefFromChip(store, { type: 'attempt', attemptId: 'at1' })).toEqual({
+      kind: 'exam',
+      nodeId: 'c1',
+      examId: 'ex1',
+      attemptId: 'at1',
+    })
+    // 2. 仅传 examId，未传 attemptId，默认取最新一次考试
+    expect(tabRefFromChip(store, { type: 'attempt', examId: 'ex1' })).toEqual({
+      kind: 'exam',
+      nodeId: 'c1',
+      examId: 'ex1',
+      attemptId: 'at1',
+    })
+    // 3. 仅传 nodeId，能找到该节点试卷并取最新一次考试
+    expect(tabRefFromChip(store, { type: 'attempt', nodeId: 'c1' })).toEqual({
+      kind: 'exam',
+      nodeId: 'c1',
+      examId: 'ex1',
+      attemptId: 'at1',
+    })
+    // 4. 仅传 path（如 极限 或 极限/试卷），能找到试卷并取最新一次考试
+    expect(tabRefFromChip(store, { type: 'attempt', path: '微积分/极限/试卷' })).toEqual({
+      kind: 'exam',
+      nodeId: 'c1',
+      examId: 'ex1',
+      attemptId: 'at1',
+    })
+  })
+
+  it('chip.build 对 attempt 的增强：支持仅凭 attemptId 反查试卷，且将带有 attemptId 的 exam 规整为 attempt', () => {
+    const store = fixture()
+    const ops = chipWith(store)
+    // 仅凭 attemptId
+    const res1 = ops.build({ type: 'attempt', attemptId: 'at1' }) as { ok: boolean; chip: string }
+    expect(res1.ok).toBe(true)
+    expect(res1.chip).toContain('"type":"attempt"')
+    expect(res1.chip).toContain('"examId":"ex1"')
+    expect(res1.chip).toContain('"attemptId":"at1"')
+
+    // type 为 exam 但带了 attemptId，规整为 attempt
+    const res2 = ops.build({ type: 'exam', examId: 'ex1', attemptId: 'at1' }) as { ok: boolean; chip: string }
+    expect(res2.ok).toBe(true)
+    expect(res2.chip).toContain('"type":"attempt"')
+    expect(res2.chip).toContain('"attemptId":"at1"')
+  })
 })
