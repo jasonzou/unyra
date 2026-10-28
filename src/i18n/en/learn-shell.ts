@@ -90,6 +90,7 @@ const dict: Record<string, string> = {
   '（下位第 {0} 级节点文档，属于「{1}」）': '(Descendant level {0} doc, belongs to "{1}")',
   '（同属节点「{0}」）': '(Also belongs to node "{0}")',
   '这场试卷已经不在了': 'This exam no longer exists',
+  '这次考试记录已经不在了': 'This exam record no longer exists',
   '这条引用对应的文档已经不在了': 'The document this reference points to no longer exists',
   '暂无打开的页签': 'No open tabs',
   '书卷未启 · 随思落墨': 'Scrolls unopened · Ink follows thought',

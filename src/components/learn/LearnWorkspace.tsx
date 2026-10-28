@@ -2846,13 +2846,18 @@ export default function LearnWorkspace({
      * 没配 Key 时**不吞掉这次交卷**：卷子照样收下、成绩照旧是系统的客观分，
      * 只是判分与讲解要等用户把 Key 填上——那时再点一次「阅卷」即可（列表里有入口）。
      */
-    onSubmitted: () => {
+    onSubmitted: (examId: string, attemptId: string) => {
       if (!hasKey) {
         onToast(t('已交卷。判分与错题讲解需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
         onOpenSettings()
         return
       }
-      agent.runWorkflow('exam-grade')
+      const st = getLatest()
+      const ex = st.exams.find((e) => e.id === examId)
+      agent.runWorkflow('exam-grade', {
+        nodeId: ex?.nodeId,
+        params: { target: ex?.nodeId ?? '', examId, attemptId },
+      })
     },
   })
 
@@ -3427,7 +3432,7 @@ export default function LearnWorkspace({
         点击时跑一次无所谓）。解析到了就打开它的教学文档。
       */
       if (p.type === 'doc' && p.path) {
-        const wanted = p.path.replace(/\/(教学|讲义|笔记|大纲|试卷)$/, '')
+        const wanted = p.path.replace(/\/(教学|讲义|笔记|大纲|试卷|考试|试卷记录|作答记录)$/, '')
         const norm = (v: string): string => v.replace(/\\/g, '/').trim().replace(/\/+$/, '')
         // 先按「节点树路径原样」对一次：api.node.list 回的就是这种，模型多半直接抄
         const exact = s.nodes.find(
@@ -3445,6 +3450,14 @@ export default function LearnWorkspace({
             return
           }
         }
+      }
+      if (p.type === 'attempt') {
+        onToast(t('这次考试记录已经不在了'))
+        return
+      }
+      if (p.type === 'exam') {
+        onToast(t('这场试卷已经不在了'))
+        return
       }
       onToast(t('这条引用对应的文档已经不在了'))
       return
