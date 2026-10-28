@@ -45,6 +45,7 @@ import type {
   LearnTab,
   TabRef,
   WebTabMeta,
+  ResourceItem,
 } from '../../learn/types'
 import { emptyDocs, emptyOutline, notesOf } from '../../learn/types'
 import {
@@ -3125,6 +3126,7 @@ export default function LearnWorkspace({
     startSuperLab,
     startOutline,
     startPrereqOutline,
+    startVideoOutline,
     workflowRows,
     runWorkflowRow,
     removeWorkflowRow,
@@ -3940,8 +3942,31 @@ export default function LearnWorkspace({
         return node.editContent({ videoId })
       },
       onOpenVideo: (videoId: string) => openTab({ kind: 'video', videoId }),
+      onGenerateVideoOutline: (videoNodeUuid: string) => startVideoOutline(videoNodeUuid),
+      onOpenResourceItem: (item: ResourceItem) => {
+        if (item.kind === 'video' || item.data?.source || item.target) {
+          const s = getLatest()
+          const videoId = (item.data?.videoId as string) ?? (item.target?.startsWith('v:') ? item.target.slice(2) : item.target)
+          const video = (s.videos ?? []).find((v) => v.id === videoId) ?? (s.videos ?? [])[0]
+          if (video) {
+            const targetSource = (item.data?.source as string) ?? (typeof item.target === 'string' && (item.target.startsWith('http') || item.target.includes('BV')) ? item.target : undefined)
+            if (targetSource && targetSource !== (video.selection?.source ?? video.input)) {
+              const updatedVideos = (s.videos ?? []).map((v) =>
+                v.id === video.id ? { ...v, selection: { source: targetSource, title: item.title } } : v,
+              )
+              set({ ...s, videos: updatedVideos })
+            }
+            openTab({ kind: 'video', videoId: video.id })
+            return
+          }
+        }
+        if (item.kind === 'link' || (item.target && (item.target.startsWith('http://') || item.target.startsWith('https://')))) {
+          openTab({ kind: 'web', url: item.target!, key: `web_${Date.now()}` })
+          return
+        }
+      },
     }),
-    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, canvasSetEntry, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline, makeNodeService, openTab],
+    [canvasCreateNode, canvasDeleteNode, canvasConnect, canvasDisconnect, canvasSetEntry, createChildDoc, canvasRenameNote, canvasAddOutlineEntry, generateDocForNode, startPrereqOutline, startVideoOutline, makeNodeService, openTab, getLatest, set],
   )
 
   const noteActionsCache = useRef(new Map<string, ComponentProps<typeof DocPane>['note']>())

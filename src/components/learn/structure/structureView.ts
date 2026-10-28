@@ -17,12 +17,12 @@
  * 而且都容易在「顺手优化一下」时改错。
  */
 
-import type { LearnStore } from '../../../learn/types'
+import type { LearnStore, ResourceItem } from '../../../learn/types'
 import { examsOfNode, nodeById, prereqIds } from '../../../learn/graph'
 import { notesOf } from '../../../learn/notes'
 import { attemptScore, type ExamAttempt } from '../../../learn/exam'
 import { superDocsOf } from '../../../learn/types'
-import { docIdOfOutlineUuid, outlineUuid, type GNodeKind } from '../../../learn/nodeKinds'
+import { docIdOfOutlineUuid, outlineUuid, resourceUuid, type GNodeKind } from '../../../learn/nodeKinds'
 import {
   CARD_H,
   CARD_W,
@@ -72,16 +72,22 @@ function attemptRows(attempts: ExamAttempt[]): ExamAttemptRow[] {
   })
 }
 
-/** 试卷卡有多高：边框 + 标题行 + 每条考试记录一行 + 内边距（没有记录就是标准高度） */
+/** 试卷卡有多高：边框 + 标题行 + 头部考试按钮行 + 每条考试记录一行 + 内边距（没有记录就是标准高度） */
 export function examCardHeight(rows: number): number {
   if (!rows) return CARD_H
-  return Math.max(CARD_FRAME_H + OUTLINE_HEAD + rows * SLOT_ROW + CARD_PAD_B, CARD_H)
+  return Math.max(CARD_FRAME_H + OUTLINE_HEAD + (rows + 1) * SLOT_ROW + CARD_PAD_B, CARD_H)
 }
 
 /** 大纲卡有多高：边框 + 标题行 + 每条目标项一行 + 底部「＋ 添加目标项」一行 + 内边距 */
 export function outlineCardHeight(count: number): number {
   if (!count) return CARD_H
   return Math.max(CARD_FRAME_H + OUTLINE_HEAD + (count + 1) * SLOT_ROW + CARD_PAD_B, CARD_H)
+}
+
+/** 资源归纳卡有多高：边框 + 标题行 + 列表项 + 内边距 */
+export function resourceCardHeight(count: number): number {
+  if (!count) return CARD_H
+  return Math.max(CARD_FRAME_H + OUTLINE_HEAD + count * SLOT_ROW + CARD_PAD_B, CARD_H)
 }
 
 /* ---------- 卡片与目标项 ---------- */
@@ -108,8 +114,10 @@ export interface CardView {
   blank?: boolean
   /** 用户贴在卡片上的便条（存进坐标表） */
   note?: string
-  /** 大纲卡的目标项行（kind = outline 时才有） */
+  /** 大纲卡或资源归纳卡的目标项行（kind = outline 或 resource 时才有） */
   slots?: OutlineSlotView[]
+  /** 资源归纳节点绑定的资源列表条目（原样透传供点击跳转用） */
+  resourceItems?: ResourceItem[]
   /** 这张文档卡是本图的入口（目标的根）——卡片上挂「入口」徽章；一张图有且只有一个 */
   entry?: boolean
   /** 游离大纲卡（独立实体，没有宿主文档）：空卡给「添加目标项」而不是「生成大纲」 */
@@ -326,6 +334,34 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
     add(p)
   }
 
+  const resourcePending = new Map<string, Pending>()
+  for (const entity of store.resourceNodes ?? []) {
+    if (entity.goalId !== goalId) continue
+    const uuid = resourceUuid(entity.id)
+    const slots: OutlineSlotView[] = entity.items.map((it, idx) => ({
+      key: it.key,
+      title: it.title,
+      index: idx + 1,
+      childId: null,
+    }))
+    const p: Pending = {
+      card: {
+        uuid,
+        kind: 'resource',
+        title: entity.title,
+        subtitle: entity.items.length ? `${entity.items.length} 个资源项` : '还没有资源项',
+        slots,
+        resourceItems: entity.items,
+      },
+      depth: 2,
+      anchorY: 0,
+      next: [],
+      parent: null,
+    }
+    resourcePending.set(uuid, p)
+    add(p)
+  }
+
   /*
    * 树边（store.edges，两端是树成员 id）：画在成员卡之间——
    * - from 是文档 id：那份文档有大纲就以它的大纲卡为源（hub 翻译，交替链
@@ -345,7 +381,7 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
   }
   for (const e of store.edges) {
     const fromCard = fromCardOf(e.from)
-    const toCard = outlinePending.get(e.to) ?? docPending.get(e.to)
+    const toCard = outlinePending.get(e.to) ?? docPending.get(e.to) ?? resourcePending.get(e.to)
     if (!fromCard || !toCard) continue
     // 深度按成员算：父成员的卡 + 1（附身大纲那一对的「右侧」即大纲卡本身）
     toCard.depth = Math.max(toCard.depth, fromCard.depth + 1)
@@ -542,6 +578,10 @@ export function deriveCanvas(store: LearnStore, goalId: string, saved: Structure
       const p = byUuid.get(c.uuid)
       return examCardHeight(p?.card.attempts?.length ?? 0)
     }
+    if (c.kind === 'resource') {
+      const p = byUuid.get(c.uuid)
+      return resourceCardHeight(p?.card.slots?.length ?? 0)
+    }
     return CARD_H
   }
 
@@ -605,6 +645,7 @@ export const KIND_TONE: Record<GNodeKind, string> = {
   exam: 'border-amber-500/30 bg-amber-500/[0.06]',
   superdoc: 'border-violet-500/30 bg-violet-500/[0.06]',
   video: 'border-cyan-500/30 bg-cyan-500/[0.06]',
+  resource: 'border-emerald-600/35 bg-emerald-600/[0.06]',
 }
 
 export const KIND_BADGE: Record<GNodeKind, string> = {
@@ -615,6 +656,7 @@ export const KIND_BADGE: Record<GNodeKind, string> = {
   exam: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
   superdoc: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
   video: 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300',
+  resource: 'bg-emerald-600/15 text-emerald-800 dark:text-emerald-300',
 }
 
 /** 目标项圆点与它的连线只用这一个颜色：颜色在图上只承载一个含义「来自某条目标项」 */

@@ -27,7 +27,7 @@ import { createVideoNode, deleteVideoNode } from '../video/nodes'
 import { NOTE_DEFAULT_NAME, notesOf, uniqueNoteName } from '../notes'
 import { SUPERDOC_DEFAULT_NAME, removeSuperDoc, writeSuperDoc } from '../superdocs'
 import { emptyDocs, superDocsOf, type KnowledgeNode, type LearnStore, type NoteFile, type SuperDocFile } from '../types'
-import { docIdOfEntryUuid, docIdOfOutlineUuid, entryUuid, outlineUuid, GNode, type NodeCtx, type NodeResult } from './base'
+import { docIdOfEntryUuid, docIdOfOutlineUuid, entryUuid, outlineUuid, resourceUuid, idOfResourceUuid, GNode, type NodeCtx, type NodeResult } from './base'
 import { DocGNode } from './doc'
 import { EntryGNode } from './entry'
 import { ExamGNode } from './exam'
@@ -35,6 +35,7 @@ import { NoteGNode } from './note'
 import { OutlineGNode } from './outline'
 import { SuperdocGNode } from './superdoc'
 import { VideoGNode } from './video'
+import { ResourceGNode } from './resource'
 
 export interface NodeServiceDeps {
   getLatest: () => LearnStore
@@ -52,6 +53,8 @@ export type UuidLocation =
   | { kind: 'exam'; docId: string; examId: string }
   /** 视频节点（游离实体）：nodeId 是它自己的实体 id，与视频资源 id 无关 */
   | { kind: 'video'; nodeId: string }
+  /** 资源归纳节点（终端实体）：resId 是它自己的实体 id */
+  | { kind: 'resource'; resId: string }
 
 export function locateUuid(store: LearnStore, uuid: string): UuidLocation | null {
   const entryDoc = docIdOfEntryUuid(uuid)
@@ -68,6 +71,11 @@ export function locateUuid(store: LearnStore, uuid: string): UuidLocation | null
   }
   const exam = store.exams.find((e) => e.id === uuid)
   if (exam) return { kind: 'exam', docId: exam.nodeId, examId: exam.id }
+  // 资源归纳节点（终端实体）
+  const resId = idOfResourceUuid(uuid)
+  if ((store.resourceNodes ?? []).some((r) => r.id === resId || r.id === uuid)) {
+    return { kind: 'resource', resId }
+  }
   // 视频节点：游离实体（目标 × 视频的绑定），没有宿主文档
   if ((store.videoNodes ?? []).some((v) => v.id === uuid)) return { kind: 'video', nodeId: uuid }
   for (const node of store.nodes) {
@@ -175,6 +183,8 @@ export class NodeService {
         return new ExamGNode(this.ctx, loc.examId)
       case 'video':
         return new VideoGNode(this.ctx, loc.nodeId)
+      case 'resource':
+        return new ResourceGNode(this.ctx, resourceUuid(loc.resId))
     }
   }
 
@@ -207,6 +217,51 @@ export class NodeService {
         title: '视频 · 未绑定',
         created: true,
         note: '已建一枚视频节点（还没绑视频）：editContent({ videoId }) 绑一个现有视频，视频清单看 list() 的 videos 段',
+      }
+    }
+
+    if (kind === 'resource') {
+      const underRaw = typeof input.under === 'string' ? input.under.trim() : ''
+      const outlineUnder = underRaw.startsWith('o:') ? outlineByMember(store, underRaw) : null
+      const entityId = crypto.randomUUID()
+      const now = Date.now()
+      const rawItems = Array.isArray(input.items) ? input.items : []
+      const items = rawItems.map((raw, idx) => {
+        if (typeof raw === 'string') return { key: `item-${idx + 1}`, title: raw.trim(), kind: 'video' as const }
+        const itemObj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+        const itTitle = typeof itemObj.title === 'string' ? itemObj.title.trim() : `选集 ${idx + 1}`
+        const key = typeof itemObj.key === 'string' && itemObj.key ? itemObj.key : `k-${idx + 1}`
+        const itemKind = (itemObj.kind === 'doc' || itemObj.kind === 'link' || itemObj.kind === 'video' ? itemObj.kind : 'video') as 'video' | 'doc' | 'link'
+        const target = typeof itemObj.target === 'string' ? itemObj.target : undefined
+        const data = itemObj.data && typeof itemObj.data === 'object' ? (itemObj.data as Record<string, unknown>) : undefined
+        return { key, title: itTitle, kind: itemKind, target, data }
+      })
+      const entity = {
+        id: entityId,
+        goalId,
+        title: title || '资源归纳',
+        intro: typeof input.intro === 'string' ? input.intro.trim() : '',
+        items,
+        createdAt: now,
+        updatedAt: now,
+      }
+      let nextStore: LearnStore = {
+        ...store,
+        resourceNodes: [...(store.resourceNodes ?? []), entity],
+      }
+      const portKey = typeof input.portKey === 'string' && input.portKey.trim() ? input.portKey.trim() : undefined
+      if (outlineUnder) {
+        const voice = outlineUnder.kind === 'attached' ? outlineUnder.docId : outlineUnder.uuid
+        const r = addEdge(nextStore, voice, resourceUuid(entity.id), portKey)
+        if (r.added) nextStore = r.store
+      }
+      this.deps.set(nextStore)
+      return {
+        ok: true,
+        uuid: resourceUuid(entity.id),
+        title: entity.title,
+        created: true,
+        note: `已创建资源归纳节点「${entity.title}」（含 ${items.length} 个资源项）${outlineUnder ? '，并挂在大纲之下' : ''}`,
       }
     }
 
@@ -495,6 +550,10 @@ export class NodeService {
       freeOutlines: (store.outlines ?? [])
         .filter((o) => o.goalId === goalId)
         .map((o) => ({ uuid: outlineUuid(o.id), title: o.title, entries: o.children.length })),
+      // 资源归纳节点（终端节点，收拢具体选集/资源）：支持 get(uuid) 与 editContent
+      resources: (store.resourceNodes ?? [])
+        .filter((r) => r.goalId === goalId)
+        .map((r) => ({ uuid: resourceUuid(r.id), title: r.title, items: r.items.length })),
       /*
        * 视频节点（目标 × 视频的绑定）：videos 段给「绑了什么」，清单给全部视频——
        * 要绑一个就 editContent({ videoId })。被引用的视频删除会被拦（删除守卫读这张表）。
@@ -614,6 +673,10 @@ export class NodeService {
       if (!next) return { error: '这个视频节点已经不在了' }
       this.deps.set(next)
       return { ok: true, note: '已删除这枚视频节点：目标与视频的绑定解除，视频资源还在侧栏里' }
+    }
+    if (loc.kind === 'resource') {
+      const node = new ResourceGNode(this.ctx, resourceUuid(loc.resId))
+      return node.deleteSelf()
     }
 
     if (loc.kind === 'doc') {

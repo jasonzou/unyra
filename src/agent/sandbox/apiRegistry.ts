@@ -162,7 +162,7 @@ const p = await api.see({ pdf: 'moji:static/<uuid>', page: [1, 3] })`,
     [
       a('list', 'node.list()', '目标的全图清单', '回 goal（含入口 uuid）与 nodes：每份文档带 uuid / 标题 / path / 状态 / 上游 / 大纲（目标项数）/ 笔记 / 试卷 / 超级文档（各带 uuid）。导航、找落点、核对存在性全靠它。', 'const list = await api.node.list()'),
       a('get', 'node.get(uuid)', '取一个节点对象', '回执在门面里被包成真对象（content / editContent / help / connect / disconnect）。uuid 全部来自 list()，不要手拼——大纲与入口的前缀规则 help() 里会讲。', "const n = await api.node.get(list.nodes[0].uuid)"),
-      a('create', 'node.create({ kind, title?, under? , ...? })', '建节点（画布与 agent 同一条通道）', 'kind: doc / outline / note / exam / superdoc / video。under 给了 = 创建即绑（挂件挂到那份文档、文档挂进那一层，同目标同名文档复用不另建）；under 不给 = **独立游离实体**（笔记/超级文档进游离池、试卷宿主悬空、文档无父无纲），之后拖线 / connect 绑定。outline 配宿主文档一起成形：不给 under 就建「新文档+空大纲」，给了 under 就给那份文档补空卷大纲。试卷遇空壳复用原位。video 不参与树结构：不给 under 建，建好 editContent({ videoId }) 绑一个现有视频（清单在 list() 的 videos.all）。', `await api.node.create({ kind: 'note', title: '错题本', under: 文档uuid })`),
+      a('create', 'node.create({ kind, title?, under? , ...? })', '建节点（画布与 agent 同一条通道）', 'kind: doc / outline / note / exam / superdoc / video / resource。under 给了 = 创建即绑（挂件挂到那份文档、文档挂进那一层，同目标同名文档复用不另建）；under 不给 = **独立游离实体**（笔记/超级文档进游离池、试卷宿主悬空、文档无父无纲），之后拖线 / connect 绑定。outline 配宿主文档一起成形：不给 under 就建「新文档+空大纲」，给了 under 就给那份文档补空卷大纲。试卷遇空壳复用原位。video 不参与树结构：不给 under 建，建好 editContent({ videoId }) 绑一个现有视频（清单在 list() 的 videos.all）。resource 为终端节点（不能有下游），items 传入归纳的资源条目列表，可挂在大纲下作为视频大纲的终端节点。', `await api.node.create({ kind: 'note', title: '错题本', under: 文档uuid })`),
       a('delete', 'node.delete(uuid)', '删节点（删谁只删谁）', '删文档只删它自己：相连的线摘掉、下游文档断线成游离（不删除）、名下的笔记/试卷/超级文档随它走；删大纲 = 清空那份计划（文档与树边不动）；删挂件只删它自己。删试卷走 api.exam.delete（要先确认没有待判分的考试）。', `await api.node.delete(笔记uuid)`),
       a('invoke', 'node.invoke(uuid, 成员名, 参数数组)', '调节点对象的成员', '门面自动走它（n.editContent(...) 最终就是一次 node.invoke）；connect / disconnect 的对象参数会被折成 uuid。直接调时参数是数组形状。', `await api.node.invoke(文档uuid, 'editContent', [{ title: '极限', description: '', teaching: '# 极限', status: 'learning' }])`),
       a('brief', 'node.brief(uuid)', '文档的一页纸简报（写正文之前先看它）', '一次给齐：self（标题/描述/状态/字数）、port（认领的目标项——范围与边界以它为准）、siblings（同层其他目标项）、taught（全图各文档已讲过的小节标题——出现过的概念别重讲）。省掉 list 全图 + 逐个读。', `const brief = await api.node.brief(文档uuid)`),
@@ -560,6 +560,18 @@ files.* 碰到它们会被拒绝，并提示该用哪一组。`,
       a('run', 'skill.run(id, scriptName, args?)', '跑技能脚本', '只跑 skills/<id>/scripts/ 下的脚本；回 output / exitCode。', `const r = await api.skill.run('pdf', 'extract.py', ['input.pdf'])`),
       a('write', 'skill.write(skillDef)', '写/覆盖技能', '结构化维护技能定义；也可用 files.* 直接读写 skills/。', `await api.skill.write({ id: 'my-skill', name: '我的技能', instructions: '...' })`),
       a('delete', 'skill.delete(id)', '删除一个专业技能', '不可逆；整个技能目录（规范/脚本/参考）一并删除。', `await api.skill.delete('my-skill')`),
+    ],
+  ),
+  g(
+    'video',
+    '视频资源',
+    '视频资源与选集信息：查看绑定的视频及其分 P / 选集列表。',
+    `视频资源与选集信息：
+- video.get(videoIdOrUuid)：获取视频详情与所有选集（episodes）列表，包含选集标题、分 P 序号与播放来源。
+- video.list()：列出当前目标可用的全部视频资源。`,
+    [
+      a('list', 'video.list()', '列出所有视频资源', '返回视频资源的 id、标题与插件名。', 'const list = await api.video.list()'),
+      a('get', 'video.get(videoIdOrUuid)', '获取视频详情与选集', '返回 id、title、hasEpisodes、episodeCount 与 episodes 选集清单（每项带 page、title、source）。', "const info = await api.video.get('v-123')"),
     ],
   ),
 

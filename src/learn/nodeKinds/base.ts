@@ -21,7 +21,7 @@
 import type { LearnStore } from '../types'
 
 /** 全部节点类型（键 = uuid 派生前缀之外的判别字段） */
-export type GNodeKind = 'entry' | 'outline' | 'doc' | 'note' | 'exam' | 'superdoc' | 'video'
+export type GNodeKind = 'entry' | 'outline' | 'doc' | 'note' | 'exam' | 'superdoc' | 'video' | 'resource'
 
 /** 一条关系记录：type 是**对方相对我**的身份（对方是我的上游 / 下游） */
 export interface NodeRelation {
@@ -56,6 +56,10 @@ export const entryUuid = (rootDocId: string): string => 'entry:' + rootDocId
 /** 从入口 uuid 取根文档 id */
 export const docIdOfEntryUuid = (uuid: string): string | null =>
   uuid.startsWith('entry:') && uuid.length > 6 ? uuid.slice(6) : null
+/** 资源归纳节点 uuid：`res:{实体id}` */
+export const resourceUuid = (id: string): string => (id.startsWith('res:') ? id : 'res:' + id)
+/** 从资源归纳 uuid 取实体 id */
+export const idOfResourceUuid = (uuid: string): string => (uuid.startsWith('res:') ? uuid.slice(4) : uuid)
 
 /** help() 的回执：三段自述，文案依赖节点当下的状态与上游 */
 export interface NodeHelp {

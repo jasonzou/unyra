@@ -118,6 +118,10 @@ export interface StructureCanvasProps {
   onGenerateDoc?: (nodeUuid: string, hint?: string) => void
   /** 文档卡右键菜单的「生成前置知识大纲」 */
   onGenerateOutline?: (docUuid: string) => void
+  /** 视频卡点「生成大纲」：交给 AI 根据选集生成结构化大纲并以资源归纳节点落地 */
+  onGenerateVideoOutline?: (videoNodeUuid: string) => void
+  /** 打开资源归纳节点中的某个资源项 */
+  onOpenResourceItem?: (item: import('../../../learn/types').ResourceItem) => void
   onToast?: (msg: string) => void
   /** 外部指定的聚焦目标（chip 路由）：把镜头挪到 uuid 对得上的那张卡 */
   focusTarget?: { nodeId: string; nonce: number } | null
@@ -129,7 +133,7 @@ export interface StructureCanvasProps {
  * 卡从落位那刻起就由 store 派生。入口、文档与大纲不在列表里——入口由目标绑定
  * 派生，子文档点大纲目标项，前置知识大纲走文档卡右键菜单。
  */
-const PALETTE: GNodeKind[] = ['doc', 'outline', 'note', 'exam', 'superdoc', 'video']
+const PALETTE: GNodeKind[] = ['doc', 'outline', 'note', 'exam', 'superdoc', 'video', 'resource']
 
 /** 网格背景的点距（世界坐标 px）：平移/缩放时按相机换算，见画布根的 backgroundImage */
 const GRID_PX = 28
@@ -207,6 +211,16 @@ function KindIcon({ kind }: { kind: GNodeKind }) {
       </svg>
     )
   }
+  if (kind === 'resource') {
+    return (
+      <svg {...common}>
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
+        <path d="M6 6h10" />
+        <path d="M6 10h10" />
+        <path d="M6 14h6" />
+      </svg>
+    )
+  }
   return (
     <svg {...common}>
       <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L13.663 8.5a2 2 0 0 0 1.401 1.398l6.135 1.581a.5.5 0 0 1 0 .964L13.5 14.063a2 2 0 0 0-1.4 1.402l-1.582 6.135a.5.5 0 0 1-.963 0z" />
@@ -274,6 +288,7 @@ const MINI_FILL: Record<GNodeKind, string> = {
   exam: '#f59e0b',
   superdoc: '#8b5cf6',
   video: '#06b6d4',
+  resource: '#10b981',
 }
 
 type Gesture =
@@ -328,6 +343,8 @@ export const StructureCanvas = memo(function StructureCanvas({
   onOpenVideo,
   onGenerateDoc,
   onGenerateOutline,
+  onGenerateVideoOutline,
+  onOpenResourceItem,
   onToast,
   focusTarget,
   onFocusHandled,
@@ -1887,12 +1904,28 @@ export const StructureCanvas = memo(function StructureCanvas({
                 </div>
               ) : card.kind === 'exam' && (card.attempts?.length ?? 0) > 0 ? (
                 /*
-                  试卷的考试记录：一行一次作答（与大纲目标项同一套行高与圆点节奏——
-                  高度由派生层的 examCardHeight 算，这里只管照着画）。
-                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素
-                  （见 onPointerDown 开头的 closest）的 click 会被吞掉。
+                  试卷的考试记录：一行一次作答，顶部配有「开始考试」按钮；
+                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素的 click 会被吞掉。
                 */
                 <div className="flex flex-col pb-2">
+                  <div className="flex items-center justify-between px-3 pb-1 pt-0.5 border-b border-line/40">
+                    <span className="text-[10px] text-ink-faint">{t('作答记录 ({0})', card.attempts!.length)}</span>
+                    <button
+                      type="button"
+                      title={t('开始考试（打开独立考试窗口）')}
+                      onClick={() => {
+                        const exam = store.exams.find((e) => e.id === card.uuid)
+                        if (exam && !nodeById(store, exam.nodeId)) {
+                          onToast?.(t('这份试卷还没绑到文档上：拖线连到某张文档卡之后就能开考'))
+                          return
+                        }
+                        if (exam) exams.onStart(exam.nodeId, exam.id)
+                      }}
+                      className="rounded bg-seal/15 px-2 py-0.5 text-[10.5px] font-semibold text-seal-deep hover:bg-seal/25 transition cursor-pointer"
+                    >
+                      {t('开始考试')}
+                    </button>
+                  </div>
                   {card.attempts!.map((row) => (
                     <button
                       key={row.n}
@@ -1910,29 +1943,95 @@ export const StructureCanvas = memo(function StructureCanvas({
                     </button>
                   ))}
                 </div>
-              ) : card.kind === 'video' ? (
+              ) : card.kind === 'exam' && !card.blank ? (
                 /*
-                  视频卡：副行显示绑定状态；「选择视频 / 换绑」打开下拉（现有视频列表 + 解绑）。
-                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素的 click 会被吞掉。
+                  有内容的试卷（还没有作答记录）：显示考试按钮
                 */
                 <div className="flex items-center justify-between gap-2 px-3 pb-2">
                   <span className="min-w-0 flex-1 truncate text-[11px] text-ink-soft">{card.subtitle}</span>
                   <button
                     type="button"
-                    title={t('从现有视频里挑一个绑到这个目标（打开它会一并打开这门课的页签组）')}
-                    className="shrink-0 bg-seal/15 px-2 py-0.5 text-[11px] text-seal-deep hover:bg-seal/25"
-                    onClick={(e) => {
-                      const r = e.currentTarget.getBoundingClientRect()
-                      setMenu({
-                        x: Math.min(r.right, window.innerWidth - 264),
-                        y: Math.min(r.bottom + 6, window.innerHeight - 200),
-                        uuid: card.uuid,
-                        mode: 'videoPick',
-                      })
+                    title={t('开始考试（打开独立考试窗口）')}
+                    className="shrink-0 rounded bg-seal/15 px-2.5 py-0.5 text-[11px] font-semibold text-seal-deep hover:bg-seal/25 transition cursor-pointer"
+                    onClick={() => {
+                      const exam = store.exams.find((e) => e.id === card.uuid)
+                      if (exam && !nodeById(store, exam.nodeId)) {
+                        onToast?.(t('这份试卷还没绑到文档上：拖线连到某张文档卡之后就能开考'))
+                        return
+                      }
+                      if (exam) exams.onStart(exam.nodeId, exam.id)
                     }}
                   >
-                    {card.blank ? t('选择视频') : t('换绑')}
+                    {t('开始考试')}
                   </button>
+                </div>
+              ) : card.kind === 'video' ? (
+                /*
+                  视频卡：副行显示绑定状态；绑定后显示「生成大纲」按钮；「选择视频 / 换绑」打开下拉。
+                  必须是真按钮：画布容器在 pointerdown 上捕获指针，非白名单元素的 click 会被吞掉。
+                */
+                <div className="flex items-center justify-between gap-2 px-3 pb-2">
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-ink-soft">{card.subtitle}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!card.blank && (
+                      <button
+                        type="button"
+                        title={t('为这个视频生成大纲')}
+                        className="shrink-0 rounded bg-seal/15 px-2 py-0.5 text-[11px] font-medium text-seal-deep hover:bg-seal/25 transition cursor-pointer"
+                        onClick={() => onGenerateVideoOutline?.(card.uuid)}
+                      >
+                        {t('生成大纲')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title={t('从现有视频里挑一个绑到这个目标（打开它会一并打开这门课的页签组）')}
+                      className="shrink-0 rounded bg-line/60 px-2 py-0.5 text-[11px] text-ink-soft hover:bg-line/90 transition cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        setMenu({
+                          x: Math.min(r.right, window.innerWidth - 264),
+                          y: Math.min(r.bottom + 6, window.innerHeight - 200),
+                          uuid: card.uuid,
+                          mode: 'videoPick',
+                        })
+                      }}
+                    >
+                      {card.blank ? t('选择视频') : t('换绑')}
+                    </button>
+                  </div>
+                </div>
+              ) : card.kind === 'resource' ? (
+                /*
+                  资源归纳节点（终端节点）：列出归纳的具体资源条目（如各选集），点击对应条目即可跳转该资源
+                */
+                <div className="flex flex-col pb-2">
+                  {(card.resourceItems ?? []).map((it, idx) => (
+                    <button
+                      key={it.key || idx}
+                      type="button"
+                      title={t('打开资源：{0}', it.title)}
+                      onClick={() => {
+                        if (onOpenResourceItem) {
+                          onOpenResourceItem(it)
+                        } else if (it.kind === 'video' && it.target) {
+                          onOpenVideo?.(it.target)
+                        }
+                      }}
+                      className="group/item flex w-full cursor-pointer items-center gap-1.5 px-3 text-left text-[11px] text-ink-soft hover:bg-emerald-500/[0.08]"
+                      style={{ height: SLOT_ROW }}
+                    >
+                      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
+                        {idx + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate font-medium group-hover/item:text-emerald-700 dark:group-hover/item:text-emerald-300">
+                        {it.title}
+                      </span>
+                    </button>
+                  ))}
+                  {(!card.resourceItems || card.resourceItems.length === 0) && (
+                    <div className="truncate px-3 text-[11px] text-ink-faint">{t('暂无归纳资源项')}</div>
+                  )}
                 </div>
               ) : (card.kind === 'exam' || card.kind === 'superdoc') && card.blank && leafOwnerNodeId ? (
                 /*

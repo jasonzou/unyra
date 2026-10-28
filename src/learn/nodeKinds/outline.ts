@@ -166,14 +166,14 @@ export class OutlineGNode extends GNode {
   }
 
   onDownstream(node: GNode): ConnectFilter {
-    if (node.kind === 'doc' || node.kind === 'outline') return true
-    return '大纲的下游只能是文档或大纲（目标项要么由文档落地，要么再开一层子大纲）'
+    if (node.kind === 'doc' || node.kind === 'outline' || node.kind === 'resource') return true
+    return '大纲的下游只能是文档、大纲或资源归纳节点（目标项要么由文档落地，要么再开一层子大纲，或由资源归纳节点收拢落地）'
   }
 
   protected link(down: GNode, portKey?: string): NodeResult {
     const s = this.ctx.store()
     if (!this.found) return { error: '这份大纲已经不在了' }
-    // 成员 id 即对方 uuid：文档 = 节点 id（交替链），大纲 = o:{id}（分类链，拼法即语义）
+    // 成员 id 即对方 uuid：文档 = 节点 id（交替链），大纲 = o:{id}（分类链，拼法即语义），资源归纳 = res:{id}
     const toMember = down.uuid
     const voice = this.voice
     const existing = s.edges.find((e) => e.from === voice && e.to === toMember)
@@ -195,9 +195,13 @@ export class OutlineGNode extends GNode {
     }
     this.ctx.commit(r.store)
     const claimed = portKey ? '，认领了目标项「' + (this.ports.find((p) => p.key === portKey)?.label ?? portKey) + '」' : ''
-    return down.kind === 'outline'
-      ? { ok: true, note: '已在「' + this.title + '」之下开了新的一层「' + down.title + '」' + claimed + '；那层的目标项由它自己列' }
-      : { ok: true, note: '已把文档「' + down.title + '」挂到「' + this.title + '」之下' + claimed }
+    if (down.kind === 'outline') {
+      return { ok: true, note: '已在「' + this.title + '」之下开了新的一层「' + down.title + '」' + claimed + '；那层的目标项由它自己列' }
+    }
+    if (down.kind === 'resource') {
+      return { ok: true, note: '已把资源归纳节点「' + down.title + '」挂到「' + this.title + '」之下' + claimed }
+    }
+    return { ok: true, note: '已把文档「' + down.title + '」挂到「' + this.title + '」之下' + claimed }
   }
 
   protected unlink(target: GNode): NodeResult {

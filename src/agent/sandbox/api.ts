@@ -1445,6 +1445,17 @@ export function buildApi(
     }, log)
   }
 
+  if (opts.video) {
+    wrapApi(api, 'video.list', async () => {
+      return opts.video?.list() ?? []
+    }, log)
+    wrapApi(api, 'video.get', async (args) => {
+      const target = asText(args[0]).trim()
+      if (!target) return { ok: false, error: 'video.get 需要提供 videoId 或视频节点的 uuid' }
+      return await opts.video?.get(target)
+    }, log)
+  }
+
   if (addons?.nodeFacade) attachNodeFacade(api)
 
   // 根 help：顶层函数与各组的总览。真沙箱由 sandboxRuntime 再挂一次（同步、不花宿主往返）

@@ -778,6 +778,29 @@ export interface VideoNodeEntity {
   updatedAt: number
 }
 
+/** 资源归纳节点中的一项列表条目 */
+export interface ResourceItem {
+  key: string
+  title: string
+  /** 资源类型：如视频 'video'、文档 'doc' 或链接 'link' */
+  kind?: 'video' | 'doc' | 'link'
+  /** 目标标识（如 videoId、docId 或 url） */
+  target?: string
+  /** 附加参数（如视频选集的 source、page 序号等） */
+  data?: Record<string, unknown>
+}
+
+/** 资源归纳节点（节点宇宙的终端类型）：类似于大纲节点有列表项，但不能有下游，点击列表项打开相应资源 */
+export interface ResourceNodeEntity {
+  id: string
+  goalId: string
+  title: string
+  intro?: string
+  items: ResourceItem[]
+  createdAt: number
+  updatedAt: number
+}
+
 export interface LearnStore {
   version: 2
   nodes: KnowledgeNode[]
@@ -804,6 +827,10 @@ export interface LearnStore {
    * 各目标目录的 video-nodes.json；可选字段，理由同 outlines。
    */
   videoNodes?: VideoNodeEntity[]
+  /**
+   * 资源归纳节点池（终端节点，见 ResourceNodeEntity）：按目标归档，可选字段，旧数据按 `?? []` 兜底。
+   */
+  resourceNodes?: ResourceNodeEntity[]
   /** 临时变量：按节点分组，带过期时间（见 lib/tmpStore） */
   tmp: TmpStore
   /**

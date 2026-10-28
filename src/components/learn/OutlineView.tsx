@@ -17,7 +17,19 @@ import { StructureCanvas, type StructureCanvasProps } from './structure/Structur
 
 export type CanvasChannelProps = Pick<
   StructureCanvasProps,
-  'onCreateNode' | 'onDeleteNode' | 'onConnect' | 'onDisconnect' | 'onCreateChildDoc' | 'onRenameNote' | 'onAddOutlineEntry' | 'onBindVideo' | 'onOpenVideo' | 'onGenerateDoc' | 'onGenerateOutline'
+  | 'onCreateNode'
+  | 'onDeleteNode'
+  | 'onConnect'
+  | 'onDisconnect'
+  | 'onCreateChildDoc'
+  | 'onRenameNote'
+  | 'onAddOutlineEntry'
+  | 'onBindVideo'
+  | 'onOpenVideo'
+  | 'onGenerateDoc'
+  | 'onGenerateOutline'
+  | 'onGenerateVideoOutline'
+  | 'onOpenResourceItem'
 >
 
 export interface OutlineViewProps {
@@ -44,6 +56,7 @@ function sameOutlineView(prev: OutlineViewProps, next: OutlineViewProps): boolea
   if (prev.store.nodes !== next.store.nodes || prev.store.exams !== next.store.exams) return false
   // 视频卡（绑定的标题 / 空卡占位）读 videoNodes 与 videos：绑定变了图要跟着变
   if (prev.store.videoNodes !== next.store.videoNodes || prev.store.videos !== next.store.videos) return false
+  if (prev.store.resourceNodes !== next.store.resourceNodes) return false
   if (prev.docs !== next.docs || prev.exams !== next.exams) return false
   if (prev.channel !== next.channel) return false
   if (prev.focusTarget !== next.focusTarget) return false

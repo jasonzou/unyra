@@ -220,6 +220,34 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
   }
 
   /**
+   * 视频大纲：为绑定的视频规划语义大纲与终端资源归纳节点。
+   */
+  const startVideoOutline = (videoNodeUuid: string) => {
+    if (!hasKey) {
+      onToast(t('生成大纲需要 AI，请先在设置中填写「{0}」的 API Key', providerName))
+      onOpenSettings()
+      return
+    }
+    const store = getLatest()
+    const videoNode = (store.videoNodes ?? []).find((v) => v.id === videoNodeUuid)
+    if (!videoNode || !videoNode.videoId) {
+      onToast(t('该视频节点尚未绑定视频，无法生成大纲'))
+      return
+    }
+    const goal = store.goals.find((g) => g.id === videoNode.goalId)
+    const rootId = goal?.rootNodeId ?? activeNode?.id
+    if (!rootId) {
+      onToast(t('未找到绑定的学习目标根节点'))
+      return
+    }
+    agent.runWorkflow('video-outline', {
+      nodeId: rootId,
+      params: { target: videoNodeUuid, videoId: videoNode.videoId },
+    })
+    onToast(t('已为视频启动大纲生成工作流，导师正在分析视频选集…'))
+  }
+
+  /**
    * 把「谁来跑伪编译工作流」交给代码块菜单（见 lib/docHost）。
    *
    * 为什么由学习区注册：跑工作流要用 useAgent 的 runWorkflow，还要知道有没有配 Key、
@@ -296,6 +324,7 @@ export function useWorkflowStarters(deps: WorkflowStartersDeps) {
     startBrowserUse,
     startOutline,
     startPrereqOutline,
+    startVideoOutline,
     workflowRows,
     runWorkflowRow,
     removeWorkflowRow,

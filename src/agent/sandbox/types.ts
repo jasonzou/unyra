@@ -217,7 +217,10 @@ export interface SandboxOptions {
    * （list 看服务与工具 / discover 现场探测 / call 调用）。
    * MCP 总开关关着就没有这一组——与旧做法「关闭时不注入任何 MCP 工具」同一口径。
    */
+  /** 外部 MCP 服务 */
   mcp?: McpOps
+  /** 视频资源与选集信息（video.*） */
+  video?: VideoOps
   /** 一次编排的中止信号：用户点「停止」时，正在等用户的 ask 等调用要能立刻退出 */
   signal?: AbortSignal
   timeoutMs?: number
@@ -886,6 +889,28 @@ export interface LearningOps {
   mistake: (nodeId: string, input: { pattern?: unknown; cause?: unknown; count?: unknown }) => AgentToolResult
   forget: (nodeId: string, pattern: string) => AgentToolResult
   check: (nodeId: string, input: Record<string, unknown>) => AgentToolResult
+}
+
+export interface VideoEpisodeInfo {
+  page: number
+  title: string
+  source: string
+  durationMs?: number
+}
+
+export interface VideoInfoResult {
+  ok: boolean
+  id: string
+  title: string
+  hasEpisodes: boolean
+  episodeCount: number
+  episodes: VideoEpisodeInfo[]
+  error?: string
+}
+
+export interface VideoOps {
+  list: () => Array<{ id: string; title: string; plugin: string }>
+  get: (target: string) => Promise<VideoInfoResult>
 }
 
 export interface SandboxRequest {

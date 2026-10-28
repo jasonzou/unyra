@@ -338,6 +338,47 @@ const root = await api.node.get(根uuid)；const c = await root.content。c.titl
 边界：只负责计划——目标项长成文档是「生成文档」流程在画布上做的事，本轮产出里没有新节点；写完在对话里用两三句说清定了哪几条、为什么。指令给了「目标节点」就只写它；没给就 api.node.list() 凭上下文判断，判断不了 api.ask。`,
   },
   {
+    key: 'video-outline',
+    title: '视频大纲生成',
+    text: `「视频大纲」工作流——为绑定的视频资源规划语义大纲与资源归纳结构：
+
+一、判断选集与终止条件（核心铁律）
+1. 第一步必须调用 const info = await api.video.get(videoId) 获取视频详情与选集（episodes）信息。
+2. 判断视频是否有选集：
+   - 若 !info.hasEpisodes 或 info.episodeCount <= 1（视频没有分 P 或合集选集）：
+     **必须立即停止工作流**，严禁创建任何大纲或节点，直接在对话中回复告知用户：“此视频无法生成大纲”（说明该视频为单集内容，无分 P 或合集选集，无法按选集拆解生成大纲结构）。
+3. 若视频有选集（info.hasEpisodes 为 true 且选集数量 > 1）：
+   - 获取所有选集的标题与序号（如 P1, P2... 或 01, 02... 序号 + 标题），严格保留序号信息。
+
+二、大纲层级与语义规划（铁律：最多不超过三层）
+根据选集标题的语义，将所有选集组织进逻辑清晰的大纲层级结构中：
+- **选集很少**（如 2~6 节）：只需规划 1 层大纲（直接在上一层大纲下挂资源归纳节点）；
+- **选集较多**（如 7~15 节）：规划 2 层大纲（父级大纲节点 -> 模块大纲节点 -> 资源归纳节点）；
+- **选集很多**（如 16 节以上）：规划 2 层或 3 层大纲；
+- **绝对上限**：层级**最多不超过三层**（严禁超过 3 层）。
+
+三、终端节点铁律（只能为资源归纳节点）
+- **视频大纲的终端节点只能为资源归纳节点（kind: 'resource'）**，严禁使用普通文档节点作为终端。
+- 资源归纳节点类似于大纲节点，拥有列表项（items），用来让用户点击后直接跳转播放相应的视频选集。
+- 资源归纳节点**不能有下游连接（它是终端节点，任何连向下游的操作都会被系统拒绝）**。
+- 创建资源归纳节点示例：
+  \`\`\`javascript
+  const resNode = await api.node.create({
+    kind: 'resource',
+    title: '第一章 基础选集',
+    under: outlineUuid, // 挂载在所属大纲之下
+    items: [
+      { key: 'p1', title: 'P1 课程导论', kind: 'video', target: videoId, data: { source: ep1.source, page: 1 } },
+      { key: 'p2', title: 'P2 快速上手', kind: 'video', target: videoId, data: { source: ep2.source, page: 2 } },
+    ],
+  })
+  \`\`\`
+- 每一条资源条目的 title 必须标明序号及选集标题；kind 设为 'video'；target 为 videoId；data 包含 { source, page }。
+
+四、收尾
+- 全部大纲节点与末端资源归纳节点创建并挂接完毕后，向用户简要汇报大纲结构与各模块归纳的选集分布。`,
+  },
+  {
     key: 'learning-process',
     title: '学习过程',
     text: `学习过程记录（api.reading.* / api.attention.* / api.focus.*）：
